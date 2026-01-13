@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "spatial-viewer"
+name = "karospace"
 version = "0.1.0"
-description = "HTML viewer for Xenium spatial transcriptomics data"
+description = "Interactive HTML viewer for spatial transcriptomics data"
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
@@ -40,7 +40,7 @@ dev = [
 ]
 
 [project.scripts]
-spatial-viewer = "spatial_viewer.cli:main"
+karospace = "karospace.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["spatial_viewer*"]
+include = ["karospace*"]

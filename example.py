@@ -5,7 +5,7 @@ This script demonstrates how to load Xenium spatial transcriptomics data
 and export it to an interactive HTML viewer.
 """
 
-from spatial_viewer import load_spatial_data, export_to_html
+from karospace import load_spatial_data, export_to_html
 
 # Path to your h5ad file
 # Update this path to point to your EAE/MANA data
@@ -28,7 +28,7 @@ export_to_html(
     dataset,
     output_path="eae_mana_viewer.html",
     color="anno_L2",  # Initial color (categorical)
-    title="KaroSpace - EAE/MANA Xenium",
+    title="KaroSpace",
     cols=20,  # 8 columns for many sections
     spot_size=1.5,  # smaller spots for dense data
     downsample=30000,  # limit cells per section to keep file manageable

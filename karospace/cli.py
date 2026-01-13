@@ -19,8 +19,8 @@ def main():
     parser.add_argument(
         "-o", "--output",
         type=str,
-        default="spatial_viewer.html",
-        help="Output HTML file path (default: spatial_viewer.html)"
+        default="karospace.html",
+        help="Output HTML file path (default: karospace.html)"
     )
     parser.add_argument(
         "-c", "--color",

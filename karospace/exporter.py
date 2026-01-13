@@ -319,6 +319,33 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             color: var(--muted-color);
             font-size: 14px;
         }}
+
+        /* Tooltip styles */
+        .cell-tooltip {{
+            position: fixed;
+            background: var(--header-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 6px 10px;
+            font-size: 11px;
+            pointer-events: none;
+            z-index: 2000;
+            display: none;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            max-width: 250px;
+            transition: background 0.3s, border-color 0.3s;
+        }}
+        .cell-tooltip.visible {{ display: block; }}
+        .cell-tooltip-color {{
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 6px;
+            vertical-align: middle;
+        }}
+        .cell-tooltip-label {{ font-weight: 500; }}
+        .cell-tooltip-value {{ color: var(--muted-color); margin-left: 4px; }}
     </style>
 </head>
 <body>
@@ -378,6 +405,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             </div>
         </div>
     </div>
+
+    <div class="cell-tooltip" id="cell-tooltip"></div>
 
     <script>
     const DATA = {data_json};
@@ -615,6 +644,86 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
         }} else if (noResults) {{
             noResults.remove();
+        }}
+    }}
+
+    // Tooltip functionality
+    const tooltip = document.getElementById('cell-tooltip');
+    let tooltipTimeout = null;
+
+    function showTooltip(x, y, content) {{
+        tooltip.innerHTML = content;
+        tooltip.classList.add('visible');
+        // Position tooltip, keeping it on screen
+        const rect = tooltip.getBoundingClientRect();
+        const tooltipX = Math.min(x + 15, window.innerWidth - rect.width - 10);
+        const tooltipY = Math.min(y + 15, window.innerHeight - rect.height - 10);
+        tooltip.style.left = tooltipX + 'px';
+        tooltip.style.top = tooltipY + 'px';
+    }}
+
+    function hideTooltip() {{
+        tooltip.classList.remove('visible');
+    }}
+
+    function findNearestCell(section, mouseX, mouseY, canvasRect, transform) {{
+        // transform: {{ scale, offsetX, offsetY, centerX, centerY, dataCenterX, dataCenterY, isModal }}
+        const config = getColorConfig();
+        const values = getSectionValues(section);
+        const searchRadius = transform.isModal ? modalSpotSize * modalZoom * 2 : spotSize * 3;
+
+        let nearestIdx = -1;
+        let nearestDist = Infinity;
+
+        for (let i = 0; i < section.x.length; i++) {{
+            const val = values[i];
+            if (val === null || val === undefined) continue;
+
+            // Skip hidden categories
+            if (!config.is_continuous) {{
+                const catIdx = Math.round(val);
+                const catName = config.categories[catIdx];
+                if (hiddenCategories.has(catName)) continue;
+            }}
+
+            let screenX, screenY;
+            if (transform.isModal) {{
+                screenX = transform.centerX + (section.x[i] - transform.dataCenterX) * transform.scale;
+                screenY = transform.centerY - (section.y[i] - transform.dataCenterY) * transform.scale;
+            }} else {{
+                const bounds = section.bounds;
+                screenX = transform.offsetX + (section.x[i] - bounds.xmin) * transform.scale;
+                screenY = transform.height - (transform.offsetY + (section.y[i] - bounds.ymin) * transform.scale);
+            }}
+
+            const dist = Math.sqrt((mouseX - screenX) ** 2 + (mouseY - screenY) ** 2);
+            if (dist < nearestDist && dist < searchRadius) {{
+                nearestDist = dist;
+                nearestIdx = i;
+            }}
+        }}
+
+        return nearestIdx;
+    }}
+
+    function getCellTooltipContent(section, cellIdx) {{
+        const config = getColorConfig();
+        const values = getSectionValues(section);
+        const val = values[cellIdx];
+        const colorLabel = currentGene || currentColor;
+
+        if (config.is_continuous) {{
+            const t = (val - config.vmin) / (config.vmax - config.vmin);
+            const color = viridis(Math.max(0, Math.min(1, t)));
+            return `<span class="cell-tooltip-color" style="background: ${{color}}"></span>
+                    <span class="cell-tooltip-label">${{colorLabel}}:</span>
+                    <span class="cell-tooltip-value">${{val.toFixed(3)}}</span>`;
+        }} else {{
+            const catIdx = Math.round(val);
+            const catName = config.categories[catIdx];
+            const color = getCategoryColor(catIdx);
+            return `<span class="cell-tooltip-color" style="background: ${{color}}"></span>
+                    <span class="cell-tooltip-label">${{catName}}</span>`;
         }}
     }}
 
@@ -863,6 +972,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function closeModal() {{
         document.getElementById('modal').classList.remove('active');
         modalSection = null;
+        hideTooltip();
     }}
 
     // Grid
@@ -991,6 +1101,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             dragStartX = e.clientX; dragStartY = e.clientY;
             lastPanX = modalPanX; lastPanY = modalPanY;
             canvas.style.cursor = 'grabbing';
+            hideTooltip();
         }});
         document.addEventListener('mousemove', (e) => {{
             if (!isDragging) return;
@@ -1003,6 +1114,45 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             canvas.style.cursor = 'grab';
         }});
         canvas.style.cursor = 'grab';
+
+        // Tooltip on hover in modal
+        canvas.addEventListener('mousemove', (e) => {{
+            if (isDragging || !modalSection) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            // Calculate transform parameters (same as renderModalSection)
+            const bounds = modalSection.bounds;
+            const dataWidth = bounds.xmax - bounds.xmin;
+            const dataHeight = bounds.ymax - bounds.ymin;
+            const baseScale = Math.min((rect.width - 40) / dataWidth, (rect.height - 40) / dataHeight);
+            const scale = baseScale * modalZoom;
+            const centerX = rect.width / 2 + modalPanX;
+            const centerY = rect.height / 2 + modalPanY;
+            const dataCenterX = (bounds.xmin + bounds.xmax) / 2;
+            const dataCenterY = (bounds.ymin + bounds.ymax) / 2;
+
+            const transform = {{
+                scale,
+                centerX,
+                centerY,
+                dataCenterX,
+                dataCenterY,
+                isModal: true
+            }};
+
+            const cellIdx = findNearestCell(modalSection, mouseX, mouseY, rect, transform);
+            if (cellIdx >= 0) {{
+                const content = getCellTooltipContent(modalSection, cellIdx);
+                showTooltip(e.clientX, e.clientY, content);
+            }} else {{
+                hideTooltip();
+            }}
+        }});
+
+        canvas.addEventListener('mouseleave', hideTooltip);
     }}
 
     // Initialize

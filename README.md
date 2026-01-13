@@ -22,8 +22,8 @@ Originally developed at Karolinska Institutet for visualizing Xenium spatial tra
 ### From source
 
 ```bash
-git clone https://github.com/your-username/spatial-viewer.git
-cd spatial-viewer
+git clone https://github.com/your-username/karospace.git
+cd karospace
 pip install -e .
 ```
 
@@ -41,7 +41,7 @@ pip install -e .
 ### Python API
 
 ```python
-from spatial_viewer import load_spatial_data, export_to_html
+from karospace import load_spatial_data, export_to_html
 
 # Load your h5ad file
 dataset = load_spatial_data(
@@ -54,7 +54,7 @@ export_to_html(
     dataset,
     output_path="viewer.html",
     color="cell_type",           # Initial color column
-    title="KaroSpace Viewer",
+    title="KaroSpace",
     cols=8,                      # Grid columns
     spot_size=2.0,               # Cell/spot size
     downsample=30000,            # Max cells per section (for large datasets)
@@ -74,14 +74,14 @@ export_to_html(
 ### Command Line
 
 ```bash
-spatial-viewer your_data.h5ad -o viewer.html --color leiden --cols 6
+karospace your_data.h5ad -o viewer.html --color leiden --cols 6
 ```
 
 #### CLI Options
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `-o, --output` | Output HTML file path | `spatial_viewer.html` |
+| `-o, --output` | Output HTML file path | `karospace.html` |
 | `-c, --color` | Initial color column | `leiden` |
 | `-g, --groupby` | Column to group sections by | `sample_id` |
 | `--cols` | Number of grid columns | `4` |
@@ -110,13 +110,13 @@ Sections will be outlined with colors based on their `course` metadata if presen
 
 ## Example
 
-See [example.py](example.py) for a complete working example with the EAE/MANA dataset.
+See [example.py](example.py) for a complete working example.
 
 ```python
-from spatial_viewer import load_spatial_data, export_to_html
+from karospace import load_spatial_data, export_to_html
 
 dataset = load_spatial_data(
-    "EAE_data.h5ad",
+    "your_data.h5ad",
     groupby="sample_id",
 )
 
@@ -124,14 +124,14 @@ print(f"Loaded {dataset.n_sections} sections with {dataset.n_cells:,} cells")
 
 export_to_html(
     dataset,
-    output_path="eae_viewer.html",
+    output_path="viewer.html",
     color="anno_L2",
-    title="KaroSpace - EAE/MANA Xenium",
+    title="KaroSpace",
     cols=20,
     spot_size=1.5,
     downsample=30000,
-    additional_colors=['anno_L3', 'anno_L2', 'anno_L1', 'leiden_3.5'],
-    genes=["Cd4", "Cd8a", "Gfap", "Mbp", "Iba1", "Foxp3"],
+    additional_colors=['anno_L3', 'anno_L2', 'anno_L1', 'leiden'],
+    genes=["Cd4", "Cd8a", "Gfap", "Mbp"],
 )
 ```
 
