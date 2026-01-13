@@ -22,7 +22,7 @@ Originally developed at Karolinska Institutet for visualizing Xenium spatial tra
 ### From source
 
 ```bash
-git clone https://github.com/your-username/karospace.git
+git clone https://github.com/christoffermattssonlangseth/karospace.git
 cd karospace
 pip install -e .
 ```
