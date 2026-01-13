@@ -1,5 +1,5 @@
 """
-Example usage of the spatial-viewer package.
+Example usage of KaroSpace.
 
 This script demonstrates how to load Xenium spatial transcriptomics data
 and export it to an interactive HTML viewer.
@@ -28,7 +28,7 @@ export_to_html(
     dataset,
     output_path="eae_mana_viewer.html",
     color="anno_L2",  # Initial color (categorical)
-    title="EAE/MANA Xenium Spatial Viewer",
+    title="KaroSpace - EAE/MANA Xenium",
     cols=20,  # 8 columns for many sections
     spot_size=1.5,  # smaller spots for dense data
     downsample=30000,  # limit cells per section to keep file manageable

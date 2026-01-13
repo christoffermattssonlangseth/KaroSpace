@@ -383,16 +383,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     const DATA = {data_json};
     const PALETTE = {palette_json};
 
-    // Course border color palette
+    // Course border color palette (rgba with 0.5 alpha for subtler borders)
     const COURSE_COLORS = {{
-        'peak_I': '#e41a1c',
-        'peak_II': '#377eb8',
-        'peak_III': '#4daf4a',
-        'naive': '#984ea3',
-        'remission': '#ff7f00',
-        'chronic': '#ffff33',
-        'acute': '#a65628',
-        'control': '#999999',
+        'peak_I': 'rgba(228, 26, 28, 0.5)',
+        'peak_II': 'rgba(55, 126, 184, 0.5)',
+        'peak_III': 'rgba(77, 175, 74, 0.5)',
+        'naive': 'rgba(152, 78, 163, 0.5)',
+        'remission': 'rgba(255, 127, 0, 0.5)',
+        'chronic': 'rgba(255, 255, 51, 0.5)',
+        'acute': 'rgba(166, 86, 40, 0.5)',
+        'control': 'rgba(153, 153, 153, 0.5)',
     }};
 
     function getCourseColor(course) {{
@@ -410,7 +410,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             hash = course.charCodeAt(i) + ((hash << 5) - hash);
         }}
         const hue = Math.abs(hash) % 360;
-        return `hsl(${{hue}}, 65%, 50%)`;
+        return `hsla(${{hue}}, 65%, 50%, 0.5)`;
     }}
 
     // State

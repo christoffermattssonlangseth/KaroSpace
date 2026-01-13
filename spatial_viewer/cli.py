@@ -1,5 +1,5 @@
 """
-Command-line interface for spatial-viewer.
+Command-line interface for KaroSpace.
 """
 
 import argparse
@@ -61,7 +61,7 @@ def main():
     parser.add_argument(
         "--title",
         type=str,
-        default="Spatial Viewer",
+        default="KaroSpace",
         help="Page title"
     )
 
