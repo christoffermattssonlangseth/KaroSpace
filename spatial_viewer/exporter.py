@@ -31,64 +31,110 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{title}</title>
     <style>
+        :root {{
+            --background: {background};
+            --text-color: {text_color};
+            --header-bg: {header_bg};
+            --panel-bg: {panel_bg};
+            --border-color: {border_color};
+            --input-bg: {input_bg};
+            --muted-color: {muted_color};
+            --hover-bg: {hover_bg};
+        }}
+        :root.dark {{
+            --background: #1a1a1a;
+            --text-color: #e0e0e0;
+            --header-bg: #2a2a2a;
+            --panel-bg: #2a2a2a;
+            --border-color: #404040;
+            --input-bg: #333333;
+            --muted-color: #888888;
+            --hover-bg: #3a3a3a;
+        }}
+        :root.light {{
+            --background: #f5f5f5;
+            --text-color: #1a1a1a;
+            --header-bg: #ffffff;
+            --panel-bg: #ffffff;
+            --border-color: #e0e0e0;
+            --input-bg: #ffffff;
+            --muted-color: #666666;
+            --hover-bg: #f0f0f0;
+        }}
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
         body {{
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background: {background};
-            color: {text_color};
+            background: var(--background);
+            color: var(--text-color);
             min-height: 100vh;
+            transition: background 0.3s, color 0.3s;
         }}
         .header {{
             padding: 12px 24px;
-            background: {header_bg};
-            border-bottom: 1px solid {border_color};
+            background: var(--header-bg);
+            border-bottom: 1px solid var(--border-color);
             display: flex;
             align-items: center;
             justify-content: space-between;
             flex-wrap: wrap;
             gap: 12px;
+            transition: background 0.3s, border-color 0.3s;
         }}
         .header h1 {{ font-size: 18px; font-weight: 600; }}
         .controls {{ display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }}
         .control-group {{ display: flex; align-items: center; gap: 6px; }}
-        .control-group label {{ font-size: 12px; color: {muted_color}; }}
+        .control-group label {{ font-size: 12px; color: var(--muted-color); }}
         select, input[type="text"] {{
             padding: 5px 8px;
-            border: 1px solid {border_color};
+            border: 1px solid var(--border-color);
             border-radius: 4px;
-            background: {input_bg};
-            color: {text_color};
+            background: var(--input-bg);
+            color: var(--text-color);
             font-size: 12px;
+            transition: background 0.3s, border-color 0.3s, color 0.3s;
         }}
         select {{ min-width: 120px; }}
         input[type="text"] {{ width: 140px; }}
         select:focus, input:focus {{ outline: none; border-color: #0066cc; }}
-        .stats {{ font-size: 11px; color: {muted_color}; }}
+        .stats {{ font-size: 11px; color: var(--muted-color); }}
+
+        /* Theme toggle button */
+        .theme-toggle {{
+            background: var(--input-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 5px 10px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.3s, border-color 0.3s;
+        }}
+        .theme-toggle:hover {{ background: var(--hover-bg); }}
 
         /* Filter bar */
         .filter-bar {{
             padding: 8px 24px;
-            background: {header_bg};
-            border-bottom: 1px solid {border_color};
+            background: var(--header-bg);
+            border-bottom: 1px solid var(--border-color);
             display: flex;
             align-items: center;
             gap: 16px;
             flex-wrap: wrap;
+            transition: background 0.3s, border-color 0.3s;
         }}
         .filter-group {{ display: flex; align-items: center; gap: 6px; }}
-        .filter-group label {{ font-size: 11px; color: {muted_color}; text-transform: capitalize; }}
+        .filter-group label {{ font-size: 11px; color: var(--muted-color); text-transform: capitalize; }}
         .filter-chips {{ display: flex; gap: 4px; flex-wrap: wrap; }}
         .filter-chip {{
             padding: 3px 8px;
             font-size: 11px;
-            border: 1px solid {border_color};
+            border: 1px solid var(--border-color);
             border-radius: 12px;
-            background: {input_bg};
-            color: {text_color};
+            background: var(--input-bg);
+            color: var(--text-color);
             cursor: pointer;
             transition: all 0.15s;
         }}
-        .filter-chip:hover {{ background: {hover_bg}; }}
+        .filter-chip:hover {{ background: var(--hover-bg); }}
         .filter-chip.active {{ background: #0066cc; color: white; border-color: #0066cc; }}
         .filter-chip.inactive {{ opacity: 0.4; }}
 
@@ -103,12 +149,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             align-content: start;
         }}
         .section-panel {{
-            background: {panel_bg};
-            border: 1px solid {border_color};
+            background: var(--panel-bg);
+            border: 1px solid var(--border-color);
             border-radius: 6px;
             overflow: hidden;
             cursor: pointer;
-            transition: box-shadow 0.2s, transform 0.2s;
+            transition: box-shadow 0.2s, transform 0.2s, background 0.3s, border-color 0.3s;
         }}
         .section-panel:hover {{
             box-shadow: 0 4px 12px rgba(0,0,0,0.15);
@@ -117,45 +163,48 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .section-panel.filtered-out {{ display: none; }}
         .section-header {{
             padding: 6px 10px;
-            background: {header_bg};
-            border-bottom: 1px solid {border_color};
+            background: var(--header-bg);
+            border-bottom: 1px solid var(--border-color);
             font-size: 11px;
             font-weight: 500;
             display: flex;
             justify-content: space-between;
             align-items: center;
+            transition: background 0.3s, border-color 0.3s;
         }}
         .section-header .expand-icon {{ font-size: 12px; opacity: 0.5; }}
-        .section-meta {{ font-size: 9px; color: {muted_color}; margin-top: 1px; }}
+        .section-meta {{ font-size: 9px; color: var(--muted-color); margin-top: 1px; }}
         .section-canvas {{ display: block; width: 100%; aspect-ratio: 1; }}
 
         .legend-container {{
             width: 200px;
             padding: 12px;
-            background: {panel_bg};
-            border-left: 1px solid {border_color};
+            background: var(--panel-bg);
+            border-left: 1px solid var(--border-color);
             overflow-y: auto;
             font-size: 12px;
+            transition: background 0.3s, border-color 0.3s;
         }}
         .legend-title {{
             font-size: 13px;
             font-weight: 600;
             margin-bottom: 8px;
             padding-bottom: 6px;
-            border-bottom: 1px solid {border_color};
+            border-bottom: 1px solid var(--border-color);
         }}
         .legend-actions {{ display: flex; gap: 6px; margin-bottom: 8px; }}
         .legend-btn {{
             flex: 1;
             padding: 3px 6px;
             font-size: 10px;
-            border: 1px solid {border_color};
+            border: 1px solid var(--border-color);
             border-radius: 3px;
-            background: {input_bg};
-            color: {text_color};
+            background: var(--input-bg);
+            color: var(--text-color);
             cursor: pointer;
+            transition: background 0.3s, border-color 0.3s, color 0.3s;
         }}
-        .legend-btn:hover {{ background: {hover_bg}; }}
+        .legend-btn:hover {{ background: var(--hover-bg); }}
         .legend-item {{
             display: flex;
             align-items: center;
@@ -167,7 +216,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             border-radius: 3px;
             transition: background 0.15s;
         }}
-        .legend-item:hover {{ background: {hover_bg}; }}
+        .legend-item:hover {{ background: var(--hover-bg); }}
         .legend-item.hidden {{ opacity: 0.3; text-decoration: line-through; }}
         .legend-color {{
             width: 12px;
@@ -176,7 +225,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             flex-shrink: 0;
             border: 2px solid transparent;
         }}
-        .legend-item.hidden .legend-color {{ border-color: {muted_color}; background: transparent !important; }}
+        .legend-item.hidden .legend-color {{ border-color: var(--muted-color); background: transparent !important; }}
         .colorbar {{ width: 16px; height: 150px; margin: 8px auto; border-radius: 2px; }}
         .colorbar-labels {{
             display: flex;
@@ -184,7 +233,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             justify-content: space-between;
             height: 150px;
             font-size: 10px;
-            color: {muted_color};
+            color: var(--muted-color);
             margin-left: 6px;
         }}
         .colorbar-container {{ display: flex; align-items: stretch; justify-content: center; }}
@@ -201,7 +250,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         .modal-overlay.active {{ display: flex; }}
         .modal-content {{
-            background: {panel_bg};
+            background: var(--panel-bg);
             border-radius: 12px;
             width: 90vw;
             height: 90vh;
@@ -210,27 +259,29 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             flex-direction: column;
             overflow: hidden;
             box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            transition: background 0.3s;
         }}
         .modal-header {{
             padding: 12px 16px;
-            background: {header_bg};
-            border-bottom: 1px solid {border_color};
+            background: var(--header-bg);
+            border-bottom: 1px solid var(--border-color);
             display: flex;
             justify-content: space-between;
             align-items: center;
+            transition: background 0.3s, border-color 0.3s;
         }}
         .modal-header h2 {{ font-size: 15px; font-weight: 600; }}
-        .modal-header .modal-meta {{ font-size: 11px; color: {muted_color}; margin-left: 10px; }}
+        .modal-header .modal-meta {{ font-size: 11px; color: var(--muted-color); margin-left: 10px; }}
         .modal-close {{
             background: none;
             border: none;
             font-size: 22px;
             cursor: pointer;
-            color: {text_color};
+            color: var(--text-color);
             padding: 2px 6px;
             border-radius: 4px;
         }}
-        .modal-close:hover {{ background: {hover_bg}; }}
+        .modal-close:hover {{ background: var(--hover-bg); }}
         .modal-body {{ flex: 1; display: flex; overflow: hidden; }}
         .modal-canvas-container {{ flex: 1; position: relative; overflow: hidden; }}
         .modal-canvas {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; }}
@@ -241,29 +292,31 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             transform: translateX(-50%);
             display: flex;
             gap: 6px;
-            background: {header_bg};
+            background: var(--header-bg);
             padding: 6px 10px;
             border-radius: 6px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            transition: background 0.3s;
         }}
         .modal-controls button {{
             padding: 5px 10px;
-            border: 1px solid {border_color};
+            border: 1px solid var(--border-color);
             border-radius: 4px;
-            background: {input_bg};
-            color: {text_color};
+            background: var(--input-bg);
+            color: var(--text-color);
             cursor: pointer;
             font-size: 12px;
+            transition: background 0.3s, border-color 0.3s, color 0.3s;
         }}
-        .modal-controls button:hover {{ background: {hover_bg}; }}
-        .modal-legend {{ width: 180px; padding: 12px; border-left: 1px solid {border_color}; overflow-y: auto; }}
-        .zoom-info {{ font-size: 10px; color: {muted_color}; margin-left: 6px; }}
+        .modal-controls button:hover {{ background: var(--hover-bg); }}
+        .modal-legend {{ width: 180px; padding: 12px; border-left: 1px solid var(--border-color); overflow-y: auto; transition: border-color 0.3s; }}
+        .zoom-info {{ font-size: 10px; color: var(--muted-color); margin-left: 6px; }}
 
         .no-results {{
             grid-column: 1 / -1;
             text-align: center;
             padding: 40px;
-            color: {muted_color};
+            color: var(--muted-color);
             font-size: 14px;
         }}
     </style>
@@ -285,6 +338,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 <label>Size:</label>
                 <input type="range" id="spot-size" min="0.5" max="8" step="0.5" value="{spot_size}" style="width:80px">
             </div>
+            <button class="theme-toggle" id="theme-toggle" title="Toggle dark/light mode">
+                <span id="theme-icon">{theme_icon}</span>
+            </button>
         </div>
         <div class="stats"><span id="stats-text"></span></div>
     </div>
@@ -313,6 +369,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         <button id="zoom-in">+ Zoom</button>
                         <button id="zoom-out">- Zoom</button>
                         <button id="zoom-reset">Reset</button>
+                        <span style="margin-left: 10px; font-size: 11px; color: {muted_color};">Size:</span>
+                        <input type="range" id="modal-spot-size" min="0.5" max="12" step="0.5" value="{spot_size}" style="width: 80px;">
+                        <span id="modal-spot-size-label" style="font-size: 11px; min-width: 24px;">{spot_size}</span>
                     </div>
                 </div>
                 <div class="modal-legend" id="modal-legend"></div>
@@ -324,20 +383,75 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     const DATA = {data_json};
     const PALETTE = {palette_json};
 
+    // Course border color palette
+    const COURSE_COLORS = {{
+        'peak_I': '#e41a1c',
+        'peak_II': '#377eb8',
+        'peak_III': '#4daf4a',
+        'naive': '#984ea3',
+        'remission': '#ff7f00',
+        'chronic': '#ffff33',
+        'acute': '#a65628',
+        'control': '#999999',
+    }};
+
+    function getCourseColor(course) {{
+        if (!course) return null;
+        // Check exact match first
+        if (COURSE_COLORS[course]) return COURSE_COLORS[course];
+        // Check case-insensitive
+        const lowerCourse = course.toLowerCase();
+        for (const [key, color] of Object.entries(COURSE_COLORS)) {{
+            if (key.toLowerCase() === lowerCourse) return color;
+        }}
+        // Generate a consistent color for unknown courses
+        let hash = 0;
+        for (let i = 0; i < course.length; i++) {{
+            hash = course.charCodeAt(i) + ((hash << 5) - hash);
+        }}
+        const hue = Math.abs(hash) % 360;
+        return `hsl(${{hue}}, 65%, 50%)`;
+    }}
+
     // State
     let currentColor = DATA.initial_color;
     let currentGene = null;
     let hiddenCategories = new Set();
     let spotSize = {spot_size};
     let activeFilters = {{}};  // e.g. {{ course: new Set(['peak_I', 'peak_III']) }}
+    let currentTheme = '{initial_theme}';
 
     // Modal state
     let modalSection = null;
     let modalZoom = 1;
     let modalPanX = 0, modalPanY = 0;
+    let modalSpotSize = {spot_size};
     let isDragging = false;
     let dragStartX = 0, dragStartY = 0;
     let lastPanX = 0, lastPanY = 0;
+
+    // Theme toggle
+    function toggleTheme() {{
+        currentTheme = currentTheme === 'light' ? 'dark' : 'light';
+        document.documentElement.classList.remove('light', 'dark');
+        document.documentElement.classList.add(currentTheme);
+        document.getElementById('theme-icon').textContent = currentTheme === 'dark' ? '☀️' : '🌙';
+        localStorage.setItem('spatial-viewer-theme', currentTheme);
+        // Re-render canvases with new background
+        renderAllSections();
+        if (modalSection) renderModalSection();
+    }}
+
+    function initTheme() {{
+        // Check for saved preference or use initial theme
+        const saved = localStorage.getItem('spatial-viewer-theme');
+        if (saved && (saved === 'light' || saved === 'dark')) {{
+            currentTheme = saved;
+        }}
+        document.documentElement.classList.add(currentTheme);
+        document.getElementById('theme-icon').textContent = currentTheme === 'dark' ? '☀️' : '🌙';
+        document.getElementById('theme-toggle').addEventListener('click', toggleTheme);
+    }}
 
     // Color utilities
     function viridis(t) {{
@@ -389,6 +503,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return true;
     }}
 
+    // Get current panel background color from CSS variable
+    function getPanelBg() {{
+        return getComputedStyle(document.documentElement).getPropertyValue('--panel-bg').trim();
+    }}
+
     // Rendering
     function renderSection(section, canvas) {{
         const ctx = canvas.getContext('2d');
@@ -399,7 +518,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         ctx.scale(dpr, dpr);
 
         const width = rect.width, height = rect.height, padding = 8;
-        ctx.fillStyle = '{panel_bg}';
+        ctx.fillStyle = getPanelBg();
         ctx.fillRect(0, 0, width, height);
 
         if (section.x.length === 0) return;
@@ -513,7 +632,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         ctx.scale(dpr, dpr);
 
         const width = rect.width, height = rect.height;
-        ctx.fillStyle = '{panel_bg}';
+        ctx.fillStyle = getPanelBg();
         ctx.fillRect(0, 0, width, height);
 
         if (modalSection.x.length === 0) return;
@@ -528,7 +647,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const centerY = height / 2 + modalPanY;
         const dataCenterX = (bounds.xmin + bounds.xmax) / 2;
         const dataCenterY = (bounds.ymin + bounds.ymax) / 2;
-        const adjustedSpotSize = Math.max(1, spotSize * modalZoom * 0.8);
+        const adjustedSpotSize = Math.max(1, modalSpotSize * modalZoom * 0.8);
 
         const config = getColorConfig();
         const values = getSectionValues(modalSection);
@@ -684,6 +803,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 </div>
             </div>`;
         }}
+
+        // Add course border legend if course metadata exists
+        if (filters.course && filters.course.length > 0) {{
+            html += `<div class="filter-group" style="margin-left: auto;">
+                <label>Border colors:</label>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    ${{filters.course.map(c => `<span style="display: flex; align-items: center; gap: 3px; font-size: 10px;">
+                        <span style="width: 12px; height: 12px; border: 3px solid ${{getCourseColor(c)}}; border-radius: 2px;"></span>
+                        ${{c}}
+                    </span>`).join('')}}
+                </div>
+            </div>`;
+        }}
+
         filterBar.innerHTML = html;
 
         filterBar.querySelectorAll('.filter-chip').forEach(chip => {{
@@ -741,6 +874,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const panel = document.createElement('div');
             panel.className = 'section-panel';
             panel.dataset.sectionId = section.id;
+
+            // Apply course-based border color
+            const course = section.metadata?.course;
+            const borderColor = getCourseColor(course);
+            if (borderColor) {{
+                panel.style.borderColor = borderColor;
+                panel.style.borderWidth = '3px';
+            }}
 
             const metaParts = Object.entries(section.metadata || {{}})
                 .map(([k, v]) => `${{k}}: ${{v}}`).join(' | ');
@@ -831,6 +972,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             renderModalSection();
         }});
 
+        document.getElementById('modal-spot-size').addEventListener('input', (e) => {{
+            modalSpotSize = parseFloat(e.target.value);
+            document.getElementById('modal-spot-size-label').textContent = modalSpotSize;
+            renderModalSection();
+        }});
+
         const container = document.getElementById('modal-canvas-container');
         container.addEventListener('wheel', (e) => {{
             e.preventDefault();
@@ -860,6 +1007,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     // Initialize
     window.addEventListener('load', () => {{
+        initTheme();
         initGrid();
         initControls();
         initFilters();
@@ -958,6 +1106,10 @@ def export_to_html(
         genes=genes,
     )
 
+    # Theme settings
+    theme_icon = "☀️" if theme == "dark" else "🌙"
+    initial_theme = theme
+
     # Generate HTML
     html = HTML_TEMPLATE.format(
         title=title,
@@ -965,6 +1117,8 @@ def export_to_html(
         spot_size=spot_size,
         data_json=json.dumps(data),
         palette_json=json.dumps(DEFAULT_CATEGORICAL_PALETTE),
+        theme_icon=theme_icon,
+        initial_theme=initial_theme,
         **colors
     )
 
