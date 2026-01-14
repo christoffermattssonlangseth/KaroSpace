@@ -1,5 +1,9 @@
 # KaroSpace
 
+<p align="center">
+  <img src="assets/logo.png" alt="KaroSpace Logo" width="300">
+</p>
+
 **KaroSpace** is an interactive HTML viewer for exploring spatial transcriptomics data. It generates standalone HTML files from h5ad files that can be shared and viewed in any web browser without requiring a server or Python installation.
 
 Originally developed at Karolinska Institutet for visualizing Xenium spatial transcriptomics data across multiple tissue sections.
@@ -172,14 +176,7 @@ Selected cells are highlighted with a yellow/gold outline in both UMAP and spati
 
 - Use `downsample` parameter for datasets with >50,000 cells per section
 - Limit `genes` list to only essential genes (each adds to file size)
-- Use fewer `cols` for sections with complex shapes
 - Consider splitting very large datasets into multiple viewers
-
-## TODO
-- The UMAP view needs to conform to the dark/light mode toggle. 
-- Allow the size of the UMAP dots to be changed. 
-- The autoscaling of samples become a bit skewed when the UMAP is toggled on, can this be changed somehow? 
-- When selecting cells from the UMAP representation, allow the user to select and highlight only the cells selected in the legend. 
 
 ## License
 

@@ -5,11 +5,21 @@ Creates self-contained HTML files with embedded data and JavaScript
 for interactive visualization of spatial transcriptomics data.
 """
 
+import base64
 import json
 from pathlib import Path
 from typing import Optional, List
 
 from .data_loader import SpatialDataset
+
+
+def _load_logo_base64() -> Optional[str]:
+    """Load logo from assets as base64 string."""
+    logo_path = Path(__file__).parent.parent / "assets" / "logo.png"
+    if logo_path.exists():
+        with open(logo_path, "rb") as f:
+            return base64.b64encode(f.read()).decode("utf-8")
+    return None
 
 
 # Default color palettes
@@ -30,6 +40,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{title}</title>
+    {favicon_link}
     <style>
         :root {{
             --background: {background};
@@ -431,6 +442,21 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             stroke: #ffd700;
             stroke-width: 2px;
         }}
+
+        /* Footer logo */
+        .footer-logo {{
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            opacity: 0.6;
+            transition: opacity 0.2s;
+            z-index: 100;
+        }}
+        .footer-logo:hover {{ opacity: 1; }}
+        .footer-logo img {{
+            height: 40px;
+            width: auto;
+        }}
     </style>
 </head>
 <body>
@@ -474,6 +500,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             <div class="umap-controls">
                 <button class="umap-btn" id="magic-wand-btn" title="Draw to select cells">Magic Wand</button>
                 <button class="umap-btn" id="clear-selection-btn" title="Clear selection">Clear</button>
+                <span style="margin-left: 6px; font-size: 11px; color: var(--muted-color);">Size:</span>
+                <input type="range" id="umap-spot-size" min="0.5" max="6" step="0.5" value="2" style="width: 60px;">
+                <span id="umap-spot-size-label" style="font-size: 11px; min-width: 20px;">2</span>
             </div>
             <div class="umap-selection-info" id="umap-selection-info">No cells selected</div>
         </div>
@@ -585,6 +614,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         // Re-render canvases with new background
         renderAllSections();
         if (modalSection) renderModalSection();
+        if (umapVisible) renderUMAP();
     }}
 
     function initTheme() {{
@@ -706,18 +736,50 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const config = getColorConfig();
         const adjustedSpotSize = Math.max(1, umapSpotSize * umapZoom * 0.5);
 
-        // Draw all cells from all sections
+        // Check if any categories are hidden
+        const hasHidden = hiddenCategories.size > 0 && !config.is_continuous;
+
+        // First pass: draw hidden categories as grey (if any are hidden)
+        if (hasHidden) {{
+            ctx.fillStyle = '#888888';
+            ctx.globalAlpha = 0.2;
+            DATA.sections.forEach(section => {{
+                if (!section.umap_x || !section.umap_y) return;
+                const values = getSectionValues(section);
+
+                for (let i = 0; i < section.umap_x.length; i++) {{
+                    const val = values[i];
+                    if (val === null || val === undefined) continue;
+
+                    const catIdx = Math.round(val);
+                    const catName = config.categories[catIdx];
+                    if (!hiddenCategories.has(catName)) continue; // Only draw hidden cells in first pass
+
+                    const x = centerX + (section.umap_x[i] - dataCenterX) * scale;
+                    const y = centerY - (section.umap_y[i] - dataCenterY) * scale;
+
+                    if (x < -adjustedSpotSize || x > width + adjustedSpotSize ||
+                        y < -adjustedSpotSize || y > height + adjustedSpotSize) continue;
+
+                    ctx.beginPath();
+                    ctx.arc(x, y, adjustedSpotSize, 0, Math.PI * 2);
+                    ctx.fill();
+                }}
+            }});
+            ctx.globalAlpha = 1;
+        }}
+
+        // Second pass: draw visible categories with full color
         DATA.sections.forEach(section => {{
             if (!section.umap_x || !section.umap_y) return;
 
             const values = getSectionValues(section);
 
-            // First pass: draw non-selected cells
             for (let i = 0; i < section.umap_x.length; i++) {{
                 const val = values[i];
                 if (val === null || val === undefined) continue;
 
-                // Skip hidden categories
+                // Skip hidden categories (they were drawn in first pass)
                 if (!config.is_continuous) {{
                     const catIdx = Math.round(val);
                     const catName = config.categories[catIdx];
@@ -855,9 +917,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const btn = document.getElementById('umap-toggle');
         panel.classList.toggle('visible', umapVisible);
         btn.classList.toggle('active', umapVisible);
-        if (umapVisible) {{
-            requestAnimationFrame(renderUMAP);
-        }}
+        // Re-render after layout change to fix grid sizing
+        requestAnimationFrame(() => {{
+            renderAllSections();
+            if (umapVisible) renderUMAP();
+        }});
     }}
 
     // Initialize UMAP panel
@@ -879,6 +943,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         // Clear selection button
         document.getElementById('clear-selection-btn').addEventListener('click', clearSelection);
+
+        // UMAP spot size slider
+        document.getElementById('umap-spot-size').addEventListener('input', (e) => {{
+            umapSpotSize = parseFloat(e.target.value);
+            document.getElementById('umap-spot-size-label').textContent = umapSpotSize;
+            renderUMAP();
+        }});
 
         // UMAP canvas events
         const canvas = document.getElementById('umap-canvas');
@@ -1326,6 +1397,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 renderLegend('modal-legend');
                 renderAllSections();
                 if (modalSection) renderModalSection();
+                if (umapVisible) renderUMAP();
             }});
 
             document.getElementById(`${{targetId}}-hide-all`)?.addEventListener('click', () => {{
@@ -1334,6 +1406,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 renderLegend('modal-legend');
                 renderAllSections();
                 if (modalSection) renderModalSection();
+                if (umapVisible) renderUMAP();
             }});
 
             legend.querySelectorAll('.legend-item').forEach(item => {{
@@ -1345,6 +1418,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     renderLegend('modal-legend');
                     renderAllSections();
                     if (modalSection) renderModalSection();
+                    if (umapVisible) renderUMAP();
                 }});
             }});
         }}
@@ -1632,6 +1706,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (umapVisible) renderUMAP();
     }});
     </script>
+    {footer_logo}
 </body>
 </html>
 '''
@@ -1723,6 +1798,15 @@ def export_to_html(
     theme_icon = "☀️" if theme == "dark" else "🌙"
     initial_theme = theme
 
+    # Load logo for favicon and footer
+    logo_base64 = _load_logo_base64()
+    if logo_base64:
+        favicon_link = f'<link rel="icon" type="image/png" href="data:image/png;base64,{logo_base64}">'
+        footer_logo = f'<div class="footer-logo"><img src="data:image/png;base64,{logo_base64}" alt="KaroSpace"></div>'
+    else:
+        favicon_link = ""
+        footer_logo = ""
+
     # Generate HTML
     html = HTML_TEMPLATE.format(
         title=title,
@@ -1732,6 +1816,8 @@ def export_to_html(
         palette_json=json.dumps(DEFAULT_CATEGORICAL_PALETTE),
         theme_icon=theme_icon,
         initial_theme=initial_theme,
+        favicon_link=favicon_link,
+        footer_logo=footer_logo,
         **colors
     )
 

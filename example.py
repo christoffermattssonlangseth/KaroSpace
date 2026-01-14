@@ -9,7 +9,7 @@ from karospace import load_spatial_data, export_to_html
 
 # Path to your h5ad file
 # Update this path to point to your EAE/MANA data
-H5AD_PATH = '/Volumes/processing2/RRmap/data/EAE_proseg_clustered_louvain_leiden_all_sections_annotated_rotated_cellcharter_neigh2_251219.h5ad'
+H5AD_PATH = '/Volumes/processing2/RRmap/data/EAE_proseg_clustered_louvain_leiden_all_sections_annotated_rotated_scVI_mana_embedding_clustered.h5ad'
 
 # Load the dataset
 # - groupby: column in adata.obs that identifies each section
@@ -36,7 +36,7 @@ export_to_html(
 
     # Include additional color options for the dropdown
     additional_colors=[
-       'anno_L3', 'anno_L2', 'anno_L1','leiden_3.5'
+       'anno_L3', 'anno_L2', 'anno_L1','leiden_3.5','leiden_mana_1.0','leiden_mana_0.8','leiden_mana_0.3','leiden_mana_0.5'
 
         # Add any other obs columns you want to switch between
     ],
