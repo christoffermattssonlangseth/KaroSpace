@@ -175,6 +175,12 @@ Selected cells are highlighted with a yellow/gold outline in both UMAP and spati
 - Use fewer `cols` for sections with complex shapes
 - Consider splitting very large datasets into multiple viewers
 
+## TODO
+- The UMAP view needs to conform to the dark/light mode toggle. 
+- Allow the size of the UMAP dots to be changed. 
+- The autoscaling of samples become a bit skewed when the UMAP is toggled on, can this be changed somehow? 
+- When selecting cells from the UMAP representation, allow the user to select and highlight only the cells selected in the legend. 
+
 ## License
 
 MIT License
