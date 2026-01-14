@@ -144,7 +144,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             padding: 12px;
             overflow: auto;
             display: grid;
-            grid-template-columns: repeat({cols}, 1fr);
+            grid-template-columns: repeat(auto-fit, minmax({min_panel_size}px, 1fr));
             gap: 8px;
             align-content: start;
         }}
@@ -346,6 +346,91 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         .cell-tooltip-label {{ font-weight: 500; }}
         .cell-tooltip-value {{ color: var(--muted-color); margin-left: 4px; }}
+
+        /* UMAP panel styles */
+        .umap-panel {{
+            width: 300px;
+            background: var(--panel-bg);
+            border-left: 1px solid var(--border-color);
+            display: none;
+            flex-direction: column;
+            transition: background 0.3s, border-color 0.3s;
+        }}
+        .umap-panel.visible {{ display: flex; }}
+        .umap-header {{
+            padding: 8px 12px;
+            background: var(--header-bg);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: background 0.3s, border-color 0.3s;
+        }}
+        .umap-header h3 {{ font-size: 13px; font-weight: 600; }}
+        .umap-canvas-container {{
+            flex: 1;
+            position: relative;
+            min-height: 250px;
+        }}
+        .umap-canvas {{
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }}
+        .umap-controls {{
+            padding: 8px 12px;
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            align-items: center;
+            transition: border-color 0.3s;
+        }}
+        .umap-btn {{
+            padding: 5px 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: var(--input-bg);
+            color: var(--text-color);
+            cursor: pointer;
+            font-size: 11px;
+            transition: background 0.3s, border-color 0.3s, color 0.3s;
+        }}
+        .umap-btn:hover {{ background: var(--hover-bg); }}
+        .umap-btn.active {{
+            background: #0066cc;
+            color: white;
+            border-color: #0066cc;
+        }}
+        .umap-selection-info {{
+            font-size: 11px;
+            color: var(--muted-color);
+            padding: 4px 12px;
+            border-top: 1px solid var(--border-color);
+        }}
+        .umap-toggle {{
+            background: var(--input-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 5px 10px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: background 0.3s, border-color 0.3s;
+        }}
+        .umap-toggle:hover {{ background: var(--hover-bg); }}
+        .umap-toggle.active {{
+            background: #0066cc;
+            color: white;
+            border-color: #0066cc;
+        }}
+
+        /* Selection highlight */
+        .selection-highlight {{
+            stroke: #ffd700;
+            stroke-width: 2px;
+        }}
     </style>
 </head>
 <body>
@@ -365,6 +450,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 <label>Size:</label>
                 <input type="range" id="spot-size" min="0.5" max="8" step="0.5" value="{spot_size}" style="width:80px">
             </div>
+            <button class="umap-toggle" id="umap-toggle" title="Toggle UMAP view" style="display: none;">
+                UMAP
+            </button>
             <button class="theme-toggle" id="theme-toggle" title="Toggle dark/light mode">
                 <span id="theme-icon">{theme_icon}</span>
             </button>
@@ -376,6 +464,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     <div class="main-container">
         <div class="grid-container" id="grid"></div>
+        <div class="umap-panel" id="umap-panel">
+            <div class="umap-header">
+                <h3>UMAP</h3>
+            </div>
+            <div class="umap-canvas-container" id="umap-canvas-container">
+                <canvas class="umap-canvas" id="umap-canvas"></canvas>
+            </div>
+            <div class="umap-controls">
+                <button class="umap-btn" id="magic-wand-btn" title="Draw to select cells">Magic Wand</button>
+                <button class="umap-btn" id="clear-selection-btn" title="Clear selection">Clear</button>
+            </div>
+            <div class="umap-selection-info" id="umap-selection-info">No cells selected</div>
+        </div>
         <div class="legend-container" id="legend"></div>
     </div>
 
@@ -459,6 +560,21 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let dragStartX = 0, dragStartY = 0;
     let lastPanX = 0, lastPanY = 0;
 
+    // UMAP state
+    let umapVisible = false;
+    let umapZoom = 1;
+    let umapPanX = 0, umapPanY = 0;
+    let umapSpotSize = 2;
+    let isUmapDragging = false;
+    let umapDragStartX = 0, umapDragStartY = 0;
+    let umapLastPanX = 0, umapLastPanY = 0;
+
+    // Selection state
+    let magicWandActive = false;
+    let isDrawingLasso = false;
+    let lassoPath = [];  // Array of {{x, y}} points
+    let selectedCells = new Set();  // Set of "sectionId:cellIdx" strings
+
     // Theme toggle
     function toggleTheme() {{
         currentTheme = currentTheme === 'light' ? 'dark' : 'light';
@@ -537,6 +653,294 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return getComputedStyle(document.documentElement).getPropertyValue('--panel-bg').trim();
     }}
 
+    // Check if a cell is selected
+    function isCellSelected(sectionId, cellIdx) {{
+        return selectedCells.has(`${{sectionId}}:${{cellIdx}}`);
+    }}
+
+    // Point-in-polygon test using ray casting algorithm
+    function pointInPolygon(x, y, polygon) {{
+        if (polygon.length < 3) return false;
+        let inside = false;
+        for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {{
+            const xi = polygon[i].x, yi = polygon[i].y;
+            const xj = polygon[j].x, yj = polygon[j].y;
+            if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) {{
+                inside = !inside;
+            }}
+        }}
+        return inside;
+    }}
+
+    // UMAP rendering
+    function renderUMAP() {{
+        if (!DATA.has_umap || !umapVisible) return;
+
+        const canvas = document.getElementById('umap-canvas');
+        const ctx = canvas.getContext('2d');
+        const dpr = window.devicePixelRatio || 1;
+        const container = document.getElementById('umap-canvas-container');
+        const rect = container.getBoundingClientRect();
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        ctx.scale(dpr, dpr);
+
+        const width = rect.width, height = rect.height;
+        ctx.fillStyle = getPanelBg();
+        ctx.fillRect(0, 0, width, height);
+
+        const bounds = DATA.umap_bounds;
+        if (!bounds) return;
+
+        const dataWidth = bounds.xmax - bounds.xmin;
+        const dataHeight = bounds.ymax - bounds.ymin;
+        const padding = 20;
+        const baseScale = Math.min((width - 2*padding) / dataWidth, (height - 2*padding) / dataHeight);
+        const scale = baseScale * umapZoom;
+
+        const centerX = width / 2 + umapPanX;
+        const centerY = height / 2 + umapPanY;
+        const dataCenterX = (bounds.xmin + bounds.xmax) / 2;
+        const dataCenterY = (bounds.ymin + bounds.ymax) / 2;
+
+        const config = getColorConfig();
+        const adjustedSpotSize = Math.max(1, umapSpotSize * umapZoom * 0.5);
+
+        // Draw all cells from all sections
+        DATA.sections.forEach(section => {{
+            if (!section.umap_x || !section.umap_y) return;
+
+            const values = getSectionValues(section);
+
+            // First pass: draw non-selected cells
+            for (let i = 0; i < section.umap_x.length; i++) {{
+                const val = values[i];
+                if (val === null || val === undefined) continue;
+
+                // Skip hidden categories
+                if (!config.is_continuous) {{
+                    const catIdx = Math.round(val);
+                    const catName = config.categories[catIdx];
+                    if (hiddenCategories.has(catName)) continue;
+                }}
+
+                const x = centerX + (section.umap_x[i] - dataCenterX) * scale;
+                const y = centerY - (section.umap_y[i] - dataCenterY) * scale;
+
+                // Skip if outside canvas
+                if (x < -adjustedSpotSize || x > width + adjustedSpotSize ||
+                    y < -adjustedSpotSize || y > height + adjustedSpotSize) continue;
+
+                let color;
+                if (config.is_continuous) {{
+                    const t = (val - config.vmin) / (config.vmax - config.vmin);
+                    color = viridis(Math.max(0, Math.min(1, t)));
+                }} else {{
+                    const catIdx = Math.round(val);
+                    color = getCategoryColor(catIdx);
+                }}
+
+                ctx.fillStyle = color;
+                ctx.beginPath();
+                ctx.arc(x, y, adjustedSpotSize, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Draw selection highlight
+                if (isCellSelected(section.id, i)) {{
+                    ctx.strokeStyle = '#ffd700';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                }}
+            }}
+        }});
+
+        // Draw lasso path if currently drawing
+        if (isDrawingLasso && lassoPath.length > 1) {{
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            ctx.moveTo(lassoPath[0].x, lassoPath[0].y);
+            for (let i = 1; i < lassoPath.length; i++) {{
+                ctx.lineTo(lassoPath[i].x, lassoPath[i].y);
+            }}
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }}
+    }}
+
+    // Perform lasso selection on UMAP
+    function performLassoSelection() {{
+        if (lassoPath.length < 3) return;
+
+        const canvas = document.getElementById('umap-canvas');
+        const container = document.getElementById('umap-canvas-container');
+        const rect = container.getBoundingClientRect();
+        const width = rect.width, height = rect.height;
+
+        const bounds = DATA.umap_bounds;
+        if (!bounds) return;
+
+        const dataWidth = bounds.xmax - bounds.xmin;
+        const dataHeight = bounds.ymax - bounds.ymin;
+        const padding = 20;
+        const baseScale = Math.min((width - 2*padding) / dataWidth, (height - 2*padding) / dataHeight);
+        const scale = baseScale * umapZoom;
+
+        const centerX = width / 2 + umapPanX;
+        const centerY = height / 2 + umapPanY;
+        const dataCenterX = (bounds.xmin + bounds.xmax) / 2;
+        const dataCenterY = (bounds.ymin + bounds.ymax) / 2;
+
+        const config = getColorConfig();
+
+        // Clear previous selection or add to it (could add shift-key support later)
+        selectedCells.clear();
+
+        // Check all cells in all sections
+        DATA.sections.forEach(section => {{
+            if (!section.umap_x || !section.umap_y) return;
+
+            const values = getSectionValues(section);
+
+            for (let i = 0; i < section.umap_x.length; i++) {{
+                const val = values[i];
+                if (val === null || val === undefined) continue;
+
+                // Skip hidden categories
+                if (!config.is_continuous) {{
+                    const catIdx = Math.round(val);
+                    const catName = config.categories[catIdx];
+                    if (hiddenCategories.has(catName)) continue;
+                }}
+
+                const x = centerX + (section.umap_x[i] - dataCenterX) * scale;
+                const y = centerY - (section.umap_y[i] - dataCenterY) * scale;
+
+                if (pointInPolygon(x, y, lassoPath)) {{
+                    selectedCells.add(`${{section.id}}:${{i}}`);
+                }}
+            }}
+        }});
+
+        updateSelectionInfo();
+        renderUMAP();
+        renderAllSections();
+        if (modalSection) renderModalSection();
+    }}
+
+    // Update selection info display
+    function updateSelectionInfo() {{
+        const info = document.getElementById('umap-selection-info');
+        if (selectedCells.size === 0) {{
+            info.textContent = 'No cells selected';
+        }} else {{
+            info.textContent = `${{selectedCells.size.toLocaleString()}} cells selected`;
+        }}
+    }}
+
+    // Clear selection
+    function clearSelection() {{
+        selectedCells.clear();
+        updateSelectionInfo();
+        renderUMAP();
+        renderAllSections();
+        if (modalSection) renderModalSection();
+    }}
+
+    // Toggle UMAP panel
+    function toggleUMAP() {{
+        umapVisible = !umapVisible;
+        const panel = document.getElementById('umap-panel');
+        const btn = document.getElementById('umap-toggle');
+        panel.classList.toggle('visible', umapVisible);
+        btn.classList.toggle('active', umapVisible);
+        if (umapVisible) {{
+            requestAnimationFrame(renderUMAP);
+        }}
+    }}
+
+    // Initialize UMAP panel
+    function initUMAP() {{
+        if (!DATA.has_umap) return;
+
+        // Show UMAP toggle button
+        document.getElementById('umap-toggle').style.display = 'inline-block';
+        document.getElementById('umap-toggle').addEventListener('click', toggleUMAP);
+
+        // Magic wand button
+        document.getElementById('magic-wand-btn').addEventListener('click', () => {{
+            magicWandActive = !magicWandActive;
+            const btn = document.getElementById('magic-wand-btn');
+            btn.classList.toggle('active', magicWandActive);
+            const canvas = document.getElementById('umap-canvas');
+            canvas.style.cursor = magicWandActive ? 'crosshair' : 'grab';
+        }});
+
+        // Clear selection button
+        document.getElementById('clear-selection-btn').addEventListener('click', clearSelection);
+
+        // UMAP canvas events
+        const canvas = document.getElementById('umap-canvas');
+        const container = document.getElementById('umap-canvas-container');
+
+        canvas.addEventListener('mousedown', (e) => {{
+            const rect = container.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            if (magicWandActive) {{
+                // Start lasso drawing
+                isDrawingLasso = true;
+                lassoPath = [{{ x, y }}];
+            }} else {{
+                // Start panning
+                isUmapDragging = true;
+                umapDragStartX = e.clientX;
+                umapDragStartY = e.clientY;
+                umapLastPanX = umapPanX;
+                umapLastPanY = umapPanY;
+                canvas.style.cursor = 'grabbing';
+            }}
+        }});
+
+        canvas.addEventListener('mousemove', (e) => {{
+            const rect = container.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            if (isDrawingLasso) {{
+                lassoPath.push({{ x, y }});
+                renderUMAP();
+            }} else if (isUmapDragging) {{
+                umapPanX = umapLastPanX + (e.clientX - umapDragStartX);
+                umapPanY = umapLastPanY + (e.clientY - umapDragStartY);
+                renderUMAP();
+            }}
+        }});
+
+        document.addEventListener('mouseup', (e) => {{
+            if (isDrawingLasso) {{
+                isDrawingLasso = false;
+                performLassoSelection();
+                lassoPath = [];
+            }}
+            if (isUmapDragging) {{
+                isUmapDragging = false;
+                canvas.style.cursor = magicWandActive ? 'crosshair' : 'grab';
+            }}
+        }});
+
+        // Zoom with mouse wheel
+        container.addEventListener('wheel', (e) => {{
+            e.preventDefault();
+            umapZoom = Math.max(0.1, Math.min(20, umapZoom * (e.deltaY > 0 ? 0.9 : 1.1)));
+            renderUMAP();
+        }});
+
+        canvas.style.cursor = 'grab';
+    }}
+
     // Rendering
     function renderSection(section, canvas) {{
         const ctx = canvas.getContext('2d');
@@ -605,6 +1009,31 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ctx.beginPath();
             ctx.arc(x, height - y, spotSize, 0, Math.PI * 2);
             ctx.fill();
+        }}
+
+        // Third pass: draw selection highlights
+        if (selectedCells.size > 0) {{
+            ctx.strokeStyle = '#ffd700';
+            ctx.lineWidth = 2;
+            for (let i = 0; i < section.x.length; i++) {{
+                if (!isCellSelected(section.id, i)) continue;
+
+                const val = values[i];
+                if (val === null || val === undefined) continue;
+
+                // Skip hidden categories
+                if (!config.is_continuous) {{
+                    const catIdx = Math.round(val);
+                    const catName = config.categories[catIdx];
+                    if (hiddenCategories.has(catName)) continue;
+                }}
+
+                const x = offsetX + (section.x[i] - bounds.xmin) * scale;
+                const y = offsetY + (section.y[i] - bounds.ymin) * scale;
+                ctx.beginPath();
+                ctx.arc(x, height - y, spotSize + 1, 0, Math.PI * 2);
+                ctx.stroke();
+            }}
         }}
     }}
 
@@ -812,6 +1241,35 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ctx.beginPath();
             ctx.arc(x, y, adjustedSpotSize, 0, Math.PI * 2);
             ctx.fill();
+        }}
+
+        // Third pass: draw selection highlights
+        if (selectedCells.size > 0) {{
+            ctx.strokeStyle = '#ffd700';
+            ctx.lineWidth = 3;
+            for (let i = 0; i < modalSection.x.length; i++) {{
+                if (!isCellSelected(modalSection.id, i)) continue;
+
+                const val = values[i];
+                if (val === null || val === undefined) continue;
+
+                // Skip hidden categories
+                if (!config.is_continuous) {{
+                    const catIdx = Math.round(val);
+                    const catName = config.categories[catIdx];
+                    if (hiddenCategories.has(catName)) continue;
+                }}
+
+                const x = centerX + (modalSection.x[i] - dataCenterX) * scale;
+                const y = centerY - (modalSection.y[i] - dataCenterY) * scale;
+
+                if (x < -adjustedSpotSize || x > width + adjustedSpotSize ||
+                    y < -adjustedSpotSize || y > height + adjustedSpotSize) continue;
+
+                ctx.beginPath();
+                ctx.arc(x, y, adjustedSpotSize + 2, 0, Math.PI * 2);
+                ctx.stroke();
+            }}
         }}
 
         document.getElementById('zoom-info').textContent = `${{Math.round(modalZoom * 100)}}%`;
@@ -1029,6 +1487,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             renderLegend('modal-legend');
             renderAllSections();
             if (modalSection) renderModalSection();
+            if (umapVisible) renderUMAP();
         }});
 
         const geneList = document.getElementById('gene-list');
@@ -1048,6 +1507,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 renderLegend('modal-legend');
                 renderAllSections();
                 if (modalSection) renderModalSection();
+                if (umapVisible) renderUMAP();
             }} else if (gene && DATA.all_genes && DATA.all_genes.includes(gene)) {{
                 alert(`Gene "${{gene}}" is in the dataset but was not pre-loaded.\\nTo view it, re-export with this gene included in the genes parameter.`);
             }} else if (gene) {{
@@ -1162,12 +1622,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         initControls();
         initFilters();
         initModal();
+        initUMAP();
         renderLegend('legend');
         requestAnimationFrame(renderAllSections);
     }});
     window.addEventListener('resize', () => {{
         renderAllSections();
         if (modalSection) renderModalSection();
+        if (umapVisible) renderUMAP();
     }});
     </script>
 </body>
@@ -1180,7 +1642,7 @@ def export_to_html(
     output_path: str,
     color: str = "leiden",
     title: str = "Spatial Viewer",
-    cols: int = 4,
+    min_panel_size: int = 150,
     spot_size: float = 2,
     downsample: Optional[int] = None,
     theme: str = "light",
@@ -1202,8 +1664,9 @@ def export_to_html(
         Initial color column or gene name
     title : str
         Page title
-    cols : int
-        Number of columns in grid
+    min_panel_size : int
+        Minimum width of each section panel in pixels (default 150).
+        The grid auto-adjusts columns based on screen width.
     spot_size : float
         Default spot size
     downsample : int, optional
@@ -1263,7 +1726,7 @@ def export_to_html(
     # Generate HTML
     html = HTML_TEMPLATE.format(
         title=title,
-        cols=cols,
+        min_panel_size=min_panel_size,
         spot_size=spot_size,
         data_json=json.dumps(data),
         palette_json=json.dumps(DEFAULT_CATEGORICAL_PALETTE),

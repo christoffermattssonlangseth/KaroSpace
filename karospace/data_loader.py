@@ -53,6 +53,11 @@ class SpatialDataset:
     def n_cells(self) -> int:
         return self.adata.n_obs
 
+    @property
+    def has_umap(self) -> bool:
+        """Check if UMAP coordinates are available."""
+        return "X_umap" in self.adata.obsm
+
     def get_color_data(
         self,
         color: str,
@@ -158,6 +163,19 @@ class SpatialDataset:
         coords = np.asarray(self.adata.obsm["spatial"])[:, :2]
         section_indices = self.get_section_indices()
 
+        # Get UMAP coordinates if available
+        umap_coords = None
+        umap_bounds = None
+        if self.has_umap:
+            umap_coords = np.asarray(self.adata.obsm["X_umap"])[:, :2]
+            # Compute global UMAP bounds for consistent scaling across all sections
+            umap_bounds = {
+                "xmin": float(umap_coords[:, 0].min()),
+                "xmax": float(umap_coords[:, 0].max()),
+                "ymin": float(umap_coords[:, 1].min()),
+                "ymax": float(umap_coords[:, 1].max()),
+            }
+
         # Get initial color data
         values, is_continuous, categories = self.get_color_data(color, vmin, vmax)
 
@@ -231,6 +249,11 @@ class SpatialDataset:
 
             section_coords = coords[idx]
 
+            # Get UMAP coordinates for this section if available
+            section_umap = None
+            if umap_coords is not None:
+                section_umap = umap_coords[idx]
+
             # Build color values for this section
             section_colors = {}
             for col, cdata in color_data.items():
@@ -248,7 +271,7 @@ class SpatialDataset:
                     float(v) if np.isfinite(v) else None for v in section_vals
                 ]
 
-            sections_data.append({
+            section_entry = {
                 "id": section.section_id,
                 "metadata": section.metadata,
                 "n_cells": int(len(idx)),
@@ -262,7 +285,14 @@ class SpatialDataset:
                     "ymin": float(section_coords[:, 1].min()) if len(idx) > 0 else 0,
                     "ymax": float(section_coords[:, 1].max()) if len(idx) > 0 else 0,
                 }
-            })
+            }
+
+            # Add UMAP coordinates if available
+            if section_umap is not None:
+                section_entry["umap_x"] = section_umap[:, 0].tolist()
+                section_entry["umap_y"] = section_umap[:, 1].tolist()
+
+            sections_data.append(section_entry)
 
         # Build color metadata
         colors_meta = {}
@@ -293,6 +323,8 @@ class SpatialDataset:
             "available_colors": list(color_data.keys()),
             "available_genes": list(gene_data.keys()) if gene_data else self.var_names[:100],
             "all_genes": self.var_names[:500],  # For autocomplete
+            "has_umap": umap_coords is not None,
+            "umap_bounds": umap_bounds,
         }
 
 

@@ -8,10 +8,12 @@ Originally developed at Karolinska Institutet for visualizing Xenium spatial tra
 
 - **Multi-section grid view** - Display dozens or hundreds of tissue sections in a responsive grid layout
 - **Interactive zoom and pan** - Click any section to open a detailed view with mouse wheel zoom and drag-to-pan
+- **UMAP view with Magic Wand selection** - Toggle UMAP panel, draw to select cells, highlights sync across views
 - **Category toggling** - Click legend items to show/hide specific cell types or clusters; hidden cells appear as grey
 - **Gene expression visualization** - Pre-load genes of interest and switch between them with a viridis colormap
 - **Multiple color columns** - Switch between different annotation columns (e.g., cell types, clusters, conditions)
 - **Metadata filtering** - Filter sections by metadata like experimental condition, timepoint, or region
+- **Cell tooltips** - Hover over cells to see their type or expression value
 - **Course-based borders** - Section panels are outlined with colors indicating their experimental course/condition
 - **Dark/light mode** - Toggle between themes with preference saved to browser localStorage
 - **Adjustable spot size** - Control cell/spot size in both grid view and detailed modal view
@@ -55,7 +57,7 @@ export_to_html(
     output_path="viewer.html",
     color="cell_type",           # Initial color column
     title="KaroSpace",
-    cols=8,                      # Grid columns
+    min_panel_size=150,          # Min panel width (grid auto-adjusts)
     spot_size=2.0,               # Cell/spot size
     downsample=30000,            # Max cells per section (for large datasets)
     theme="light",               # "light" or "dark"
@@ -84,7 +86,7 @@ karospace your_data.h5ad -o viewer.html --color leiden --cols 6
 | `-o, --output` | Output HTML file path | `karospace.html` |
 | `-c, --color` | Initial color column | `leiden` |
 | `-g, --groupby` | Column to group sections by | `sample_id` |
-| `--cols` | Number of grid columns | `4` |
+| `--min-panel-size` | Minimum panel width in pixels (grid auto-adjusts) | `150` |
 | `--spot-size` | Cell/spot size | `2.0` |
 | `--downsample` | Max cells per section | None |
 | `--theme` | Color theme (`light` or `dark`) | `light` |
@@ -127,7 +129,7 @@ export_to_html(
     output_path="viewer.html",
     color="anno_L2",
     title="KaroSpace",
-    cols=20,
+    min_panel_size=120,
     spot_size=1.5,
     downsample=30000,
     additional_colors=['anno_L3', 'anno_L2', 'anno_L1', 'leiden'],
@@ -152,7 +154,19 @@ export_to_html(
 - **Zoom buttons** - +/- zoom controls
 - **Reset button** - Return to default zoom/pan
 - **Size slider** - Adjust spot size for this view
+- **Hover over cells** - See cell type or expression value
 - **Escape or click outside** - Close modal
+
+### UMAP View (if available)
+If your h5ad file contains UMAP coordinates (`adata.obsm['X_umap']`), a UMAP toggle button appears:
+- **UMAP button** - Toggle the UMAP panel on/off
+- **Magic Wand** - Activate lasso selection mode
+- **Draw selection** - Click and drag to draw a selection area
+- **Clear** - Clear the current selection
+- **Mouse wheel** - Zoom the UMAP view
+- **Click and drag** (without Magic Wand) - Pan the UMAP view
+
+Selected cells are highlighted with a yellow/gold outline in both UMAP and spatial views.
 
 ## Performance Tips
 

@@ -35,10 +35,10 @@ def main():
         help="Column to group sections by (default: sample_id)"
     )
     parser.add_argument(
-        "--cols",
+        "--min-panel-size",
         type=int,
-        default=4,
-        help="Number of columns in grid (default: 4)"
+        default=150,
+        help="Minimum panel width in pixels (default: 150). Grid auto-adjusts columns."
     )
     parser.add_argument(
         "--spot-size",
@@ -93,7 +93,7 @@ def main():
         output_path=args.output,
         color=args.color,
         title=args.title,
-        cols=args.cols,
+        min_panel_size=args.min_panel_size,
         spot_size=args.spot_size,
         downsample=args.downsample,
         theme=args.theme,

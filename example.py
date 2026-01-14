@@ -29,7 +29,7 @@ export_to_html(
     output_path="eae_mana_viewer.html",
     color="anno_L2",  # Initial color (categorical)
     title="KaroSpace",
-    cols=20,  # 8 columns for many sections
+    min_panel_size=120,  # minimum panel width in pixels, grid auto-adjusts
     spot_size=1.5,  # smaller spots for dense data
     downsample=30000,  # limit cells per section to keep file manageable
     theme="light",  # or "dark"
