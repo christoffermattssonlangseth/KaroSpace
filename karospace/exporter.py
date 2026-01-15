@@ -78,23 +78,25 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             background: var(--background);
             color: var(--text-color);
             min-height: 100vh;
+            display: flex;
+            flex-direction: column;
             transition: background 0.3s, color 0.3s;
         }}
         .header {{
-            padding: 12px 24px;
+            padding: 8px 16px;
             background: var(--header-bg);
             border-bottom: 1px solid var(--border-color);
             display: flex;
             align-items: center;
             justify-content: space-between;
             flex-wrap: wrap;
-            gap: 12px;
+            gap: 8px;
             transition: background 0.3s, border-color 0.3s;
         }}
-        .header h1 {{ font-size: 18px; font-weight: 600; }}
-        .controls {{ display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }}
-        .control-group {{ display: flex; align-items: center; gap: 6px; }}
-        .control-group label {{ font-size: 12px; color: var(--muted-color); }}
+        .header h1 {{ font-size: 16px; font-weight: 600; }}
+        .controls {{ display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }}
+        .control-group {{ display: flex; align-items: center; gap: 4px; }}
+        .control-group label {{ font-size: 11px; color: var(--muted-color); }}
         select, input[type="text"] {{
             padding: 5px 8px;
             border: 1px solid var(--border-color);
@@ -123,23 +125,24 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         /* Filter bar */
         .filter-bar {{
-            padding: 8px 24px;
+            padding: 6px 16px;
             background: var(--header-bg);
             border-bottom: 1px solid var(--border-color);
             display: flex;
             align-items: center;
-            gap: 16px;
+            gap: 12px;
             flex-wrap: wrap;
             transition: background 0.3s, border-color 0.3s;
         }}
-        .filter-group {{ display: flex; align-items: center; gap: 6px; }}
-        .filter-group label {{ font-size: 11px; color: var(--muted-color); text-transform: capitalize; }}
-        .filter-chips {{ display: flex; gap: 4px; flex-wrap: wrap; }}
+        .filter-bar:empty {{ display: none; }}
+        .filter-group {{ display: flex; align-items: center; gap: 4px; }}
+        .filter-group label {{ font-size: 10px; color: var(--muted-color); text-transform: capitalize; }}
+        .filter-chips {{ display: flex; gap: 3px; flex-wrap: wrap; }}
         .filter-chip {{
-            padding: 3px 8px;
-            font-size: 11px;
+            padding: 2px 6px;
+            font-size: 10px;
             border: 1px solid var(--border-color);
-            border-radius: 12px;
+            border-radius: 10px;
             background: var(--input-bg);
             color: var(--text-color);
             cursor: pointer;
@@ -149,10 +152,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .filter-chip.active {{ background: #0066cc; color: white; border-color: #0066cc; }}
         .filter-chip.inactive {{ opacity: 0.4; }}
 
-        .main-container {{ display: flex; height: calc(100vh - 110px); }}
+        .main-container {{ display: flex; flex: 1; min-height: 0; }}
         .grid-container {{
             flex: 1;
-            padding: 12px;
+            padding: 8px;
             overflow: auto;
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax({min_panel_size}px, 1fr));
@@ -173,18 +176,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         .section-panel.filtered-out {{ display: none; }}
         .section-header {{
-            padding: 6px 10px;
+            padding: 4px 8px;
             background: var(--header-bg);
             border-bottom: 1px solid var(--border-color);
-            font-size: 11px;
+            font-size: 10px;
             font-weight: 500;
             display: flex;
             justify-content: space-between;
             align-items: center;
             transition: background 0.3s, border-color 0.3s;
         }}
-        .section-header .expand-icon {{ font-size: 12px; opacity: 0.5; }}
-        .section-meta {{ font-size: 9px; color: var(--muted-color); margin-top: 1px; }}
+        .section-header .expand-icon {{ font-size: 10px; opacity: 0.5; }}
+        .section-meta {{ font-size: 8px; color: var(--muted-color); margin-top: 1px; }}
         .section-canvas {{ display: block; width: 100%; aspect-ratio: 1; }}
 
         .legend-container {{
@@ -194,7 +197,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             border-left: 1px solid var(--border-color);
             overflow-y: auto;
             font-size: 12px;
-            transition: background 0.3s, border-color 0.3s;
+            transition: background 0.3s, border-color 0.3s, width 0.3s, padding 0.3s;
+        }}
+        .legend-container.collapsed {{
+            width: 0;
+            padding: 0;
+            overflow: hidden;
+            border-left: none;
         }}
         .legend-title {{
             font-size: 13px;
@@ -421,7 +430,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             padding: 4px 12px;
             border-top: 1px solid var(--border-color);
         }}
-        .umap-toggle {{
+        .umap-toggle, .legend-toggle {{
             background: var(--input-bg);
             border: 1px solid var(--border-color);
             border-radius: 4px;
@@ -430,8 +439,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             font-size: 12px;
             transition: background 0.3s, border-color 0.3s;
         }}
-        .umap-toggle:hover {{ background: var(--hover-bg); }}
-        .umap-toggle.active {{
+        .umap-toggle:hover, .legend-toggle:hover {{ background: var(--hover-bg); }}
+        .umap-toggle.active, .legend-toggle.active {{
             background: #0066cc;
             color: white;
             border-color: #0066cc;
@@ -478,6 +487,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             </div>
             <button class="umap-toggle" id="umap-toggle" title="Toggle UMAP view" style="display: none;">
                 UMAP
+            </button>
+            <button class="legend-toggle active" id="legend-toggle" title="Toggle legend panel">
+                Legend
             </button>
             <button class="theme-toggle" id="theme-toggle" title="Toggle dark/light mode">
                 <span id="theme-icon">{theme_icon}</span>
@@ -1593,6 +1605,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             spotSize = parseFloat(e.target.value);
             renderAllSections();
             if (modalSection) renderModalSection();
+        }});
+
+        // Legend toggle
+        document.getElementById('legend-toggle').addEventListener('click', () => {{
+            const legend = document.getElementById('legend');
+            const btn = document.getElementById('legend-toggle');
+            legend.classList.toggle('collapsed');
+            btn.classList.toggle('active');
+            // Re-render to adjust for new grid size
+            requestAnimationFrame(renderAllSections);
         }});
     }}
 
