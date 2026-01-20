@@ -19,6 +19,9 @@ Originally developed at Karolinska Institutet for visualizing Xenium spatial tra
 - **Metadata filtering** - Filter sections by metadata like experimental condition, timepoint, or region
 - **Cell tooltips** - Hover over cells to see their type or expression value
 - **Course-based borders** - Section panels are outlined with colors indicating their experimental course/condition
+- **Neighborhood graph overlay** - Toggle adjacency edges when a neighbor graph is present in `adata.obsp`
+- **Neighbor rings on hover** - Highlight 1–3 hop neighbors around a hovered cell (when neighbors are available)
+- **Screenshot export** - Download a full-page image of the current view
 - **Dark/light mode** - Toggle between themes with preference saved to browser localStorage
 - **Adjustable spot size** - Control cell/spot size in both grid view and detailed modal view
 - **Standalone HTML** - Generated files are self-contained with embedded data and JavaScript
@@ -114,6 +117,11 @@ For filtering functionality, include these columns in `adata.obs`:
 
 Sections will be outlined with colors based on their `course` metadata if present.
 
+### Optional neighborhood graph
+
+If `adata.obsp` contains a neighbor graph (e.g., `spatial_connectivities`, `connectivities`,
+`neighbors`, or `neighbor_graph`), KaroSpace will expose graph and neighbor-hover controls.
+
 ## Example
 
 See [example.py](example.py) for a complete working example.
@@ -150,6 +158,11 @@ export_to_html(
 - **Size slider** - Adjust spot size
 - **Filter chips** - Click to filter sections by metadata
 - **Legend items** - Click to toggle categories on/off
+- **Legend button** - Show/hide the legend panel
+- **Graph button** - Toggle neighborhood graph overlay (if available)
+- **Neighbors button** - Toggle neighbor rings on hover (if available)
+- **Hop selector** - Choose which neighbor hop(s) to display (if available)
+- **Screenshot button** - Download a snapshot of the current view
 - **Theme button** - Toggle dark/light mode
 
 ### Modal View (Detailed Section)
@@ -157,6 +170,9 @@ export_to_html(
 - **Click and drag** - Pan around
 - **Zoom buttons** - +/- zoom controls
 - **Reset button** - Return to default zoom/pan
+- **Graph button** - Toggle neighborhood graph overlay (if available)
+- **Neighbors button** - Toggle neighbor rings on hover (if available)
+- **Hop selector** - Choose which neighbor hop(s) to display (if available)
 - **Size slider** - Adjust spot size for this view
 - **Hover over cells** - See cell type or expression value
 - **Escape or click outside** - Close modal
@@ -167,6 +183,7 @@ If your h5ad file contains UMAP coordinates (`adata.obsm['X_umap']`), a UMAP tog
 - **Magic Wand** - Activate lasso selection mode
 - **Draw selection** - Click and drag to draw a selection area
 - **Clear** - Clear the current selection
+- **Size slider** - Adjust point size in the UMAP view
 - **Mouse wheel** - Zoom the UMAP view
 - **Click and drag** (without Magic Wand) - Pan the UMAP view
 
