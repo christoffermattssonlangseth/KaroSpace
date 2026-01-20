@@ -612,6 +612,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let activeFilters = {{}};  // e.g. {{ course: new Set(['peak_I', 'peak_III']) }}
     let currentTheme = '{initial_theme}';
     let showGraph = false;
+    let hoverNeighbors = null;
+    const MAX_HOVER_HOPS = 3;
+    const HOVER_COLORS = [
+        'rgba(255, 165, 0, 0.9)',
+        'rgba(0, 200, 255, 0.9)',
+        'rgba(255, 105, 180, 0.9)',
+    ];
 
     // Modal state
     let modalSection = null;
@@ -768,6 +775,112 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function getGraphColor() {{
         const color = getComputedStyle(document.documentElement).getPropertyValue('--graph-color').trim();
         return color || 'rgba(0, 0, 0, 0.12)';
+    }}
+
+    function getSectionAdjacency(section) {{
+        if (section._adj) return section._adj;
+        const n = section.x.length;
+        const adj = Array.from({{ length: n }}, () => []);
+        if (section.edges) {{
+            section.edges.forEach(edge => {{
+                const i = edge[0];
+                const j = edge[1];
+                if (i >= 0 && j >= 0 && i < n && j < n) {{
+                    adj[i].push(j);
+                    adj[j].push(i);
+                }}
+            }});
+        }}
+        section._adj = adj;
+        return adj;
+    }}
+
+    function computeNeighborRings(section, startIdx, maxHops) {{
+        if (!section.edges || section.edges.length === 0) return [];
+        const adj = getSectionAdjacency(section);
+        const visited = new Set([startIdx]);
+        let frontier = [startIdx];
+        const rings = [];
+
+        for (let hop = 1; hop <= maxHops; hop++) {{
+            const nextSet = new Set();
+            frontier.forEach(node => {{
+                adj[node].forEach(nb => {{
+                    if (!visited.has(nb)) {{
+                        visited.add(nb);
+                        nextSet.add(nb);
+                    }}
+                }});
+            }});
+            if (nextSet.size === 0) break;
+            const ring = Array.from(nextSet);
+            rings.push(ring);
+            frontier = ring;
+        }}
+
+        return rings;
+    }}
+
+    function updateHoverNeighbors(section, cellIdx) {{
+        if (!section || !section.edges || section.edges.length === 0) {{
+            hoverNeighbors = null;
+            return false;
+        }}
+        if (hoverNeighbors &&
+            hoverNeighbors.sectionId === section.id &&
+            hoverNeighbors.centerIdx === cellIdx) {{
+            return false;
+        }}
+        const rings = computeNeighborRings(section, cellIdx, MAX_HOVER_HOPS);
+        hoverNeighbors = {{
+            sectionId: section.id,
+            centerIdx: cellIdx,
+            rings,
+        }};
+        return true;
+    }}
+
+    function drawNeighborHighlights(ctx, section, transform, adjustedSpotSize) {{
+        if (!hoverNeighbors || hoverNeighbors.sectionId !== section.id) return;
+        const rings = hoverNeighbors.rings || [];
+        const centerIdx = hoverNeighbors.centerIdx;
+        if (centerIdx === null || centerIdx === undefined) return;
+
+        const config = getColorConfig();
+        const values = getSectionValues(section);
+
+        const xCenter = transform.centerX + (section.x[centerIdx] - transform.dataCenterX) * transform.scale;
+        const yCenter = transform.centerY - (section.y[centerIdx] - transform.dataCenterY) * transform.scale;
+
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.lineWidth = Math.max(1.5, adjustedSpotSize * 0.35);
+        ctx.beginPath();
+        ctx.arc(xCenter, yCenter, adjustedSpotSize + 2, 0, Math.PI * 2);
+        ctx.stroke();
+
+        rings.forEach((ring, idx) => {{
+            const color = HOVER_COLORS[idx] || HOVER_COLORS[HOVER_COLORS.length - 1];
+            ctx.strokeStyle = color;
+            ctx.lineWidth = Math.max(1, adjustedSpotSize * 0.25);
+            ring.forEach(cellIdx => {{
+                const val = values[cellIdx];
+                if (val === null || val === undefined) return;
+                if (!config.is_continuous) {{
+                    const catIdx = Math.round(val);
+                    const catName = config.categories[catIdx];
+                    if (hiddenCategories.has(catName)) return;
+                }}
+                const x = transform.centerX + (section.x[cellIdx] - transform.dataCenterX) * transform.scale;
+                const y = transform.centerY - (section.y[cellIdx] - transform.dataCenterY) * transform.scale;
+                if (x < -adjustedSpotSize || x > transform.width + adjustedSpotSize ||
+                    y < -adjustedSpotSize || y > transform.height + adjustedSpotSize) return;
+                ctx.beginPath();
+                ctx.arc(x, y, adjustedSpotSize + 1 + idx, 0, Math.PI * 2);
+                ctx.stroke();
+            }});
+        }});
+        ctx.restore();
     }}
 
     // Check if a cell is selected
@@ -1492,6 +1605,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
         }}
 
+        drawNeighborHighlights(ctx, modalSection, {{
+            scale,
+            centerX,
+            centerY,
+            dataCenterX,
+            dataCenterY,
+            width,
+            height
+        }}, adjustedSpotSize);
+
         document.getElementById('zoom-info').textContent = `${{Math.round(modalZoom * 100)}}%`;
     }}
 
@@ -1854,12 +1977,24 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             if (cellIdx >= 0) {{
                 const content = getCellTooltipContent(modalSection, cellIdx);
                 showTooltip(e.clientX, e.clientY, content);
+                const changed = updateHoverNeighbors(modalSection, cellIdx);
+                if (changed) renderModalSection();
             }} else {{
                 hideTooltip();
+                if (hoverNeighbors) {{
+                    hoverNeighbors = null;
+                    renderModalSection();
+                }}
             }}
         }});
 
-        canvas.addEventListener('mouseleave', hideTooltip);
+        canvas.addEventListener('mouseleave', () => {{
+            hideTooltip();
+            if (hoverNeighbors) {{
+                hoverNeighbors = null;
+                renderModalSection();
+            }}
+        }});
     }}
 
     // Initialize
