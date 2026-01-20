@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 from scipy.sparse import issparse
+import scipy.sparse as sp
 from typing import Dict, List, Optional, Tuple, Union
 from dataclasses import dataclass, field
 import json
@@ -176,6 +177,20 @@ class SpatialDataset:
                 "ymax": float(umap_coords[:, 1].max()),
             }
 
+        # Get neighborhood graph if available
+        neighbor_graph = None
+        neighbor_graph_key = None
+        for key in ("spatial_connectivities", "connectivities", "neighbors", "neighbor_graph"):
+            if key in self.adata.obsp:
+                neighbor_graph = self.adata.obsp[key]
+                neighbor_graph_key = key
+                break
+        if neighbor_graph is not None:
+            if not issparse(neighbor_graph):
+                neighbor_graph = sp.csr_matrix(neighbor_graph)
+            else:
+                neighbor_graph = neighbor_graph.tocsr()
+
         # Get initial color data
         values, is_continuous, categories = self.get_color_data(color, vmin, vmax)
 
@@ -292,6 +307,14 @@ class SpatialDataset:
                 section_entry["umap_x"] = section_umap[:, 0].tolist()
                 section_entry["umap_y"] = section_umap[:, 1].tolist()
 
+            if neighbor_graph is not None:
+                subgraph = neighbor_graph[idx][:, idx]
+                if issparse(subgraph) and subgraph.nnz > 0:
+                    upper = sp.triu(subgraph, k=1).tocoo()
+                    section_entry["edges"] = list(zip(upper.row.tolist(), upper.col.tolist()))
+                else:
+                    section_entry["edges"] = []
+
             sections_data.append(section_entry)
 
         # Build color metadata
@@ -325,6 +348,8 @@ class SpatialDataset:
             "all_genes": self.var_names[:500],  # For autocomplete
             "has_umap": umap_coords is not None,
             "umap_bounds": umap_bounds,
+            "has_neighbors": neighbor_graph is not None,
+            "neighbors_key": neighbor_graph_key,
         }
 
 

@@ -51,6 +51,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             --input-bg: {input_bg};
             --muted-color: {muted_color};
             --hover-bg: {hover_bg};
+            --graph-color: {graph_color};
         }}
         :root.dark {{
             --background: #1a1a1a;
@@ -61,6 +62,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             --input-bg: #333333;
             --muted-color: #888888;
             --hover-bg: #3a3a3a;
+            --graph-color: rgba(255, 255, 255, 0.12);
         }}
         :root.light {{
             --background: #f5f5f5;
@@ -71,6 +73,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             --input-bg: #ffffff;
             --muted-color: #666666;
             --hover-bg: #f0f0f0;
+            --graph-color: rgba(0, 0, 0, 0.12);
         }}
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
         body {{
@@ -440,7 +443,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             padding: 4px 12px;
             border-top: 1px solid var(--border-color);
         }}
-        .umap-toggle, .legend-toggle {{
+        .umap-toggle, .legend-toggle, .graph-toggle {{
             background: var(--input-bg);
             border: 1px solid var(--border-color);
             border-radius: 4px;
@@ -449,8 +452,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             font-size: 12px;
             transition: background 0.3s, border-color 0.3s;
         }}
-        .umap-toggle:hover, .legend-toggle:hover {{ background: var(--hover-bg); }}
-        .umap-toggle.active, .legend-toggle.active {{
+        .umap-toggle:hover, .legend-toggle:hover, .graph-toggle:hover {{ background: var(--hover-bg); }}
+        .umap-toggle.active, .legend-toggle.active, .graph-toggle.active {{
             background: #0066cc;
             color: white;
             border-color: #0066cc;
@@ -500,6 +503,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             </button>
             <button class="legend-toggle active" id="legend-toggle" title="Toggle legend panel">
                 Legend
+            </button>
+            <button class="graph-toggle" id="graph-toggle" title="Toggle neighborhood graph" style="display: none;">
+                Graph
             </button>
             <button class="export-btn" id="screenshot-btn" title="Download screenshot">
                 Screenshot
@@ -605,6 +611,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let spotSize = {spot_size};
     let activeFilters = {{}};  // e.g. {{ course: new Set(['peak_I', 'peak_III']) }}
     let currentTheme = '{initial_theme}';
+    let showGraph = false;
 
     // Modal state
     let modalSection = null;
@@ -756,6 +763,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     // Get current panel background color from CSS variable
     function getPanelBg() {{
         return getComputedStyle(document.documentElement).getPropertyValue('--panel-bg').trim();
+    }}
+
+    function getGraphColor() {{
+        const color = getComputedStyle(document.documentElement).getPropertyValue('--graph-color').trim();
+        return color || 'rgba(0, 0, 0, 0.12)';
     }}
 
     // Check if a cell is selected
@@ -1112,6 +1124,35 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const config = getColorConfig();
         const values = getSectionValues(section);
 
+        if (showGraph && section.edges && section.edges.length) {{
+            const graphColor = getGraphColor();
+            ctx.strokeStyle = graphColor;
+            ctx.lineWidth = Math.max(0.3, spotSize * 0.15);
+            ctx.beginPath();
+            for (let e = 0; e < section.edges.length; e++) {{
+                const edge = section.edges[e];
+                const i = edge[0];
+                const j = edge[1];
+                const valI = values[i];
+                const valJ = values[j];
+                if (valI === null || valI === undefined || valJ === null || valJ === undefined) continue;
+                if (!config.is_continuous) {{
+                    const catIdxI = Math.round(valI);
+                    const catIdxJ = Math.round(valJ);
+                    const catNameI = config.categories[catIdxI];
+                    const catNameJ = config.categories[catIdxJ];
+                    if (hiddenCategories.has(catNameI) || hiddenCategories.has(catNameJ)) continue;
+                }}
+                const x1 = offsetX + (section.x[i] - bounds.xmin) * scale;
+                const y1 = height - (offsetY + (section.y[i] - bounds.ymin) * scale);
+                const x2 = offsetX + (section.x[j] - bounds.xmin) * scale;
+                const y2 = height - (offsetY + (section.y[j] - bounds.ymin) * scale);
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x2, y2);
+            }}
+            ctx.stroke();
+        }}
+
         // First pass: draw grey background for hidden categories (if any are hidden)
         const hasHidden = hiddenCategories.size > 0 && !config.is_continuous;
         if (hasHidden) {{
@@ -1335,6 +1376,39 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         const config = getColorConfig();
         const values = getSectionValues(modalSection);
+
+        if (showGraph && modalSection.edges && modalSection.edges.length) {{
+            const graphColor = getGraphColor();
+            ctx.strokeStyle = graphColor;
+            ctx.lineWidth = Math.max(0.3, modalSpotSize * modalZoom * 0.12);
+            ctx.beginPath();
+            for (let e = 0; e < modalSection.edges.length; e++) {{
+                const edge = modalSection.edges[e];
+                const i = edge[0];
+                const j = edge[1];
+                const valI = values[i];
+                const valJ = values[j];
+                if (valI === null || valI === undefined || valJ === null || valJ === undefined) continue;
+                if (!config.is_continuous) {{
+                    const catIdxI = Math.round(valI);
+                    const catIdxJ = Math.round(valJ);
+                    const catNameI = config.categories[catIdxI];
+                    const catNameJ = config.categories[catIdxJ];
+                    if (hiddenCategories.has(catNameI) || hiddenCategories.has(catNameJ)) continue;
+                }}
+                const x1 = centerX + (modalSection.x[i] - dataCenterX) * scale;
+                const y1 = centerY - (modalSection.y[i] - dataCenterY) * scale;
+                const x2 = centerX + (modalSection.x[j] - dataCenterX) * scale;
+                const y2 = centerY - (modalSection.y[j] - dataCenterY) * scale;
+                if (x1 < -adjustedSpotSize || x1 > width + adjustedSpotSize ||
+                    y1 < -adjustedSpotSize || y1 > height + adjustedSpotSize) continue;
+                if (x2 < -adjustedSpotSize || x2 > width + adjustedSpotSize ||
+                    y2 < -adjustedSpotSize || y2 > height + adjustedSpotSize) continue;
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x2, y2);
+            }}
+            ctx.stroke();
+        }}
 
         // First pass: draw grey background for hidden categories
         const hasHidden = hiddenCategories.size > 0 && !config.is_continuous;
@@ -1681,6 +1755,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             // Re-render to adjust for new grid size
             requestAnimationFrame(renderAllSections);
         }});
+
+        // Neighborhood graph toggle
+        if (DATA.has_neighbors) {{
+            const graphBtn = document.getElementById('graph-toggle');
+            graphBtn.style.display = 'inline-block';
+            graphBtn.addEventListener('click', () => {{
+                showGraph = !showGraph;
+                graphBtn.classList.toggle('active', showGraph);
+                renderAllSections();
+                if (modalSection) renderModalSection();
+            }});
+        }}
     }}
 
     function initModal() {{
@@ -1858,6 +1944,7 @@ def export_to_html(
             "input_bg": "#333333",
             "muted_color": "#888888",
             "hover_bg": "#3a3a3a",
+            "graph_color": "rgba(255, 255, 255, 0.12)",
         }
     else:
         colors = {
@@ -1869,6 +1956,7 @@ def export_to_html(
             "input_bg": "#ffffff",
             "muted_color": "#666666",
             "hover_bg": "#f0f0f0",
+            "graph_color": "rgba(0, 0, 0, 0.12)",
         }
 
     # Get data with multiple color layers and genes
