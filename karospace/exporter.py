@@ -510,6 +510,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             <button class="graph-toggle" id="neighbor-hover-toggle" title="Toggle neighbor rings on hover" style="display: none;">
                 Neighbors
             </button>
+            <select id="neighbor-hop-select" title="Neighbor hop display" style="display: none; min-width: 90px;">
+                <option value="1">1-hop</option>
+                <option value="2">2-hop</option>
+                <option value="3">3-hop</option>
+                <option value="all" selected>All hops</option>
+            </select>
             <button class="export-btn" id="screenshot-btn" title="Download screenshot">
                 Screenshot
             </button>
@@ -560,6 +566,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         <button id="zoom-in">+ Zoom</button>
                         <button id="zoom-out">- Zoom</button>
                         <button id="zoom-reset">Reset</button>
+                        <button class="graph-toggle" id="modal-graph-toggle" title="Toggle neighborhood graph" style="display: none;">Graph</button>
+                        <button class="graph-toggle" id="modal-neighbor-hover-toggle" title="Toggle neighbor rings on hover" style="display: none;">Neighbors</button>
+                        <select id="modal-neighbor-hop-select" title="Neighbor hop display" style="display: none; min-width: 90px;">
+                            <option value="1">1-hop</option>
+                            <option value="2">2-hop</option>
+                            <option value="3">3-hop</option>
+                            <option value="all" selected>All hops</option>
+                        </select>
                         <span style="margin-left: 10px; font-size: 11px; color: {muted_color};">Size:</span>
                         <input type="range" id="modal-spot-size" min="0.5" max="12" step="0.5" value="{spot_size}" style="width: 80px;">
                         <span id="modal-spot-size-label" style="font-size: 11px; min-width: 24px;">{spot_size}</span>
@@ -617,6 +631,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let showGraph = false;
     let hoverNeighbors = null;
     let neighborHoverEnabled = false;
+    let neighborHopMode = 'all';
     const MAX_HOVER_HOPS = 3;
     const HOVER_COLORS = [
         'rgba(255, 165, 0, 0.9)',
@@ -847,12 +862,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function drawNeighborHighlights(ctx, section, transform, adjustedSpotSize) {{
         if (!hoverNeighbors || hoverNeighbors.sectionId !== section.id) return;
-        const rings = hoverNeighbors.rings || [];
+        let rings = hoverNeighbors.rings || [];
         const centerIdx = hoverNeighbors.centerIdx;
         if (centerIdx === null || centerIdx === undefined) return;
 
         const config = getColorConfig();
         const values = getSectionValues(section);
+
+        if (neighborHopMode !== 'all') {{
+            const hopIdx = Math.max(1, Math.min(MAX_HOVER_HOPS, parseInt(neighborHopMode, 10))) - 1;
+            rings = rings[hopIdx] ? [rings[hopIdx]] : [];
+        }}
 
         const xCenter = transform.centerX + (section.x[centerIdx] - transform.dataCenterX) * transform.scale;
         const yCenter = transform.centerY - (section.y[centerIdx] - transform.dataCenterY) * transform.scale;
@@ -884,6 +904,31 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 ctx.arc(x, y, adjustedSpotSize + 1 + idx, 0, Math.PI * 2);
                 ctx.stroke();
             }});
+        }});
+
+        rings.forEach((ring, idx) => {{
+            const color = HOVER_COLORS[idx] || HOVER_COLORS[HOVER_COLORS.length - 1];
+            ctx.strokeStyle = color;
+            ctx.lineWidth = Math.max(1, adjustedSpotSize * 0.2);
+            ctx.globalAlpha = 0.8;
+            ctx.beginPath();
+            ring.forEach(cellIdx => {{
+                const val = values[cellIdx];
+                if (val === null || val === undefined) return;
+                if (!config.is_continuous) {{
+                    const catIdx = Math.round(val);
+                    const catName = config.categories[catIdx];
+                    if (hiddenCategories.has(catName)) return;
+                }}
+                const x = transform.centerX + (section.x[cellIdx] - transform.dataCenterX) * transform.scale;
+                const y = transform.centerY - (section.y[cellIdx] - transform.dataCenterY) * transform.scale;
+                if (x < -adjustedSpotSize || x > transform.width + adjustedSpotSize ||
+                    y < -adjustedSpotSize || y > transform.height + adjustedSpotSize) return;
+                ctx.moveTo(xCenter, yCenter);
+                ctx.lineTo(x, y);
+            }});
+            ctx.stroke();
+            ctx.globalAlpha = 1;
         }});
         ctx.restore();
     }}
@@ -1905,6 +1950,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     if (modalSection) renderModalSection();
                 }}
             }});
+
+            const hopSelect = document.getElementById('neighbor-hop-select');
+            hopSelect.style.display = 'inline-block';
+            hopSelect.value = neighborHopMode;
+            hopSelect.addEventListener('change', () => {{
+                neighborHopMode = hopSelect.value;
+                if (modalSection) renderModalSection();
+            }});
         }}
     }}
 
@@ -2011,6 +2064,44 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 renderModalSection();
             }}
         }});
+
+        if (DATA.has_neighbors) {{
+            const modalGraphBtn = document.getElementById('modal-graph-toggle');
+            modalGraphBtn.style.display = 'inline-block';
+            modalGraphBtn.classList.toggle('active', showGraph);
+            modalGraphBtn.addEventListener('click', () => {{
+                showGraph = !showGraph;
+                modalGraphBtn.classList.toggle('active', showGraph);
+                const graphBtn = document.getElementById('graph-toggle');
+                if (graphBtn) graphBtn.classList.toggle('active', showGraph);
+                renderAllSections();
+                if (modalSection) renderModalSection();
+            }});
+
+            const modalNeighborBtn = document.getElementById('modal-neighbor-hover-toggle');
+            modalNeighborBtn.style.display = 'inline-block';
+            modalNeighborBtn.classList.toggle('active', neighborHoverEnabled);
+            modalNeighborBtn.addEventListener('click', () => {{
+                neighborHoverEnabled = !neighborHoverEnabled;
+                modalNeighborBtn.classList.toggle('active', neighborHoverEnabled);
+                const neighborBtn = document.getElementById('neighbor-hover-toggle');
+                if (neighborBtn) neighborBtn.classList.toggle('active', neighborHoverEnabled);
+                if (!neighborHoverEnabled) {{
+                    hoverNeighbors = null;
+                    if (modalSection) renderModalSection();
+                }}
+            }});
+
+            const modalHopSelect = document.getElementById('modal-neighbor-hop-select');
+            modalHopSelect.style.display = 'inline-block';
+            modalHopSelect.value = neighborHopMode;
+            modalHopSelect.addEventListener('change', () => {{
+                neighborHopMode = modalHopSelect.value;
+                const hopSelect = document.getElementById('neighbor-hop-select');
+                if (hopSelect) hopSelect.value = neighborHopMode;
+                if (modalSection) renderModalSection();
+            }});
+        }}
     }}
 
     // Initialize
