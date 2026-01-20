@@ -507,6 +507,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             <button class="graph-toggle" id="graph-toggle" title="Toggle neighborhood graph" style="display: none;">
                 Graph
             </button>
+            <button class="graph-toggle" id="neighbor-hover-toggle" title="Toggle neighbor rings on hover" style="display: none;">
+                Neighbors
+            </button>
             <button class="export-btn" id="screenshot-btn" title="Download screenshot">
                 Screenshot
             </button>
@@ -613,6 +616,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let currentTheme = '{initial_theme}';
     let showGraph = false;
     let hoverNeighbors = null;
+    let neighborHoverEnabled = false;
     const MAX_HOVER_HOPS = 3;
     const HOVER_COLORS = [
         'rgba(255, 165, 0, 0.9)',
@@ -822,6 +826,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function updateHoverNeighbors(section, cellIdx) {{
+        if (!neighborHoverEnabled) return false;
         if (!section || !section.edges || section.edges.length === 0) {{
             hoverNeighbors = null;
             return false;
@@ -1888,6 +1893,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 graphBtn.classList.toggle('active', showGraph);
                 renderAllSections();
                 if (modalSection) renderModalSection();
+            }});
+
+            const neighborBtn = document.getElementById('neighbor-hover-toggle');
+            neighborBtn.style.display = 'inline-block';
+            neighborBtn.addEventListener('click', () => {{
+                neighborHoverEnabled = !neighborHoverEnabled;
+                neighborBtn.classList.toggle('active', neighborHoverEnabled);
+                if (!neighborHoverEnabled) {{
+                    hoverNeighbors = null;
+                    if (modalSection) renderModalSection();
+                }}
             }});
         }}
     }}
