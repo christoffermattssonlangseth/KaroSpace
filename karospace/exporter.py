@@ -122,6 +122,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             transition: background 0.3s, border-color 0.3s;
         }}
         .theme-toggle:hover {{ background: var(--hover-bg); }}
+        .export-btn {{
+            background: var(--input-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 5px 10px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: background 0.3s, border-color 0.3s;
+        }}
+        .export-btn:hover {{ background: var(--hover-bg); }}
 
         /* Filter bar */
         .filter-bar {{
@@ -491,6 +501,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             <button class="legend-toggle active" id="legend-toggle" title="Toggle legend panel">
                 Legend
             </button>
+            <button class="export-btn" id="screenshot-btn" title="Download screenshot">
+                Screenshot
+            </button>
             <button class="theme-toggle" id="theme-toggle" title="Toggle dark/light mode">
                 <span id="theme-icon">{theme_icon}</span>
             </button>
@@ -550,6 +563,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     <div class="cell-tooltip" id="cell-tooltip"></div>
 
+    <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
     <script>
     const DATA = {data_json};
     const PALETTE = {palette_json};
@@ -638,6 +652,55 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         document.documentElement.classList.add(currentTheme);
         document.getElementById('theme-icon').textContent = currentTheme === 'dark' ? '☀️' : '🌙';
         document.getElementById('theme-toggle').addEventListener('click', toggleTheme);
+    }}
+
+    function getScreenshotTimestamp() {{
+        return new Date().toISOString().replace(/[:.]/g, '-');
+    }}
+
+    function downloadCanvasImage(canvas, filename) {{
+        if (!canvas) return;
+        const link = document.createElement('a');
+        link.href = canvas.toDataURL('image/png');
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+    }}
+
+    function replaceCanvasesWithImages(root) {{
+        const originals = document.querySelectorAll('canvas');
+        const clones = root.querySelectorAll('canvas');
+        originals.forEach((canvas, idx) => {{
+            const cloneCanvas = clones[idx];
+            if (!cloneCanvas || !cloneCanvas.parentNode) return;
+            const img = document.createElement('img');
+            img.src = canvas.toDataURL('image/png');
+            const rect = canvas.getBoundingClientRect();
+            img.style.width = `${{rect.width}}px`;
+            img.style.height = `${{rect.height}}px`;
+            img.style.display = 'block';
+            img.setAttribute('width', `${{canvas.width}}`);
+            img.setAttribute('height', `${{canvas.height}}`);
+            cloneCanvas.parentNode.replaceChild(img, cloneCanvas);
+        }});
+    }}
+
+    function screenshotFullPage() {{
+        const name = `spatial-viewer-${{getScreenshotTimestamp()}}.png`;
+        if (typeof html2canvas !== 'function') {{
+            alert('Screenshot library failed to load. Please check your connection and try again.');
+            return;
+        }}
+        html2canvas(document.body, {{
+            backgroundColor: null,
+            scale: window.devicePixelRatio || 1,
+            useCORS: true
+        }}).then(canvas => {{
+            downloadCanvasImage(canvas, name);
+        }}).catch(() => {{
+            alert('Screenshot failed to render.');
+        }});
     }}
 
     // Color utilities
@@ -1606,6 +1669,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             renderAllSections();
             if (modalSection) renderModalSection();
         }});
+
+        document.getElementById('screenshot-btn').addEventListener('click', screenshotFullPage);
 
         // Legend toggle
         document.getElementById('legend-toggle').addEventListener('click', () => {{

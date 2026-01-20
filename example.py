@@ -9,7 +9,7 @@ from karospace import load_spatial_data, export_to_html
 
 # Path to your h5ad file
 # Update this path to point to your EAE/MANA data
-H5AD_PATH = '/Volumes/processing2/RRmap/data/EAE_proseg_clustered_louvain_leiden_all_sections_annotated_rotated_scVI_mana_embedding_clustered.h5ad'
+H5AD_PATH = '/Volumes/processing2/RRmap/data/EAE_MANA_annotated_gmm_clust.h5ad'#'/Volumes/processing2/RRmap/data/EAE_proseg_clustered_louvain_leiden_all_sections_annotated_rotated_scVI_mana_embedding_clustered.h5ad'
 
 # Load the dataset
 # - groupby: column in adata.obs that identifies each section
@@ -26,17 +26,17 @@ print(f"Available color columns: {dataset.obs_columns[:10]}...")  # first 10
 # For your 107 sections with course/region metadata:
 export_to_html(
     dataset,
-    output_path="eae_mana_viewer.html",
+    output_path="eae_mana_viewer2.html",
     color="anno_L2",  # Initial color (categorical)
     title="KaroSpace",
     min_panel_size=120,  # minimum panel width in pixels, grid auto-adjusts
     spot_size=1.5,  # smaller spots for dense data
-    downsample=30000,  # limit cells per section to keep file manageable
+    downsample=100000,  # limit cells per section to keep file manageable
     theme="light",  # or "dark"
 
     # Include additional color options for the dropdown
     additional_colors=[
-       'anno_L3', 'anno_L2', 'anno_L1','leiden_3.5','leiden_mana_1.0','leiden_mana_0.8','leiden_mana_0.3','leiden_mana_0.5'
+       'anno_L3', 'anno_L2', 'anno_L1','leiden_3.5','leiden_mana_1.0','leiden_mana_0.8','leiden_mana_0.3','leiden_mana_0.5','gmm_25_gauss'
 
         # Add any other obs columns you want to switch between
     ],
