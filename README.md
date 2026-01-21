@@ -77,6 +77,7 @@ export_to_html(
         "Cd8a",
         "Gfap",
     ],
+    use_hvgs=True,               # Use adata.var['highly_variable'] (capped to 20) when available
 )
 ```
 
@@ -165,6 +166,7 @@ export_to_html(
     downsample=30000,
     additional_colors=['anno_L3', 'anno_L2', 'anno_L1', 'leiden'],
     genes=["Cd4", "Cd8a", "Gfap", "Mbp"],
+    use_hvgs=False,
 )
 ```
 
@@ -212,6 +214,7 @@ Selected cells are highlighted with a yellow/gold outline in both UMAP and spati
 
 - Use `downsample` parameter for datasets with >50,000 cells per section
 - Limit `genes` list to only essential genes (each adds to file size)
+- If you enable `use_hvgs`, the viewer preloads up to 20 HVGs to limit file size
 - Consider splitting very large datasets into multiple viewers
 
 ## License
