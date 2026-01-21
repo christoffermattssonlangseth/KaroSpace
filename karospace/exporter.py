@@ -52,6 +52,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             --muted-color: {muted_color};
             --hover-bg: {hover_bg};
             --graph-color: {graph_color};
+            --accent: #870052;
+            --accent-strong: #4F0433;
+            --accent-warm: #FF876F;
+            --accent-soft: #FEEEEB;
+            --accent-cool: #EDF4F4;
         }}
         :root.dark {{
             --background: #1a1a1a;
@@ -78,7 +83,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
         body {{
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background: var(--background);
+            background:
+                radial-gradient(800px 500px at 10% 0%, rgba(255, 135, 111, 0.08), rgba(0, 0, 0, 0)),
+                radial-gradient(900px 600px at 100% 20%, rgba(135, 0, 82, 0.08), rgba(0, 0, 0, 0)),
+                var(--background);
             color: var(--text-color);
             min-height: 100vh;
             display: flex;
@@ -87,7 +95,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         .header {{
             padding: 8px 16px;
-            background: var(--header-bg);
+            background:
+                linear-gradient(90deg, rgba(255, 135, 111, 0.12), rgba(135, 0, 82, 0.08)),
+                var(--header-bg);
             border-bottom: 1px solid var(--border-color);
             display: flex;
             align-items: center;
@@ -111,7 +121,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         select {{ min-width: 120px; }}
         input[type="text"] {{ width: 140px; }}
-        select:focus, input:focus {{ outline: none; border-color: #4F0433; }}
+        select:focus, input:focus {{ outline: none; border-color: var(--accent-strong); box-shadow: 0 0 0 2px rgba(135, 0, 82, 0.15); }}
         .stats {{ font-size: 11px; color: var(--muted-color); }}
 
         /* Theme toggle button */
@@ -162,7 +172,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             transition: all 0.15s;
         }}
         .filter-chip:hover {{ background: var(--hover-bg); }}
-        .filter-chip.active {{ background: #4F0433; color: white; border-color: #4F0433; }}
+        .filter-chip.active {{ background: var(--accent-strong); color: white; border-color: var(--accent-strong); }}
         .filter-chip.inactive {{ opacity: 0.4; }}
 
         .main-container {{ display: flex; flex: 1; min-height: 0; }}
@@ -433,9 +443,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         .umap-btn:hover {{ background: var(--hover-bg); }}
         .umap-btn.active {{
-            background: #4F0433;
+            background: var(--accent-strong);
             color: white;
-            border-color: #4F0433;
+            border-color: var(--accent-strong);
         }}
         .umap-selection-info {{
             font-size: 11px;
@@ -454,9 +464,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         .umap-toggle:hover, .legend-toggle:hover, .graph-toggle:hover {{ background: var(--hover-bg); }}
         .umap-toggle.active, .legend-toggle.active, .graph-toggle.active {{
-            background: #4F0433;
+            background: var(--accent-strong);
             color: white;
-            border-color: #4F0433;
+            border-color: var(--accent-strong);
         }}
 
         /* Selection highlight */
@@ -483,9 +493,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             position: fixed;
             inset: 0;
             background:
-                radial-gradient(120px 120px at 50% 30%, rgba(79, 4, 51, 0.35), rgba(0, 0, 0, 0)),
-                radial-gradient(400px 300px at 50% 60%, rgba(79, 4, 51, 0.22), rgba(0, 0, 0, 0)),
-                linear-gradient(180deg, #0b0508 0%, #12070d 60%, #160811 100%);
+                radial-gradient(140px 140px at 50% 28%, rgba(135, 0, 82, 0.35), rgba(0, 0, 0, 0)),
+                radial-gradient(520px 360px at 50% 60%, rgba(255, 135, 111, 0.18), rgba(0, 0, 0, 0)),
+                linear-gradient(180deg, #0b0508 0%, #14070f 60%, #1a0a14 100%);
             color: #f5dbe7;
             display: flex;
             flex-direction: column;
@@ -500,16 +510,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             position: relative;
             width: 140px;
             height: 90px;
-            filter: drop-shadow(0 0 10px rgba(79, 4, 51, 0.6));
+            filter: drop-shadow(0 0 12px rgba(135, 0, 82, 0.6));
         }}
         .loading-dot {{
             position: absolute;
             width: 8px;
             height: 8px;
             border-radius: 50%;
-            background: radial-gradient(circle at 30% 30%, #ffe3ef 0%, #b51a5b 55%, rgba(79, 4, 51, 0.9) 100%);
+            background: radial-gradient(circle at 30% 30%, #ffe3ef 0%, #ffb39f 45%, #870052 100%);
             opacity: 0.9;
-            box-shadow: 0 0 8px rgba(79, 4, 51, 0.9);
+            box-shadow: 0 0 8px rgba(135, 0, 82, 0.9);
             animation: drift 2.6s ease-in-out infinite;
         }}
         .loading-dot:nth-child(1) {{ left: 10px; top: 18px; animation-delay: 0s; }}
