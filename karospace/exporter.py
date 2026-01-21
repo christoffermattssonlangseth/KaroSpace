@@ -1914,7 +1914,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }});
 
         const geneList = document.getElementById('gene-list');
-        (DATA.all_genes || DATA.available_genes || []).forEach(gene => {{
+        (DATA.available_genes || []).forEach(gene => {{
             const opt = document.createElement('option');
             opt.value = gene;
             geneList.appendChild(opt);
@@ -1931,10 +1931,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 renderAllSections();
                 if (modalSection) renderModalSection();
                 if (umapVisible) renderUMAP();
-            }} else if (gene && DATA.all_genes && DATA.all_genes.includes(gene)) {{
-                alert(`Gene "${{gene}}" is in the dataset but was not pre-loaded.\\nTo view it, re-export with this gene included in the genes parameter.`);
             }} else if (gene) {{
-                alert(`Gene "${{gene}}" not found in the dataset.`);
+                alert(`Gene "${{gene}}" was not pre-loaded.\\nTo view it, re-export with this gene included in the genes parameter or add it to highly variable genes.`);
             }}
         }});
 
@@ -2193,6 +2191,7 @@ def export_to_html(
     vmax: Optional[float] = None,
     additional_colors: Optional[List[str]] = None,
     genes: Optional[List[str]] = None,
+    use_hvgs: bool = True,
 ) -> str:
     """
     Export spatial dataset to a standalone HTML file.
@@ -2253,6 +2252,15 @@ def export_to_html(
             "hover_bg": "#f0f0f0",
             "graph_color": "rgba(0, 0, 0, 0.12)",
         }
+
+    # Prefer highly variable genes for expression if available; otherwise use provided genes
+    hv_genes = None
+    if use_hvgs and "highly_variable" in dataset.adata.var.columns:
+        hv_mask = dataset.adata.var["highly_variable"].to_numpy(dtype=bool)
+        if hv_mask.any():
+            hv_genes = dataset.adata.var_names[hv_mask].tolist()[:20]
+    if hv_genes is not None:
+        genes = hv_genes
 
     # Get data with multiple color layers and genes
     data = dataset.to_json_data(

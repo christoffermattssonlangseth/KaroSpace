@@ -103,9 +103,12 @@ class SpatialDataset:
                 values[values < 0] = np.nan
                 return values, False, categories
         elif color in self.adata.var_names:
-            # Gene expression
+            # Gene expression (prefer normalized layer when available)
             gene_idx = self.adata.var_names.get_loc(color)
-            x = self.adata.X[:, gene_idx]
+            expr_layer = None
+            if "normalized" in self.adata.layers:
+                expr_layer = self.adata.layers["normalized"]
+            x = expr_layer[:, gene_idx] if expr_layer is not None else self.adata.X[:, gene_idx]
             if issparse(x):
                 values = np.asarray(x.toarray()).ravel()
             else:
@@ -344,8 +347,7 @@ class SpatialDataset:
             "total_cells": sum(s["n_cells"] for s in sections_data),
             "sections": sections_data,
             "available_colors": list(color_data.keys()),
-            "available_genes": list(gene_data.keys()) if gene_data else self.var_names[:100],
-            "all_genes": self.var_names[:500],  # For autocomplete
+            "available_genes": list(gene_data.keys()),
             "has_umap": umap_coords is not None,
             "umap_bounds": umap_bounds,
             "has_neighbors": neighbor_graph is not None,

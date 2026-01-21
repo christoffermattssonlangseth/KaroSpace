@@ -9,7 +9,7 @@ from karospace import load_spatial_data, export_to_html
 
 # Path to your h5ad file
 # Update this path to point to your EAE/MANA data
-H5AD_PATH = '/Volumes/processing2/RRmap/data/EAE_MANA_annotated_gmm_clust.h5ad'#'/Volumes/processing2/RRmap/data/EAE_proseg_clustered_louvain_leiden_all_sections_annotated_rotated_scVI_mana_embedding_clustered.h5ad'
+H5AD_PATH = '/Volumes/processing2/RRmap/data/EAE_MANA_annotated_gmm_clust_with_scores.h5ad'#'/Volumes/processing2/RRmap/data/EAE_proseg_clustered_louvain_leiden_all_sections_annotated_rotated_scVI_mana_embedding_clustered.h5ad'
 
 # Load the dataset
 # - groupby: column in adata.obs that identifies each section
@@ -21,6 +21,11 @@ dataset = load_spatial_data(
 
 print(f"Loaded {dataset.n_sections} sections with {dataset.n_cells:,} total cells")
 print(f"Available color columns: {dataset.obs_columns[:10]}...")  # first 10
+
+# Choose gene source for expression:
+# - True: use highly variable genes (if present, capped to 20)
+# - False: use the explicit genes list below
+USE_HVGS = False
 
 # Export to HTML with full features
 # For your 107 sections with course/region metadata:
@@ -45,14 +50,34 @@ export_to_html(
     # These will be available in the gene input field
     genes=[
         # Example marker genes - replace with your genes of interest
-        "Cd4",
-        "Cd8a",
-        "Gfap",
-        "Mbp",
-        "Iba1",
+        "Arg1",
+        "C3",
+        "Cd74",
+        "Cldn11",
+        "Col1a2",
+        "Ctss",
+        "Ermn",
         "Foxp3",
-        # Add more genes as needed (each adds to file size)
+        "Gfap",
+        "Gpnmb",
+        "Grn",
+        "H2-Aa",
+        "H2-Ab1",
+        "H2-Eb1",
+        "Igf2",
+        "Klk6",
+        "Mag",
+        "Mbp",
+        "Meg3",
+        "Mki67",
+        "Ptgds",
+        "Serpina3n",
+        "Serping1",
+        "Slc47a1",
+        "Snap25",
+        "Vtn"
     ],
+    use_hvgs=USE_HVGS,
 )
 
 # The viewer now supports:
