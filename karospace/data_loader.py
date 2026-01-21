@@ -128,10 +128,18 @@ class SpatialDataset:
     def get_metadata_filters(self) -> Dict[str, List[str]]:
         """Get unique values for filterable metadata columns."""
         filters = {}
-        for col in ["course", "region", "condition", "timepoint"]:
+        for col in ["course", "region", "condition", "timepoint", "last_score", "last_day"]:
             if col in self.adata.obs.columns:
                 unique_vals = self.adata.obs[col].dropna().astype(str).unique()
-                filters[col] = sorted(unique_vals)
+                if col == "last_day":
+                    def _sort_key(v):
+                        try:
+                            return (0, float(v))
+                        except ValueError:
+                            return (1, v)
+                    filters[col] = sorted(unique_vals, key=_sort_key)
+                else:
+                    filters[col] = sorted(unique_vals)
         return filters
 
     def to_json_data(
@@ -412,7 +420,7 @@ def load_spatial_data(
 
         # Extract metadata
         metadata = {}
-        for meta_col in ["region", "course", "condition", "timepoint"]:
+        for meta_col in ["region", "course", "condition", "timepoint", "last_score", "last_day"]:
             if meta_col in adata.obs.columns:
                 vals = adata.obs.loc[mask, meta_col].dropna().astype(str).unique()
                 if len(vals) == 1:

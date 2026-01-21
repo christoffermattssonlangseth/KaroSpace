@@ -479,9 +479,36 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             height: 40px;
             width: auto;
         }}
+        .loading-overlay {{
+            position: fixed;
+            inset: 0;
+            background: var(--background);
+            color: var(--text-color);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            z-index: 1000;
+        }}
+        .loading-spinner {{
+            width: 34px;
+            height: 34px;
+            border: 3px solid var(--border-color);
+            border-top-color: #0066cc;
+            border-radius: 50%;
+            animation: spin 0.9s linear infinite;
+        }}
+        @keyframes spin {{
+            to {{ transform: rotate(360deg); }}
+        }}
     </style>
 </head>
 <body>
+    <div class="loading-overlay" id="loading-overlay">
+        <div class="loading-spinner" aria-hidden="true"></div>
+        <div style="font-size: 12px; color: var(--muted-color);">Loading data...</div>
+    </div>
     <div class="header">
         <h1>{title}</h1>
         <div class="controls">
@@ -590,6 +617,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     <script>
     const DATA = {data_json};
     const PALETTE = {palette_json};
+    const METADATA_LABELS = {metadata_labels_json};
 
     // Course border color palette (rgba with 0.5 alpha for subtler borders)
     const COURSE_COLORS = {{
@@ -754,6 +782,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function getCategoryColor(idx) {{ return PALETTE[idx % PALETTE.length]; }}
+
+    function formatMetadataLabel(key) {{
+        return METADATA_LABELS[key] || key.replace(/_/g, ' ');
+    }}
 
     // Get current color config
     function getColorConfig() {{
@@ -1787,7 +1819,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         for (const [key, values] of Object.entries(filters)) {{
             activeFilters[key] = new Set();  // Start with all shown
             html += `<div class="filter-group">
-                <label>${{key}}:</label>
+                <label>${{formatMetadataLabel(key)}}:</label>
                 <div class="filter-chips" data-filter="${{key}}">
                     ${{values.map(v => `<span class="filter-chip" data-value="${{v}}">${{v}}</span>`).join('')}}
                 </div>
@@ -1843,7 +1875,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         document.getElementById('modal-title').textContent = sectionId;
         const metaText = Object.entries(modalSection.metadata || {{}})
-            .map(([k, v]) => `${{k}}: ${{v}}`).join(' | ');
+            .map(([k, v]) => `${{formatMetadataLabel(k)}}: ${{v}}`).join(' | ');
         document.getElementById('modal-meta').textContent = metaText;
         document.getElementById('modal').classList.add('active');
         renderLegend('modal-legend');
@@ -1875,7 +1907,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
 
             const metaParts = Object.entries(section.metadata || {{}})
-                .map(([k, v]) => `${{k}}: ${{v}}`).join(' | ');
+                .map(([k, v]) => `${{formatMetadataLabel(k)}}: ${{v}}`).join(' | ');
             const metaHtml = metaParts ? `<div class="section-meta">${{metaParts}}</div>` : '';
 
             panel.innerHTML = `
@@ -2165,6 +2197,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         initUMAP();
         renderLegend('legend');
         requestAnimationFrame(renderAllSections);
+        const loader = document.getElementById('loading-overlay');
+        if (loader) loader.style.display = 'none';
     }});
     window.addEventListener('resize', () => {{
         renderAllSections();
@@ -2286,12 +2320,18 @@ def export_to_html(
         footer_logo = ""
 
     # Generate HTML
+    metadata_labels = {
+        "last_score": "disease score",
+        "last_day": "day of sacrifice",
+    }
+
     html = HTML_TEMPLATE.format(
         title=title,
         min_panel_size=min_panel_size,
         spot_size=spot_size,
         data_json=json.dumps(data),
         palette_json=json.dumps(DEFAULT_CATEGORICAL_PALETTE),
+        metadata_labels_json=json.dumps(metadata_labels),
         theme_icon=theme_icon,
         initial_theme=initial_theme,
         favicon_link=favicon_link,
