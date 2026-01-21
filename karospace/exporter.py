@@ -111,7 +111,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         select {{ min-width: 120px; }}
         input[type="text"] {{ width: 140px; }}
-        select:focus, input:focus {{ outline: none; border-color: #0066cc; }}
+        select:focus, input:focus {{ outline: none; border-color: #4F0433; }}
         .stats {{ font-size: 11px; color: var(--muted-color); }}
 
         /* Theme toggle button */
@@ -162,7 +162,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             transition: all 0.15s;
         }}
         .filter-chip:hover {{ background: var(--hover-bg); }}
-        .filter-chip.active {{ background: #0066cc; color: white; border-color: #0066cc; }}
+        .filter-chip.active {{ background: #4F0433; color: white; border-color: #4F0433; }}
         .filter-chip.inactive {{ opacity: 0.4; }}
 
         .main-container {{ display: flex; flex: 1; min-height: 0; }}
@@ -433,9 +433,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         .umap-btn:hover {{ background: var(--hover-bg); }}
         .umap-btn.active {{
-            background: #0066cc;
+            background: #4F0433;
             color: white;
-            border-color: #0066cc;
+            border-color: #4F0433;
         }}
         .umap-selection-info {{
             font-size: 11px;
@@ -454,9 +454,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         .umap-toggle:hover, .legend-toggle:hover, .graph-toggle:hover {{ background: var(--hover-bg); }}
         .umap-toggle.active, .legend-toggle.active, .graph-toggle.active {{
-            background: #0066cc;
+            background: #4F0433;
             color: white;
-            border-color: #0066cc;
+            border-color: #4F0433;
         }}
 
         /* Selection highlight */
@@ -482,32 +482,77 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .loading-overlay {{
             position: fixed;
             inset: 0;
-            background: var(--background);
-            color: var(--text-color);
+            background:
+                radial-gradient(120px 120px at 50% 30%, rgba(79, 4, 51, 0.35), rgba(0, 0, 0, 0)),
+                radial-gradient(400px 300px at 50% 60%, rgba(79, 4, 51, 0.22), rgba(0, 0, 0, 0)),
+                linear-gradient(180deg, #0b0508 0%, #12070d 60%, #160811 100%);
+            color: #f5dbe7;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
             gap: 10px;
             z-index: 1000;
+            text-transform: uppercase;
+            letter-spacing: 0.18em;
         }}
-        .loading-spinner {{
-            width: 34px;
-            height: 34px;
-            border: 3px solid var(--border-color);
-            border-top-color: #0066cc;
+        .loading-cloud {{
+            position: relative;
+            width: 140px;
+            height: 90px;
+            filter: drop-shadow(0 0 10px rgba(79, 4, 51, 0.6));
+        }}
+        .loading-dot {{
+            position: absolute;
+            width: 8px;
+            height: 8px;
             border-radius: 50%;
-            animation: spin 0.9s linear infinite;
+            background: radial-gradient(circle at 30% 30%, #ffe3ef 0%, #b51a5b 55%, rgba(79, 4, 51, 0.9) 100%);
+            opacity: 0.9;
+            box-shadow: 0 0 8px rgba(79, 4, 51, 0.9);
+            animation: drift 2.6s ease-in-out infinite;
         }}
-        @keyframes spin {{
-            to {{ transform: rotate(360deg); }}
+        .loading-dot:nth-child(1) {{ left: 10px; top: 18px; animation-delay: 0s; }}
+        .loading-dot:nth-child(2) {{ left: 34px; top: 46px; animation-delay: 0.2s; }}
+        .loading-dot:nth-child(3) {{ left: 62px; top: 20px; animation-delay: 0.4s; }}
+        .loading-dot:nth-child(4) {{ left: 88px; top: 52px; animation-delay: 0.1s; }}
+        .loading-dot:nth-child(5) {{ left: 114px; top: 28px; animation-delay: 0.3s; }}
+        .loading-dot:nth-child(6) {{ left: 22px; top: 72px; animation-delay: 0.5s; }}
+        .loading-dot:nth-child(7) {{ left: 72px; top: 72px; animation-delay: 0.6s; }}
+        .loading-dot:nth-child(8) {{ left: 48px; top: 6px; animation-delay: 0.7s; }}
+        .loading-dot:nth-child(9) {{ left: 96px; top: 8px; animation-delay: 0.8s; }}
+        .loading-dot:nth-child(10) {{ left: 6px; top: 54px; animation-delay: 0.9s; }}
+        .loading-dot:nth-child(11) {{ left: 126px; top: 62px; animation-delay: 1.0s; }}
+        .loading-dot:nth-child(12) {{ left: 58px; top: 40px; animation-delay: 1.1s; }}
+        @keyframes drift {{
+            0% {{ transform: translate(0, 0) scale(1); opacity: 0.6; }}
+            50% {{ transform: translate(0, -10px) scale(1.25); opacity: 1; }}
+            100% {{ transform: translate(0, 0) scale(1); opacity: 0.6; }}
+        }}
+        .loading-text {{
+            font-size: 11px;
+            color: rgba(245, 219, 231, 0.7);
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
         }}
     </style>
 </head>
 <body>
     <div class="loading-overlay" id="loading-overlay">
-        <div class="loading-spinner" aria-hidden="true"></div>
-        <div style="font-size: 12px; color: var(--muted-color);">Loading data...</div>
+        <div class="loading-cloud" aria-hidden="true">
+            <span class="loading-dot"></span>
+            <span class="loading-dot"></span>
+            <span class="loading-dot"></span>
+            <span class="loading-dot"></span>
+            <span class="loading-dot"></span>
+            <span class="loading-dot"></span>
+            <span class="loading-dot"></span>
+            <span class="loading-dot"></span>
+            <span class="loading-dot"></span>
+            <span class="loading-dot"></span>
+            <span class="loading-dot"></span>
+            <span class="loading-dot"></span>
+        </div>
+        <div class="loading-text">Loading data...</div>
     </div>
     <div class="header">
         <h1>{title}</h1>
