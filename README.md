@@ -122,6 +122,25 @@ Sections will be outlined with colors based on their `course` metadata if presen
 If `adata.obsp` contains a neighbor graph (e.g., `spatial_connectivities`, `connectivities`,
 `neighbors`, or `neighbor_graph`), KaroSpace will expose graph and neighbor-hover controls.
 
+### Optional cell polygons
+
+If you have per-cell polygons, store them in `adata.uns["polygons"]` using a flat vertex
+buffer with offsets so each cell can have a variable number of vertices:
+
+```python
+# n_cells = adata.n_obs
+# vertices is a flat (M, 2) array of x/y polygon points for all cells
+# offsets is length n_cells + 1, with vertices for cell i in
+# vertices[offsets[i]:offsets[i+1]]
+
+adata.uns["polygons"] = {
+    "vertices": vertices,  # shape (M, 2), float32/float64
+    "offsets": offsets,    # shape (n_cells + 1,), int64
+}
+```
+
+You can keep `adata.obsm["spatial"]` as the cell centroid coordinates for fallback rendering.
+
 ## Example
 
 See [example.py](example.py) for a complete working example.

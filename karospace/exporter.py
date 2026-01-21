@@ -1255,7 +1255,34 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         // Zoom with mouse wheel
         container.addEventListener('wheel', (e) => {{
             e.preventDefault();
-            umapZoom = Math.max(0.1, Math.min(20, umapZoom * (e.deltaY > 0 ? 0.9 : 1.1)));
+            const rect = container.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+            const bounds = DATA.umap_bounds;
+            if (!bounds) return;
+
+            const dataWidth = bounds.xmax - bounds.xmin;
+            const dataHeight = bounds.ymax - bounds.ymin;
+            const padding = 20;
+            const baseScale = Math.min((rect.width - 2 * padding) / dataWidth, (rect.height - 2 * padding) / dataHeight);
+            const oldScale = baseScale * umapZoom;
+            const nextZoom = Math.max(0.1, Math.min(20, umapZoom * (e.deltaY > 0 ? 0.9 : 1.1)));
+            const newScale = baseScale * nextZoom;
+
+            const dataCenterX = (bounds.xmin + bounds.xmax) / 2;
+            const dataCenterY = (bounds.ymin + bounds.ymax) / 2;
+            const centerX = rect.width / 2 + umapPanX;
+            const centerY = rect.height / 2 + umapPanY;
+
+            const dataX = dataCenterX + (mouseX - centerX) / oldScale;
+            const dataY = dataCenterY - (mouseY - centerY) / oldScale;
+
+            const newCenterX = mouseX - (dataX - dataCenterX) * newScale;
+            const newCenterY = mouseY + (dataY - dataCenterY) * newScale;
+            umapPanX = newCenterX - rect.width / 2;
+            umapPanY = newCenterY - rect.height / 2;
+            umapZoom = nextZoom;
+
             renderUMAP();
         }});
 
@@ -1989,8 +2016,34 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         const container = document.getElementById('modal-canvas-container');
         container.addEventListener('wheel', (e) => {{
+            if (!modalSection) return;
             e.preventDefault();
-            modalZoom = Math.max(0.1, Math.min(20, modalZoom * (e.deltaY > 0 ? 0.9 : 1.1)));
+            const rect = container.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            const bounds = modalSection.bounds;
+            const dataWidth = bounds.xmax - bounds.xmin;
+            const dataHeight = bounds.ymax - bounds.ymin;
+            const baseScale = Math.min((rect.width - 40) / dataWidth, (rect.height - 40) / dataHeight);
+            const oldScale = baseScale * modalZoom;
+            const nextZoom = Math.max(0.1, Math.min(20, modalZoom * (e.deltaY > 0 ? 0.9 : 1.1)));
+            const newScale = baseScale * nextZoom;
+
+            const dataCenterX = (bounds.xmin + bounds.xmax) / 2;
+            const dataCenterY = (bounds.ymin + bounds.ymax) / 2;
+            const centerX = rect.width / 2 + modalPanX;
+            const centerY = rect.height / 2 + modalPanY;
+
+            const dataX = dataCenterX + (mouseX - centerX) / oldScale;
+            const dataY = dataCenterY - (mouseY - centerY) / oldScale;
+
+            const newCenterX = mouseX - (dataX - dataCenterX) * newScale;
+            const newCenterY = mouseY + (dataY - dataCenterY) * newScale;
+            modalPanX = newCenterX - rect.width / 2;
+            modalPanY = newCenterY - rect.height / 2;
+            modalZoom = nextZoom;
+
             renderModalSection();
         }});
 
