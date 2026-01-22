@@ -70,7 +70,7 @@ export_to_html(
     use_hvgs=USE_HVGS,
 )
 
-# The viewer now supports:
+# The viewer now supports: 
 # 1. Filter by course (peak_I, peak_II, peak_III) or other metadata
 # 2. Switch between different color columns
 # 3. View gene expression for pre-loaded genes
