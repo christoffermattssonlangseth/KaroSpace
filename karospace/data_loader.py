@@ -45,6 +45,7 @@ class SpatialDataset:
     groupby: str
     obs_columns: List[str]
     var_names: List[str]
+    metadata_columns: List[str]
 
     @property
     def n_sections(self) -> int:
@@ -128,7 +129,7 @@ class SpatialDataset:
     def get_metadata_filters(self) -> Dict[str, List[str]]:
         """Get unique values for filterable metadata columns."""
         filters = {}
-        for col in ["course", "region", "condition", "timepoint", "last_score", "last_day"]:
+        for col in self.metadata_columns:
             if col in self.adata.obs.columns:
                 unique_vals = self.adata.obs[col].dropna().astype(str).unique()
                 if col == "last_day":
@@ -368,6 +369,8 @@ def load_spatial_data(
     groupby: str = "sample_id",
     spatial_key: str = "spatial",
     group_order: Optional[List[str]] = None,
+    metadata_columns: Optional[List[str]] = None,
+    metadata_max_columns: Optional[int] = None,
 ) -> SpatialDataset:
     """
     Load spatial transcriptomics data from h5ad file.
@@ -382,6 +385,10 @@ def load_spatial_data(
         Key in obsm containing spatial coordinates
     group_order : list, optional
         Custom order for sections
+    metadata_columns : list, optional
+        Obs columns to use for section metadata and filter chips
+    metadata_max_columns : int, optional
+        Limit the number of metadata columns used (order preserved)
 
     Returns
     -------
@@ -409,6 +416,14 @@ def load_spatial_data(
 
     print(f"  Found {len(section_ids)} sections")
 
+    # Determine metadata columns
+    if metadata_columns is None:
+        metadata_columns = ["course", "region", "condition", "timepoint", "last_score", "last_day"]
+    if metadata_max_columns is not None:
+        if metadata_max_columns < 0:
+            raise ValueError("metadata_max_columns must be >= 0")
+        metadata_columns = metadata_columns[:metadata_max_columns]
+
     # Build section data
     coords = np.asarray(adata.obsm[spatial_key])[:, :2]
     gvals = gser.astype(str).to_numpy()
@@ -420,7 +435,7 @@ def load_spatial_data(
 
         # Extract metadata
         metadata = {}
-        for meta_col in ["region", "course", "condition", "timepoint", "last_score", "last_day"]:
+        for meta_col in metadata_columns:
             if meta_col in adata.obs.columns:
                 vals = adata.obs.loc[mask, meta_col].dropna().astype(str).unique()
                 if len(vals) == 1:
@@ -447,4 +462,5 @@ def load_spatial_data(
         groupby=groupby,
         obs_columns=obs_columns,
         var_names=list(adata.var_names),
+        metadata_columns=metadata_columns,
     )

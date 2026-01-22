@@ -9,7 +9,7 @@ from karospace import load_spatial_data, export_to_html
 
 # Path to your h5ad file
 # Update this path to point to your EAE/MANA data
-H5AD_PATH = '/Volumes/processing2/RRmap/data/EAE_MANA_annotated_gmm_clust_with_scores_anno_comp.h5ad'#'/Volumes/processing2/RRmap/data/EAE_proseg_clustered_louvain_leiden_all_sections_annotated_rotated_scVI_mana_embedding_clustered.h5ad'
+H5AD_PATH = '/Volumes/processing2/oligo-mtDSB/data/mtDNA_DSB_5k_clustered_annotation_with_rbd_2_cytetype_brain_novae4.h5ad'#'/Volumes/processing2/RRmap/data/EAE_proseg_clustered_louvain_leiden_all_sections_annotated_rotated_scVI_mana_embedding_clustered.h5ad'
 
 # Load the dataset
 # - groupby: column in adata.obs that identifies each section
@@ -18,8 +18,8 @@ dataset = load_spatial_data(
     H5AD_PATH,
     groupby="sample_id",  # adjust to match your data
     # Choose which obs columns appear as filter chips in the viewer
-    metadata_columns=["course", "region", "condition", "timepoint", "last_score", "last_day"],
-    # metadata_max_columns=4,  # optional: limit number of metadata columns used
+    metadata_columns=['age', 'sex', 'genotype', 'condition'],
+    # metadata_max_columns=3,  # optional: limit number of metadata columns used
 )
 
 print(f"Loaded {dataset.n_sections} sections with {dataset.n_cells:,} total cells")
@@ -34,52 +34,38 @@ USE_HVGS = False
 # For your 107 sections with course/region metadata:
 export_to_html(
     dataset,
-    output_path="eae_mana_viewer2.html",
-    color="anno_L2",  # Initial color (categorical)
+    output_path="mt-DSB-viewer.html",
+    color="cell_class_updated",  # Initial color (categorical)
     title="KaroSpace",
     min_panel_size=120,  # minimum panel width in pixels, grid auto-adjusts
     spot_size=1.5,  # smaller spots for dense data
     downsample=100000,  # limit cells per section to keep file manageable
     theme="light",  # or "dark"
-    outline_by="course",  # metadata column for panel outline colors
+    outline_by="condition",  # metadata column for panel outline colors
 
     # Include additional color options for the dropdown
     additional_colors=[
-       'anno_L3', 'anno_L2', 'anno_L1','leiden_3.5','compartment_mana'
-
-        # Add any other obs columns you want to switch between
+        'cytetype_annotation_leiden_3', 
+        'RBD_compartment_simplified',
+        'leiden_0.5', 
+        'leiden_1', 
+        'leiden_2',
+        'leiden_1.5', 
+        'leiden_2.1', 
+        'leiden_2.3', 
+        'leiden_2.5', 
+        'leiden_3',
+        'rbd_domain_0.1',
+        'rbd_domain_0.2', 
+        'rbd_domain_0.5',
+        'rbd_domain_1.0'
     ],
 
     # Pre-load specific genes for expression visualization
     # These will be available in the gene input field
     genes=[
         # Example marker genes - replace with your genes of interest
-        "Arg1",
-        #"C3",
-        "Cd74",
-        "Cldn11",
-        "Col1a2",
-        "Ctss",
-        #"Ermn",
-        "Foxp3",
-        "Gfap",
-        "Gpnmb",
-        "Grn",
-        "H2-Aa",
-        "H2-Ab1",
-        "H2-Eb1",
-        #"Igf2",
-       # "Klk6",
-        #"Mag",
-        "Mbp",
-        "Meg3",
-        "Mki67",
-        "Ptgds",
-        "Serpina3n",
-        #"Serping1",
-       # "Slc47a1",
-       # "Snap25",
-       #"Vtn"
+       "Atf4"
     ],
     use_hvgs=USE_HVGS,
 )

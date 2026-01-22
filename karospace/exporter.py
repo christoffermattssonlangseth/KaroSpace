@@ -578,7 +578,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             </div>
             <div class="control-group">
                 <label>Size:</label>
-                <input type="range" id="spot-size" min="0.5" max="8" step="0.5" value="{spot_size}" style="width:80px">
+                <input type="range" id="spot-size" min="0.1" max="8" step="0.1" value="{spot_size}" style="width:80px">
             </div>
             <button class="umap-toggle" id="umap-toggle" title="Toggle UMAP view" style="display: none;">
                 UMAP
@@ -623,7 +623,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 <button class="umap-btn" id="magic-wand-btn" title="Draw to select cells">Magic Wand</button>
                 <button class="umap-btn" id="clear-selection-btn" title="Clear selection">Clear</button>
                 <span style="margin-left: 6px; font-size: 11px; color: var(--muted-color);">Size:</span>
-                <input type="range" id="umap-spot-size" min="0.5" max="6" step="0.5" value="2" style="width: 60px;">
+                <input type="range" id="umap-spot-size" min="0.1" max="6" step="0.1" value="2" style="width: 60px;">
                 <span id="umap-spot-size-label" style="font-size: 11px; min-width: 20px;">2</span>
             </div>
             <div class="umap-selection-info" id="umap-selection-info">No cells selected</div>
@@ -657,7 +657,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                             <option value="all" selected>All hops</option>
                         </select>
                         <span style="margin-left: 10px; font-size: 11px; color: {muted_color};">Size:</span>
-                        <input type="range" id="modal-spot-size" min="0.5" max="12" step="0.5" value="{spot_size}" style="width: 80px;">
+                        <input type="range" id="modal-spot-size" min="0.1" max="12" step="0.1" value="{spot_size}" style="width: 80px;">
                         <span id="modal-spot-size-label" style="font-size: 11px; min-width: 24px;">{spot_size}</span>
                     </div>
                 </div>
@@ -673,9 +673,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     const DATA = {data_json};
     const PALETTE = {palette_json};
     const METADATA_LABELS = {metadata_labels_json};
+    const OUTLINE_BY = {outline_by_json};
 
-    // Course border color palette (rgba with 0.5 alpha for subtler borders)
-    const COURSE_COLORS = {{
+    // Outline color overrides (used for course by default)
+    const OUTLINE_COLOR_OVERRIDES = {{
         'peak_I': 'rgba(228, 26, 28, 0.5)',
         'peak_II': 'rgba(55, 126, 184, 0.5)',
         'peak_III': 'rgba(77, 175, 74, 0.5)',
@@ -686,19 +687,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         'control': 'rgba(153, 153, 153, 0.5)',
     }};
 
-    function getCourseColor(course) {{
-        if (!course) return null;
-        // Check exact match first
-        if (COURSE_COLORS[course]) return COURSE_COLORS[course];
-        // Check case-insensitive
-        const lowerCourse = course.toLowerCase();
-        for (const [key, color] of Object.entries(COURSE_COLORS)) {{
-            if (key.toLowerCase() === lowerCourse) return color;
+    function getOutlineColor(value) {{
+        if (!value || !OUTLINE_BY) return null;
+        if (OUTLINE_BY === 'course') {{
+            if (OUTLINE_COLOR_OVERRIDES[value]) return OUTLINE_COLOR_OVERRIDES[value];
+            const lowerValue = value.toLowerCase();
+            for (const [key, color] of Object.entries(OUTLINE_COLOR_OVERRIDES)) {{
+                if (key.toLowerCase() === lowerValue) return color;
+            }}
         }}
-        // Generate a consistent color for unknown courses
+        // Generate a consistent color for unknown values
         let hash = 0;
-        for (let i = 0; i < course.length; i++) {{
-            hash = course.charCodeAt(i) + ((hash << 5) - hash);
+        for (let i = 0; i < value.length; i++) {{
+            hash = value.charCodeAt(i) + ((hash << 5) - hash);
         }}
         const hue = Math.abs(hash) % 360;
         return `hsla(${{hue}}, 65%, 50%, 0.5)`;
@@ -1881,14 +1882,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             </div>`;
         }}
 
-        // Add course border legend if course metadata exists
-        if (filters.course && filters.course.length > 0) {{
+        // Add outline legend if outline metadata exists
+        if (OUTLINE_BY && filters[OUTLINE_BY] && filters[OUTLINE_BY].length > 0) {{
+            const outlineLabel = formatMetadataLabel(OUTLINE_BY);
             html += `<div class="filter-group" style="margin-left: auto;">
-                <label>Border colors:</label>
+                <label>Outline (${{
+                    outlineLabel
+                }}):</label>
                 <div style="display: flex; gap: 8px; align-items: center;">
-                    ${{filters.course.map(c => `<span style="display: flex; align-items: center; gap: 3px; font-size: 10px;">
-                        <span style="width: 12px; height: 12px; border: 3px solid ${{getCourseColor(c)}}; border-radius: 2px;"></span>
-                        ${{c}}
+                    ${{filters[OUTLINE_BY].map(v => `<span style="display: flex; align-items: center; gap: 3px; font-size: 10px;">
+                        <span style="width: 12px; height: 12px; border: 3px solid ${{getOutlineColor(v)}}; border-radius: 2px;"></span>
+                        ${{v}}
                     </span>`).join('')}}
                 </div>
             </div>`;
@@ -1953,9 +1957,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             panel.className = 'section-panel';
             panel.dataset.sectionId = section.id;
 
-            // Apply course-based border color
-            const course = section.metadata?.course;
-            const borderColor = getCourseColor(course);
+            // Apply outline color
+            const outlineValue = OUTLINE_BY ? section.metadata?.[OUTLINE_BY] : null;
+            const borderColor = getOutlineColor(outlineValue);
             if (borderColor) {{
                 panel.style.borderColor = borderColor;
                 panel.style.borderWidth = '3px';
@@ -2278,6 +2282,7 @@ def export_to_html(
     theme: str = "light",
     vmin: Optional[float] = None,
     vmax: Optional[float] = None,
+    outline_by: Optional[str] = "course",
     additional_colors: Optional[List[str]] = None,
     genes: Optional[List[str]] = None,
     use_hvgs: bool = True,
@@ -2306,6 +2311,8 @@ def export_to_html(
         'light' or 'dark'
     vmin, vmax : float, optional
         Min/max for continuous color scale
+    outline_by : str, optional
+        Metadata column used to color panel outlines (default: "course")
     additional_colors : list, optional
         Additional obs columns to include for color switching
     genes : list, optional
@@ -2351,6 +2358,9 @@ def export_to_html(
     if hv_genes is not None:
         genes = hv_genes
 
+    if outline_by and outline_by not in dataset.metadata_columns:
+        print(f"  Warning: outline_by '{outline_by}' not in metadata columns; no outlines will be shown.")
+
     # Get data with multiple color layers and genes
     data = dataset.to_json_data(
         color,
@@ -2387,6 +2397,7 @@ def export_to_html(
         data_json=json.dumps(data),
         palette_json=json.dumps(DEFAULT_CATEGORICAL_PALETTE),
         metadata_labels_json=json.dumps(metadata_labels),
+        outline_by_json=json.dumps(outline_by),
         theme_icon=theme_icon,
         initial_theme=initial_theme,
         favicon_link=favicon_link,
