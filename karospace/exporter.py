@@ -228,6 +228,97 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             overflow: hidden;
             border-left: none;
         }}
+        .color-panel {{
+            width: 240px;
+            padding: 12px;
+            background: var(--panel-bg);
+            border-left: 1px solid var(--border-color);
+            overflow-y: auto;
+            font-size: 12px;
+            transition: background 0.3s, border-color 0.3s, width 0.3s, padding 0.3s;
+        }}
+        .color-panel.collapsed {{
+            width: 0;
+            padding: 0;
+            overflow: hidden;
+            border-left: none;
+        }}
+        .color-panel-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid var(--border-color);
+        }}
+        .color-panel-title {{ font-size: 13px; font-weight: 600; }}
+        .color-panel-section {{
+            margin-bottom: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }}
+        .color-panel-section label {{ font-size: 10px; color: var(--muted-color); }}
+        .color-search {{
+            padding: 6px 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: var(--input-bg);
+            color: var(--text-color);
+            font-size: 12px;
+        }}
+        .color-list {{
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            max-height: 220px;
+            overflow-y: auto;
+            padding-right: 2px;
+        }}
+        .color-item {{
+            padding: 5px 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: var(--input-bg);
+            color: var(--text-color);
+            cursor: pointer;
+            font-size: 11px;
+            transition: background 0.2s, border-color 0.2s;
+        }}
+        .color-item:hover {{ background: var(--hover-bg); }}
+        .color-item.active {{
+            background: var(--accent-strong);
+            color: white;
+            border-color: var(--accent-strong);
+        }}
+        .color-aggregation {{
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            font-size: 11px;
+        }}
+        .agg-group {{
+            padding: 6px;
+            border-radius: 6px;
+            background: rgba(135, 0, 82, 0.06);
+            border: 1px solid var(--border-color);
+        }}
+        .agg-group-title {{ font-weight: 600; margin-bottom: 4px; }}
+        .agg-group-meta {{ font-size: 10px; color: var(--muted-color); margin-bottom: 4px; }}
+        .agg-row {{
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin: 2px 0;
+        }}
+        .agg-dot {{
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }}
+        .agg-label {{ flex: 1; }}
+        .agg-value {{ font-variant-numeric: tabular-nums; }}
         .legend-title {{
             font-size: 13px;
             font-weight: 600;
@@ -468,6 +559,21 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             color: white;
             border-color: var(--accent-strong);
         }}
+        .color-toggle {{
+            background: var(--input-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 5px 10px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: background 0.3s, border-color 0.3s;
+        }}
+        .color-toggle:hover {{ background: var(--hover-bg); }}
+        .color-toggle.active {{
+            background: var(--accent-strong);
+            color: white;
+            border-color: var(--accent-strong);
+        }}
 
         /* Selection highlight */
         .selection-highlight {{
@@ -586,6 +692,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             <button class="legend-toggle active" id="legend-toggle" title="Toggle legend panel">
                 Legend
             </button>
+            <button class="color-toggle" id="color-toggle" title="Toggle color explorer">
+                Colors
+            </button>
             <button class="graph-toggle" id="graph-toggle" title="Toggle neighborhood graph" style="display: none;">
                 Graph
             </button>
@@ -628,6 +737,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             </div>
             <div class="umap-selection-info" id="umap-selection-info">No cells selected</div>
         </div>
+        <div class="color-panel collapsed" id="color-panel"></div>
         <div class="legend-container" id="legend"></div>
     </div>
 
@@ -722,6 +832,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         'rgba(0, 200, 255, 0.9)',
         'rgba(255, 105, 180, 0.9)',
     ];
+    const expandedAggGroups = new Set();
 
     // Modal state
     let modalSection = null;
@@ -1861,6 +1972,208 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
     }}
 
+    function buildColorPanel() {{
+        const panel = document.getElementById('color-panel');
+        if (!panel) return;
+        const metadataKeys = Object.keys(DATA.metadata_filters || {{}});
+        const hasMetadata = metadataKeys.length > 0;
+
+        const options = ['<option value="">None</option>']
+            .concat(metadataKeys.map(key => `<option value="${{key}}">${{formatMetadataLabel(key)}}</option>`))
+            .join('');
+
+        panel.innerHTML = `
+            <div class="color-panel-header">
+                <div class="color-panel-title">Color explorer</div>
+            </div>
+            <div class="color-panel-section">
+                <label>Search colors</label>
+                <input class="color-search" id="color-search" type="text" placeholder="Type to filter...">
+            </div>
+            <div class="color-panel-section">
+                <label>Available colors</label>
+                <div class="color-list" id="color-list"></div>
+            </div>
+            <div class="color-panel-section">
+                <label>Aggregate by</label>
+                <select id="color-groupby" ${{!hasMetadata ? 'disabled' : ''}}>
+                    ${{options}}
+                </select>
+            </div>
+            <div class="color-aggregation" id="color-aggregation">
+                <div class="agg-group-meta">${{hasMetadata ? 'Pick a metadata column to summarize.' : 'No metadata columns available for aggregation.'}}</div>
+            </div>
+        `;
+
+        const search = document.getElementById('color-search');
+        search.addEventListener('input', () => {{
+            renderColorList(search.value);
+        }});
+
+        const groupBy = document.getElementById('color-groupby');
+        groupBy.addEventListener('change', () => {{
+            renderColorAggregation();
+        }});
+
+        renderColorList('');
+        renderColorAggregation();
+    }}
+
+    function renderColorList(query) {{
+        const list = document.getElementById('color-list');
+        if (!list) return;
+        const q = (query || '').trim().toLowerCase();
+        const items = DATA.available_colors.filter(col => col.toLowerCase().includes(q));
+        if (items.length === 0) {{
+            list.innerHTML = `<div class="agg-group-meta">No matches.</div>`;
+            return;
+        }}
+        list.innerHTML = items.map(col => `
+            <div class="color-item ${{col === currentColor && !currentGene ? 'active' : ''}}" data-color="${{col}}">
+                ${{col}}
+            </div>
+        `).join('');
+
+        list.querySelectorAll('.color-item').forEach(item => {{
+            item.addEventListener('click', () => {{
+                const col = item.dataset.color;
+                if (!col) return;
+                currentColor = col;
+                currentGene = null;
+                document.getElementById('color-select').value = col;
+                document.getElementById('gene-input').value = '';
+                hiddenCategories.clear();
+                renderLegend('legend');
+                renderLegend('modal-legend');
+                renderAllSections();
+                if (modalSection) renderModalSection();
+                if (umapVisible) renderUMAP();
+                renderColorList(document.getElementById('color-search').value);
+                renderColorAggregation();
+            }});
+        }});
+    }}
+
+    function renderColorAggregation() {{
+        const container = document.getElementById('color-aggregation');
+        const groupBy = document.getElementById('color-groupby');
+        if (!container || !groupBy) return;
+        const groupKey = groupBy.value;
+        if (!groupKey) {{
+            container.innerHTML = '<div class="agg-group-meta">Pick a metadata column to summarize.</div>';
+            return;
+        }}
+
+        if (currentGene) {{
+            container.innerHTML = '<div class="agg-group-meta">Aggregation is disabled while a gene is active. Clear the gene input to aggregate by categorical colors.</div>';
+            return;
+        }}
+
+        const config = getColorConfig();
+        const label = currentGene || currentColor;
+        const groups = new Map();
+
+        DATA.sections.forEach(section => {{
+            const groupVal = section.metadata?.[groupKey] || 'unknown';
+            if (!groups.has(groupVal)) {{
+                groups.set(groupVal, {{ total: 0, counts: {{}}, sum: 0, min: null, max: null }});
+            }}
+            const group = groups.get(groupVal);
+            const values = getSectionValues(section);
+            values.forEach(val => {{
+                if (val === null || val === undefined || Number.isNaN(val)) return;
+                group.total += 1;
+                if (config.is_continuous) {{
+                    group.sum += val;
+                    if (group.min === null || val < group.min) group.min = val;
+                    if (group.max === null || val > group.max) group.max = val;
+                }} else {{
+                    const catIdx = Math.round(val);
+                    const catName = config.categories?.[catIdx] || 'unknown';
+                    group.counts[catName] = (group.counts[catName] || 0) + 1;
+                }}
+            }});
+        }});
+
+        if (groups.size === 0) {{
+            container.innerHTML = '<div class="agg-group-meta">No data to summarize.</div>';
+            return;
+        }}
+
+        const entries = Array.from(groups.entries());
+        entries.sort((a, b) => a[0].localeCompare(b[0]));
+
+        if (config.is_continuous) {{
+            container.innerHTML = entries.map(([groupVal, stats]) => {{
+                const mean = stats.total > 0 ? (stats.sum / stats.total) : 0;
+                const min = stats.min !== null ? stats.min.toFixed(2) : 'n/a';
+                const max = stats.max !== null ? stats.max.toFixed(2) : 'n/a';
+                return `
+                    <div class="agg-group">
+                        <div class="agg-group-title">${{formatMetadataLabel(groupKey)}}: ${{groupVal}}</div>
+                        <div class="agg-group-meta">${{label}} · n=${{stats.total}}</div>
+                        <div class="agg-row"><span class="agg-label">Mean</span><span class="agg-value">${{mean.toFixed(2)}}</span></div>
+                        <div class="agg-row"><span class="agg-label">Min</span><span class="agg-value">${{min}}</span></div>
+                        <div class="agg-row"><span class="agg-label">Max</span><span class="agg-value">${{max}}</span></div>
+                    </div>
+                `;
+            }}).join('');
+            return;
+        }}
+
+        container.innerHTML = entries.map(([groupVal, stats]) => {{
+            const total = stats.total || 0;
+            const counts = Object.entries(stats.counts);
+            counts.sort((a, b) => b[1] - a[1]);
+            const isExpanded = expandedAggGroups.has(groupVal);
+            const top = isExpanded ? counts : counts.slice(0, 6);
+            const shownTotal = top.reduce((sum, [, c]) => sum + c, 0);
+            const other = total - shownTotal;
+            const toggleLabel = isExpanded ? 'Show top 6' : 'Show all';
+
+            const rows = top.map(([cat, count]) => {{
+                const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+                const catIdx = config.categories?.indexOf(cat) ?? -1;
+                const color = catIdx >= 0 ? getCategoryColor(catIdx) : '#999';
+                return `
+                    <div class="agg-row">
+                        <span class="agg-dot" style="background: ${{color}}"></span>
+                        <span class="agg-label">${{cat}}</span>
+                        <span class="agg-value">${{pct}}% (${{count}})</span>
+                    </div>
+                `;
+            }}).join('');
+
+            const otherRow = other > 0 ? `
+                <div class="agg-row">
+                    <span class="agg-dot" style="background: #bbb"></span>
+                    <span class="agg-label">Other</span>
+                    <span class="agg-value">${{Math.round((other / total) * 100)}}% (${{other}})</span>
+                </div>
+            ` : '';
+
+            return `
+                <div class="agg-group">
+                    <div class="agg-group-title">${{formatMetadataLabel(groupKey)}}: ${{groupVal}}</div>
+                    <div class="agg-group-meta">${{label}} · n=${{total}}</div>
+                    <button class="legend-btn" data-agg-toggle="${{groupVal}}">${{toggleLabel}}</button>
+                    ${{rows}}
+                    ${{otherRow}}
+                </div>
+            `;
+        }}).join('');
+
+        container.querySelectorAll('[data-agg-toggle]').forEach(btn => {{
+            btn.addEventListener('click', () => {{
+                const key = btn.getAttribute('data-agg-toggle');
+                if (!key) return;
+                if (expandedAggGroups.has(key)) expandedAggGroups.delete(key);
+                else expandedAggGroups.add(key);
+                renderColorAggregation();
+            }});
+        }});
+    }}
+
     // Filters
     function initFilters() {{
         const filterBar = document.getElementById('filter-bar');
@@ -2002,6 +2315,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             renderAllSections();
             if (modalSection) renderModalSection();
             if (umapVisible) renderUMAP();
+            renderColorList(document.getElementById('color-search')?.value || '');
+            renderColorAggregation();
         }});
 
         const geneList = document.getElementById('gene-list');
@@ -2022,6 +2337,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 renderAllSections();
                 if (modalSection) renderModalSection();
                 if (umapVisible) renderUMAP();
+                renderColorList(document.getElementById('color-search')?.value || '');
+                renderColorAggregation();
             }} else if (gene) {{
                 alert(`Gene "${{gene}}" was not pre-loaded.\\nTo view it, re-export with this gene included in the genes parameter or add it to highly variable genes.`);
             }}
@@ -2042,6 +2359,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             legend.classList.toggle('collapsed');
             btn.classList.toggle('active');
             // Re-render to adjust for new grid size
+            requestAnimationFrame(renderAllSections);
+        }});
+
+        // Color explorer toggle
+        buildColorPanel();
+        const colorToggle = document.getElementById('color-toggle');
+        const colorPanel = document.getElementById('color-panel');
+        colorToggle.addEventListener('click', () => {{
+            colorPanel.classList.toggle('collapsed');
+            colorToggle.classList.toggle('active');
             requestAnimationFrame(renderAllSections);
         }});
 
