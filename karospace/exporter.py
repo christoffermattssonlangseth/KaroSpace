@@ -586,15 +586,34 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             position: fixed;
             bottom: 10px;
             right: 10px;
-            opacity: 0.6;
-            transition: opacity 0.2s;
+            opacity: 0.7;
+            transition: opacity 0.2s, transform 0.2s;
             z-index: 100;
+            font-size: 11px;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            padding: 6px 10px;
+            border-radius: 999px;
+            background: rgba(135, 0, 82, 0.12);
+            color: var(--text-color);
+            border: 1px solid var(--border-color);
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
         }}
-        .footer-logo:hover {{ opacity: 1; }}
-        .footer-logo img {{
-            height: 40px;
-            width: auto;
+        .footer-logo:hover {{
+            opacity: 1;
+            transform: translateY(-1px);
         }}
+        .footer-link {{
+            letter-spacing: 0.12em;
+            text-decoration: none;
+            color: var(--text-color);
+            opacity: 0.75;
+            border-left: 1px solid var(--border-color);
+            padding-left: 10px;
+        }}
+        .footer-link:hover {{ opacity: 1; }}
         .loading-overlay {{
             position: fixed;
             inset: 0;
@@ -2702,14 +2721,19 @@ def export_to_html(
     theme_icon = "☀️" if theme == "dark" else "🌙"
     initial_theme = theme
 
-    # Load logo for favicon and footer
+    # Load logo for favicon
     logo_base64 = _load_logo_base64()
     if logo_base64:
         favicon_link = f'<link rel="icon" type="image/png" href="data:image/png;base64,{logo_base64}">'
-        footer_logo = f'<div class="footer-logo"><img src="data:image/png;base64,{logo_base64}" alt="KaroSpace"></div>'
     else:
         favicon_link = ""
-        footer_logo = ""
+    footer_logo = (
+        '<div class="footer-logo">'
+        '<span>KaroSpace</span>'
+        '<a class="footer-link" href="https://github.com/christoffermattssonlangseth/karospace" '
+        'target="_blank" rel="noopener noreferrer">GitHub</a>'
+        '</div>'
+    )
 
     # Generate HTML
     metadata_labels = {

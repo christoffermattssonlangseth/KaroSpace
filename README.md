@@ -16,6 +16,7 @@ Originally developed at Karolinska Institutet for visualizing Xenium spatial tra
 - **Category toggling** - Click legend items to show/hide specific cell types or clusters; hidden cells appear as grey
 - **Gene expression visualization** - Pre-load genes of interest and switch between them with a viridis colormap
 - **Multiple color columns** - Switch between different annotation columns (e.g., cell types, clusters, conditions)
+- **Color explorer panel** - Search color columns and aggregate categorical colors by metadata (e.g., course, region)
 - **Metadata filtering** - Filter sections by metadata like experimental condition, timepoint, or region
 - **Cell tooltips** - Hover over cells to see their type or expression value
 - **Course-based borders** - Section panels are outlined with colors indicating their experimental course/condition
@@ -180,11 +181,14 @@ export_to_html(
 - **Filter chips** - Click to filter sections by metadata
 - **Legend items** - Click to toggle categories on/off
 - **Legend button** - Show/hide the legend panel
+- **Colors button** - Toggle the color explorer (search + aggregation panel)
+- **Color explorer usage** - Pick a metadata column in “Aggregate by” to summarize categorical colors per group; use “Show all / Show top 6” per group
 - **Graph button** - Toggle neighborhood graph overlay (if available)
 - **Neighbors button** - Toggle neighbor rings on hover (if available)
 - **Hop selector** - Choose which neighbor hop(s) to display (if available)
 - **Screenshot button** - Download a snapshot of the current view
 - **Theme button** - Toggle dark/light mode
+- **Footer badge** - “KaroSpace” label with a GitHub link
 
 ### Modal View (Detailed Section)
 - **Mouse wheel** - Zoom in/out
