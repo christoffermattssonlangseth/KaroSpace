@@ -435,6 +435,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             border: 2px solid transparent;
         }}
         .legend-item.hidden .legend-color {{ border-color: var(--muted-color); background: transparent !important; }}
+        .legend-item.selected {{
+            border-color: var(--accent-strong);
+            box-shadow: 0 0 0 2px rgba(135, 0, 82, 0.2);
+        }}
+        .legend-item.selected .legend-color {{
+            border-color: var(--accent-strong);
+        }}
         .colorbar {{ width: 16px; height: 150px; margin: 8px auto; border-radius: 2px; }}
         .colorbar-labels {{
             display: flex;
@@ -633,6 +640,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             background: var(--accent-strong);
             color: white;
             border-color: var(--accent-strong);
+        }}
+        .graph-toggle:disabled {{
+            opacity: 0.5;
+            cursor: not-allowed;
         }}
         .color-toggle {{
             background: var(--input-bg);
@@ -868,6 +879,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                             <option value="3">3-hop</option>
                             <option value="all" selected>All hops</option>
                         </select>
+                        <button class="graph-toggle" id="modal-type-toggle" title="Select a category by clicking a cell">Select type</button>
+                        <button class="graph-toggle" id="modal-type-clear" title="Clear selected type">Clear type</button>
                         <span style="margin-left: 10px; font-size: 11px; color: {muted_color};">Size:</span>
                         <div class="size-control">
                             <button class="size-step" id="modal-spot-size-dec" type="button">−</button>
@@ -948,6 +961,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let isDragging = false;
     let dragStartX = 0, dragStartY = 0;
     let lastPanX = 0, lastPanY = 0;
+    let modalTypeSelectEnabled = false;
+    let modalSelectedCategory = null;
 
     // UMAP state
     let umapVisible = false;
@@ -1669,12 +1684,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ctx.globalAlpha = 1;
         }}
 
-        // Second pass: draw visible categories on top
+        // Second pass: draw visible categories on top (with optional selected-category focus)
+        const hasTypeFocus = !config.is_continuous && modalSelectedCategory;
         for (let i = 0; i < section.x.length; i++) {{
             const val = values[i];
             if (val === null || val === undefined) continue;
 
             let color;
+            let isSelectedCat = false;
             if (config.is_continuous) {{
                 const t = (val - config.vmin) / (config.vmax - config.vmin);
                 color = viridis(Math.max(0, Math.min(1, t)));
@@ -1682,16 +1699,24 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const catIdx = Math.round(val);
                 const catName = config.categories[catIdx];
                 if (hiddenCategories.has(catName)) continue;  // Skip hidden, already drawn as grey
+                isSelectedCat = modalSelectedCategory && catName === modalSelectedCategory;
                 color = getCategoryColor(catIdx);
             }}
 
             const x = offsetX + (section.x[i] - bounds.xmin) * scale;
             const y = offsetY + (section.y[i] - bounds.ymin) * scale;
-            ctx.fillStyle = color;
+            if (hasTypeFocus && !isSelectedCat) {{
+                ctx.fillStyle = '#bbbbbb';
+                ctx.globalAlpha = 0.15;
+            }} else {{
+                ctx.fillStyle = color;
+                ctx.globalAlpha = 1;
+            }}
             ctx.beginPath();
             ctx.arc(x, height - y, spotSize, 0, Math.PI * 2);
             ctx.fill();
         }}
+        ctx.globalAlpha = 1;
 
         // Third pass: draw selection highlights
         if (selectedCells.size > 0) {{
@@ -1871,6 +1896,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         const config = getColorConfig();
         const values = getSectionValues(modalSection);
+        const typeToggleBtn = document.getElementById('modal-type-toggle');
+        const typeClearBtn = document.getElementById('modal-type-clear');
+        if (config.is_continuous) {{
+            modalSelectedCategory = null;
+            modalTypeSelectEnabled = false;
+            typeToggleBtn?.classList.remove('active');
+        }} else if (modalSelectedCategory && !config.categories?.includes(modalSelectedCategory)) {{
+            modalSelectedCategory = null;
+        }}
+        if (typeToggleBtn) typeToggleBtn.disabled = config.is_continuous;
+        if (typeClearBtn) typeClearBtn.disabled = config.is_continuous;
 
         if (showGraph && modalSection.edges && modalSection.edges.length) {{
             const graphColor = getGraphColor();
@@ -1930,12 +1966,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ctx.globalAlpha = 1;
         }}
 
-        // Second pass: draw visible categories on top
+        // Second pass: draw visible categories on top (with optional selected-category focus)
+        const hasTypeFocus = !config.is_continuous && modalSelectedCategory;
         for (let i = 0; i < modalSection.x.length; i++) {{
             const val = values[i];
             if (val === null || val === undefined) continue;
 
             let color;
+            let isSelectedCat = false;
             if (config.is_continuous) {{
                 const t = (val - config.vmin) / (config.vmax - config.vmin);
                 color = viridis(Math.max(0, Math.min(1, t)));
@@ -1943,6 +1981,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const catIdx = Math.round(val);
                 const catName = config.categories[catIdx];
                 if (hiddenCategories.has(catName)) continue;
+                isSelectedCat = modalSelectedCategory && catName === modalSelectedCategory;
                 color = getCategoryColor(catIdx);
             }}
 
@@ -1952,11 +1991,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             if (x < -adjustedSpotSize || x > width + adjustedSpotSize ||
                 y < -adjustedSpotSize || y > height + adjustedSpotSize) continue;
 
-            ctx.fillStyle = color;
+            if (hasTypeFocus && !isSelectedCat) {{
+                ctx.fillStyle = '#bbbbbb';
+                ctx.globalAlpha = 0.15;
+            }} else {{
+                ctx.fillStyle = color;
+                ctx.globalAlpha = 1;
+            }}
             ctx.beginPath();
             ctx.arc(x, y, adjustedSpotSize, 0, Math.PI * 2);
             ctx.fill();
         }}
+        ctx.globalAlpha = 1;
 
         // Third pass: draw selection highlights
         if (selectedCells.size > 0) {{
@@ -1986,6 +2032,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 ctx.stroke();
             }}
         }}
+
+        // No extra highlight needed: non-selected categories are greyed out above
 
         drawNeighborHighlights(ctx, modalSection, {{
             scale,
@@ -2038,7 +2086,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             `;
             (config.categories || []).forEach((cat, idx) => {{
                 const hiddenClass = hiddenCategories.has(cat) ? 'hidden' : '';
-                html += `<div class="legend-item ${{hiddenClass}}" data-category="${{cat}}">
+                const selectedClass = modalSelectedCategory && cat === modalSelectedCategory ? 'selected' : '';
+                html += `<div class="legend-item ${{hiddenClass}} ${{selectedClass}}" data-category="${{cat}}">
                     <div class="legend-color" style="background: ${{getCategoryColor(idx)}}"></div>
                     <span>${{cat}}</span>
                 </div>`;
@@ -2047,6 +2096,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
             document.getElementById(`${{targetId}}-show-all`)?.addEventListener('click', () => {{
                 hiddenCategories.clear();
+                if (modalSelectedCategory && config.categories?.includes(modalSelectedCategory)) {{
+                    // Keep selected category visible; focus is handled by rendering
+                    hiddenCategories.delete(modalSelectedCategory);
+                }}
                 renderLegend('legend');
                 renderLegend('modal-legend');
                 renderAllSections();
@@ -2056,6 +2109,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
             document.getElementById(`${{targetId}}-hide-all`)?.addEventListener('click', () => {{
                 (config.categories || []).forEach(cat => hiddenCategories.add(cat));
+                if (modalSelectedCategory && config.categories?.includes(modalSelectedCategory)) {{
+                    hiddenCategories.delete(modalSelectedCategory);
+                }}
                 renderLegend('legend');
                 renderLegend('modal-legend');
                 renderAllSections();
@@ -2180,11 +2236,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             item.addEventListener('click', () => {{
                 const col = item.dataset.color;
                 if (!col) return;
-                currentColor = col;
-                currentGene = null;
-                document.getElementById('color-select').value = col;
-                document.getElementById('gene-input').value = '';
-                hiddenCategories.clear();
+            currentColor = col;
+            currentGene = null;
+            modalSelectedCategory = null;
+            modalTypeSelectEnabled = false;
+            document.getElementById('color-select').value = col;
+            document.getElementById('gene-input').value = '';
+            hiddenCategories.clear();
                 renderLegend('legend');
                 renderLegend('modal-legend');
                 renderAllSections();
@@ -2511,6 +2569,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         colorSelect.addEventListener('change', (e) => {{
             currentColor = e.target.value;
             currentGene = null;
+            modalSelectedCategory = null;
+            modalTypeSelectEnabled = false;
             document.getElementById('gene-input').value = '';
             hiddenCategories.clear();
             renderLegend('legend');
@@ -2535,6 +2595,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const gene = geneInput.value.trim();
             if (gene && DATA.genes_meta[gene]) {{
                 currentGene = gene;
+                modalSelectedCategory = null;
+                modalTypeSelectEnabled = false;
                 hiddenCategories.clear();
                 renderLegend('legend');
                 renderLegend('modal-legend');
@@ -2701,12 +2763,64 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }});
 
         const canvas = document.getElementById('modal-canvas');
+        const typeToggleBtn = document.getElementById('modal-type-toggle');
+        const typeClearBtn = document.getElementById('modal-type-clear');
+        typeToggleBtn.addEventListener('click', () => {{
+            const config = getColorConfig();
+            if (config.is_continuous) return;
+            modalTypeSelectEnabled = !modalTypeSelectEnabled;
+            typeToggleBtn.classList.toggle('active', modalTypeSelectEnabled);
+        }});
+        typeClearBtn.addEventListener('click', () => {{
+            modalSelectedCategory = null;
+            renderAllSections();
+            renderModalSection();
+        }});
         canvas.addEventListener('mousedown', (e) => {{
             isDragging = true;
             dragStartX = e.clientX; dragStartY = e.clientY;
             lastPanX = modalPanX; lastPanY = modalPanY;
             canvas.style.cursor = 'grabbing';
             hideTooltip();
+        }});
+        canvas.addEventListener('click', (e) => {{
+            if (!modalSection || isDragging) return;
+            const config = getColorConfig();
+            if (config.is_continuous || !modalTypeSelectEnabled) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+            const bounds = modalSection.bounds;
+            const dataWidth = bounds.xmax - bounds.xmin;
+            const dataHeight = bounds.ymax - bounds.ymin;
+            const baseScale = Math.min((rect.width - 40) / dataWidth, (rect.height - 40) / dataHeight);
+            const scale = baseScale * modalZoom;
+            const centerX = rect.width / 2 + modalPanX;
+            const centerY = rect.height / 2 + modalPanY;
+            const dataCenterX = (bounds.xmin + bounds.xmax) / 2;
+            const dataCenterY = (bounds.ymin + bounds.ymax) / 2;
+            const transform = {{
+                scale,
+                centerX,
+                centerY,
+                dataCenterX,
+                dataCenterY,
+                isModal: true
+            }};
+
+            const cellIdx = findNearestCell(modalSection, mouseX, mouseY, rect, transform);
+            if (cellIdx >= 0) {{
+                const values = getSectionValues(modalSection);
+                const val = values[cellIdx];
+                if (val !== null && val !== undefined) {{
+                    const catIdx = Math.round(val);
+                    const catName = config.categories[catIdx];
+                    modalSelectedCategory = catName || null;
+                    renderAllSections();
+                    renderModalSection();
+                }}
+            }}
         }});
         document.addEventListener('mousemove', (e) => {{
             if (!isDragging) return;
