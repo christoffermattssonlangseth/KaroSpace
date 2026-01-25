@@ -123,6 +123,27 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         input[type="text"] {{ width: 140px; }}
         select:focus, input:focus {{ outline: none; border-color: var(--accent-strong); box-shadow: 0 0 0 2px rgba(135, 0, 82, 0.15); }}
         .stats {{ font-size: 11px; color: var(--muted-color); }}
+        .size-control {{
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }}
+        .size-step {{
+            width: 18px;
+            height: 18px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: var(--input-bg);
+            color: var(--text-color);
+            cursor: pointer;
+            font-size: 12px;
+            line-height: 1;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s, border-color 0.2s;
+        }}
+        .size-step:hover {{ background: var(--hover-bg); }}
 
         /* Theme toggle button */
         .theme-toggle {{
@@ -267,6 +288,34 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             color: var(--text-color);
             font-size: 12px;
         }}
+        .color-tabs {{
+            display: flex;
+            gap: 6px;
+        }}
+        .color-tab {{
+            flex: 1;
+            padding: 4px 6px;
+            font-size: 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: var(--input-bg);
+            color: var(--text-color);
+            cursor: pointer;
+            transition: background 0.2s, border-color 0.2s, color 0.2s;
+        }}
+        .color-tab.active {{
+            background: var(--accent-strong);
+            color: white;
+            border-color: var(--accent-strong);
+        }}
+        .color-tab-content {{
+            display: none;
+            flex-direction: column;
+            gap: 8px;
+        }}
+        .color-tab-content.active {{
+            display: flex;
+        }}
         .color-list {{
             display: flex;
             flex-direction: column;
@@ -296,6 +345,32 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             flex-direction: column;
             gap: 8px;
             font-size: 11px;
+        }}
+        .marker-genes {{
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 8px;
+            background: var(--input-bg);
+            max-height: 240px;
+            overflow: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }}
+        .marker-search {{
+            padding: 6px 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: var(--input-bg);
+            color: var(--text-color);
+            font-size: 11px;
+        }}
+        .marker-group-title {{ font-size: 11px; font-weight: 600; }}
+        .marker-genes-list {{
+            font-size: 10px;
+            color: var(--muted-color);
+            line-height: 1.4;
+            word-break: break-word;
         }}
         .agg-group {{
             padding: 6px;
@@ -703,7 +778,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             </div>
             <div class="control-group">
                 <label>Size:</label>
-                <input type="range" id="spot-size" min="0.1" max="8" step="0.1" value="{spot_size}" style="width:80px">
+                <div class="size-control">
+                    <button class="size-step" id="spot-size-dec" type="button">−</button>
+                    <input type="range" id="spot-size" min="0.1" max="8" step="0.1" value="{spot_size}" style="width:80px">
+                    <button class="size-step" id="spot-size-inc" type="button">+</button>
+                </div>
             </div>
             <button class="umap-toggle" id="umap-toggle" title="Toggle UMAP view" style="display: none;">
                 UMAP
@@ -712,7 +791,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 Legend
             </button>
             <button class="color-toggle" id="color-toggle" title="Toggle color explorer">
-                Colors
+                Insights
             </button>
             <button class="graph-toggle" id="graph-toggle" title="Toggle neighborhood graph" style="display: none;">
                 Graph
@@ -751,7 +830,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 <button class="umap-btn" id="magic-wand-btn" title="Draw to select cells">Magic Wand</button>
                 <button class="umap-btn" id="clear-selection-btn" title="Clear selection">Clear</button>
                 <span style="margin-left: 6px; font-size: 11px; color: var(--muted-color);">Size:</span>
-                <input type="range" id="umap-spot-size" min="0.1" max="6" step="0.1" value="2" style="width: 60px;">
+                <div class="size-control">
+                    <button class="size-step" id="umap-spot-size-dec" type="button">−</button>
+                    <input type="range" id="umap-spot-size" min="0.1" max="6" step="0.1" value="2" style="width: 60px;">
+                    <button class="size-step" id="umap-spot-size-inc" type="button">+</button>
+                </div>
                 <span id="umap-spot-size-label" style="font-size: 11px; min-width: 20px;">2</span>
             </div>
             <div class="umap-selection-info" id="umap-selection-info">No cells selected</div>
@@ -786,7 +869,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                             <option value="all" selected>All hops</option>
                         </select>
                         <span style="margin-left: 10px; font-size: 11px; color: {muted_color};">Size:</span>
-                        <input type="range" id="modal-spot-size" min="0.1" max="12" step="0.1" value="{spot_size}" style="width: 80px;">
+                        <div class="size-control">
+                            <button class="size-step" id="modal-spot-size-dec" type="button">−</button>
+                            <input type="range" id="modal-spot-size" min="0.1" max="12" step="0.1" value="{spot_size}" style="width: 80px;">
+                            <button class="size-step" id="modal-spot-size-inc" type="button">+</button>
+                        </div>
                         <span id="modal-spot-size-label" style="font-size: 11px; min-width: 24px;">{spot_size}</span>
                     </div>
                 </div>
@@ -2014,13 +2101,26 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 <div class="color-list" id="color-list"></div>
             </div>
             <div class="color-panel-section">
-                <label>Aggregate by</label>
-                <select id="color-groupby" ${{!hasMetadata ? 'disabled' : ''}}>
-                    ${{options}}
-                </select>
-            </div>
-            <div class="color-aggregation" id="color-aggregation">
-                <div class="agg-group-meta">${{hasMetadata ? 'Pick a metadata column to summarize.' : 'No metadata columns available for aggregation.'}}</div>
+                <label>Details</label>
+                <div class="color-tabs">
+                    <button class="color-tab active" id="color-tab-aggregate" type="button">Stats</button>
+                    <button class="color-tab" id="color-tab-markers" type="button">Marker genes</button>
+                </div>
+                <div class="color-tab-content active" id="color-tab-aggregate-content">
+                    <div>
+                        <label>Aggregate by</label>
+                        <select id="color-groupby" ${{!hasMetadata ? 'disabled' : ''}}>
+                            ${{options}}
+                        </select>
+                    </div>
+                    <div class="color-aggregation" id="color-aggregation">
+                        <div class="agg-group-meta">${{hasMetadata ? 'Pick a metadata column to summarize.' : 'No metadata columns available for aggregation.'}}</div>
+                    </div>
+                </div>
+                <div class="color-tab-content" id="color-tab-markers-content">
+                    <input class="marker-search" id="marker-gene-search" type="text" placeholder="Search marker genes...">
+                    <div class="marker-genes" id="marker-genes"></div>
+                </div>
             </div>
         `;
 
@@ -2034,8 +2134,31 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             renderColorAggregation();
         }});
 
+        const aggregateTab = document.getElementById('color-tab-aggregate');
+        const markerTab = document.getElementById('color-tab-markers');
+        const aggregateContent = document.getElementById('color-tab-aggregate-content');
+        const markerContent = document.getElementById('color-tab-markers-content');
+        aggregateTab.addEventListener('click', () => {{
+            aggregateTab.classList.add('active');
+            markerTab.classList.remove('active');
+            aggregateContent.classList.add('active');
+            markerContent.classList.remove('active');
+        }});
+        markerTab.addEventListener('click', () => {{
+            markerTab.classList.add('active');
+            aggregateTab.classList.remove('active');
+            markerContent.classList.add('active');
+            aggregateContent.classList.remove('active');
+        }});
+
+        const markerSearch = document.getElementById('marker-gene-search');
+        markerSearch.addEventListener('input', () => {{
+            renderMarkerGenes();
+        }});
+
         renderColorList('');
         renderColorAggregation();
+        renderMarkerGenes();
     }}
 
     function renderColorList(query) {{
@@ -2069,6 +2192,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 if (umapVisible) renderUMAP();
                 renderColorList(document.getElementById('color-search').value);
                 renderColorAggregation();
+                renderMarkerGenes();
             }});
         }});
     }}
@@ -2191,6 +2315,66 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 renderColorAggregation();
             }});
         }});
+    }}
+
+    function renderMarkerGenes() {{
+        const container = document.getElementById('marker-genes');
+        if (!container) return;
+        const searchInput = document.getElementById('marker-gene-search');
+        const query = (searchInput?.value || '').trim().toLowerCase();
+        const markers = DATA.marker_genes || {{}};
+
+        if (currentGene) {{
+            container.innerHTML = '<div class="agg-group-meta">Clear the gene input to view marker genes.</div>';
+            return;
+        }}
+
+        const config = getColorConfig();
+        if (config.is_continuous) {{
+            container.innerHTML = '<div class="agg-group-meta">Marker genes are available for categorical colors only.</div>';
+            return;
+        }}
+
+        const groupMarkers = markers[currentColor];
+        if (!groupMarkers || Object.keys(groupMarkers).length === 0) {{
+            container.innerHTML = '<div class="agg-group-meta">No marker genes available for this color.</div>';
+            return;
+        }}
+
+        const categories = config.categories || Object.keys(groupMarkers);
+        const rows = categories.map(cat => {{
+            const key = String(cat);
+            const genes = groupMarkers[key] || [];
+            if (query) {{
+                const hasMatch = genes.some(g => String(g).toLowerCase().includes(query));
+                if (!hasMatch) return '';
+            }}
+            const geneText = genes.length ? genes.join(' ') : 'No genes found.';
+            return `
+                <div class="marker-group">
+                    <div class="marker-group-title">${{key}}</div>
+                    <div class="marker-genes-list">${{geneText}}</div>
+                </div>
+            `;
+        }}).filter(Boolean);
+
+        if (rows.length === 0) {{
+            container.innerHTML = '<div class="agg-group-meta">No marker genes match your search.</div>';
+            return;
+        }}
+
+        container.innerHTML = rows.join('');
+    }}
+
+    function stepRange(rangeEl, delta) {{
+        if (!rangeEl) return;
+        const min = parseFloat(rangeEl.min || '0');
+        const max = parseFloat(rangeEl.max || '100');
+        const step = parseFloat(rangeEl.step || '1');
+        const current = parseFloat(rangeEl.value || '0');
+        const next = Math.min(max, Math.max(min, current + delta * step));
+        rangeEl.value = String(next);
+        rangeEl.dispatchEvent(new Event('input', {{ bubbles: true }}));
     }}
 
     // Filters
@@ -2336,6 +2520,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             if (umapVisible) renderUMAP();
             renderColorList(document.getElementById('color-search')?.value || '');
             renderColorAggregation();
+            renderMarkerGenes();
         }});
 
         const geneList = document.getElementById('gene-list');
@@ -2358,16 +2543,44 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 if (umapVisible) renderUMAP();
                 renderColorList(document.getElementById('color-search')?.value || '');
                 renderColorAggregation();
+                renderMarkerGenes();
+            }} else if (!gene) {{
+                currentGene = null;
+                hiddenCategories.clear();
+                renderLegend('legend');
+                renderLegend('modal-legend');
+                renderAllSections();
+                if (modalSection) renderModalSection();
+                if (umapVisible) renderUMAP();
+                renderColorList(document.getElementById('color-search')?.value || '');
+                renderColorAggregation();
+                renderMarkerGenes();
             }} else if (gene) {{
                 alert(`Gene "${{gene}}" was not pre-loaded.\\nTo view it, re-export with this gene included in the genes parameter or add it to highly variable genes.`);
             }}
         }});
 
-        document.getElementById('spot-size').addEventListener('input', (e) => {{
-            spotSize = parseFloat(e.target.value);
-            renderAllSections();
-            if (modalSection) renderModalSection();
-        }});
+        const spotRange = document.getElementById('spot-size');
+        if (spotRange) {{
+            spotRange.addEventListener('input', (e) => {{
+                spotSize = parseFloat(e.target.value);
+                renderAllSections();
+                if (modalSection) renderModalSection();
+            }});
+        }}
+        document.getElementById('spot-size-dec')?.addEventListener('click', () => stepRange(spotRange, -1));
+        document.getElementById('spot-size-inc')?.addEventListener('click', () => stepRange(spotRange, 1));
+
+        const umapRange = document.getElementById('umap-spot-size');
+        if (umapRange) {{
+            umapRange.addEventListener('input', (e) => {{
+                umapSpotSize = parseFloat(e.target.value);
+                document.getElementById('umap-spot-size-label').textContent = umapSpotSize.toFixed(1);
+                if (umapVisible) renderUMAP();
+            }});
+        }}
+        document.getElementById('umap-spot-size-dec')?.addEventListener('click', () => stepRange(umapRange, -1));
+        document.getElementById('umap-spot-size-inc')?.addEventListener('click', () => stepRange(umapRange, 1));
 
         document.getElementById('screenshot-btn').addEventListener('click', screenshotFullPage);
 
@@ -2443,11 +2656,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             renderModalSection();
         }});
 
-        document.getElementById('modal-spot-size').addEventListener('input', (e) => {{
-            modalSpotSize = parseFloat(e.target.value);
-            document.getElementById('modal-spot-size-label').textContent = modalSpotSize;
-            renderModalSection();
-        }});
+        const modalRange = document.getElementById('modal-spot-size');
+        if (modalRange) {{
+            modalRange.addEventListener('input', (e) => {{
+                modalSpotSize = parseFloat(e.target.value);
+                document.getElementById('modal-spot-size-label').textContent = modalSpotSize;
+                renderModalSection();
+            }});
+        }}
+        document.getElementById('modal-spot-size-dec')?.addEventListener('click', () => stepRange(modalRange, -1));
+        document.getElementById('modal-spot-size-inc')?.addEventListener('click', () => stepRange(modalRange, 1));
 
         const container = document.getElementById('modal-canvas-container');
         container.addEventListener('wheel', (e) => {{
@@ -2631,6 +2849,9 @@ def export_to_html(
     outline_by: Optional[str] = "course",
     additional_colors: Optional[List[str]] = None,
     genes: Optional[List[str]] = None,
+    hvg_limit: int = 20,
+    marker_genes_groupby: Optional[List[str]] = None,
+    marker_genes_top_n: int = 30,
     use_hvgs: bool = True,
 ) -> str:
     """
@@ -2663,6 +2884,12 @@ def export_to_html(
         Additional obs columns to include for color switching
     genes : list, optional
         Gene names to include for expression visualization
+    hvg_limit : int
+        Max number of highly variable genes to include (default 20)
+    marker_genes_groupby : list, optional
+        Obs columns to compute marker genes for (categorical only)
+    marker_genes_top_n : int
+        Number of top marker genes to keep per group
 
     Returns
     -------
@@ -2700,7 +2927,7 @@ def export_to_html(
     if use_hvgs and "highly_variable" in dataset.adata.var.columns:
         hv_mask = dataset.adata.var["highly_variable"].to_numpy(dtype=bool)
         if hv_mask.any():
-            hv_genes = dataset.adata.var_names[hv_mask].tolist()[:20]
+            hv_genes = dataset.adata.var_names[hv_mask].tolist()[:max(0, int(hvg_limit))]
     if hv_genes is not None:
         genes = hv_genes
 
@@ -2715,6 +2942,8 @@ def export_to_html(
         vmax=vmax,
         additional_colors=additional_colors,
         genes=genes,
+        marker_genes_groupby=marker_genes_groupby,
+        marker_genes_top_n=marker_genes_top_n,
     )
 
     # Theme settings

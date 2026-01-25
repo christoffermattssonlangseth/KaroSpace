@@ -68,6 +68,14 @@ export_to_html(
        "Atf4"
     ],
     use_hvgs=USE_HVGS,
+    hvg_limit=50,
+
+    # Compute marker genes for these categorical color columns
+    # (appears in the Color panel under "Marker genes")
+    marker_genes_groupby=[
+        "cell_class_updated",  # change to your cluster column (e.g. "leiden_mana_1.0")
+    ],
+    marker_genes_top_n=30,
 )
 
 # The viewer now supports: 

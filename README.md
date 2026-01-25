@@ -16,7 +16,7 @@ Originally developed at Karolinska Institutet for visualizing Xenium spatial tra
 - **Category toggling** - Click legend items to show/hide specific cell types or clusters; hidden cells appear as grey
 - **Gene expression visualization** - Pre-load genes of interest and switch between them with a viridis colormap
 - **Multiple color columns** - Switch between different annotation columns (e.g., cell types, clusters, conditions)
-- **Color explorer panel** - Search color columns and aggregate categorical colors by metadata (e.g., course, region)
+- **Insights panel** - Search color columns, view categorical stats, and marker genes by color
 - **Metadata filtering** - Filter sections by metadata like experimental condition, timepoint, or region
 - **Cell tooltips** - Hover over cells to see their type or expression value
 - **Course-based borders** - Section panels are outlined with colors indicating their experimental course/condition
@@ -24,7 +24,7 @@ Originally developed at Karolinska Institutet for visualizing Xenium spatial tra
 - **Neighbor rings on hover** - Highlight 1–3 hop neighbors around a hovered cell (when neighbors are available)
 - **Screenshot export** - Download a full-page image of the current view
 - **Dark/light mode** - Toggle between themes with preference saved to browser localStorage
-- **Adjustable spot size** - Control cell/spot size in both grid view and detailed modal view
+- **Adjustable spot size** - Control cell/spot size with slider and +/- steps in grid/UMAP/modal views
 - **Standalone HTML** - Generated files are self-contained with embedded data and JavaScript
 
 ## Installation
@@ -78,7 +78,12 @@ export_to_html(
         "Cd8a",
         "Gfap",
     ],
-    use_hvgs=True,               # Use adata.var['highly_variable'] (capped to 20) when available
+    use_hvgs=True,               # Use adata.var['highly_variable'] when available
+    hvg_limit=20,                # Max number of HVGs to include
+    marker_genes_groupby=[       # Compute marker genes for these categorical obs columns
+        "cell_type",
+    ],
+    marker_genes_top_n=30,       # Top N markers per group
 )
 ```
 
@@ -168,6 +173,9 @@ export_to_html(
     additional_colors=['anno_L3', 'anno_L2', 'anno_L1', 'leiden'],
     genes=["Cd4", "Cd8a", "Gfap", "Mbp"],
     use_hvgs=False,
+    hvg_limit=20,
+    marker_genes_groupby=["anno_L2"],
+    marker_genes_top_n=30,
 )
 ```
 
@@ -177,12 +185,12 @@ export_to_html(
 - **Click a section** - Open detailed modal view
 - **Color dropdown** - Switch between annotation columns
 - **Gene input** - Type a gene name to view expression (must be pre-loaded)
-- **Size slider** - Adjust spot size
+- **Size slider** - Adjust spot size (drag or +/- buttons)
 - **Filter chips** - Click to filter sections by metadata
 - **Legend items** - Click to toggle categories on/off
 - **Legend button** - Show/hide the legend panel
-- **Colors button** - Toggle the color explorer (search + aggregation panel)
-- **Color explorer usage** - Pick a metadata column in “Aggregate by” to summarize categorical colors per group; use “Show all / Show top 6” per group
+- **Insights button** - Toggle the insights panel (colors + stats + marker genes)
+- **Insights usage** - Use the “Stats” tab to aggregate categorical colors by metadata; use the “Marker genes” tab to view top markers per category
 - **Graph button** - Toggle neighborhood graph overlay (if available)
 - **Neighbors button** - Toggle neighbor rings on hover (if available)
 - **Hop selector** - Choose which neighbor hop(s) to display (if available)

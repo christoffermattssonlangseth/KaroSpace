@@ -34,7 +34,7 @@ USE_HVGS = False
 # For your 107 sections with course/region metadata:
 export_to_html(
     dataset,
-    output_path="eae_mana_viewer2.html",
+    output_path="RRMap.html",
     color="anno_L2",  # Initial color (categorical)
     title="KaroSpace",
     min_panel_size=120,  # minimum panel width in pixels, grid auto-adjusts
@@ -45,9 +45,11 @@ export_to_html(
 
     # Include additional color options for the dropdown
     additional_colors=[
-       'anno_L3', 'anno_L2', 'anno_L1','leiden_3.5','compartment_mana'
-
-        # Add any other obs columns you want to switch between
+       'anno_L3', 
+       'anno_L2', 
+       'anno_L1',
+       'leiden_3.5',
+       'compartment_mana'
     ],
 
     # Pre-load specific genes for expression visualization
@@ -82,6 +84,18 @@ export_to_html(
        #"Vtn"
     ],
     use_hvgs=USE_HVGS,
+    hvg_limit=500,
+
+    # Compute marker genes for these categorical color columns
+    # (appears in the Color panel under "Marker genes")
+    marker_genes_groupby=[
+       'anno_L3', 
+       'anno_L2', 
+       'anno_L1',
+       'leiden_3.5',
+       'compartment_mana'
+    ],
+    marker_genes_top_n=50,
 )
 
 # The viewer now supports:

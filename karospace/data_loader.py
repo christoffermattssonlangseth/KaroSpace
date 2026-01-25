@@ -151,6 +151,8 @@ class SpatialDataset:
         vmax: Optional[float] = None,
         additional_colors: Optional[List[str]] = None,
         genes: Optional[List[str]] = None,
+        marker_genes_groupby: Optional[List[str]] = None,
+        marker_genes_top_n: int = 30,
     ) -> Dict:
         """
         Export dataset to JSON-serializable format for the HTML viewer.
@@ -167,6 +169,10 @@ class SpatialDataset:
             Additional obs columns to include for color switching
         genes : list, optional
             Gene names to include for expression visualization
+        marker_genes_groupby : list, optional
+            Obs columns to compute marker genes for (categorical only)
+        marker_genes_top_n : int
+            Number of top marker genes to keep per group
 
         Returns
         -------
@@ -264,6 +270,61 @@ class SpatialDataset:
         # Get metadata filters
         metadata_filters = self.get_metadata_filters()
 
+        # Compute marker genes for requested groupby columns
+        marker_genes = {}
+        if marker_genes_groupby:
+            for groupby in marker_genes_groupby:
+                if groupby not in self.adata.obs.columns:
+                    print(f"  Warning: marker_genes groupby '{groupby}' not found in obs.")
+                    continue
+                col = self.adata.obs[groupby]
+                if not pd.api.types.is_categorical_dtype(col):
+                    self.adata.obs[groupby] = col.astype("category")
+                key_added = f"rank_genes_groups_{groupby}"
+                alt_key_added = f"rank_genes_groups__{groupby}"
+                existing_key = None
+                if key_added in self.adata.uns:
+                    existing_key = key_added
+                elif alt_key_added in self.adata.uns:
+                    existing_key = alt_key_added
+
+                if existing_key is None:
+                    try:
+                        sc.tl.rank_genes_groups(
+                            self.adata,
+                            groupby=groupby,
+                            reference="rest",
+                            method="t-test",
+                            pts=False,
+                            key_added=key_added,
+                        )
+                    except Exception as e:
+                        print(f"  Warning: Could not compute marker genes for '{groupby}': {e}")
+                        continue
+
+                rg = self.adata.uns.get(existing_key or key_added)
+                if not rg:
+                    print(f"  Warning: marker genes not found for '{groupby}'.")
+                    continue
+
+                names = rg.get("names")
+                if names is None:
+                    print(f"  Warning: marker genes missing names for '{groupby}'.")
+                    continue
+
+                if isinstance(names, pd.DataFrame):
+                    marker_genes[groupby] = {
+                        col_name: names[col_name].astype(str).tolist()[:marker_genes_top_n]
+                        for col_name in names.columns
+                    }
+                elif isinstance(names, np.ndarray) and names.dtype.names:
+                    marker_genes[groupby] = {
+                        group: [str(x) for x in names[group][:marker_genes_top_n]]
+                        for group in names.dtype.names
+                    }
+                else:
+                    print(f"  Warning: Unrecognized marker gene format for '{groupby}'.")
+
         # Build section data with all color layers
         sections_data = []
         for section in self.sections:
@@ -357,6 +418,7 @@ class SpatialDataset:
             "sections": sections_data,
             "available_colors": list(color_data.keys()),
             "available_genes": list(gene_data.keys()),
+            "marker_genes": marker_genes,
             "has_umap": umap_coords is not None,
             "umap_bounds": umap_bounds,
             "has_neighbors": neighbor_graph is not None,
