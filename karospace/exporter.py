@@ -346,6 +346,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             gap: 8px;
             font-size: 11px;
         }}
+        .color-aggregation.collapsed {{
+            display: none;
+        }}
         .marker-genes {{
             border: 1px solid var(--border-color);
             border-radius: 6px;
@@ -394,6 +397,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         .agg-label {{ flex: 1; }}
         .agg-value {{ font-variant-numeric: tabular-nums; }}
+        .trend-table {{
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 10px;
+        }}
+        .trend-table th, .trend-table td {{
+            text-align: left;
+            padding: 4px 6px;
+            border-bottom: 1px solid var(--border-color);
+            font-variant-numeric: tabular-nums;
+        }}
+        .trend-table th {{ color: var(--muted-color); font-weight: 600; }}
         .legend-title {{
             font-size: 13px;
             font-weight: 600;
@@ -2169,8 +2184,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                             ${{options}}
                         </select>
                     </div>
+                    <div style="display: flex; justify-content: flex-end;">
+                        <button class="legend-btn" id="color-aggregation-toggle" type="button">Collapse stats</button>
+                    </div>
                     <div class="color-aggregation" id="color-aggregation">
                         <div class="agg-group-meta">${{hasMetadata ? 'Pick a metadata column to summarize.' : 'No metadata columns available for aggregation.'}}</div>
+                    </div>
+                    <div>
+                        <label>Cell type trend</label>
+                        <input class="color-search" id="celltype-search" type="text" placeholder="Search cell type...">
+                    </div>
+                    <div class="color-aggregation" id="celltype-trend">
+                        <div class="agg-group-meta">${{hasMetadata ? 'Search for a category to see counts across the selected metadata.' : 'No metadata columns available.'}}</div>
                     </div>
                 </div>
                 <div class="color-tab-content" id="color-tab-markers-content">
@@ -2188,6 +2213,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const groupBy = document.getElementById('color-groupby');
         groupBy.addEventListener('change', () => {{
             renderColorAggregation();
+            renderCellTypeTrend();
+        }});
+
+        const aggregationToggle = document.getElementById('color-aggregation-toggle');
+        const aggregationContainer = document.getElementById('color-aggregation');
+        aggregationToggle.addEventListener('click', () => {{
+            const isCollapsed = aggregationContainer.classList.toggle('collapsed');
+            aggregationToggle.textContent = isCollapsed ? 'Show stats' : 'Collapse stats';
         }});
 
         const aggregateTab = document.getElementById('color-tab-aggregate');
@@ -2212,8 +2245,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             renderMarkerGenes();
         }});
 
+        const celltypeSearch = document.getElementById('celltype-search');
+        celltypeSearch.addEventListener('input', () => {{
+            renderCellTypeTrend();
+        }});
+
         renderColorList('');
         renderColorAggregation();
+        renderCellTypeTrend();
         renderMarkerGenes();
     }}
 
@@ -2250,6 +2289,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 if (umapVisible) renderUMAP();
                 renderColorList(document.getElementById('color-search').value);
                 renderColorAggregation();
+                renderCellTypeTrend();
                 renderMarkerGenes();
             }});
         }});
@@ -2424,6 +2464,95 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         container.innerHTML = rows.join('');
     }}
 
+    function renderCellTypeTrend() {{
+        const container = document.getElementById('celltype-trend');
+        const groupBy = document.getElementById('color-groupby');
+        if (!container || !groupBy) return;
+        const groupKey = groupBy.value;
+        if (!groupKey) {{
+            container.innerHTML = '<div class="agg-group-meta">Pick a metadata column to summarize.</div>';
+            return;
+        }}
+
+        if (currentGene) {{
+            container.innerHTML = '<div class="agg-group-meta">Clear the gene input to view categorical trends.</div>';
+            return;
+        }}
+
+        const config = getColorConfig();
+        if (config.is_continuous) {{
+            container.innerHTML = '<div class="agg-group-meta">Trends are available for categorical colors only.</div>';
+            return;
+        }}
+
+        const input = document.getElementById('celltype-search');
+        const query = (input?.value || '').trim().toLowerCase();
+        if (!query) {{
+            container.innerHTML = '<div class="agg-group-meta">Search for a category to see counts across metadata groups.</div>';
+            return;
+        }}
+
+        const categories = config.categories || [];
+        const matches = categories.filter(cat => String(cat).toLowerCase().includes(query));
+        if (matches.length === 0) {{
+            container.innerHTML = '<div class="agg-group-meta">No matching categories.</div>';
+            return;
+        }}
+
+        const target = matches[0];
+        const groups = new Map();
+
+        DATA.sections.forEach(section => {{
+            const groupVal = section.metadata?.[groupKey] || 'unknown';
+            if (!groups.has(groupVal)) {{
+                groups.set(groupVal, {{ total: 0, count: 0 }});
+            }}
+            const group = groups.get(groupVal);
+            const values = getSectionValues(section);
+            values.forEach(val => {{
+                if (val === null || val === undefined || Number.isNaN(val)) return;
+                group.total += 1;
+                const catIdx = Math.round(val);
+                const catName = config.categories?.[catIdx];
+                if (catName === target) group.count += 1;
+            }});
+        }});
+
+        const entries = Array.from(groups.entries()).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+        const rows = entries.map(([groupVal, stats]) => {{
+            const pct = stats.total > 0 ? (stats.count / stats.total) * 100 : 0;
+            return `
+                <tr>
+                    <td>${{groupVal}}</td>
+                    <td>${{stats.count}}</td>
+                    <td>${{stats.total}}</td>
+                    <td>${{pct.toFixed(1)}}%</td>
+                </tr>
+            `;
+        }}).join('');
+
+        const matchNote = matches.length > 1
+            ? `<div class="agg-group-meta">Multiple matches; showing first: <strong>${{target}}</strong></div>`
+            : `<div class="agg-group-meta">Showing: <strong>${{target}}</strong></div>`;
+
+        container.innerHTML = `
+            ${{matchNote}}
+            <table class="trend-table">
+                <thead>
+                    <tr>
+                        <th>${{formatMetadataLabel(groupKey)}}</th>
+                        <th>Count</th>
+                        <th>Total</th>
+                        <th>%</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${{rows}}
+                </tbody>
+            </table>
+        `;
+    }}
+
     function stepRange(rangeEl, delta) {{
         if (!rangeEl) return;
         const min = parseFloat(rangeEl.min || '0');
@@ -2580,6 +2709,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             if (umapVisible) renderUMAP();
             renderColorList(document.getElementById('color-search')?.value || '');
             renderColorAggregation();
+            renderCellTypeTrend();
             renderMarkerGenes();
         }});
 
@@ -2605,6 +2735,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 if (umapVisible) renderUMAP();
                 renderColorList(document.getElementById('color-search')?.value || '');
                 renderColorAggregation();
+                renderCellTypeTrend();
                 renderMarkerGenes();
             }} else if (!gene) {{
                 currentGene = null;
@@ -2616,6 +2747,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 if (umapVisible) renderUMAP();
                 renderColorList(document.getElementById('color-search')?.value || '');
                 renderColorAggregation();
+                renderCellTypeTrend();
                 renderMarkerGenes();
             }} else if (gene) {{
                 alert(`Gene "${{gene}}" was not pre-loaded.\\nTo view it, re-export with this gene included in the genes parameter or add it to highly variable genes.`);
