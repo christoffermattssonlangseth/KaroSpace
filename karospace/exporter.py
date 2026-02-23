@@ -1015,6 +1015,29 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             max-height: 180px;
             overflow: auto;
         }}
+        .modal-blend-summary {{
+            color: var(--text-color);
+            font-weight: 500;
+        }}
+        .modal-blend-markers-toggle {{
+            margin-top: 4px;
+            padding: 0;
+            border: none;
+            background: none;
+            color: var(--accent-strong);
+            font-size: 10px;
+            font-weight: 600;
+            cursor: pointer;
+        }}
+        .modal-blend-markers-toggle:hover {{
+            text-decoration: underline;
+        }}
+        .modal-blend-markers {{
+            margin-top: 4px;
+        }}
+        .modal-blend-markers.collapsed {{
+            display: none;
+        }}
         .modal-blend-marker-header {{
             margin-top: 4px;
             font-weight: 600;
@@ -1911,6 +1934,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let modalNextAnnotationId = 1;
     let modalBlendEnabled = false;
     let modalBlendMix = 0.5;  // Split position from left: 0 = all B, 1 = all A
+    let modalBlendMarkersCollapsed = true;
     let modalAnnotationPanelCustomPosition = null;
     let isDraggingModalAnnotationPanel = false;
     let modalAnnotationPanelDragOffsetX = 0;
@@ -6522,10 +6546,22 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const aMarkers = getModalBlendMarkerHtml('a');
                 const bMarkers = getModalBlendMarkerHtml('b');
                 const markerBlocks = [aMarkers, bMarkers].filter(Boolean);
+                const hasMarkers = markerBlocks.length > 0;
+                const toggleLabel = modalBlendMarkersCollapsed ? 'Show marker genes' : 'Hide marker genes';
                 modalBlendMeta.innerHTML = [
-                    `<div>${{escapeHtml(summary)}}</div>`,
-                    ...markerBlocks,
+                    `<div class="modal-blend-summary">${{escapeHtml(summary)}}</div>`,
+                    hasMarkers
+                        ? `<button type="button" class="modal-blend-markers-toggle" id="modal-blend-markers-toggle" aria-expanded="${{modalBlendMarkersCollapsed ? 'false' : 'true'}}">${{toggleLabel}}</button>`
+                        : '',
+                    hasMarkers
+                        ? `<div class="modal-blend-markers ${{modalBlendMarkersCollapsed ? 'collapsed' : ''}}">${{markerBlocks.join('')}}</div>`
+                        : '',
                 ].join('');
+                const markersToggle = document.getElementById('modal-blend-markers-toggle');
+                markersToggle?.addEventListener('click', () => {{
+                    modalBlendMarkersCollapsed = !modalBlendMarkersCollapsed;
+                    updateModalBlendLabels();
+                }});
             }}
         }}
 

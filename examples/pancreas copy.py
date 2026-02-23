@@ -5,17 +5,11 @@ This script demonstrates how to load Xenium spatial transcriptomics data
 and export it to an interactive HTML viewer.
 """
 
-from pathlib import Path
-import sys
-
-# Ensure this example imports the local workspace package (not a pip-installed copy).
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
 from karospace import load_spatial_data, export_to_html
 
 # Path to your h5ad file
 # Update this path to point to your EAE/MANA data
-H5AD_PATH = '/Volumes/processing2/KaroSpaceDataWrangle/codex3.h5ad'#'/Volumes/processing2/RRmap/data/EAE_proseg_clustered_louvain_leiden_all_sections_annotated_rotated_scVI_mana_embedding_clustered.h5ad'
+H5AD_PATH = '/Volumes/processing2/xenium-pancreas/data/xenium_pancreas_clustered_mana.h5ad'#'/Volumes/processing2/RRmap/data/EAE_proseg_clustered_louvain_leiden_all_sections_annotated_rotated_scVI_mana_embedding_clustered.h5ad'
 
 # Load the dataset
 # - groupby: column in adata.obs that identifies each section
@@ -24,7 +18,7 @@ dataset = load_spatial_data(
     H5AD_PATH,
     groupby="sample_id",  # adjust to match your data
     # Choose which obs columns appear as filter chips in the viewer
-    metadata_columns=['stage'],
+    metadata_columns=['condition'],
     metadata_value_order={
         "stage": [
                   ],
@@ -39,14 +33,14 @@ print(f"Available color columns: {dataset.obs_columns[:10]}...")  # first 10
 # - True: use highly variable genes (if present, capped to 20)
 # - False: use the explicit genes list below
 USE_HVGS = True
-OUTLINE_BY = "stage"
+OUTLINE_BY = "condition"
 
 # Export to HTML with full features
 # For your 107 sections with course/region metadata:
 export_to_html(
     dataset,
-    output_path="CODEX.html",
-    color="CellCharter_10",  # Initial color (categorical)
+    output_path="pancreas.html",
+    color="leiden_2",  # Initial color (categorical)
     title="KaroSpace",
     min_panel_size=120,  # minimum panel width in pixels, grid auto-adjusts
     spot_size="auto",  # adaptive default based on section density
@@ -55,7 +49,8 @@ export_to_html(
     outline_by=OUTLINE_BY,  # metadata column for panel outline colors
 
     # Include additional color options for the dropdown
-    additional_colors=[ 'CellCharter_15','CellCharter_20'
+    additional_colors=[
+       'leiden_0.5', 'leiden_1', 'leiden_1.5', 'leiden_2', 'gmm_mana_5', 'gmm_mana_8', 'gmm_mana_10', 'gmm_mana_12', 'gmm_mana_15', 'gmm_mana_20'
     ],
 
     # Pre-load specific genes for expression visualization
@@ -90,13 +85,12 @@ export_to_html(
        #"Vtn"
     ],
     use_hvgs=USE_HVGS,
-    hvg_limit=50,
+    hvg_limit=100,
 
     # Compute marker genes for these categorical color columns
     # (appears in the Color panel under "Marker genes")
     marker_genes_groupby=[
-       'CellCharter_10', 'CellCharter_15','CellCharter_20'
-
+        'leiden_0.5', 'leiden_1', 'leiden_1.5', 'leiden_2', 'gmm_mana_5', 'gmm_mana_8', 'gmm_mana_10', 'gmm_mana_12', 'gmm_mana_15', 'gmm_mana_20'
     ],
     marker_genes_top_n=50,
     # Force permutation z-scores (auto mode disables permutations for very large datasets).
@@ -117,7 +111,7 @@ export_to_html(
 # 4. Click to expand sections with zoom/pan
 # 5. Toggle categories on/off in the legend
 
-print("\nDone! Open CODEX.html in a browser.")
+print("\nDone! Open eae_mana_viewer.html in a browser.")
 print("Use the filter chips to show only specific courses (e.g., peak_III)")
 print("Use the Color dropdown to switch between different annotations")
 print("Type a gene name to view expression (must be in the genes list)")

@@ -5,17 +5,11 @@ This script demonstrates how to load Xenium spatial transcriptomics data
 and export it to an interactive HTML viewer.
 """
 
-from pathlib import Path
-import sys
-
-# Ensure this example imports the local workspace package (not a pip-installed copy).
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
 from karospace import load_spatial_data, export_to_html
 
 # Path to your h5ad file
 # Update this path to point to your EAE/MANA data
-H5AD_PATH = '/Volumes/processing2/KaroSpaceDataWrangle/codex3.h5ad'#'/Volumes/processing2/RRmap/data/EAE_proseg_clustered_louvain_leiden_all_sections_annotated_rotated_scVI_mana_embedding_clustered.h5ad'
+H5AD_PATH = '/Users/chrislangseth/work/karolinska_institutet/projects/xenium_mouse_embryo/derived_scanpy/step0_clustered.h5ad'#'/Volumes/processing2/RRmap/data/EAE_proseg_clustered_louvain_leiden_all_sections_annotated_rotated_scVI_mana_embedding_clustered.h5ad'
 
 # Load the dataset
 # - groupby: column in adata.obs that identifies each section
@@ -24,10 +18,9 @@ dataset = load_spatial_data(
     H5AD_PATH,
     groupby="sample_id",  # adjust to match your data
     # Choose which obs columns appear as filter chips in the viewer
-    metadata_columns=['stage'],
+    metadata_columns=[],
     metadata_value_order={
-        "stage": [
-                  ],
+        "condition": [],
     },
     # metadata_max_columns=4,  # optional: limit number of metadata columns used
 )
@@ -39,55 +32,31 @@ print(f"Available color columns: {dataset.obs_columns[:10]}...")  # first 10
 # - True: use highly variable genes (if present, capped to 20)
 # - False: use the explicit genes list below
 USE_HVGS = True
-OUTLINE_BY = "stage"
+OUTLINE_BY = "condition"
 
 # Export to HTML with full features
 # For your 107 sections with course/region metadata:
 export_to_html(
     dataset,
-    output_path="CODEX.html",
-    color="CellCharter_10",  # Initial color (categorical)
+    output_path="xenium-mouse-pup.html",
+    color='leiden_0.5',  # Initial color (categorical)
     title="KaroSpace",
     min_panel_size=120,  # minimum panel width in pixels, grid auto-adjusts
     spot_size="auto",  # adaptive default based on section density
-    downsample=1000000,  # limit cells per section to keep file manageable
+    downsample=10000000,  # limit cells per section to keep file manageable
     theme="light",  # or "dark"
     outline_by=OUTLINE_BY,  # metadata column for panel outline colors
 
     # Include additional color options for the dropdown
-    additional_colors=[ 'CellCharter_15','CellCharter_20'
+    additional_colors=[
+       'leiden_0.1', 'leiden_1', 'leiden_1.5', 'leiden_2'
     ],
 
     # Pre-load specific genes for expression visualization
     # These will be available in the gene input field
     genes=[
         # Example marker genes - replace with your genes of interest
-        "Arg1",
-        #"C3",
-        "Cd74",
-        "Cldn11",
-        "Col1a2",
-        "Ctss",
-        #"Ermn",
-        "Foxp3",
-        "Gfap",
-        "Gpnmb",
-        "Grn",
-        "H2-Aa",
-        "H2-Ab1",
-        "H2-Eb1",
-        #"Igf2",
-       # "Klk6",
-        #"Mag",
-        "Mbp",
-        "Meg3",
-        "Mki67",
-        "Ptgds",
-        "Serpina3n",
-        #"Serping1",
-       # "Slc47a1",
-       # "Snap25",
-       #"Vtn"
+         # A1
     ],
     use_hvgs=USE_HVGS,
     hvg_limit=50,
@@ -95,19 +64,9 @@ export_to_html(
     # Compute marker genes for these categorical color columns
     # (appears in the Color panel under "Marker genes")
     marker_genes_groupby=[
-       'CellCharter_10', 'CellCharter_15','CellCharter_20'
-
+      'leiden_0.1', 'leiden_0.5', 'leiden_1', 'leiden_1.5', 'leiden_2'
     ],
     marker_genes_top_n=50,
-    # Force permutation z-scores (auto mode disables permutations for very large datasets).
-    neighbor_stats_permutations=25,
-    neighbor_stats_seed=42,
-    # Contact-conditioned interaction markers (source near target vs source not near target).
-    interaction_markers_groupby=None,
-    interaction_markers_top_targets=6,
-    interaction_markers_top_genes=15,
-    interaction_markers_min_cells=30,
-    interaction_markers_min_neighbors=1,
 )
 
 # The viewer now supports:
@@ -117,7 +76,7 @@ export_to_html(
 # 4. Click to expand sections with zoom/pan
 # 5. Toggle categories on/off in the legend
 
-print("\nDone! Open CODEX.html in a browser.")
+print("\nDone! Open eae_mana_viewer.html in a browser.")
 print("Use the filter chips to show only specific courses (e.g., peak_III)")
 print("Use the Color dropdown to switch between different annotations")
 print("Type a gene name to view expression (must be in the genes list)")
