@@ -72,6 +72,18 @@ def main():
         help="Gene vector encoding. 'sparse' stores only non-zero indices/values (smaller HTML for zero-inflated data). (default: auto)"
     )
     parser.add_argument(
+        "--gene-storage",
+        choices=["embedded", "sidecar"],
+        default="embedded",
+        help="Store genes in the HTML (`embedded`) or write non-embedded genes to an auxiliary JSON sidecar (`sidecar`). (default: embedded)"
+    )
+    parser.add_argument(
+        "--gene-aux-path",
+        type=str,
+        default=None,
+        help="Optional output path for the gene sidecar JSON when --gene-storage sidecar."
+    )
+    parser.add_argument(
         "--gene-sparse-zero-threshold",
         type=float,
         default=0.8,
@@ -183,6 +195,8 @@ def main():
         downsample=args.downsample,
         theme=args.theme,
         gene_encoding=args.gene_encoding,
+        gene_storage=args.gene_storage,
+        gene_aux_path=args.gene_aux_path,
         gene_sparse_zero_threshold=args.gene_sparse_zero_threshold,
         pack_arrays=args.pack_arrays,
         pack_arrays_min_len=args.pack_arrays_min_len,

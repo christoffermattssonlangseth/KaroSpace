@@ -8,6 +8,7 @@ gene expression, and metadata for visualization.
 import numpy as np
 import pandas as pd
 import scanpy as sc
+from pandas.api.types import CategoricalDtype
 from scipy.sparse import issparse
 import scipy.sparse as sp
 from typing import Dict, List, Optional, Tuple, Union
@@ -88,7 +89,7 @@ class SpatialDataset:
         """
         if color in self.adata.obs.columns:
             col = self.adata.obs[color]
-            if pd.api.types.is_categorical_dtype(col):
+            if isinstance(col.dtype, CategoricalDtype):
                 categories = list(col.cat.categories)
                 values = col.cat.codes.to_numpy().astype(float)
                 # Handle NaN codes (-1)
@@ -160,6 +161,253 @@ class SpatialDataset:
                 else:
                     filters[col] = sorted(unique_vals)
         return filters
+
+    def _get_export_section_indices(self, downsample: Optional[int] = None) -> Dict[str, np.ndarray]:
+        """Return per-section obs indices used for export, including deterministic downsampling."""
+        section_indices = self.get_section_indices()
+        export_indices: Dict[str, np.ndarray] = {}
+        for section in self.sections:
+            idx = section_indices[section.section_id]
+            if downsample and len(idx) > downsample:
+                rng = np.random.default_rng(42)
+                idx = rng.choice(idx, size=downsample, replace=False)
+                idx = np.sort(idx)
+            export_indices[section.section_id] = np.asarray(idx)
+        return export_indices
+
+    def _collect_gene_data(self, genes: Optional[List[str]] = None) -> Dict[str, Dict[str, Union[np.ndarray, float]]]:
+        """Collect gene vectors and ranges for export."""
+        gene_data: Dict[str, Dict[str, Union[np.ndarray, float]]] = {}
+        for gene in genes or []:
+            if gene not in self.adata.var_names:
+                continue
+            try:
+                vals, _, _ = self.get_color_data(gene)
+                finite = np.isfinite(vals)
+                gene_vmin = float(np.nanmin(vals[finite])) if finite.any() else 0.0
+                gene_vmax = float(np.nanmax(vals[finite])) if finite.any() else 1.0
+                gene_data[gene] = {
+                    "values": vals,
+                    "vmin": gene_vmin,
+                    "vmax": gene_vmax,
+                }
+            except Exception as e:
+                print(f"  Warning: Could not load gene '{gene}': {e}")
+        return gene_data
+
+    @staticmethod
+    def _resolve_gene_encodings(
+        gene_data: Dict[str, Dict[str, Union[np.ndarray, float]]],
+        gene_encoding: str,
+        gene_sparse_zero_threshold: float,
+    ) -> Dict[str, str]:
+        gene_encodings: Dict[str, str] = {}
+        for gene, gdata in gene_data.items():
+            if gene_encoding == "dense":
+                gene_encodings[gene] = "dense"
+            elif gene_encoding == "sparse":
+                gene_encodings[gene] = "sparse"
+            else:
+                vals = np.asarray(gdata["values"])
+                finite = np.isfinite(vals)
+                nonzero = finite & (vals != 0)
+                zero_frac = 1.0
+                if vals.size:
+                    zero_frac = 1.0 - (float(np.count_nonzero(nonzero)) / float(vals.size))
+                gene_encodings[gene] = "sparse" if zero_frac >= float(gene_sparse_zero_threshold) else "dense"
+        return gene_encodings
+
+    @staticmethod
+    def _validate_gene_export_options(
+        gene_encoding: str,
+        gene_sparse_zero_threshold: float,
+        gene_sparse_pack_min_nnz: int,
+    ) -> None:
+        gene_encoding = str(gene_encoding or "auto").lower()
+        if gene_encoding not in {"auto", "dense", "sparse"}:
+            raise ValueError("gene_encoding must be one of: 'auto', 'dense', 'sparse'")
+        if not (0.0 <= float(gene_sparse_zero_threshold) <= 1.0):
+            raise ValueError("gene_sparse_zero_threshold must be between 0 and 1")
+        if int(gene_sparse_pack_min_nnz) < 0:
+            raise ValueError("gene_sparse_pack_min_nnz must be >= 0")
+
+    @staticmethod
+    def _serialize_gene_section_values(
+        section_vals: np.ndarray,
+        mode: str,
+        gene_sparse_pack: bool,
+        gene_sparse_pack_min_nnz: int,
+        b64_encoder,
+    ) -> Dict:
+        if mode == "sparse":
+            finite = np.isfinite(section_vals)
+            nonzero = finite & (section_vals != 0)
+            nz_idx = np.flatnonzero(nonzero).astype(np.uint32)
+            nz_vals = np.asarray(section_vals[nonzero], dtype=np.float32)
+            if bool(gene_sparse_pack) and int(nz_idx.size) >= int(gene_sparse_pack_min_nnz):
+                sparse_entry = {
+                    "ib64": b64_encoder(np.asarray(nz_idx, dtype="<u4")),
+                    "vb64": b64_encoder(np.asarray(nz_vals, dtype="<f4")),
+                }
+            else:
+                sparse_entry = {
+                    "i": nz_idx.astype(int).tolist(),
+                    "v": nz_vals.astype(float).tolist(),
+                }
+            nan_idx = np.flatnonzero(np.isnan(section_vals)).astype(int)
+            if nan_idx.size:
+                sparse_entry["nan"] = nan_idx.tolist()
+            return {"sparse": sparse_entry}
+
+        return {
+            "dense": [float(v) if np.isfinite(v) else None for v in section_vals]
+        }
+
+    def to_gene_sidecar_data(
+        self,
+        genes: Optional[List[str]] = None,
+        downsample: Optional[int] = None,
+        export_indices: Optional[Dict[str, np.ndarray]] = None,
+        gene_encoding: str = "auto",
+        gene_sparse_zero_threshold: float = 0.8,
+        gene_sparse_pack: bool = True,
+        gene_sparse_pack_min_nnz: int = 256,
+    ) -> Dict:
+        """Export a gene-major sidecar payload for downstream viewer loading."""
+        self._validate_gene_export_options(gene_encoding, gene_sparse_zero_threshold, gene_sparse_pack_min_nnz)
+        export_indices = export_indices or self._get_export_section_indices(downsample=downsample)
+        unique_genes = []
+        seen = set()
+        for gene in genes or []:
+            if gene in seen or gene not in self.adata.var_names:
+                continue
+            seen.add(gene)
+            unique_genes.append(gene)
+
+        def _b64(arr: np.ndarray) -> str:
+            import base64
+
+            carr = np.ascontiguousarray(arr)
+            return base64.b64encode(carr.tobytes(order="C")).decode("ascii")
+
+        genes_payload = {}
+        genes_meta = {}
+        gene_encodings: Dict[str, str] = {}
+        if unique_genes:
+            gene_indices = [self.adata.var_names.get_loc(gene) for gene in unique_genes]
+            expr_layer = self.adata.layers["normalized"] if "normalized" in self.adata.layers else self.adata.X
+            batch = expr_layer[:, gene_indices]
+            resolved_gene_encoding = str(gene_encoding or "auto").lower()
+
+            if issparse(batch):
+                batch_csr = batch.tocsr()
+                batch_csc = batch.tocsc()
+                section_batches = {
+                    section.section_id: batch_csr[export_indices[section.section_id], :].tocsc()
+                    for section in self.sections
+                }
+                n_obs = int(batch.shape[0])
+                for gene_pos, gene in enumerate(unique_genes):
+                    col = batch_csc.getcol(gene_pos)
+                    raw_vals = np.asarray(col.data, dtype=float).ravel()
+                    finite_vals = raw_vals[np.isfinite(raw_vals)]
+                    if finite_vals.size:
+                        raw_min = float(np.min(finite_vals))
+                        raw_max = float(np.max(finite_vals))
+                        has_implicit_zeros = int(np.count_nonzero(col.data != 0)) < n_obs
+                        gene_vmin = min(0.0, raw_min) if has_implicit_zeros else raw_min
+                        gene_vmax = max(0.0, raw_max) if has_implicit_zeros else raw_max
+                    else:
+                        gene_vmin = 0.0
+                        gene_vmax = 0.0
+
+                    if resolved_gene_encoding == "dense":
+                        mode = "dense"
+                    elif resolved_gene_encoding == "sparse":
+                        mode = "sparse"
+                    else:
+                        nonzero = np.isfinite(raw_vals) & (raw_vals != 0)
+                        zero_frac = 1.0
+                        if n_obs:
+                            zero_frac = 1.0 - (float(np.count_nonzero(nonzero)) / float(n_obs))
+                        mode = "sparse" if zero_frac >= float(gene_sparse_zero_threshold) else "dense"
+                    gene_encodings[gene] = mode
+
+                    sections_payload = {}
+                    for section in self.sections:
+                        sec_col = section_batches[section.section_id].getcol(gene_pos)
+                        if mode == "sparse":
+                            section_vals = np.asarray(sec_col.data, dtype=float).ravel()
+                            section_idx = np.asarray(sec_col.indices, dtype=np.int64).ravel()
+                            finite = np.isfinite(section_vals)
+                            nonzero = finite & (section_vals != 0)
+                            nz_idx = section_idx[nonzero].astype(np.uint32, copy=False)
+                            nz_vals = section_vals[nonzero].astype(np.float32, copy=False)
+                            if bool(gene_sparse_pack) and int(nz_idx.size) >= int(gene_sparse_pack_min_nnz):
+                                sparse_entry = {
+                                    "ib64": _b64(np.asarray(nz_idx, dtype="<u4")),
+                                    "vb64": _b64(np.asarray(nz_vals, dtype="<f4")),
+                                }
+                            else:
+                                sparse_entry = {
+                                    "i": nz_idx.astype(int).tolist(),
+                                    "v": nz_vals.astype(float).tolist(),
+                                }
+                            nan_idx = section_idx[np.isnan(section_vals)].astype(int, copy=False)
+                            if nan_idx.size:
+                                sparse_entry["nan"] = nan_idx.tolist()
+                            sections_payload[section.section_id] = {"sparse": sparse_entry}
+                        else:
+                            dense_vals = np.asarray(sec_col.toarray()).ravel()
+                            sections_payload[section.section_id] = {
+                                "dense": [
+                                    float(v) if np.isfinite(v) else None for v in dense_vals
+                                ]
+                            }
+
+                    genes_payload[gene] = {"sections": sections_payload}
+                    genes_meta[gene] = {"vmin": gene_vmin, "vmax": gene_vmax}
+            else:
+                batch_dense = np.asarray(batch)
+                if batch_dense.ndim == 1:
+                    batch_dense = batch_dense.reshape(-1, 1)
+                for gene_pos, gene in enumerate(unique_genes):
+                    vals = np.asarray(batch_dense[:, gene_pos], dtype=float).ravel()
+                    finite = np.isfinite(vals)
+                    gene_vmin = float(np.nanmin(vals[finite])) if finite.any() else 0.0
+                    gene_vmax = float(np.nanmax(vals[finite])) if finite.any() else 0.0
+                    if resolved_gene_encoding == "dense":
+                        mode = "dense"
+                    elif resolved_gene_encoding == "sparse":
+                        mode = "sparse"
+                    else:
+                        nonzero = finite & (vals != 0)
+                        zero_frac = 1.0
+                        if vals.size:
+                            zero_frac = 1.0 - (float(np.count_nonzero(nonzero)) / float(vals.size))
+                        mode = "sparse" if zero_frac >= float(gene_sparse_zero_threshold) else "dense"
+                    gene_encodings[gene] = mode
+
+                    sections_payload = {}
+                    for section in self.sections:
+                        idx = export_indices[section.section_id]
+                        section_vals = batch_dense[idx, gene_pos]
+                        sections_payload[section.section_id] = self._serialize_gene_section_values(
+                            section_vals=np.asarray(section_vals),
+                            mode=mode,
+                            gene_sparse_pack=gene_sparse_pack,
+                            gene_sparse_pack_min_nnz=gene_sparse_pack_min_nnz,
+                            b64_encoder=_b64,
+                        )
+                    genes_payload[gene] = {"sections": sections_payload}
+                    genes_meta[gene] = {"vmin": gene_vmin, "vmax": gene_vmax}
+
+        return {
+            "format": "karospace-gene-sidecar-v1",
+            "genes_meta": genes_meta,
+            "gene_encodings": gene_encodings,
+            "genes": genes_payload,
+        }
 
     def to_json_data(
         self,
@@ -254,7 +502,7 @@ class SpatialDataset:
             JSON-serializable data structure
         """
         coords = np.asarray(self.adata.obsm["spatial"])[:, :2]
-        section_indices = self.get_section_indices()
+        export_section_indices = self._get_export_section_indices(downsample=downsample)
 
         # Get UMAP coordinates if available
         umap_coords = None
@@ -324,30 +572,10 @@ class SpatialDataset:
                 print(f"  Warning: Could not load color '{col}': {e}")
 
         # Pre-compute gene expression data
-        gene_data = {}
-        if genes:
-            for gene in genes:
-                if gene in self.adata.var_names:
-                    try:
-                        vals, _, _ = self.get_color_data(gene)
-                        finite = np.isfinite(vals)
-                        gene_vmin = float(np.nanmin(vals[finite])) if finite.any() else 0.0
-                        gene_vmax = float(np.nanmax(vals[finite])) if finite.any() else 1.0
-                        gene_data[gene] = {
-                            "values": vals,
-                            "vmin": gene_vmin,
-                            "vmax": gene_vmax,
-                        }
-                    except Exception as e:
-                        print(f"  Warning: Could not load gene '{gene}': {e}")
+        gene_data = self._collect_gene_data(genes)
 
         gene_encoding = str(gene_encoding or "auto").lower()
-        if gene_encoding not in {"auto", "dense", "sparse"}:
-            raise ValueError("gene_encoding must be one of: 'auto', 'dense', 'sparse'")
-        if not (0.0 <= float(gene_sparse_zero_threshold) <= 1.0):
-            raise ValueError("gene_sparse_zero_threshold must be between 0 and 1")
-        if int(gene_sparse_pack_min_nnz) < 0:
-            raise ValueError("gene_sparse_pack_min_nnz must be >= 0")
+        self._validate_gene_export_options(gene_encoding, gene_sparse_zero_threshold, gene_sparse_pack_min_nnz)
         if int(section_array_pack_min_len) < 0:
             raise ValueError("section_array_pack_min_len must be >= 0")
         if int(interaction_markers_top_targets) < 1:
@@ -359,21 +587,7 @@ class SpatialDataset:
         if int(interaction_markers_min_neighbors) < 1:
             raise ValueError("interaction_markers_min_neighbors must be >= 1")
 
-        gene_encodings: Dict[str, str] = {}
-        if gene_data:
-            for gene, gdata in gene_data.items():
-                if gene_encoding == "dense":
-                    gene_encodings[gene] = "dense"
-                elif gene_encoding == "sparse":
-                    gene_encodings[gene] = "sparse"
-                else:
-                    vals = np.asarray(gdata["values"])
-                    finite = np.isfinite(vals)
-                    nonzero = finite & (vals != 0)
-                    zero_frac = 1.0
-                    if vals.size:
-                        zero_frac = 1.0 - (float(np.count_nonzero(nonzero)) / float(vals.size))
-                    gene_encodings[gene] = "sparse" if zero_frac >= float(gene_sparse_zero_threshold) else "dense"
+        gene_encodings = self._resolve_gene_encodings(gene_data, gene_encoding, gene_sparse_zero_threshold)
 
         def _b64(arr: np.ndarray) -> str:
             import base64
@@ -400,12 +614,17 @@ class SpatialDataset:
         # Compute marker genes for requested groupby columns
         marker_genes = {}
         if marker_genes_groupby:
+            print(
+                f"Computing marker genes for {len(marker_genes_groupby)} "
+                f"groupby column{'s' if len(marker_genes_groupby) != 1 else ''}..."
+            )
             for groupby in marker_genes_groupby:
+                print(f"  - marker genes: {groupby}")
                 if groupby not in self.adata.obs.columns:
                     print(f"  Warning: marker_genes groupby '{groupby}' not found in obs.")
                     continue
                 col = self.adata.obs[groupby]
-                if not pd.api.types.is_categorical_dtype(col):
+                if not isinstance(col.dtype, CategoricalDtype):
                     self.adata.obs[groupby] = col.astype("category")
                 key_added = f"rank_genes_groups_{groupby}"
                 alt_key_added = f"rank_genes_groups__{groupby}"
@@ -456,7 +675,12 @@ class SpatialDataset:
         neighbor_stats = {}
         neighbor_stats_context = {}
         if neighbor_graph is not None and neighbor_stats_groupby:
+            print(
+                f"Computing neighbor stats for {len(neighbor_stats_groupby)} "
+                f"groupby column{'s' if len(neighbor_stats_groupby) != 1 else ''}..."
+            )
             for groupby in neighbor_stats_groupby:
+                print(f"  - neighbor stats: {groupby}")
                 if groupby not in self.adata.obs.columns:
                     print(f"  Warning: neighbor stats groupby '{groupby}' not found in obs.")
                     continue
@@ -464,7 +688,7 @@ class SpatialDataset:
                 if pd.api.types.is_numeric_dtype(col):
                     print(f"  Warning: neighbor stats '{groupby}' is numeric; skipping.")
                     continue
-                if not pd.api.types.is_categorical_dtype(col):
+                if not isinstance(col.dtype, CategoricalDtype):
                     col = col.astype("category")
                 categories = list(col.cat.categories)
                 codes = col.cat.codes.to_numpy()
@@ -553,6 +777,10 @@ class SpatialDataset:
         # for source S and target T, compare source cells contacting T vs source cells not contacting T.
         interaction_markers = {}
         if neighbor_graph is not None and interaction_markers_groupby:
+            print(
+                f"Computing interaction markers for {len(interaction_markers_groupby)} "
+                f"groupby column{'s' if len(interaction_markers_groupby) != 1 else ''}..."
+            )
             method = str(interaction_markers_method or "wilcoxon")
             top_targets = int(interaction_markers_top_targets)
             top_genes = int(interaction_markers_top_genes)
@@ -599,6 +827,7 @@ class SpatialDataset:
                 return out
 
             for groupby in interaction_markers_groupby:
+                print(f"  - interaction markers: {groupby}")
                 ctx = neighbor_stats_context.get(groupby)
                 if ctx is None:
                     print(
@@ -770,12 +999,7 @@ class SpatialDataset:
         # Build section data with all color layers
         sections_data = []
         for section in self.sections:
-            idx = section_indices[section.section_id]
-
-            if downsample and len(idx) > downsample:
-                rng = np.random.default_rng(42)
-                idx = rng.choice(idx, size=downsample, replace=False)
-                idx = np.sort(idx)
+            idx = export_section_indices[section.section_id]
 
             section_coords = coords_f4[idx]
 
@@ -804,29 +1028,17 @@ class SpatialDataset:
             for gene, gdata in gene_data.items():
                 section_vals = gdata["values"][idx]
                 mode = gene_encodings.get(gene, "dense")
-                if mode == "sparse":
-                    finite = np.isfinite(section_vals)
-                    nonzero = finite & (section_vals != 0)
-                    nz_idx = np.flatnonzero(nonzero).astype(np.uint32)
-                    nz_vals = np.asarray(section_vals[nonzero], dtype=np.float32)
-                    if bool(gene_sparse_pack) and int(nz_idx.size) >= int(gene_sparse_pack_min_nnz):
-                        sparse_entry = {
-                            "ib64": _b64(np.asarray(nz_idx, dtype="<u4")),
-                            "vb64": _b64(np.asarray(nz_vals, dtype="<f4")),
-                        }
-                    else:
-                        sparse_entry = {
-                            "i": nz_idx.astype(int).tolist(),
-                            "v": nz_vals.astype(float).tolist(),
-                        }
-                    nan_idx = np.flatnonzero(np.isnan(section_vals)).astype(int)
-                    if nan_idx.size:
-                        sparse_entry["nan"] = nan_idx.tolist()
-                    section_genes_sparse[gene] = sparse_entry
+                payload = self._serialize_gene_section_values(
+                    section_vals=np.asarray(section_vals),
+                    mode=mode,
+                    gene_sparse_pack=gene_sparse_pack,
+                    gene_sparse_pack_min_nnz=gene_sparse_pack_min_nnz,
+                    b64_encoder=_b64,
+                )
+                if "sparse" in payload:
+                    section_genes_sparse[gene] = payload["sparse"]
                 else:
-                    section_genes_dense[gene] = [
-                        float(v) if np.isfinite(v) else None for v in section_vals
-                    ]
+                    section_genes_dense[gene] = payload["dense"]
 
             section_entry = {
                 "id": section.section_id,
@@ -1009,7 +1221,7 @@ def load_spatial_data(
                     return (0, desired_index[meta_value], sid)
                 return (1, meta_value, sid)
             section_ids = [sid for sid, _ in sorted(section_ids, key=_order_key)]
-        elif pd.api.types.is_categorical_dtype(gser) and gser.cat.ordered:
+        elif isinstance(gser.dtype, CategoricalDtype) and gser.cat.ordered:
             section_ids = [str(c) for c in gser.cat.categories if str(c) in gser_str.unique()]
         else:
             section_ids = sorted(gser_str.unique())
@@ -1052,7 +1264,7 @@ def load_spatial_data(
     # Get available columns for coloring
     obs_columns = [
         col for col in adata.obs.columns
-        if pd.api.types.is_categorical_dtype(adata.obs[col])
+        if isinstance(adata.obs[col].dtype, CategoricalDtype)
         or pd.api.types.is_numeric_dtype(adata.obs[col])
     ]
 

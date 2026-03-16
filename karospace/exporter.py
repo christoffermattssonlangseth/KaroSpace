@@ -7,11 +7,19 @@ for interactive visualization of spatial transcriptomics data.
 
 import base64
 import json
+import os
+import time
 from pathlib import Path
 from typing import Optional, List, Tuple, Union
 import numpy as np
+try:
+    from tqdm.auto import tqdm
+except Exception:  # pragma: no cover - optional dependency fallback
+    tqdm = None
 
 from .data_loader import SpatialDataset
+
+GENE_SIDECAR_SHARD_SIZE = 256
 
 
 def _load_logo_base64() -> Optional[str]:
@@ -21,6 +29,12 @@ def _load_logo_base64() -> Optional[str]:
         with open(logo_path, "rb") as f:
             return base64.b64encode(f.read()).decode("utf-8")
     return None
+
+
+def _chunked(values: List[str], size: int) -> List[List[str]]:
+    if size < 1:
+        raise ValueError("chunk size must be >= 1")
+    return [values[i:i + size] for i in range(0, len(values), size)]
 
 
 def _estimate_auto_spot_size(dataset: SpatialDataset, min_panel_size: int) -> float:
@@ -1814,13 +1828,26 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             showError(msg, LOADING_WARNING_ID);
             loadingWarningTimer = setTimeout(removeLoadingWarning, LOADING_WARNING_AUTO_DISMISS_MS);
         }}
+        function formatAsyncError(reason) {{
+            if (!reason) return 'Unknown async error';
+            if (typeof reason === 'string') return reason;
+            if (reason && typeof reason.message === 'string' && reason.message) return reason.message;
+            try {{
+                return String(reason);
+            }} catch (_) {{
+                return 'Unknown async error';
+            }}
+        }}
+        window.__karospaceShowLoadingWarning = showLoadingWarning;
         window.__karospaceRemoveLoadingWarning = removeLoadingWarning;
         window.__karospaceShowStartupError = showError;
         window.addEventListener('error', (e) => {{
             showError(`KaroSpace failed to start: ${{e.message || 'Unknown error'}} (open DevTools console).`);
         }});
         window.addEventListener('unhandledrejection', (e) => {{
-            showError('KaroSpace failed to start: Unhandled promise rejection (open DevTools console).');
+            const detail = formatAsyncError(e.reason);
+            console.error('Unhandled promise rejection:', e.reason);
+            showError(`KaroSpace async error: ${{detail}} (open DevTools console).`);
         }});
         // Fallback: never keep the loader up forever.
         setTimeout(() => {{
@@ -1837,10 +1864,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     <script id="karospace-data" type="application/json">{data_json}</script>
     <script>
     const DATA = JSON.parse(document.getElementById('karospace-data').textContent);
+    DATA.genes_meta = DATA.genes_meta || {{}};
+    DATA.gene_encodings = DATA.gene_encodings || {{}};
     const PALETTE = {palette_json};
     const METADATA_LABELS = {metadata_labels_json};
     const OUTLINE_BY = {outline_by_json};
     const VIEWER_INFO_HTML = {viewer_info_html_json};
+    const AVAILABLE_GENE_SET = new Set(DATA.available_genes || []);
 
     const USER_AGENT = navigator.userAgent || '';
     const IS_SAFARI = /Safari/i.test(USER_AGENT) &&
@@ -1912,6 +1942,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     const expandedNeighborGroups = new Set();
     let interactionSourceCategory = null;
     let dotplotRenderToken = 0;
+    let geneAuxManifest = null;
+    let geneAuxManifestPromise = null;
+    const geneAuxShardCache = new Map();
+    const geneAuxShardPromises = new Map();
+    let geneAuxLoadingMessage = '';
 
     // Modal state
     let modalSection = null;
@@ -2486,6 +2521,170 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return arr;
     }}
 
+    function setGeneLoadingState(isLoading, message = '') {{
+        geneAuxLoadingMessage = isLoading ? (message || 'Loading gene expression…') : '';
+        const geneInput = document.getElementById('gene-input');
+        if (geneInput) {{
+            geneInput.disabled = !!isLoading;
+            if (isLoading) {{
+                geneInput.dataset.prevPlaceholder = geneInput.placeholder || '';
+                geneInput.placeholder = geneAuxLoadingMessage;
+            }} else if (geneInput.dataset.prevPlaceholder !== undefined) {{
+                geneInput.placeholder = geneInput.dataset.prevPlaceholder || 'e.g. Cd4, Gfap...';
+                delete geneInput.dataset.prevPlaceholder;
+            }}
+        }}
+        ['modal-blend-a-gene', 'modal-blend-b-gene'].forEach((id) => {{
+            const control = document.getElementById(id);
+            if (control) control.disabled = !!isLoading;
+        }});
+    }}
+
+    function hydrateGeneFromAux(gene, auxData) {{
+        const geneEntry = auxData?.genes?.[gene];
+        const geneMeta = auxData?.genes_meta?.[gene] || geneAuxManifest?.genes_meta?.[gene];
+        if (!geneEntry || !geneMeta) return false;
+        DATA.genes_meta[gene] = geneMeta;
+        const encoding = auxData?.gene_encodings?.[gene] || geneAuxManifest?.gene_encodings?.[gene];
+        if (encoding) {{
+            DATA.gene_encodings[gene] = encoding;
+        }}
+
+        (DATA.sections || []).forEach((section) => {{
+            const sectionEntry = geneEntry.sections?.[section.id];
+            if (!sectionEntry) return;
+            section.genes = section.genes || {{}};
+            section.genes_sparse = section.genes_sparse || {{}};
+            if (Array.isArray(sectionEntry.dense)) {{
+                section.genes[gene] = sectionEntry.dense;
+                if (section.genes_sparse[gene]) delete section.genes_sparse[gene];
+            }} else if (sectionEntry.sparse) {{
+                section.genes_sparse[gene] = sectionEntry.sparse;
+                if (section.genes[gene]) delete section.genes[gene];
+            }}
+        }});
+        return true;
+    }}
+
+    async function loadGeneAuxManifest() {{
+        if (geneAuxManifest) return geneAuxManifest;
+        if (geneAuxManifestPromise) return geneAuxManifestPromise;
+        if (!DATA.gene_aux_url) return null;
+        if (window.location.protocol === 'file:') {{
+            window.__karospaceShowStartupError?.(
+                'This viewer was exported with sidecar gene loading. Open it over HTTP(S) to load additional genes.'
+            );
+            return null;
+        }}
+
+        setGeneLoadingState(true, 'Loading gene manifest…');
+        window.__karospaceShowLoadingWarning?.('Loading gene sidecar manifest…');
+        geneAuxManifestPromise = fetch(DATA.gene_aux_url, {{ credentials: 'same-origin' }})
+            .then((response) => {{
+                if (!response.ok) {{
+                    throw new Error(`HTTP ${{response.status}} while loading gene sidecar manifest`);
+                }}
+                return response.json();
+            }})
+            .then((payload) => {{
+                if (!payload || payload.format !== 'karospace-gene-sidecar-manifest-v2') {{
+                    throw new Error('Unsupported gene sidecar manifest format');
+                }}
+                geneAuxManifest = payload;
+                return payload;
+            }})
+            .catch((error) => {{
+                console.error('Failed to load gene sidecar manifest:', error);
+                window.__karospaceShowStartupError?.(
+                    `Failed to load auxiliary gene data: ${{error?.message || 'Unknown error'}}`
+                );
+                geneAuxManifestPromise = null;
+                return null;
+            }})
+            .finally(() => {{
+                setGeneLoadingState(false);
+                window.__karospaceRemoveLoadingWarning?.();
+            }});
+        return geneAuxManifestPromise;
+    }}
+
+    async function loadGeneAuxShard(shardUrl) {{
+        if (!shardUrl) return null;
+        if (geneAuxShardCache.has(shardUrl)) return geneAuxShardCache.get(shardUrl);
+        if (geneAuxShardPromises.has(shardUrl)) return geneAuxShardPromises.get(shardUrl);
+
+        setGeneLoadingState(true, 'Loading gene expression…');
+        window.__karospaceShowLoadingWarning?.('Loading requested gene expression…');
+        const promise = fetch(shardUrl, {{ credentials: 'same-origin' }})
+            .then((response) => {{
+                if (!response.ok) {{
+                    throw new Error(`HTTP ${{response.status}} while loading gene shard`);
+                }}
+                return response.json();
+            }})
+            .then((payload) => {{
+                if (!payload || payload.format !== 'karospace-gene-sidecar-shard-v2') {{
+                    throw new Error('Unsupported gene sidecar shard format');
+                }}
+                geneAuxShardCache.set(shardUrl, payload);
+                return payload;
+            }})
+            .catch((error) => {{
+                console.error('Failed to load gene shard:', error);
+                window.__karospaceShowStartupError?.(
+                    `Failed to load requested gene data: ${{error?.message || 'Unknown error'}}`
+                );
+                geneAuxShardPromises.delete(shardUrl);
+                return null;
+            }})
+            .finally(() => {{
+                setGeneLoadingState(false);
+                window.__karospaceRemoveLoadingWarning?.();
+            }});
+        geneAuxShardPromises.set(shardUrl, promise);
+        return promise;
+    }}
+
+    async function ensureGeneAvailable(gene, options = {{}}) {{
+        const token = String(gene || '').trim();
+        const showErrors = options.showErrors !== false;
+        if (!token) return false;
+        if (DATA.genes_meta?.[token]) return true;
+        if (!AVAILABLE_GENE_SET.has(token)) {{
+            if (showErrors) {{
+                alert(`Gene "${{token}}" was not found in this dataset.`);
+            }}
+            return false;
+        }}
+        const manifest = await loadGeneAuxManifest();
+        if (!manifest) return false;
+        const shardUrl = manifest?.gene_to_shard?.[token];
+        if (!shardUrl) {{
+            if (showErrors) {{
+                alert(`Gene "${{token}}" is listed in the dataset but was not indexed in the auxiliary manifest.`);
+            }}
+            return false;
+        }}
+        const shardData = await loadGeneAuxShard(shardUrl);
+        if (!shardData) return false;
+        const hydrated = hydrateGeneFromAux(token, shardData);
+        if (!hydrated && showErrors) {{
+            alert(`Gene "${{token}}" is listed in the dataset but was not found in the auxiliary gene file.`);
+        }}
+        return hydrated;
+    }}
+
+    async function runAsyncUIAction(label, fn) {{
+        try {{
+            return await fn();
+        }} catch (error) {{
+            console.error(`${{label}} failed`, error);
+            const detail = (error && error.message) ? error.message : String(error);
+            window.__karospaceShowStartupError?.(`${{label}} failed: ${{detail}} (open DevTools console).`);
+            return null;
+        }}
+    }}
+
     function ensureGeneAutoScale(gene) {{
         if (!gene) return;
         if (!geneScaleAuto[gene]) {{
@@ -2527,7 +2726,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const genes = [];
         parts.forEach(g => {{
             if (seen.has(g)) return;
-            if (DATA.genes_meta && DATA.genes_meta[g]) {{
+            if (AVAILABLE_GENE_SET.has(g)) {{
                 seen.add(g);
                 genes.push(g);
             }}
@@ -2713,7 +2912,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         valueSelect.innerHTML = opts.join('');
     }}
 
-    function renderDotplot() {{
+    async function renderDotplot() {{
         const status = document.getElementById('dotplot-status');
         const grid = document.getElementById('dotplot-grid');
         const groupbySelect = document.getElementById('dotplot-groupby');
@@ -2748,8 +2947,22 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         dotplotRenderToken += 1;
         const token = dotplotRenderToken;
-        status.textContent = `Computing dotplot (${{groupbyColor}}, genes=${{genes.length}}, ${{aggLabel}})…`;
+        status.textContent = `Loading genes for dotplot (${{genes.length}})…`;
         grid.innerHTML = '';
+
+        const missing = [];
+        for (const gene of genes) {{
+            if (token !== dotplotRenderToken) return;
+            const ok = await ensureGeneAvailable(gene, {{ showErrors: false }});
+            if (!ok) missing.push(gene);
+        }}
+        if (token !== dotplotRenderToken) return;
+        if (missing.length) {{
+            status.textContent = `Gene data unavailable: ${{missing.join(', ')}}`;
+            return;
+        }}
+
+        status.textContent = `Computing dotplot (${{groupbyColor}}, genes=${{genes.length}}, ${{aggLabel}})…`;
 
         setTimeout(() => {{
             if (token !== dotplotRenderToken) return;
@@ -6159,37 +6372,37 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }});
 
         const geneInput = document.getElementById('gene-input');
-        geneInput.addEventListener('change', () => {{
-            const gene = geneInput.value.trim();
-            if (gene && DATA.genes_meta[gene]) {{
-                currentGene = gene;
-                geneDenseCache.clear();
-                modalSelectedCategory = null;
-                modalTypeSelectEnabled = false;
-                hiddenCategories.clear();
-                ensureGeneAutoScale(currentGene);
-                updateExpressionScaleUI();
-                renderLegend('legend');
-                renderLegend('modal-legend');
-                renderAllSections();
-                if (modalSection) renderModalSection();
-                if (umapVisible) renderUMAP();
-                updateSelectionInfo();
-                refreshInsights();
-            }} else if (!gene) {{
-                currentGene = null;
-                hiddenCategories.clear();
-                updateExpressionScaleUI();
-                renderLegend('legend');
-                renderLegend('modal-legend');
-                renderAllSections();
-                if (modalSection) renderModalSection();
-                if (umapVisible) renderUMAP();
-                updateSelectionInfo();
-                refreshInsights();
-            }} else if (gene) {{
-                alert(`Gene "${{gene}}" was not pre-loaded.\\nTo view it, re-export with this gene included in the genes parameter or add it to highly variable genes.`);
-            }}
+        geneInput.addEventListener('change', async () => {{
+            await runAsyncUIAction('Gene selection', async () => {{
+                const gene = geneInput.value.trim();
+                if (gene && await ensureGeneAvailable(gene)) {{
+                    currentGene = gene;
+                    geneDenseCache.clear();
+                    modalSelectedCategory = null;
+                    modalTypeSelectEnabled = false;
+                    hiddenCategories.clear();
+                    ensureGeneAutoScale(currentGene);
+                    updateExpressionScaleUI();
+                    renderLegend('legend');
+                    renderLegend('modal-legend');
+                    renderAllSections();
+                    if (modalSection) renderModalSection();
+                    if (umapVisible) renderUMAP();
+                    updateSelectionInfo();
+                    refreshInsights();
+                }} else if (!gene) {{
+                    currentGene = null;
+                    hiddenCategories.clear();
+                    updateExpressionScaleUI();
+                    renderLegend('legend');
+                    renderLegend('modal-legend');
+                    renderAllSections();
+                    if (modalSection) renderModalSection();
+                    if (umapVisible) renderUMAP();
+                    updateSelectionInfo();
+                    refreshInsights();
+                }}
+            }});
         }});
 
         const spotRange = document.getElementById('spot-size');
@@ -6676,21 +6889,22 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 modalBlendSpec[side].category = controls.category.value;
                 applyModalBlendControlChange();
             }});
-            controls.gene?.addEventListener('change', () => {{
-                const gene = controls.gene.value.trim();
-                if (!gene) {{
-                    modalBlendSpec[side].gene = '';
+            controls.gene?.addEventListener('change', async () => {{
+                await runAsyncUIAction(`Modal gene selection (${{side.toUpperCase()}})`, async () => {{
+                    const gene = controls.gene.value.trim();
+                    if (!gene) {{
+                        modalBlendSpec[side].gene = '';
+                        applyModalBlendControlChange();
+                        return;
+                    }}
+                    if (!await ensureGeneAvailable(gene)) {{
+                        controls.gene.value = modalBlendSpec[side].gene || '';
+                        return;
+                    }}
+                    modalBlendSpec[side].gene = gene;
+                    ensureGeneAutoScale(gene);
                     applyModalBlendControlChange();
-                    return;
-                }}
-                if (!DATA.genes_meta?.[gene]) {{
-                    alert(`Gene "${{gene}}" was not pre-loaded.\\nChoose a listed gene or re-export with this gene included.`);
-                    controls.gene.value = modalBlendSpec[side].gene || '';
-                    return;
-                }}
-                modalBlendSpec[side].gene = gene;
-                ensureGeneAutoScale(gene);
-                applyModalBlendControlChange();
+                }});
             }});
             controls.scaleMin?.addEventListener('change', () => applyModalBlendGeneScale(side));
             controls.scaleMax?.addEventListener('change', () => applyModalBlendGeneScale(side));
@@ -7036,6 +7250,8 @@ def export_to_html(
     additional_colors: Optional[List[str]] = None,
     genes: Optional[List[str]] = None,
     gene_encoding: str = "auto",
+    gene_storage: str = "embedded",
+    gene_aux_path: Optional[str] = None,
     gene_sparse_zero_threshold: float = 0.8,
     pack_arrays: bool = True,
     pack_arrays_min_len: int = 1024,
@@ -7090,6 +7306,12 @@ def export_to_html(
     gene_encoding : str
         "dense", "sparse", or "auto" (default). "auto" uses sparse encoding for
         zero-inflated genes to reduce HTML size.
+    gene_storage : str
+        "embedded" (default) keeps gene data in the HTML. "sidecar" embeds only
+        the selected/preloaded genes and writes remaining genes to an auxiliary
+        JSON file for downstream lazy loading.
+    gene_aux_path : str, optional
+        Output path for the sidecar gene JSON when gene_storage="sidecar".
     gene_sparse_zero_threshold : float
         Only used when gene_encoding="auto". Use sparse encoding when the
         fraction of zeros is >= this threshold (default: 0.8).
@@ -7158,6 +7380,10 @@ def export_to_html(
             "graph_color": "rgba(0, 0, 0, 0.12)",
         }
 
+    gene_storage = str(gene_storage or "embedded").strip().lower()
+    if gene_storage not in {"embedded", "sidecar"}:
+        raise ValueError("gene_storage must be one of: 'embedded', 'sidecar'")
+
     # Prefer highly variable genes for expression if available; otherwise use provided genes
     hv_genes = None
     if use_hvgs and "highly_variable" in dataset.adata.var.columns:
@@ -7166,6 +7392,23 @@ def export_to_html(
             hv_genes = dataset.adata.var_names[hv_mask].tolist()[:max(0, int(hvg_limit))]
     if hv_genes is not None:
         genes = hv_genes
+    embedded_genes = list(dict.fromkeys([g for g in (genes or []) if g in dataset.adata.var_names]))
+    sidecar_genes: List[str] = []
+    resolved_gene_aux_path: Optional[Path] = None
+    resolved_gene_aux_dir: Optional[Path] = None
+    gene_aux_url: Optional[str] = None
+    sidecar_export_indices = None
+    if gene_storage == "sidecar":
+        sidecar_genes = [g for g in dataset.var_names if g not in set(embedded_genes)]
+        sidecar_export_indices = dataset._get_export_section_indices(downsample=downsample)
+        output_path_obj = Path(output_path).expanduser()
+        if gene_aux_path:
+            resolved_gene_aux_path = Path(gene_aux_path).expanduser()
+        else:
+            resolved_gene_aux_path = output_path_obj.with_suffix(".genes.json")
+        if not resolved_gene_aux_path.is_absolute():
+            resolved_gene_aux_path = (output_path_obj.parent / resolved_gene_aux_path).resolve()
+        resolved_gene_aux_dir = resolved_gene_aux_path.with_suffix("")
 
     if outline_by and outline_by not in dataset.metadata_columns:
         print(f"  Warning: outline_by '{outline_by}' not in metadata columns; no outlines will be shown.")
@@ -7211,7 +7454,7 @@ def export_to_html(
         vmin=vmin,
         vmax=vmax,
         additional_colors=additional_colors,
-        genes=genes,
+        genes=embedded_genes,
         gene_encoding=gene_encoding,
         gene_sparse_zero_threshold=gene_sparse_zero_threshold,
         section_array_pack=pack_arrays,
@@ -7229,6 +7472,15 @@ def export_to_html(
         interaction_markers_method=interaction_markers_method,
         interaction_markers_layer=interaction_markers_layer,
     )
+    if gene_storage == "sidecar":
+        assert resolved_gene_aux_path is not None
+        data["available_genes"] = list(dataset.var_names)
+        data["gene_aux_url"] = Path(
+            os.path.relpath(resolved_gene_aux_path, start=Path(output_path).expanduser().resolve().parent)
+        ).as_posix()
+        gene_aux_url = data["gene_aux_url"]
+    else:
+        data["gene_aux_url"] = None
 
     resolved_spot_size, used_auto_spot_size = _resolve_spot_size(
         dataset=dataset,
@@ -7283,10 +7535,95 @@ def export_to_html(
 
     # Write file
     output_path = str(Path(output_path).resolve())
+    if resolved_gene_aux_path is not None:
+        resolved_gene_aux_path.parent.mkdir(parents=True, exist_ok=True)
+        assert resolved_gene_aux_dir is not None
+        resolved_gene_aux_dir.mkdir(parents=True, exist_ok=True)
+        total_sidecar_genes = len(sidecar_genes)
+        shard_groups = _chunked(sidecar_genes, GENE_SIDECAR_SHARD_SIZE)
+        total_shards = len(shard_groups)
+        sidecar_t0 = time.perf_counter()
+        progress = None
+        if total_sidecar_genes:
+            print(
+                f"Building gene sidecar: {total_sidecar_genes} genes across "
+                f"{total_shards} shard{'s' if total_shards != 1 else ''}..."
+            )
+            if tqdm is not None:
+                progress = tqdm(
+                    total=total_sidecar_genes,
+                    desc="Gene sidecar",
+                    unit="gene",
+                    dynamic_ncols=True,
+                )
+        manifest = {
+            "format": "karospace-gene-sidecar-manifest-v2",
+            "shards": {},
+            "genes_meta": {},
+            "gene_encodings": {},
+            "gene_to_shard": {},
+        }
+        output_parent = Path(output_path).resolve().parent
+        genes_written = 0
+        for shard_idx, shard_genes in enumerate(shard_groups):
+            shard_filename = f"{shard_idx:03d}.json"
+            shard_path = resolved_gene_aux_dir / shard_filename
+            shard_rel = Path(os.path.relpath(shard_path, start=output_parent)).as_posix()
+            shard_start = genes_written + 1
+            shard_end = genes_written + len(shard_genes)
+            shard_t0 = time.perf_counter()
+            if shard_genes and progress is None:
+                print(
+                    f"  - shard {shard_idx + 1}/{total_shards}: genes {shard_start}-{shard_end} "
+                    f"({shard_genes[0]} .. {shard_genes[-1]})"
+                )
+            elif shard_genes and progress is not None:
+                progress.set_postfix_str(
+                    f"shard {shard_idx + 1}/{total_shards} {shard_genes[0]}..{shard_genes[-1]}"
+                )
+            shard_data = dataset.to_gene_sidecar_data(
+                genes=shard_genes,
+                downsample=downsample,
+                export_indices=sidecar_export_indices,
+                gene_encoding=gene_encoding,
+                gene_sparse_zero_threshold=gene_sparse_zero_threshold,
+            )
+            shard_data["format"] = "karospace-gene-sidecar-shard-v2"
+            manifest["shards"][shard_rel] = shard_genes
+            for gene in shard_genes:
+                manifest["gene_to_shard"][gene] = shard_rel
+                if gene in shard_data.get("genes_meta", {}):
+                    manifest["genes_meta"][gene] = shard_data["genes_meta"][gene]
+                if gene in shard_data.get("gene_encodings", {}):
+                    manifest["gene_encodings"][gene] = shard_data["gene_encodings"][gene]
+            with open(shard_path, "w", encoding="utf-8") as f:
+                json.dump(shard_data, f, separators=(",", ":"))
+            genes_written += len(shard_genes)
+            shard_elapsed = time.perf_counter() - shard_t0
+            if progress is not None:
+                progress.update(len(shard_genes))
+                progress.set_postfix_str(
+                    f"shard {shard_idx + 1}/{total_shards} wrote {shard_filename} in {shard_elapsed:.1f}s"
+                )
+            else:
+                print(
+                    f"    wrote {shard_filename} ({genes_written}/{total_sidecar_genes} genes) "
+                    f"in {shard_elapsed:.1f}s"
+                )
+        with open(resolved_gene_aux_path, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, separators=(",", ":"))
+        if total_sidecar_genes:
+            total_elapsed = time.perf_counter() - sidecar_t0
+            if progress is not None:
+                progress.close()
+            print(f"Completed gene sidecar build in {total_elapsed:.1f}s")
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(html)
 
     print(f"Exported HTML viewer to: {output_path}")
+    if resolved_gene_aux_path is not None:
+        print(f"Exported gene sidecar to: {resolved_gene_aux_path}")
+        print(f"  - shard directory: {resolved_gene_aux_dir}")
     print(f"  - {data['n_sections']} sections")
     print(f"  - {data['total_cells']:,} cells")
     if used_auto_spot_size:
@@ -7294,12 +7631,14 @@ def export_to_html(
     else:
         print(f"  - spot size {resolved_spot_size:.2f}")
     print(f"  - {len(data['available_colors'])} color options")
-    if genes:
+    if embedded_genes:
         print(f"  - {len(data['genes_meta'])} genes loaded")
         enc = data.get("gene_encodings") or {}
         if enc:
             n_sparse = sum(1 for v in enc.values() if v == "sparse")
             n_dense = sum(1 for v in enc.values() if v == "dense")
             print(f"  - gene encoding: {n_sparse} sparse, {n_dense} dense")
+    if gene_aux_url:
+        print(f"  - sidecar genes available via {gene_aux_url}")
 
     return output_path

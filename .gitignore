@@ -44,6 +44,8 @@ data/
 # Output
 output/
 *.html
+*.genes.json
+*.genes/
 # Keep unpublished local exports out of git
 BALO.html
 

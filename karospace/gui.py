@@ -77,7 +77,7 @@ def _parse_non_negative_int(name: str, token: str) -> int:
 
 FIELD_HELP_TEXT = """Input / Output
 - Input (.h5ad): Path to an AnnData file. Use Browse or type a full path.
-- Output (.html): Path for the exported standalone viewer file.
+- Output (.html): Path for the exported viewer HTML file.
 
 Core Options
 - Group by: Column in adata.obs that identifies sections (for example sample_id).
@@ -105,6 +105,8 @@ Color & Gene Content
 
 Advanced Options
 - Gene encoding: auto | dense | sparse.
+- Gene storage: embedded keeps genes in the HTML; sidecar writes extra genes to a separate JSON file.
+- Gene aux path: Optional override for the sidecar JSON path. Leave blank to place it next to the HTML.
 - Gene sparse threshold: Number between 0 and 1 (used when encoding=auto).
 - Enable packed arrays: Pack large arrays for smaller/faster HTML load.
 - Pack arrays min len: Integer > 0.
@@ -289,6 +291,8 @@ class KaroSpaceExportGUI:
         self.use_hvgs = tk.BooleanVar(value=True)
         self.hvg_limit = tk.StringVar(value="20")
         self.gene_encoding = tk.StringVar(value="auto")
+        self.gene_storage = tk.StringVar(value="embedded")
+        self.gene_aux_path = tk.StringVar(value="")
         self.gene_sparse_zero_threshold = tk.StringVar(value="0.8")
         self.pack_arrays = tk.BooleanVar(value=True)
         self.pack_arrays_min_len = tk.StringVar(value="1024")
@@ -658,12 +662,18 @@ class KaroSpaceExportGUI:
         ttk.Combobox(encoding_group, textvariable=self.gene_encoding, values=["auto", "dense", "sparse"], state="readonly").grid(
             row=0, column=1, sticky="ew", padx=(8, 16), pady=4
         )
-        ttk.Label(encoding_group, text="Gene sparse threshold").grid(row=0, column=2, sticky="w", pady=4)
-        ttk.Entry(encoding_group, textvariable=self.gene_sparse_zero_threshold).grid(row=0, column=3, sticky="ew", pady=4)
-        ttk.Label(encoding_group, text="Pack arrays min len").grid(row=1, column=0, sticky="w", pady=4)
-        ttk.Entry(encoding_group, textvariable=self.pack_arrays_min_len).grid(row=1, column=1, sticky="ew", padx=(8, 16), pady=4)
+        ttk.Label(encoding_group, text="Gene storage").grid(row=0, column=2, sticky="w", pady=4)
+        ttk.Combobox(encoding_group, textvariable=self.gene_storage, values=["embedded", "sidecar"], state="readonly").grid(
+            row=0, column=3, sticky="ew", pady=4
+        )
+        ttk.Label(encoding_group, text="Gene sparse threshold").grid(row=1, column=0, sticky="w", pady=4)
+        ttk.Entry(encoding_group, textvariable=self.gene_sparse_zero_threshold).grid(row=1, column=1, sticky="ew", padx=(8, 16), pady=4)
+        ttk.Label(encoding_group, text="Gene aux path").grid(row=1, column=2, sticky="w", pady=4)
+        ttk.Entry(encoding_group, textvariable=self.gene_aux_path).grid(row=1, column=3, sticky="ew", pady=4)
+        ttk.Label(encoding_group, text="Pack arrays min len").grid(row=2, column=0, sticky="w", pady=4)
+        ttk.Entry(encoding_group, textvariable=self.pack_arrays_min_len).grid(row=2, column=1, sticky="ew", padx=(8, 16), pady=4)
         ttk.Checkbutton(encoding_group, text="Enable packed arrays", variable=self.pack_arrays).grid(
-            row=1, column=2, columnspan=2, sticky="w", pady=4
+            row=2, column=2, columnspan=2, sticky="w", pady=4
         )
 
         neighbor_group = ttk.LabelFrame(self.advanced_content, text="Neighbor Stats", padding=10, style="Card.TLabelframe")
@@ -836,6 +846,8 @@ class KaroSpaceExportGUI:
             "outline_by": "condition",
             "spot_size": "auto",
             "gene_encoding": "auto",
+            "gene_storage": "embedded",
+            "gene_aux_path": "",
             "gene_sparse_zero_threshold": "0.8",
             "pack_arrays": True,
             "pack_arrays_min_len": "1024",
@@ -1206,6 +1218,11 @@ class KaroSpaceExportGUI:
         gene_sparse_zero_threshold = float(self.gene_sparse_zero_threshold.get().strip())
         if gene_sparse_zero_threshold < 0 or gene_sparse_zero_threshold > 1:
             raise ValueError("Gene sparse threshold must be between 0 and 1.")
+        gene_storage = self.gene_storage.get().strip() or "embedded"
+        gene_aux_path_raw = self.gene_aux_path.get().strip()
+        gene_aux_path = None
+        if gene_aux_path_raw:
+            gene_aux_path = str(Path(gene_aux_path_raw).expanduser())
 
         use_hvgs = bool(self.use_hvgs.get())
         hvg_limit = _parse_non_negative_int("HVG limit", self.hvg_limit.get())
@@ -1240,6 +1257,8 @@ class KaroSpaceExportGUI:
             "use_hvgs": use_hvgs,
             "hvg_limit": hvg_limit,
             "gene_encoding": self.gene_encoding.get().strip() or "auto",
+            "gene_storage": gene_storage,
+            "gene_aux_path": gene_aux_path,
             "gene_sparse_zero_threshold": gene_sparse_zero_threshold,
             "pack_arrays": bool(self.pack_arrays.get()),
             "pack_arrays_min_len": _parse_positive_int("Pack arrays min len", self.pack_arrays_min_len.get()),
@@ -1283,6 +1302,8 @@ class KaroSpaceExportGUI:
             self._log(f"additional_colors={len(export_kwargs['additional_colors'])}")
         if export_kwargs.get("genes"):
             self._log(f"genes={len(export_kwargs['genes'])} (manual list)")
+        if export_kwargs.get("gene_storage") == "sidecar":
+            self._log("gene_storage=sidecar (lazy aux loading enabled)")
 
         def worker() -> None:
             try:
@@ -1301,7 +1322,13 @@ class KaroSpaceExportGUI:
         assert messagebox is not None
         self._log(f"Export finished: {output_path}")
         self._set_busy(False, "Export complete.")
-        messagebox.showinfo("Export complete", f"KaroSpace HTML created:\n{output_path}")
+        message = f"KaroSpace HTML created:\n{output_path}"
+        if self.gene_storage.get().strip() == "sidecar":
+            aux_path = self.gene_aux_path.get().strip()
+            if not aux_path:
+                aux_path = str(Path(output_path).with_suffix(".genes.json"))
+            message += f"\n\nGene sidecar:\n{aux_path}"
+        messagebox.showinfo("Export complete", message)
 
     def _on_export_error(self, exc: Exception) -> None:
         assert messagebox is not None
