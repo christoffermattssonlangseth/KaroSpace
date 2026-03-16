@@ -187,6 +187,8 @@ export_to_html(
     ],
     # For zero-inflated expression matrices, store gene vectors sparsely (smaller HTML)
     gene_encoding="auto",        # "auto" | "dense" | "sparse"
+    gene_storage="embedded",     # "embedded" | "sidecar" (manifest + shards for lazy loading)
+    gene_aux_path=None,          # Optional manifest path; defaults to viewer.genes.json
     gene_sparse_zero_threshold=0.8,
     pack_arrays=True,            # Pack coords/colors/UMAP as base64 typed arrays (smaller + faster load)
     pack_arrays_min_len=1024,
@@ -228,6 +230,8 @@ karospace your_data.h5ad -o viewer.html --color leiden
 | `--theme` | Color theme (`light` or `dark`) | `light` |
 | `--title` | Page title | `KaroSpace` |
 | `--gene-encoding` | Gene vector encoding (`auto`, `dense`, `sparse`) | `auto` |
+| `--gene-storage` | Gene storage mode (`embedded`, `sidecar`) | `embedded` |
+| `--gene-aux-path` | Optional path for the gene sidecar manifest JSON | auto |
 | `--gene-sparse-zero-threshold` | Zero fraction threshold for `auto` sparse encoding | `0.8` |
 | `--no-pack-arrays` | Disable base64 packing of large per-section arrays | off |
 | `--pack-arrays-min-len` | Only pack arrays when section cell count ≥ this value | `1024` |
@@ -341,13 +345,14 @@ If your h5ad file contains UMAP coordinates (`adata.obsm['X_umap']`), a UMAP tog
 
 ## Deployment and Sharing
 
-- **Single-file HTML**: `export_to_html` writes one standalone HTML file with embedded data + viewer logic
-- **Local use**: Open the generated `.html` in any modern browser (Chrome, Firefox, Safari). No server needed.
-- **Static hosting**: You can host the HTML as a static asset (e.g., GitHub Pages, S3, lab intranet). Since it’s self-contained, there are no runtime dependencies.
+- **Single-file HTML**: Default `export_to_html(..., gene_storage="embedded")` writes one standalone HTML file with embedded data + viewer logic
+- **Sidecar mode**: `gene_storage="sidecar"` writes the HTML plus `<name>.genes.json` and a `<name>.genes/` shard directory, allowing downstream lazy loading of non-embedded genes
+- **Local use**: Embedded mode opens directly in any modern browser. Sidecar mode requires serving the files over HTTP(S) because browsers block `fetch()` from `file://`.
+- **Static hosting**: Both modes work on static hosting (e.g., GitHub Pages, S3, lab intranet). Sidecar mode needs the HTML, manifest JSON, and shard directory deployed together.
 - **GitHub Pages (this repo)**: Use **Source = GitHub Actions** (static HTML artifact deploy). Do **not** use Jekyll/deploy-from-branch mode for this workflow.
 - **Pancreas deployment workflow**: `.github/workflows/pages-balo.yml` publishes `pancreas.html` and creates an `index.html` redirect.
 - **Pancreas test URL**: `https://christoffermattssonlangseth.github.io/KaroSpace/pancreas.html` (available after a successful Pages workflow run).
-- **Sharing**: Send the HTML file directly to collaborators; it will work offline once downloaded.
+- **Sharing**: In embedded mode, send the HTML file directly and it will work offline. In sidecar mode, share the HTML, `.genes.json`, and matching `.genes/` directory together via a served/static-hosted location.
 - **Updates**: Re-run `export_to_html` to refresh the file when annotations or metadata change.
 - **File size note**: Large datasets create large HTML files. Consider `downsample` and limiting `genes`/`additional_colors`.
 
