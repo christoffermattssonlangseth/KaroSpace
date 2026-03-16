@@ -1,11 +1,12 @@
 import json
 import re
 
+import h5py
 import numpy as np
 import pandas as pd
 from anndata import AnnData
 
-from karospace.data_loader import SectionData, SpatialDataset
+from karospace.data_loader import SectionData, SpatialDataset, load_spatial_data
 from karospace.exporter import export_to_html
 
 
@@ -100,6 +101,7 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert "G2" in shard["genes"]
     assert "sparse" in shard["genes"]["G2"]["sections"]["S1"]
     assert "async function ensureGeneAvailable" in html_text
+    assert 'id="modal-blend-loading"' in html_text
     assert "was not pre-loaded" not in html_text
 
 
@@ -123,3 +125,28 @@ def test_embedded_mode_stays_single_file(tmp_path):
     assert not (tmp_path / "viewer.genes.json").exists()
     assert embedded["gene_aux_url"] is None
     assert embedded["available_genes"] == ["G1"]
+
+
+def test_load_spatial_data_handles_null_encoded_uns_entries(tmp_path):
+    obs = pd.DataFrame(
+        {"sample_id": pd.Categorical(["S1", "S1"])},
+        index=["cell_0", "cell_1"],
+    )
+    var = pd.DataFrame(index=["G1", "G2"])
+    adata = AnnData(X=np.array([[1.0, 0.0], [0.0, 1.0]], dtype=float), obs=obs, var=var)
+    adata.obsm["spatial"] = np.array([[0.0, 0.0], [1.0, 1.0]], dtype=float)
+    adata.uns["dummy"] = {"ok": 1}
+
+    path = tmp_path / "broken.h5ad"
+    adata.write_h5ad(path)
+
+    with h5py.File(path, "r+") as handle:
+        null_ds = handle["uns"].create_dataset("null_entry", data=np.float32(0))
+        null_ds.attrs["encoding-type"] = "null"
+        null_ds.attrs["encoding-version"] = "0.1.0"
+
+    dataset = load_spatial_data(str(path), groupby="sample_id")
+
+    assert dataset.n_sections == 1
+    assert dataset.n_cells == 2
+    assert dataset.var_names == ["G1", "G2"]

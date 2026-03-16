@@ -6,6 +6,13 @@ and export it to an interactive HTML viewer.
 """
 
 import os
+import sys
+from pathlib import Path
+
+# Prefer the local repo checkout over any older site-packages install.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from karospace import load_spatial_data, export_to_html
 

@@ -14,6 +14,54 @@ import scipy.sparse as sp
 from typing import Dict, List, Optional, Tuple, Union
 from dataclasses import dataclass, field
 import json
+import os
+import shutil
+import tempfile
+
+def _strip_null_encoded_h5ad_entries(src_path: str) -> Tuple[str, List[str]]:
+    """Copy an h5ad file and remove null-encoded datasets unsupported by older anndata builds."""
+    import h5py
+
+    fd, tmp_path = tempfile.mkstemp(suffix=".h5ad")
+    os.close(fd)
+    shutil.copy2(src_path, tmp_path)
+
+    removed_paths: List[str] = []
+    with h5py.File(tmp_path, "r+") as handle:
+        def _walk(group, prefix: str = "") -> None:
+            for key in list(group.keys()):
+                obj = group[key]
+                path = f"{prefix}/{key}" if prefix else f"/{key}"
+                if obj.attrs.get("encoding-type") == "null":
+                    removed_paths.append(path)
+                    del group[key]
+                    continue
+                if isinstance(obj, h5py.Group):
+                    _walk(obj, path)
+
+        _walk(handle)
+
+    return tmp_path, removed_paths
+
+
+def _read_h5ad_with_fallback(path: str) -> sc.AnnData:
+    """Read h5ad, retrying with null-encoded uns entries stripped if needed."""
+    try:
+        return sc.read_h5ad(path)
+    except Exception as exc:
+        if "encoding_type='null'" not in str(exc):
+            raise
+
+        print("  Detected unsupported null-encoded H5AD fields; retrying with a sanitized temporary copy...")
+        temp_path = None
+        try:
+            temp_path, removed_paths = _strip_null_encoded_h5ad_entries(path)
+            if removed_paths:
+                print(f"  Removed {len(removed_paths)} null field(s): {', '.join(removed_paths)}")
+            return sc.read_h5ad(temp_path)
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                os.remove(temp_path)
 
 
 @dataclass
@@ -1188,7 +1236,7 @@ def load_spatial_data(
         Loaded dataset ready for visualization
     """
     print(f"Loading {path}...")
-    adata = sc.read_h5ad(path)
+    adata = _read_h5ad_with_fallback(path)
     print(f"  Loaded {adata.n_obs:,} cells, {adata.n_vars:,} genes")
 
     if spatial_key not in adata.obsm:

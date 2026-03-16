@@ -22,10 +22,10 @@ os.environ.setdefault("KMP_WARNINGS", "0")
 from karospace import load_spatial_data, export_to_html
 
 # Path to your h5ad file
-H5AD_PATH = os.environ.get("BALO_H5AD_PATH", "/path/to/baloMS_indep_clust_balo_MANA_balo_annot.h5ad")
+H5AD_PATH = os.environ.get("MOUSEBRAIN_H5AD_PATH", "/path/to/mouseBrain5k_cellcharter.h5ad")
 
 if H5AD_PATH.startswith("/path/to/"):
-    raise SystemExit("Set BALO_H5AD_PATH to your .h5ad file before running examples/BALO-sidecar.py.")
+    raise SystemExit("Set MOUSEBRAIN_H5AD_PATH to your .h5ad file before running examples/mouseBrainXenium5k-sidecar.py.")
 
 # Load the dataset
 dataset = load_spatial_data(
@@ -49,8 +49,8 @@ ENABLE_ANALYTICS = False
 
 export_to_html(
     dataset,
-    output_path="BALO.html",
-    color="leiden_2",
+    output_path="mouseBrainXenium5k.html",
+    color='leiden_1.0',
     title="KaroSpace",
     min_panel_size=120,
     spot_size="auto",
@@ -58,8 +58,11 @@ export_to_html(
     theme="light",
     outline_by=OUTLINE_BY,
     additional_colors=[
+        'CellCharter_5',
+        'CellCharter_10', 'CellCharter_15', 'CellCharter_20', 'leiden_0.1',
         'leiden_0.5',
     ],
+
     genes=[
      #   "Arg1",
      #   "Cd74",
@@ -82,8 +85,8 @@ export_to_html(
     use_hvgs=USE_HVGS,
     hvg_limit=200,
     gene_storage="sidecar",
-    gene_aux_path="BALO.genes.json",
-    marker_genes_groupby=['leiden_0.5'] if ENABLE_ANALYTICS else None,
+    gene_aux_path="mouseBrainXenium5k.genes.json",
+    marker_genes_groupby=['leiden_1.0'] if ENABLE_ANALYTICS else None,
     marker_genes_top_n=50,
     neighbor_stats_permutations=25 if ENABLE_ANALYTICS else 0,
     neighbor_stats_seed=42,
@@ -94,7 +97,7 @@ export_to_html(
     interaction_markers_min_neighbors=1,
 )
 
-print("\nDone! Open BALO.html through a local web server.")
-print("This export also writes BALO.genes.json for lazy downstream gene loading.")
+print("\nDone! Open mouseBrainXenium5k.html through a local web server.")
+print("This export also writes mouseBrainXenium5k.genes.json for lazy downstream gene loading.")
 print("Example: python -m http.server 8765")
-print("Then open: http://127.0.0.1:8765/BALO.html")
+print("Then open: http://127.0.0.1:8765/mouseBrainXenium5k.html")

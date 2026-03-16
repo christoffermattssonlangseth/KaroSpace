@@ -1029,6 +1029,35 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             max-height: 180px;
             overflow: auto;
         }}
+        .modal-blend-loading {{
+            display: none;
+            align-items: center;
+            gap: 7px;
+            margin: 6px 0 4px;
+            padding: 6px 8px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-color);
+            font-size: 10px;
+            line-height: 1.3;
+        }}
+        .modal-blend-loading.visible {{
+            display: flex;
+        }}
+        .modal-blend-loading::before {{
+            content: '';
+            width: 7px;
+            height: 7px;
+            border-radius: 999px;
+            background: var(--accent-strong);
+            animation: modalBlendPulse 1s ease-in-out infinite;
+            flex: 0 0 auto;
+        }}
+        @keyframes modalBlendPulse {{
+            0%, 100% {{ transform: scale(0.85); opacity: 0.45; }}
+            50% {{ transform: scale(1.15); opacity: 1; }}
+        }}
         .modal-blend-summary {{
             color: var(--text-color);
             font-weight: 500;
@@ -1684,6 +1713,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     </div>
                     <div class="modal-blend-panel" id="modal-blend-panel">
                         <div class="modal-blend-title">Variable Slider</div>
+                        <div class="modal-blend-loading" id="modal-blend-loading" role="status" aria-live="polite"></div>
                         <div class="modal-blend-row">
                             <span class="modal-blend-side">A</span>
                             <select id="modal-blend-a-kind">
@@ -2538,6 +2568,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const control = document.getElementById(id);
             if (control) control.disabled = !!isLoading;
         }});
+        const modalBlendLoading = document.getElementById('modal-blend-loading');
+        if (modalBlendLoading) {{
+            if (isLoading) {{
+                modalBlendLoading.textContent = geneAuxLoadingMessage;
+                modalBlendLoading.classList.add('visible');
+            }} else {{
+                modalBlendLoading.textContent = '';
+                modalBlendLoading.classList.remove('visible');
+            }}
+        }}
     }}
 
     function hydrateGeneFromAux(gene, auxData) {{
