@@ -22,7 +22,7 @@ os.environ.setdefault("KMP_WARNINGS", "0")
 from karospace import load_spatial_data, export_to_html
 
 # Path to your h5ad file
-H5AD_PATH = os.environ.get("MOUSEBRAIN_H5AD_PATH", "/path/to/mouseBrain5k_cellcharter.h5ad")
+H5AD_PATH = os.environ.get("MOUSEBRAIN_H5AD_PATH", "/Users/chrislangseth/work/karolinska_institutet/projects/KaroSpaceDataWrangling/data/mouseBrain5k/mouseBrain5k_cellcharter.h5ad")
 
 if H5AD_PATH.startswith("/path/to/"):
     raise SystemExit("Set MOUSEBRAIN_H5AD_PATH to your .h5ad file before running examples/mouseBrainXenium5k-sidecar.py.")

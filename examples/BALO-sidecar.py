@@ -22,7 +22,7 @@ os.environ.setdefault("KMP_WARNINGS", "0")
 from karospace import load_spatial_data, export_to_html
 
 # Path to your h5ad file
-H5AD_PATH = os.environ.get("BALO_H5AD_PATH", "/path/to/baloMS_indep_clust_balo_MANA_balo_annot.h5ad")
+H5AD_PATH = os.environ.get("BALO_H5AD_PATH", "/Users/chrislangseth/Downloads/baloMS_indep_clust_balo_MANA_balo_annot.h5ad")
 
 if H5AD_PATH.startswith("/path/to/"):
     raise SystemExit("Set BALO_H5AD_PATH to your .h5ad file before running examples/BALO-sidecar.py.")
