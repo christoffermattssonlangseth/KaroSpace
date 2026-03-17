@@ -5,7 +5,36 @@ Command-line interface for KaroSpace.
 import argparse
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
+
+
+def _parse_section_rotations_arg(raw: str) -> Optional[Dict[str, float]]:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+
+    rotations: Dict[str, float] = {}
+    for item in text.split(","):
+        token = item.strip()
+        if not token:
+            continue
+        if ":" not in token:
+            raise ValueError(
+                "each section rotation must use section_id:angle format"
+            )
+        section_id, angle_text = token.split(":", 1)
+        section_id = section_id.strip()
+        angle_text = angle_text.strip()
+        if not section_id:
+            raise ValueError("section rotation entries must include a section_id")
+        try:
+            rotations[section_id] = float(angle_text)
+        except ValueError as exc:
+            raise ValueError(
+                f"invalid angle for section {section_id!r}: {angle_text!r}"
+            ) from exc
+
+    return rotations or None
 
 
 def main():
@@ -127,6 +156,12 @@ def main():
         default="",
         help="Comma-separated obs columns to compute contact-conditioned interaction markers for. Empty disables (default)."
     )
+    parser.add_argument(
+        "--section-rotations",
+        type=str,
+        default="",
+        help="Comma-separated section_id:angle pairs for initial per-section rotations with exact degree values (example: S1:37.5,S2:-90)."
+    )
 
     args = parser.parse_args()
 
@@ -176,6 +211,11 @@ def main():
         neighbor_stats_groupby = _parse_csv(args.neighbor_stats_groupby)
     marker_genes_groupby = _parse_csv(args.marker_genes_groupby)
     interaction_markers_groupby = _parse_csv(args.interaction_markers_groupby)
+    try:
+        section_rotations = _parse_section_rotations_arg(args.section_rotations)
+    except ValueError as exc:
+        print(f"Error: --section-rotations {exc}", file=sys.stderr)
+        sys.exit(2)
 
     # Load and export
     print(f"Loading data from: {args.input}")
@@ -204,6 +244,7 @@ def main():
         neighbor_stats_groupby=neighbor_stats_groupby,
         marker_genes_groupby=marker_genes_groupby,
         interaction_markers_groupby=interaction_markers_groupby,
+        section_rotations=section_rotations,
     )
 
     print(f"Done! Open {output_path} in a browser to view.")

@@ -4,8 +4,10 @@ import re
 import h5py
 import numpy as np
 import pandas as pd
+import pytest
 from anndata import AnnData
 
+import karospace.cli as cli_module
 from karospace.data_loader import SectionData, SpatialDataset, load_spatial_data
 from karospace.exporter import export_to_html
 
@@ -101,6 +103,10 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert "G2" in shard["genes"]
     assert "sparse" in shard["genes"]["G2"]["sections"]["S1"]
     assert "async function ensureGeneAvailable" in html_text
+    assert "function requestModalBlendGene(gene)" in html_text
+    assert "requestModalBlendGene(gene);" in html_text
+    assert 'id="modal-controls-toggle"' in html_text
+    assert ".modal-controls.hidden" in html_text
     assert 'id="modal-blend-loading"' in html_text
     assert "was not pre-loaded" not in html_text
 
@@ -125,6 +131,125 @@ def test_embedded_mode_stays_single_file(tmp_path):
     assert not (tmp_path / "viewer.genes.json").exists()
     assert embedded["gene_aux_url"] is None
     assert embedded["available_genes"] == ["G1"]
+    assert {section["id"]: section["rotation_deg"] for section in embedded["sections"]} == {
+        "S1": 0.0,
+        "S2": 0.0,
+    }
+
+
+def test_export_embeds_normalized_section_rotations(tmp_path):
+    dataset = _build_dataset()
+    output_path = tmp_path / "viewer.html"
+
+    export_to_html(
+        dataset,
+        output_path=str(output_path),
+        color="leiden",
+        use_hvgs=False,
+        section_rotations={"S1": 44.5, "S2": -50.25},
+    )
+
+    embedded = _extract_data_json(output_path.read_text(encoding="utf-8"))
+    assert {section["id"]: section["rotation_deg"] for section in embedded["sections"]} == {
+        "S1": 44.5,
+        "S2": 309.75,
+    }
+
+
+def test_export_rejects_unknown_section_rotation_ids(tmp_path):
+    dataset = _build_dataset()
+
+    with pytest.raises(ValueError, match="unknown section_id"):
+        export_to_html(
+            dataset,
+            output_path=str(tmp_path / "viewer.html"),
+            color="leiden",
+            use_hvgs=False,
+            section_rotations={"missing": 45},
+        )
+
+
+def test_cli_passes_section_rotations_to_export(monkeypatch, tmp_path):
+    input_path = tmp_path / "input.h5ad"
+    input_path.write_text("placeholder", encoding="utf-8")
+    captured = {}
+
+    def fake_load(path, groupby):
+        captured["load"] = {"path": path, "groupby": groupby}
+        return _build_dataset()
+
+    def fake_export(dataset, **kwargs):
+        captured["kwargs"] = kwargs
+        return str(tmp_path / "viewer.html")
+
+    monkeypatch.setattr("karospace.data_loader.load_spatial_data", fake_load)
+    monkeypatch.setattr("karospace.exporter.export_to_html", fake_export)
+    monkeypatch.setattr(
+        cli_module.sys,
+        "argv",
+        [
+            "karospace",
+            str(input_path),
+            "--section-rotations",
+            "S1:45,S2:-90",
+        ],
+    )
+
+    cli_module.main()
+
+    assert captured["load"] == {"path": str(input_path), "groupby": "sample_id"}
+    assert captured["kwargs"]["section_rotations"] == {"S1": 45.0, "S2": -90.0}
+
+
+def test_cli_accepts_fractional_section_rotations(monkeypatch, tmp_path):
+    input_path = tmp_path / "input.h5ad"
+    input_path.write_text("placeholder", encoding="utf-8")
+    captured = {}
+
+    def fake_load(path, groupby):
+        return _build_dataset()
+
+    def fake_export(dataset, **kwargs):
+        captured["kwargs"] = kwargs
+        return str(tmp_path / "viewer.html")
+
+    monkeypatch.setattr("karospace.data_loader.load_spatial_data", fake_load)
+    monkeypatch.setattr("karospace.exporter.export_to_html", fake_export)
+    monkeypatch.setattr(
+        cli_module.sys,
+        "argv",
+        [
+            "karospace",
+            str(input_path),
+            "--section-rotations",
+            "S1:37.5,S2:-12.25",
+        ],
+    )
+
+    cli_module.main()
+
+    assert captured["kwargs"]["section_rotations"] == {"S1": 37.5, "S2": -12.25}
+
+
+def test_cli_rejects_invalid_section_rotations(monkeypatch, tmp_path, capsys):
+    input_path = tmp_path / "input.h5ad"
+    input_path.write_text("placeholder", encoding="utf-8")
+    monkeypatch.setattr(
+        cli_module.sys,
+        "argv",
+        [
+            "karospace",
+            str(input_path),
+            "--section-rotations",
+            "bad-token",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        cli_module.main()
+
+    assert exc.value.code == 2
+    assert "section_id:angle" in capsys.readouterr().err
 
 
 def test_load_spatial_data_handles_null_encoded_uns_entries(tmp_path):

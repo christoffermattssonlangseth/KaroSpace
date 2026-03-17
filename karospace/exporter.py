@@ -10,7 +10,7 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Optional, List, Tuple, Union
+from typing import Dict, Mapping, Optional, List, Tuple, Union
 import numpy as np
 try:
     from tqdm.auto import tqdm
@@ -105,6 +105,45 @@ def _resolve_spot_size(
     if not np.isfinite(value) or value <= 0:
         raise ValueError("spot_size must be a positive finite number or 'auto'.")
     return float(value), False
+
+
+def _normalize_section_rotation(value: Union[int, float]) -> float:
+    angle = float(value)
+    if not np.isfinite(angle):
+        raise ValueError("section rotation angles must be finite numbers")
+    normalized = angle % 360.0
+    if np.isclose(normalized, 360.0):
+        normalized = 0.0
+    return float(normalized)
+
+
+def _resolve_section_rotations(
+    dataset: SpatialDataset,
+    section_rotations: Optional[Mapping[str, Union[int, float]]],
+) -> Dict[str, float]:
+    if section_rotations is None:
+        return {}
+    if not isinstance(section_rotations, Mapping):
+        raise TypeError("section_rotations must be a mapping of section_id -> angle")
+
+    valid_ids = {section.section_id for section in dataset.sections}
+    resolved: Dict[str, float] = {}
+    unknown_ids = sorted(str(section_id) for section_id in section_rotations if str(section_id) not in valid_ids)
+    if unknown_ids:
+        raise ValueError(
+            "section_rotations contains unknown section_id values: " + ", ".join(unknown_ids)
+        )
+
+    for raw_section_id, raw_angle in section_rotations.items():
+        section_id = str(raw_section_id)
+        try:
+            resolved[section_id] = _normalize_section_rotation(raw_angle)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"section_rotations[{section_id!r}] must be a finite numeric angle"
+            ) from exc
+
+    return resolved
 
 
 # Default color palettes
@@ -387,6 +426,42 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             justify-content: space-between;
             align-items: center;
             transition: background 0.3s, border-color 0.3s;
+        }}
+        .section-header-main {{
+            flex: 1;
+            min-width: 0;
+        }}
+        .section-header-actions {{
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            flex-shrink: 0;
+        }}
+        .section-rotation-label {{
+            font-size: 8px;
+            color: var(--muted-color);
+            min-width: 54px;
+            text-align: right;
+        }}
+        .section-rotate-group {{
+            display: inline-flex;
+            align-items: center;
+            gap: 2px;
+        }}
+        .section-rotate-btn {{
+            min-width: 28px;
+            padding: 2px 4px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: var(--input-bg);
+            color: var(--text-color);
+            cursor: pointer;
+            font-size: 9px;
+            line-height: 1.2;
+            transition: background 0.2s, border-color 0.2s;
+        }}
+        .section-rotate-btn:hover {{
+            background: var(--hover-bg);
         }}
         .section-header .expand-icon {{ font-size: 10px; opacity: 0.5; }}
         .section-meta {{ font-size: 8px; color: var(--muted-color); margin-top: 1px; }}
@@ -894,8 +969,29 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             align-items: center;
             transition: background 0.3s, border-color 0.3s;
         }}
+        .modal-header-actions {{
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }}
         .modal-header h2 {{ font-size: 15px; font-weight: 600; }}
         .modal-header .modal-meta {{ font-size: 11px; color: var(--muted-color); margin-left: 10px; }}
+        .modal-controls-toggle {{
+            padding: 4px 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 999px;
+            background: var(--panel-bg);
+            color: var(--text-color);
+            font-size: 10px;
+            letter-spacing: 0.03em;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: background 0.2s, border-color 0.2s, color 0.2s;
+        }}
+        .modal-controls-toggle:hover {{
+            background: var(--hover-bg);
+            border-color: var(--accent-strong);
+        }}
         .modal-close {{
             background: none;
             border: none;
@@ -935,6 +1031,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             transition: background 0.3s, border-color 0.3s, color 0.3s;
         }}
         .modal-controls button:hover {{ background: var(--hover-bg); }}
+        .modal-controls.hidden {{ display: none; }}
         .modal-legend {{
             width: 180px;
             padding: 12px;
@@ -1701,8 +1798,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <h2 id="modal-title">Section</h2>
                     <span class="modal-meta" id="modal-meta"></span>
                     <span class="zoom-info" id="zoom-info">100%</span>
+                    <span class="zoom-info" id="modal-rotation-info">Rot 0 deg</span>
                 </div>
-                <button class="modal-close" id="modal-close">&times;</button>
+                <div class="modal-header-actions">
+                    <button class="modal-controls-toggle" id="modal-controls-toggle" type="button">Hide tools</button>
+                    <button class="modal-close" id="modal-close">&times;</button>
+                </div>
             </div>
             <div class="modal-body">
                 <div class="modal-canvas-container" id="modal-canvas-container">
@@ -1780,6 +1881,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         <button id="zoom-in">+ Zoom</button>
                         <button id="zoom-out">- Zoom</button>
                         <button id="zoom-reset">Reset</button>
+                        <button id="modal-rotate-left" title="Rotate section -45 degrees">Rot -45</button>
+                        <button id="modal-rotate-right" title="Rotate section +45 degrees">Rot +45</button>
+                        <button id="modal-rotate-reset" title="Reset section rotation">Rot 0</button>
                         <button class="graph-toggle" id="modal-blend-toggle" title="Split the view between two selected variables">Split</button>
                         <button class="graph-toggle" id="modal-magic-wand-btn" title="Draw to select cells in this section">Magic Wand</button>
                         <button class="graph-toggle" id="modal-annotate-btn" title="Draw persistent polygon annotations in this section">Annotate</button>
@@ -1913,6 +2017,134 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return dpr;
     }}
 
+    const ROTATION_STEP_DEG = 45;
+    const ROTATION_EPSILON = 1e-6;
+
+    function normalizeRotationDeg(value) {{
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) return 0;
+        let normalized = numeric % 360;
+        if (normalized < 0) normalized += 360;
+        if (Math.abs(normalized - 360) < ROTATION_EPSILON) normalized = 0;
+        return normalized;
+    }}
+
+    function getSignedRotationDeg(value) {{
+        let signed = normalizeRotationDeg(value);
+        if (signed > 180) signed -= 360;
+        if (Math.abs(signed) < ROTATION_EPSILON) signed = 0;
+        return signed;
+    }}
+
+    function formatRotationAngle(value) {{
+        const signed = getSignedRotationDeg(value);
+        if (Math.abs(signed - Math.round(signed)) < ROTATION_EPSILON) {{
+            return String(Math.round(signed));
+        }}
+        return signed.toFixed(2).replace(/\.?0+$/, '');
+    }}
+
+    function formatRotationLabel(value) {{
+        return `Rot ${{formatRotationAngle(value)}} deg`;
+    }}
+
+    function getSectionRotationDeg(section) {{
+        if (!section) return 0;
+        const normalized = normalizeRotationDeg(section.rotation_deg ?? 0);
+        section.rotation_deg = normalized;
+        return normalized;
+    }}
+
+    function getSectionRotationMetrics(section) {{
+        const bounds = section?.bounds || {{ xmin: 0, xmax: 0, ymin: 0, ymax: 0 }};
+        const dataCenterX = (bounds.xmin + bounds.xmax) / 2;
+        const dataCenterY = (bounds.ymin + bounds.ymax) / 2;
+        const halfWidth = Math.max((bounds.xmax - bounds.xmin) / 2, ROTATION_EPSILON);
+        const halfHeight = Math.max((bounds.ymax - bounds.ymin) / 2, ROTATION_EPSILON);
+        const angleDeg = getSectionRotationDeg(section);
+        const angleRad = angleDeg * Math.PI / 180;
+        const cos = Math.cos(angleRad);
+        const sin = Math.sin(angleRad);
+        const rotatedHalfWidth = Math.max(Math.abs(cos) * halfWidth + Math.abs(sin) * halfHeight, ROTATION_EPSILON);
+        const rotatedHalfHeight = Math.max(Math.abs(sin) * halfWidth + Math.abs(cos) * halfHeight, ROTATION_EPSILON);
+        return {{
+            angleDeg,
+            angleRad,
+            cos,
+            sin,
+            dataCenterX,
+            dataCenterY,
+            rotatedWidth: rotatedHalfWidth * 2,
+            rotatedHeight: rotatedHalfHeight * 2,
+        }};
+    }}
+
+    function createSectionViewTransform(section, options = {{}}) {{
+        if (!section) return null;
+        ensureSectionXY(section);
+        const width = Math.max(1, Number(options.width) || 0);
+        const height = Math.max(1, Number(options.height) || 0);
+        const padding = Math.max(0, Number(options.padding) || 0);
+        const zoom = Math.max(ROTATION_EPSILON, Number(options.zoom) || 1);
+        const panX = Number(options.panX) || 0;
+        const panY = Number(options.panY) || 0;
+        const metrics = getSectionRotationMetrics(section);
+        const fitWidth = Math.max(ROTATION_EPSILON, width - 2 * padding);
+        const fitHeight = Math.max(ROTATION_EPSILON, height - 2 * padding);
+        const baseScale = Math.min(
+            fitWidth / Math.max(metrics.rotatedWidth, ROTATION_EPSILON),
+            fitHeight / Math.max(metrics.rotatedHeight, ROTATION_EPSILON),
+        );
+        const scale = Math.max(ROTATION_EPSILON, baseScale * zoom);
+        const centerX = width / 2 + panX;
+        const centerY = height / 2 + panY;
+
+        const transform = {{
+            width,
+            height,
+            padding,
+            baseScale,
+            scale,
+            centerX,
+            centerY,
+            angleDeg: metrics.angleDeg,
+            angleRad: metrics.angleRad,
+            cos: metrics.cos,
+            sin: metrics.sin,
+            dataCenterX: metrics.dataCenterX,
+            dataCenterY: metrics.dataCenterY,
+            isModal: !!options.isModal,
+        }};
+
+        transform.dataToScreen = (x, y) => {{
+            const dx = x - transform.dataCenterX;
+            const dy = y - transform.dataCenterY;
+            const rotatedX = dx * transform.cos - dy * transform.sin;
+            const rotatedY = dx * transform.sin + dy * transform.cos;
+            return {{
+                x: transform.centerX + rotatedX * transform.scale,
+                y: transform.centerY - rotatedY * transform.scale,
+            }};
+        }};
+        transform.screenToData = (screenX, screenY) => {{
+            const rotatedX = (screenX - transform.centerX) / transform.scale;
+            const rotatedY = -(screenY - transform.centerY) / transform.scale;
+            return {{
+                x: transform.dataCenterX + rotatedX * transform.cos + rotatedY * transform.sin,
+                y: transform.dataCenterY - rotatedX * transform.sin + rotatedY * transform.cos,
+            }};
+        }};
+        transform.isPointVisible = (screenX, screenY, radius = 0) => {{
+            return !(
+                screenX < -radius ||
+                screenX > transform.width + radius ||
+                screenY < -radius ||
+                screenY > transform.height + radius
+            );
+        }};
+        return transform;
+    }}
+
     // Outline color overrides (used for course by default)
     const OUTLINE_COLOR_OVERRIDES = {{
         'peak_I': 'rgba(228, 26, 28, 0.5)',
@@ -1976,6 +2208,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let geneAuxManifestPromise = null;
     const geneAuxShardCache = new Map();
     const geneAuxShardPromises = new Map();
+    const modalBlendGeneLoads = new Set();
     let geneAuxLoadingMessage = '';
 
     // Modal state
@@ -2000,6 +2233,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let modalBlendEnabled = false;
     let modalBlendMix = 0.5;  // Split position from left: 0 = all B, 1 = all A
     let modalBlendMarkersCollapsed = true;
+    let modalControlsCollapsed = false;
     let modalAnnotationPanelCustomPosition = null;
     let isDraggingModalAnnotationPanel = false;
     let modalAnnotationPanelDragOffsetX = 0;
@@ -2039,6 +2273,49 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let selectionSummaryColor = DATA.initial_color;
     let selectionSummaryExpanded = false;
     const sectionById = new Map((DATA.sections || []).map(section => [section.id, section]));
+
+    function updateSectionRotationIndicators(sectionId = null) {{
+        document.querySelectorAll('.section-panel').forEach((panel) => {{
+            if (sectionId && panel.dataset.sectionId !== sectionId) return;
+            const section = sectionById.get(panel.dataset.sectionId);
+            const label = panel.querySelector('[data-section-rotation-label]');
+            if (!section || !label) return;
+            label.textContent = formatRotationLabel(getSectionRotationDeg(section));
+        }});
+        const modalRotationInfo = document.getElementById('modal-rotation-info');
+        if (modalRotationInfo) {{
+            modalRotationInfo.textContent = modalSection
+                ? formatRotationLabel(getSectionRotationDeg(modalSection))
+                : 'Rot 0 deg';
+        }}
+    }}
+
+    function setModalControlsCollapsed(collapsed) {{
+        modalControlsCollapsed = !!collapsed;
+        const controls = document.querySelector('#modal .modal-controls');
+        if (controls) controls.classList.toggle('hidden', modalControlsCollapsed);
+        const toggle = document.getElementById('modal-controls-toggle');
+        if (toggle) toggle.textContent = modalControlsCollapsed ? 'Show tools' : 'Hide tools';
+        if (modalSection) layoutModalAnnotationPanel();
+    }}
+
+    function rotateSectionBy(sectionId, deltaDeg) {{
+        const section = sectionById.get(sectionId);
+        if (!section) return;
+        section.rotation_deg = normalizeRotationDeg(getSectionRotationDeg(section) + deltaDeg);
+        updateSectionRotationIndicators(sectionId);
+        renderAllSections();
+        if (modalSection && modalSection.id === sectionId) renderModalSection();
+    }}
+
+    function resetSectionRotation(sectionId) {{
+        const section = sectionById.get(sectionId);
+        if (!section) return;
+        section.rotation_deg = 0;
+        updateSectionRotationIndicators(sectionId);
+        renderAllSections();
+        if (modalSection && modalSection.id === sectionId) renderModalSection();
+    }}
 
     // Theme toggle
     function toggleTheme() {{
@@ -2449,6 +2726,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             if (!section.colors_b64) section.colors_b64 = {{}};
             if (!section._colorCache) section._colorCache = {{}};
             if (!section._edgesCache) section._edgesCache = null;
+            section.rotation_deg = normalizeRotationDeg(section.rotation_deg ?? 0);
         }});
     }}
 
@@ -2725,6 +3003,22 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
     }}
 
+    function requestModalBlendGene(gene) {{
+        const token = String(gene || '').trim();
+        if (!token || DATA.genes_meta?.[token] || modalBlendGeneLoads.has(token)) return;
+        modalBlendGeneLoads.add(token);
+        runAsyncUIAction(`Modal split gene load (${{token}})`, async () => {{
+            const ok = await ensureGeneAvailable(token, {{ showErrors: false }});
+            if (ok) {{
+                ensureGeneAutoScale(token);
+                renderLegend('modal-legend');
+                if (modalSection) renderModalSection();
+            }}
+        }}).finally(() => {{
+            modalBlendGeneLoads.delete(token);
+        }});
+    }}
+
     function ensureGeneAutoScale(gene) {{
         if (!gene) return;
         if (!geneScaleAuto[gene]) {{
@@ -2879,7 +3173,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!section || !spec) return null;
         if (spec.kind === 'gene') {{
             const gene = (spec.gene || '').trim();
-            if (!gene || !DATA.genes_meta?.[gene]) return null;
+            if (!gene) return null;
+            if (!DATA.genes_meta?.[gene]) {{
+                requestModalBlendGene(gene);
+                return null;
+            }}
             const values = getSectionGeneValues(section, gene);
             if (!values) return null;
             const scale = getGeneScaleRange(gene);
@@ -3267,8 +3565,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             rings = rings[hopIdx] ? [rings[hopIdx]] : [];
         }}
 
-        const xCenter = transform.centerX + (section.x[centerIdx] - transform.dataCenterX) * transform.scale;
-        const yCenter = transform.centerY - (section.y[centerIdx] - transform.dataCenterY) * transform.scale;
+        const centerPoint = transform.dataToScreen(section.x[centerIdx], section.y[centerIdx]);
+        const xCenter = centerPoint.x;
+        const yCenter = centerPoint.y;
 
         ctx.save();
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
@@ -3289,10 +3588,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     const catName = config.categories[catIdx];
                     if (hiddenCategories.has(catName)) return;
                 }}
-                const x = transform.centerX + (section.x[cellIdx] - transform.dataCenterX) * transform.scale;
-                const y = transform.centerY - (section.y[cellIdx] - transform.dataCenterY) * transform.scale;
-                if (x < -adjustedSpotSize || x > transform.width + adjustedSpotSize ||
-                    y < -adjustedSpotSize || y > transform.height + adjustedSpotSize) return;
+                const point = transform.dataToScreen(section.x[cellIdx], section.y[cellIdx]);
+                const x = point.x;
+                const y = point.y;
+                if (!transform.isPointVisible(x, y, adjustedSpotSize)) return;
                 ctx.beginPath();
                 ctx.arc(x, y, adjustedSpotSize + 1 + idx, 0, Math.PI * 2);
                 ctx.stroke();
@@ -3313,10 +3612,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     const catName = config.categories[catIdx];
                     if (hiddenCategories.has(catName)) return;
                 }}
-                const x = transform.centerX + (section.x[cellIdx] - transform.dataCenterX) * transform.scale;
-                const y = transform.centerY - (section.y[cellIdx] - transform.dataCenterY) * transform.scale;
-                if (x < -adjustedSpotSize || x > transform.width + adjustedSpotSize ||
-                    y < -adjustedSpotSize || y > transform.height + adjustedSpotSize) return;
+                const point = transform.dataToScreen(section.x[cellIdx], section.y[cellIdx]);
+                const x = point.x;
+                const y = point.y;
+                if (!transform.isPointVisible(x, y, adjustedSpotSize)) return;
                 ctx.moveTo(xCenter, yCenter);
                 ctx.lineTo(x, y);
             }});
@@ -3684,34 +3983,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function getModalViewTransform(rect) {{
         if (!modalSection || !rect) return null;
-        const bounds = modalSection.bounds;
-        const dataWidth = bounds.xmax - bounds.xmin;
-        const dataHeight = bounds.ymax - bounds.ymin;
-        const baseScale = Math.min((rect.width - 40) / dataWidth, (rect.height - 40) / dataHeight);
-        const scale = baseScale * modalZoom;
-        return {{
+        return createSectionViewTransform(modalSection, {{
             width: rect.width,
             height: rect.height,
-            scale,
-            centerX: rect.width / 2 + modalPanX,
-            centerY: rect.height / 2 + modalPanY,
-            dataCenterX: (bounds.xmin + bounds.xmax) / 2,
-            dataCenterY: (bounds.ymin + bounds.ymax) / 2,
-        }};
+            padding: 20,
+            zoom: modalZoom,
+            panX: modalPanX,
+            panY: modalPanY,
+            isModal: true,
+        }});
     }}
 
     function screenPointToModalData(x, y, transform) {{
-        return {{
-            x: transform.dataCenterX + (x - transform.centerX) / transform.scale,
-            y: transform.dataCenterY - (y - transform.centerY) / transform.scale,
-        }};
+        return transform.screenToData(x, y);
     }}
 
     function modalDataPointToScreen(x, y, transform) {{
-        return {{
-            x: transform.centerX + (x - transform.dataCenterX) * transform.scale,
-            y: transform.centerY - (y - transform.dataCenterY) * transform.scale,
-        }};
+        return transform.dataToScreen(x, y);
     }}
 
     function getAnnotationColorById(id) {{
@@ -3917,18 +4205,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         const canvas = document.getElementById('modal-canvas');
         const rect = canvas.getBoundingClientRect();
-        const width = rect.width, height = rect.height;
-
-        const bounds = modalSection.bounds;
-        const dataWidth = bounds.xmax - bounds.xmin;
-        const dataHeight = bounds.ymax - bounds.ymin;
-        const baseScale = Math.min((width - 40) / dataWidth, (height - 40) / dataHeight);
-        const scale = baseScale * modalZoom;
-
-        const centerX = width / 2 + modalPanX;
-        const centerY = height / 2 + modalPanY;
-        const dataCenterX = (bounds.xmin + bounds.xmax) / 2;
-        const dataCenterY = (bounds.ymin + bounds.ymax) / 2;
+        const transform = getModalViewTransform(rect);
+        if (!transform) return;
 
         const config = getColorConfig();
         const values = getSectionValues(modalSection);
@@ -3944,8 +4222,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 if (hiddenCategories.has(catName)) continue;
             }}
 
-            const x = centerX + (modalSection.x[i] - dataCenterX) * scale;
-            const y = centerY - (modalSection.y[i] - dataCenterY) * scale;
+            const point = transform.dataToScreen(modalSection.x[i], modalSection.y[i]);
+            const x = point.x;
+            const y = point.y;
             if (pointInPolygon(x, y, modalLassoPath)) {{
                 selectedCells.add(`${{modalSection.id}}:${{i}}`);
             }}
@@ -4241,13 +4520,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         ctx.fillRect(0, 0, width, height);
 
         if (section.x.length === 0) return;
-
-        const bounds = section.bounds;
-        const dataWidth = bounds.xmax - bounds.xmin;
-        const dataHeight = bounds.ymax - bounds.ymin;
-        const scale = Math.min((width - 2*padding) / dataWidth, (height - 2*padding) / dataHeight);
-        const offsetX = padding + ((width - 2*padding) - dataWidth * scale) / 2;
-        const offsetY = padding + ((height - 2*padding) - dataHeight * scale) / 2;
+        const transform = createSectionViewTransform(section, {{
+            width,
+            height,
+            padding,
+            isModal: false,
+        }});
+        if (!transform) return;
 
         const config = getColorConfig();
         const values = getSectionValues(section);
@@ -4264,10 +4543,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     const i = edge[0];
                     const j = edge[1];
                     if (i >= section.x.length || j >= section.x.length) continue;
-                    const x1 = offsetX + (section.x[i] - bounds.xmin) * scale;
-                    const y1 = height - (offsetY + (section.y[i] - bounds.ymin) * scale);
-                    const x2 = offsetX + (section.x[j] - bounds.xmin) * scale;
-                    const y2 = height - (offsetY + (section.y[j] - bounds.ymin) * scale);
+                    const p1 = transform.dataToScreen(section.x[i], section.y[i]);
+                    const p2 = transform.dataToScreen(section.x[j], section.y[j]);
+                    const x1 = p1.x;
+                    const y1 = p1.y;
+                    const x2 = p2.x;
+                    const y2 = p2.y;
                     ctx.moveTo(x1, y1);
                     ctx.lineTo(x2, y2);
                 }}
@@ -4276,10 +4557,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     const i = edges[e];
                     const j = edges[e + 1];
                     if (i >= section.x.length || j >= section.x.length) continue;
-                    const x1 = offsetX + (section.x[i] - bounds.xmin) * scale;
-                    const y1 = height - (offsetY + (section.y[i] - bounds.ymin) * scale);
-                    const x2 = offsetX + (section.x[j] - bounds.xmin) * scale;
-                    const y2 = height - (offsetY + (section.y[j] - bounds.ymin) * scale);
+                    const p1 = transform.dataToScreen(section.x[i], section.y[i]);
+                    const p2 = transform.dataToScreen(section.x[j], section.y[j]);
+                    const x1 = p1.x;
+                    const y1 = p1.y;
+                    const x2 = p2.x;
+                    const y2 = p2.y;
                     ctx.moveTo(x1, y1);
                     ctx.lineTo(x2, y2);
                 }}
@@ -4299,10 +4582,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const catName = config.categories[catIdx];
                 if (!hiddenCategories.has(catName)) continue;  // Only draw hidden ones
 
-                const x = offsetX + (section.x[i] - bounds.xmin) * scale;
-                const y = offsetY + (section.y[i] - bounds.ymin) * scale;
+                const point = transform.dataToScreen(section.x[i], section.y[i]);
+                const x = point.x;
+                const y = point.y;
                 ctx.beginPath();
-                ctx.arc(x, height - y, spotSize, 0, Math.PI * 2);
+                ctx.arc(x, y, spotSize, 0, Math.PI * 2);
                 ctx.fill();
             }}
             ctx.globalAlpha = 1;
@@ -4329,8 +4613,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 color = getCategoryColor(catIdx);
             }}
 
-            const x = offsetX + (section.x[i] - bounds.xmin) * scale;
-            const y = offsetY + (section.y[i] - bounds.ymin) * scale;
+            const point = transform.dataToScreen(section.x[i], section.y[i]);
+            const x = point.x;
+            const y = point.y;
             if (hasTypeFocus && !isSelectedCat) {{
                 ctx.fillStyle = '#bbbbbb';
                 ctx.globalAlpha = 0.15;
@@ -4339,7 +4624,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 ctx.globalAlpha = 1;
             }}
             ctx.beginPath();
-            ctx.arc(x, height - y, spotSize, 0, Math.PI * 2);
+            ctx.arc(x, y, spotSize, 0, Math.PI * 2);
             ctx.fill();
         }}
         ctx.globalAlpha = 1;
@@ -4361,10 +4646,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     if (hiddenCategories.has(catName)) continue;
                 }}
 
-                const x = offsetX + (section.x[i] - bounds.xmin) * scale;
-                const y = offsetY + (section.y[i] - bounds.ymin) * scale;
+                const point = transform.dataToScreen(section.x[i], section.y[i]);
+                const x = point.x;
+                const y = point.y;
                 ctx.beginPath();
-                ctx.arc(x, height - y, spotSize + 1, 0, Math.PI * 2);
+                ctx.arc(x, y, spotSize + 1, 0, Math.PI * 2);
                 ctx.stroke();
             }}
         }}
@@ -4542,7 +4828,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function findNearestCell(section, mouseX, mouseY, canvasRect, transform, options = {{}}) {{
         ensureSectionXY(section);
-        // transform: {{ scale, offsetX, offsetY, centerX, centerY, dataCenterX, dataCenterY, isModal }}
         const config = getColorConfig();
         const values = getSectionValues(section);
         const ignoreMissing = !!options.ignoreMissing;
@@ -4563,15 +4848,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 if (hiddenCategories.has(catName)) continue;
             }}
 
-            let screenX, screenY;
-            if (transform.isModal) {{
-                screenX = transform.centerX + (section.x[i] - transform.dataCenterX) * transform.scale;
-                screenY = transform.centerY - (section.y[i] - transform.dataCenterY) * transform.scale;
-            }} else {{
-                const bounds = section.bounds;
-                screenX = transform.offsetX + (section.x[i] - bounds.xmin) * transform.scale;
-                screenY = transform.height - (transform.offsetY + (section.y[i] - bounds.ymin) * transform.scale);
-            }}
+            const point = transform.dataToScreen(section.x[i], section.y[i]);
+            const screenX = point.x;
+            const screenY = point.y;
 
             const dist = Math.sqrt((mouseX - screenX) ** 2 + (mouseY - screenY) ** 2);
             if (dist < nearestDist && dist < searchRadius) {{
@@ -4608,7 +4887,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const blendRuntimes = getModalBlendRuntimes(section);
         if (!blendRuntimes) return null;
 
-        const cellX = transform.centerX + (section.x[cellIdx] - transform.dataCenterX) * transform.scale;
+        const cellX = transform.dataToScreen(section.x[cellIdx], section.y[cellIdx]).x;
         const splitX = transform.width * modalBlendMix;
         const side = cellX <= splitX ? 'a' : 'b';
         const sideLabel = side === 'a' ? 'A (left)' : 'B (right)';
@@ -4705,17 +4984,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         ctx.fillRect(0, 0, width, height);
 
         if (modalSection.x.length === 0) return;
-
-        const bounds = modalSection.bounds;
-        const dataWidth = bounds.xmax - bounds.xmin;
-        const dataHeight = bounds.ymax - bounds.ymin;
-        const baseScale = Math.min((width - 40) / dataWidth, (height - 40) / dataHeight);
-        const scale = baseScale * modalZoom;
-
-        const centerX = width / 2 + modalPanX;
-        const centerY = height / 2 + modalPanY;
-        const dataCenterX = (bounds.xmin + bounds.xmax) / 2;
-        const dataCenterY = (bounds.ymin + bounds.ymax) / 2;
+        const transform = getModalViewTransform(rect);
+        if (!transform) return;
         const adjustedSpotSize = Math.max(0.25, modalSpotSize * modalZoom * 0.8);
 
         const config = getColorConfig();
@@ -4744,10 +5014,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const n = modalSection.x.length;
             const drawEdge = (i, j) => {{
                 if (i < 0 || j < 0 || i >= n || j >= n) return;
-                const x1 = centerX + (modalSection.x[i] - dataCenterX) * scale;
-                const y1 = centerY - (modalSection.y[i] - dataCenterY) * scale;
-                const x2 = centerX + (modalSection.x[j] - dataCenterX) * scale;
-                const y2 = centerY - (modalSection.y[j] - dataCenterY) * scale;
+                const p1 = transform.dataToScreen(modalSection.x[i], modalSection.y[i]);
+                const p2 = transform.dataToScreen(modalSection.x[j], modalSection.y[j]);
+                const x1 = p1.x;
+                const y1 = p1.y;
+                const x2 = p2.x;
+                const y2 = p2.y;
                 const minX = Math.min(x1, x2);
                 const maxX = Math.max(x1, x2);
                 const minY = Math.min(y1, y2);
@@ -4782,11 +5054,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const catName = config.categories[catIdx];
                 if (!hiddenCategories.has(catName)) continue;
 
-                const x = centerX + (modalSection.x[i] - dataCenterX) * scale;
-                const y = centerY - (modalSection.y[i] - dataCenterY) * scale;
-
-                if (x < -adjustedSpotSize || x > width + adjustedSpotSize ||
-                    y < -adjustedSpotSize || y > height + adjustedSpotSize) continue;
+                const point = transform.dataToScreen(modalSection.x[i], modalSection.y[i]);
+                const x = point.x;
+                const y = point.y;
+                if (!transform.isPointVisible(x, y, adjustedSpotSize)) continue;
 
                 ctx.beginPath();
                 ctx.arc(x, y, adjustedSpotSize, 0, Math.PI * 2);
@@ -4799,10 +5070,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (blendActive) {{
             const splitX = width * modalBlendMix;
             for (let i = 0; i < modalSection.x.length; i++) {{
-                const x = centerX + (modalSection.x[i] - dataCenterX) * scale;
-                const y = centerY - (modalSection.y[i] - dataCenterY) * scale;
-                if (x < -adjustedSpotSize || x > width + adjustedSpotSize ||
-                    y < -adjustedSpotSize || y > height + adjustedSpotSize) continue;
+                const point = transform.dataToScreen(modalSection.x[i], modalSection.y[i]);
+                const x = point.x;
+                const y = point.y;
+                if (!transform.isPointVisible(x, y, adjustedSpotSize)) continue;
 
                 const runtime = x <= splitX ? blendRuntimes.a : blendRuntimes.b;
                 ctx.fillStyle = rgbToCss(getModalBlendCellRgb(runtime, i));
@@ -4841,11 +5112,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     color = getCategoryColor(catIdx);
                 }}
 
-                const x = centerX + (modalSection.x[i] - dataCenterX) * scale;
-                const y = centerY - (modalSection.y[i] - dataCenterY) * scale;
-
-                if (x < -adjustedSpotSize || x > width + adjustedSpotSize ||
-                    y < -adjustedSpotSize || y > height + adjustedSpotSize) continue;
+                const point = transform.dataToScreen(modalSection.x[i], modalSection.y[i]);
+                const x = point.x;
+                const y = point.y;
+                if (!transform.isPointVisible(x, y, adjustedSpotSize)) continue;
 
                 if (hasTypeFocus && !isSelectedCat) {{
                     ctx.fillStyle = '#bbbbbb';
@@ -4878,11 +5148,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     if (hiddenCategories.has(catName)) continue;
                 }}
 
-                const x = centerX + (modalSection.x[i] - dataCenterX) * scale;
-                const y = centerY - (modalSection.y[i] - dataCenterY) * scale;
-
-                if (x < -adjustedSpotSize || x > width + adjustedSpotSize ||
-                    y < -adjustedSpotSize || y > height + adjustedSpotSize) continue;
+                const point = transform.dataToScreen(modalSection.x[i], modalSection.y[i]);
+                const x = point.x;
+                const y = point.y;
+                if (!transform.isPointVisible(x, y, adjustedSpotSize)) continue;
 
                 ctx.beginPath();
                 ctx.arc(x, y, adjustedSpotSize + 2, 0, Math.PI * 2);
@@ -4892,23 +5161,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         // No extra highlight needed: non-selected categories are greyed out above
 
-        drawNeighborHighlights(ctx, modalSection, {{
-            scale,
-            centerX,
-            centerY,
-            dataCenterX,
-            dataCenterY,
-            width,
-            height
-        }}, adjustedSpotSize);
-
-        drawModalAnnotations(ctx, {{
-            scale,
-            centerX,
-            centerY,
-            dataCenterX,
-            dataCenterY,
-        }});
+        drawNeighborHighlights(ctx, modalSection, transform, adjustedSpotSize);
+        drawModalAnnotations(ctx, transform);
 
         if (isDrawingModalLasso && modalLassoPath.length > 1) {{
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
@@ -4937,6 +5191,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
 
         document.getElementById('zoom-info').textContent = `${{Math.round(modalZoom * 100)}}%`;
+        document.getElementById('modal-rotation-info').textContent = formatRotationLabel(transform.angleDeg);
     }}
 
     // Legend
@@ -6158,10 +6413,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         document.getElementById('modal-meta').textContent = metaText;
         document.getElementById('modal').classList.add('active');
         updateSelectionInfo();
+        updateSectionRotationIndicators(sectionId);
         renderLegend('modal-legend');
         requestAnimationFrame(() => {{
             const canvas = document.getElementById('modal-canvas');
             if (canvas) canvas.style.cursor = 'grab';
+            setModalControlsCollapsed(modalControlsCollapsed);
             layoutModalAnnotationPanel();
             renderModalAnnotationPanel();
             renderModalSection();
@@ -6180,6 +6437,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         document.getElementById('modal-magic-wand-btn')?.classList.remove('active');
         document.getElementById('modal-annotate-btn')?.classList.remove('active');
         modalSection = null;
+        updateSectionRotationIndicators();
         renderModalAnnotationPanel();
         hideTooltip();
     }}
@@ -6194,7 +6452,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const margin = 8;
         const controls = container.querySelector('.modal-controls');
         let controlsTop = containerRect.height - margin;
-        if (controls) {{
+        if (controls && !controls.classList.contains('hidden')) {{
             const controlsRect = controls.getBoundingClientRect();
             controlsTop = Math.max(
                 margin,
@@ -6329,14 +6587,35 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const metaParts = Object.entries(section.metadata || {{}})
                 .map(([k, v]) => `${{formatMetadataLabel(k)}}: ${{v}}`).join(' | ');
             const metaHtml = metaParts ? `<div class="section-meta">${{metaParts}}</div>` : '';
+            const rotationLabel = formatRotationLabel(getSectionRotationDeg(section));
 
             panel.innerHTML = `
                 <div class="section-header">
-                    <div>${{section.id}}${{metaHtml}}</div>
-                    <span class="expand-icon">&#x26F6;</span>
+                    <div class="section-header-main">${{section.id}}${{metaHtml}}</div>
+                    <div class="section-header-actions">
+                        <span class="section-rotation-label" data-section-rotation-label>${{rotationLabel}}</span>
+                        <div class="section-rotate-group">
+                            <button class="section-rotate-btn" type="button" data-rotate-step="-45" title="Rotate section -45 degrees">-45</button>
+                            <button class="section-rotate-btn" type="button" data-rotate-step="45" title="Rotate section +45 degrees">+45</button>
+                            <button class="section-rotate-btn" type="button" data-rotate-reset title="Reset section rotation">0</button>
+                        </div>
+                        <span class="expand-icon">&#x26F6;</span>
+                    </div>
                 </div>
                 <canvas class="section-canvas"></canvas>
             `;
+            panel.querySelectorAll('[data-rotate-step], [data-rotate-reset]').forEach((btn) => {{
+                btn.addEventListener('click', (event) => {{
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (btn.hasAttribute('data-rotate-reset')) {{
+                        resetSectionRotation(section.id);
+                        return;
+                    }}
+                    rotateSectionBy(section.id, Number(btn.dataset.rotateStep || 0));
+                }});
+                btn.addEventListener('mousedown', (event) => event.stopPropagation());
+            }});
             panel.addEventListener('click', () => openModal(section.id));
             grid.appendChild(panel);
         }});
@@ -6563,6 +6842,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function initModal() {{
         document.getElementById('modal-close').addEventListener('click', closeModal);
+        document.getElementById('modal-controls-toggle')?.addEventListener('click', () => {{
+            setModalControlsCollapsed(!modalControlsCollapsed);
+        }});
         document.getElementById('modal').addEventListener('click', (e) => {{
             if (e.target.id === 'modal') closeModal();
         }});
@@ -6579,6 +6861,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         document.getElementById('zoom-reset').addEventListener('click', () => {{
             modalZoom = 1; modalPanX = 0; modalPanY = 0;
             renderModalSection();
+        }});
+        document.getElementById('modal-rotate-left')?.addEventListener('click', () => {{
+            if (!modalSection) return;
+            rotateSectionBy(modalSection.id, -ROTATION_STEP_DEG);
+        }});
+        document.getElementById('modal-rotate-right')?.addEventListener('click', () => {{
+            if (!modalSection) return;
+            rotateSectionBy(modalSection.id, ROTATION_STEP_DEG);
+        }});
+        document.getElementById('modal-rotate-reset')?.addEventListener('click', () => {{
+            if (!modalSection) return;
+            resetSectionRotation(modalSection.id);
         }});
         document.getElementById('modal-screenshot-btn')?.addEventListener('click', screenshotModalView);
 
@@ -6605,28 +6899,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const rect = container.getBoundingClientRect();
             const mouseX = e.clientX - rect.left;
             const mouseY = e.clientY - rect.top;
-
-            const bounds = modalSection.bounds;
-            const dataWidth = bounds.xmax - bounds.xmin;
-            const dataHeight = bounds.ymax - bounds.ymin;
-            const baseScale = Math.min((rect.width - 40) / dataWidth, (rect.height - 40) / dataHeight);
-            const oldScale = baseScale * modalZoom;
+            const currentTransform = getModalViewTransform(rect);
+            if (!currentTransform) return;
+            const anchor = currentTransform.screenToData(mouseX, mouseY);
             const nextZoom = Math.max(0.1, Math.min(20, modalZoom * (e.deltaY > 0 ? 0.9 : 1.1)));
-            const newScale = baseScale * nextZoom;
-
-            const dataCenterX = (bounds.xmin + bounds.xmax) / 2;
-            const dataCenterY = (bounds.ymin + bounds.ymax) / 2;
-            const centerX = rect.width / 2 + modalPanX;
-            const centerY = rect.height / 2 + modalPanY;
-
-            const dataX = dataCenterX + (mouseX - centerX) / oldScale;
-            const dataY = dataCenterY - (mouseY - centerY) / oldScale;
-
-            const newCenterX = mouseX - (dataX - dataCenterX) * newScale;
-            const newCenterY = mouseY + (dataY - dataCenterY) * newScale;
-            modalPanX = newCenterX - rect.width / 2;
-            modalPanY = newCenterY - rect.height / 2;
             modalZoom = nextZoom;
+            const nextTransform = getModalViewTransform(rect);
+            if (nextTransform) {{
+                const nextAnchorScreen = nextTransform.dataToScreen(anchor.x, anchor.y);
+                modalPanX += mouseX - nextAnchorScreen.x;
+                modalPanY += mouseY - nextAnchorScreen.y;
+            }}
 
             renderModalSection();
         }});
@@ -7048,24 +7331,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const rect = canvas.getBoundingClientRect();
             const mouseX = e.clientX - rect.left;
             const mouseY = e.clientY - rect.top;
-            const bounds = modalSection.bounds;
-            const dataWidth = bounds.xmax - bounds.xmin;
-            const dataHeight = bounds.ymax - bounds.ymin;
-            const baseScale = Math.min((rect.width - 40) / dataWidth, (rect.height - 40) / dataHeight);
-            const scale = baseScale * modalZoom;
-            const centerX = rect.width / 2 + modalPanX;
-            const centerY = rect.height / 2 + modalPanY;
-            const dataCenterX = (bounds.xmin + bounds.xmax) / 2;
-            const dataCenterY = (bounds.ymin + bounds.ymax) / 2;
-            const transform = {{
-                scale,
-                centerX,
-                centerY,
-                dataCenterX,
-                dataCenterY,
-                width: rect.width,
-                isModal: true
-            }};
+            const transform = getModalViewTransform(rect);
+            if (!transform) return;
 
             const cellIdx = findNearestCell(modalSection, mouseX, mouseY, rect, transform);
             if (cellIdx >= 0) {{
@@ -7136,27 +7403,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const rect = canvas.getBoundingClientRect();
             const mouseX = e.clientX - rect.left;
             const mouseY = e.clientY - rect.top;
-
-            // Calculate transform parameters (same as renderModalSection)
-            const bounds = modalSection.bounds;
-            const dataWidth = bounds.xmax - bounds.xmin;
-            const dataHeight = bounds.ymax - bounds.ymin;
-            const baseScale = Math.min((rect.width - 40) / dataWidth, (rect.height - 40) / dataHeight);
-            const scale = baseScale * modalZoom;
-            const centerX = rect.width / 2 + modalPanX;
-            const centerY = rect.height / 2 + modalPanY;
-            const dataCenterX = (bounds.xmin + bounds.xmax) / 2;
-            const dataCenterY = (bounds.ymin + bounds.ymax) / 2;
-
-            const transform = {{
-                scale,
-                centerX,
-                centerY,
-                dataCenterX,
-                dataCenterY,
-                width: rect.width,
-                isModal: true
-            }};
+            const transform = getModalViewTransform(rect);
+            if (!transform) return;
 
             const blendActive = !!getModalBlendRuntimes(modalSection);
             const cellIdx = findNearestCell(
@@ -7244,6 +7492,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             initModal();
             initUMAP();
             initHelpTooltips();
+            updateSectionRotationIndicators();
             renderLegend('legend');
             updateSelectionInfo();
             initSucceeded = true;
@@ -7309,6 +7558,7 @@ def export_to_html(
     interaction_markers_min_neighbors: int = 1,
     interaction_markers_method: str = "wilcoxon",
     interaction_markers_layer: Optional[str] = "normalized",
+    section_rotations: Optional[Mapping[str, Union[int, float]]] = None,
 ) -> str:
     """
     Export spatial dataset to a standalone HTML file.
@@ -7388,6 +7638,9 @@ def export_to_html(
         Method passed to scanpy.tl.rank_genes_groups (e.g. "wilcoxon", "t-test").
     interaction_markers_layer : str, optional
         Layer used for interaction DE (default: "normalized" if present).
+    section_rotations : mapping, optional
+        Optional mapping of section_id -> initial rotation angle in degrees.
+        Angles are stored exactly (normalized modulo 360) for the interactive viewer.
 
     Returns
     -------
@@ -7423,6 +7676,7 @@ def export_to_html(
     gene_storage = str(gene_storage or "embedded").strip().lower()
     if gene_storage not in {"embedded", "sidecar"}:
         raise ValueError("gene_storage must be one of: 'embedded', 'sidecar'")
+    resolved_section_rotations = _resolve_section_rotations(dataset, section_rotations)
 
     # Prefer highly variable genes for expression if available; otherwise use provided genes
     hv_genes = None
@@ -7511,6 +7765,7 @@ def export_to_html(
         interaction_markers_min_neighbors=interaction_markers_min_neighbors,
         interaction_markers_method=interaction_markers_method,
         interaction_markers_layer=interaction_markers_layer,
+        section_rotations=resolved_section_rotations,
     )
     if gene_storage == "sidecar":
         assert resolved_gene_aux_path is not None

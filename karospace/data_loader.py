@@ -483,6 +483,7 @@ class SpatialDataset:
         interaction_markers_min_neighbors: int = 1,
         interaction_markers_method: str = "wilcoxon",
         interaction_markers_layer: Optional[str] = "normalized",
+        section_rotations: Optional[Dict[str, float]] = None,
     ) -> Dict:
         """
         Export dataset to JSON-serializable format for the HTML viewer.
@@ -1048,6 +1049,7 @@ class SpatialDataset:
         sections_data = []
         for section in self.sections:
             idx = export_section_indices[section.section_id]
+            rotation_deg = float((section_rotations or {}).get(section.section_id, 0.0))
 
             section_coords = coords_f4[idx]
 
@@ -1092,6 +1094,7 @@ class SpatialDataset:
                 "id": section.section_id,
                 "metadata": section.metadata,
                 "n_cells": int(len(idx)),
+                "rotation_deg": rotation_deg,
                 "x": None,
                 "y": None,
                 "xb64": None,
