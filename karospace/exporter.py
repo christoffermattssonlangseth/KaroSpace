@@ -38,6 +38,75 @@ def _chunked(values: List[str], size: int) -> List[List[str]]:
     return [values[i:i + size] for i in range(0, len(values), size)]
 
 
+def _select_top_variable_genes(adata, n: int) -> List[str]:
+    """Return up to n gene names ranked by expression variance across cells."""
+    X = adata.X
+    if hasattr(X, "toarray"):
+        # For sparse matrices compute variance without densifying the whole thing.
+        # Var(X) = E[X^2] - E[X]^2
+        mean_sq = np.asarray(X.power(2).mean(axis=0)).ravel()
+        sq_mean = np.asarray(X.mean(axis=0)).ravel() ** 2
+        variances = mean_sq - sq_mean
+    else:
+        variances = np.var(np.asarray(X, dtype=float), axis=0)
+    top_idx = np.argsort(variances)[::-1][:n]
+    return [adata.var_names[i] for i in top_idx]
+
+
+def _compute_cluster_gene_means(adata, genes: List[str], obs_col: str) -> Optional[dict]:
+    """Compute per-cluster and overall mean expression for each gene."""
+    if obs_col not in adata.obs.columns:
+        return None
+    col = adata.obs[obs_col]
+    if not hasattr(col, "cat"):
+        try:
+            col = col.astype("category")
+        except Exception:
+            return None
+    categories = [str(c) for c in col.cat.categories]
+    if not categories:
+        return None
+
+    X = adata[:, genes].X
+    if hasattr(X, "toarray"):
+        X = X.toarray()
+    X = np.asarray(X, dtype=float)
+
+    means = {}
+    col_vals = col.to_numpy()
+    for cat in categories:
+        mask = col_vals == cat
+        if mask.sum() == 0:
+            means[cat] = [0.0] * len(genes)
+        else:
+            means[cat] = np.round(X[mask].mean(axis=0), 4).tolist()
+
+    background = np.round(X.mean(axis=0), 4).tolist()
+    return {"categories": categories, "means": means, "background": background}
+
+
+def _compute_gene_correlations(adata, genes: List[str], top_n: int = 10) -> dict:
+    """For each gene, return the top_n most positively correlated genes."""
+    if not genes or top_n < 1 or len(genes) < 2:
+        return {gene: [] for gene in genes} if genes else {}
+    X = adata[:, genes].X
+    if hasattr(X, "toarray"):
+        X = X.toarray()
+    X = np.asarray(X, dtype=float)
+    corr = np.corrcoef(X.T)  # shape (n_genes, n_genes)
+    result = {}
+    for i, gene in enumerate(genes):
+        scores = corr[i].copy()
+        scores[i] = -2.0  # exclude self
+        top_idx = np.argsort(scores)[::-1][:top_n]
+        result[gene] = [
+            {"gene": genes[j], "r": round(float(corr[i, j]), 3)}
+            for j in top_idx
+            if j != i and corr[i, j] > 0
+        ]
+    return result
+
+
 def _estimate_auto_spot_size(dataset: SpatialDataset, min_panel_size: int) -> float:
     """Estimate a reasonable default spot radius from section density."""
     panel_px = max(48.0, float(min_panel_size) - 16.0)  # Account for canvas padding.
@@ -949,6 +1018,60 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             align-items: center;
             justify-content: center;
         }}
+        .cluster-de-controls {{
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }}
+        .cluster-de-select-row {{
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+        }}
+        .cluster-de-result {{
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: var(--input-bg);
+            overflow: auto;
+            max-height: 420px;
+        }}
+        .cluster-de-table {{
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 10px;
+        }}
+        .cluster-de-table th, .cluster-de-table td {{
+            text-align: left;
+            padding: 6px 8px;
+            border-bottom: 1px solid var(--border-color);
+            font-variant-numeric: tabular-nums;
+            vertical-align: top;
+        }}
+        .cluster-de-table th {{
+            position: sticky;
+            top: 0;
+            z-index: 1;
+            background: var(--panel-bg);
+            color: var(--muted-color);
+            font-weight: 600;
+        }}
+        .cluster-de-table tr:last-child td {{ border-bottom: none; }}
+        .cluster-de-gene-btn {{
+            padding: 0;
+            border: none;
+            background: none;
+            color: var(--accent-strong);
+            cursor: pointer;
+            font: inherit;
+            text-align: left;
+        }}
+        .cluster-de-gene-btn:hover {{ text-decoration: underline; }}
+        .cluster-de-meta {{
+            padding: 8px;
+            font-size: 10px;
+            color: var(--muted-color);
+            border-bottom: 1px solid var(--border-color);
+        }}
         .legend-title {{
             font-size: 13px;
             font-weight: 600;
@@ -1442,6 +1565,46 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .selection-summary-toggle:hover {{
             color: var(--accent);
         }}
+        .selection-summary-expr {{
+            margin-top: 8px;
+            border-top: 1px solid var(--border-color);
+            padding-top: 6px;
+        }}
+        .selection-summary-expr-row {{
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            margin-bottom: 3px;
+        }}
+        .selection-summary-expr-gene {{
+            width: 80px;
+            flex-shrink: 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            font-size: 10px;
+        }}
+        .selection-summary-expr-bars {{
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+        }}
+        .selection-summary-expr-bar {{
+            height: 4px;
+            border-radius: 2px;
+            min-width: 1px;
+        }}
+        .selection-summary-expr-bar.sel {{ background: var(--accent-strong); }}
+        .selection-summary-expr-bar.rest {{ background: var(--muted-color); opacity: 0.5; }}
+        .selection-summary-expr-fc {{
+            width: 34px;
+            flex-shrink: 0;
+            text-align: right;
+            font-size: 10px;
+            font-variant-numeric: tabular-nums;
+            color: var(--muted-color);
+        }}
         .modal-annotation-panel {{
             position: absolute;
             right: 8px;
@@ -1914,7 +2077,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             <button class="legend-toggle active" id="legend-toggle" title="Toggle legend panel" data-help="Show or hide the legend panel with color keys, category toggles, and spotlight controls.">
                 Legend
             </button>
-            <button class="color-toggle" id="color-toggle" title="Toggle color explorer" data-help="Insights opens analysis tools for the current view: summary stats, neighbor patterns, and gene panels (dotplot and markers).">
+            <button class="color-toggle" id="color-toggle" title="Toggle color explorer" data-help="Insights opens analysis tools for the current view: summary stats, neighbor patterns, and gene panels (dotplot, markers, and cluster comparison).">
                 Insights
             </button>
             <button class="graph-toggle" id="graph-toggle" title="Toggle neighborhood graph" data-help="Overlay neighborhood graph edges to visualize local connectivity between cells." style="display: none;">
@@ -2397,6 +2560,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     const expandedNeighborGroups = new Set();
     let interactionSourceCategory = null;
     let dotplotRenderToken = 0;
+    let clusterDeGroupby = null;
+    let clusterDeSourceCategory = null;
+    let clusterDeReferenceCategory = null;
     let geneAuxManifest = null;
     let geneAuxManifestPromise = null;
     const geneAuxShardCache = new Map();
@@ -3297,6 +3463,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             </div>
         `);
 
+        if (currentGene && DATA.gene_correlations?.[currentGene]?.length) {{
+            const corrData = DATA.gene_correlations[currentGene];
+            const corrRows = `<div class="gene-token-grid">${{corrData.map(({{gene, r}}) =>
+                renderGeneTokenButton(gene, {{
+                    isActive: gene === currentGene,
+                    metaLabel: `r=${{r.toFixed(2)}}`,
+                    title: `Pearson r = ${{r.toFixed(2)}} with ${{escapeHtml(currentGene)}}`,
+                }})
+            ).join('')}}</div>`;
+            sections.push(`
+                <div class="gene-discovery-section">
+                    <div class="gene-discovery-label">Correlated with ${{escapeHtml(currentGene)}}</div>
+                    ${{corrRows}}
+                </div>
+            `);
+        }}
+
         const suggestionInfo = getGeneSuggestionGroups();
         const suggestionRows = suggestionInfo.groups.length
             ? suggestionInfo.groups.map(group => `
@@ -4106,6 +4289,63 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return summary;
     }}
 
+    function computeSelectionMeanExpression(summary) {{
+        // Prefer cluster-means lookup: covers all genes including sidecar ones.
+        const clusterMeansData = DATA.cluster_gene_means;
+        if (clusterMeansData && summary?.typeColumn) {{
+            const colData = clusterMeansData.columns?.[summary.typeColumn];
+            if (colData && summary.types.length) {{
+                const genes = clusterMeansData.genes;
+                const n = genes.length;
+                const selMeans = new Float64Array(n);
+                const totalSelected = summary.total - summary.missingTypeValues;
+                if (totalSelected > 0) {{
+                    for (const [cat, count] of summary.types) {{
+                        const catMeans = colData.means[cat];
+                        if (!catMeans) continue;
+                        const weight = count / totalSelected;
+                        for (let i = 0; i < n; i++) {{
+                            selMeans[i] += catMeans[i] * weight;
+                        }}
+                    }}
+                }}
+                const bgMeans = colData.background;
+                const result = genes.map((gene, i) => ({{
+                    gene,
+                    meanSel: selMeans[i],
+                    meanRest: bgMeans[i],
+                }}));
+                result.sort((a, b) => b.meanSel - a.meanSel);
+                return result;
+            }}
+        }}
+
+        // Fallback: compute directly from loaded gene vectors (exact, embedded genes only).
+        const loadedGenes = Object.keys(DATA.genes_meta || {{}});
+        if (!loadedGenes.length || !selectedCells.size) return [];
+        const result = [];
+        for (const gene of loadedGenes) {{
+            let selSum = 0, selCount = 0, restSum = 0, restCount = 0;
+            for (const section of (DATA.sections || [])) {{
+                const vals = getSectionGeneValues(section, gene);
+                if (!vals) continue;
+                for (let i = 0; i < vals.length; i++) {{
+                    const v = vals[i] ?? 0;
+                    if (isCellSelected(section.id, i)) {{
+                        selSum += v; selCount++;
+                    }} else {{
+                        restSum += v; restCount++;
+                    }}
+                }}
+            }}
+            const meanSel = selCount > 0 ? selSum / selCount : 0;
+            const meanRest = restCount > 0 ? restSum / restCount : 0;
+            result.push({{ gene, meanSel, meanRest }});
+        }}
+        result.sort((a, b) => b.meanSel - a.meanSel);
+        return result;
+    }}
+
     function renderSelectionSummaryHtml(summary) {{
         if (!summary || summary.total === 0) {{
             return '<div class="selection-summary-meta">Draw a region with Magic Wand to inspect selected cells.</div>';
@@ -4138,6 +4378,28 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
         }} else {{
             html += '<div class="selection-summary-meta">No categorical annotation is available for type counts.</div>';
+        }}
+
+        const exprData = computeSelectionMeanExpression(summary);
+        if (exprData.length) {{
+            const top = exprData.slice(0, 6);
+            const vmax = top[0].meanSel || 1;
+            html += '<div class="selection-summary-expr">';
+            html += '<div class="selection-summary-title">Mean expression — selection (pink) vs rest (grey)</div>';
+            top.forEach(({{gene, meanSel, meanRest}}) => {{
+                const pctSel = Math.round(100 * meanSel / vmax);
+                const pctRest = Math.round(100 * meanRest / vmax);
+                const fc = meanRest > 0 ? (meanSel / meanRest).toFixed(1) + 'x' : '—';
+                html += `<div class="selection-summary-expr-row">
+                    <span class="selection-summary-expr-gene" title="${{escapeHtml(gene)}}">${{escapeHtml(gene)}}</span>
+                    <div class="selection-summary-expr-bars">
+                        <div class="selection-summary-expr-bar sel" style="width:${{pctSel}}%"></div>
+                        <div class="selection-summary-expr-bar rest" style="width:${{pctRest}}%"></div>
+                    </div>
+                    <span class="selection-summary-expr-fc">${{fc}}</span>
+                </div>`;
+            }});
+            html += '</div>';
         }}
 
         return html;
@@ -4555,6 +4817,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const matchedKey = Object.keys(byColor).find(k => String(k).toLowerCase() === catKey.toLowerCase());
         if (matchedKey && Array.isArray(byColor[matchedKey])) return byColor[matchedKey];
         return [];
+    }}
+
+    function getAvailableClusterDEColors() {{
+        return Object.entries(DATA.cluster_de || {{}})
+            .filter(([, groups]) => groups && typeof groups === 'object' && Object.keys(groups).length > 0)
+            .map(([color]) => color)
+            .sort((a, b) => a.localeCompare(b));
+    }}
+
+    function getClusterDECategories(colorCol) {{
+        if (!colorCol) return [];
+        const fromMeta = getCategoriesForColorColumn(colorCol).map(value => String(value));
+        const fromData = Object.keys((DATA.cluster_de || {{}})[colorCol] || {{}});
+        return Array.from(new Set([...fromMeta, ...fromData]));
     }}
 
     function getGeneSuggestionGroups() {{
@@ -6060,6 +6336,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <div class="color-tabs">
                         <button class="color-tab active" id="genes-tab-dotplot" type="button">Dotplot</button>
                         <button class="color-tab" id="genes-tab-markers" type="button">Markers</button>
+                        <button class="color-tab" id="genes-tab-compare" type="button">Compare</button>
                     </div>
                     <div class="color-tab-content active" id="genes-tab-dotplot-content">
                         <div class="dotplot-controls">
@@ -6093,6 +6370,30 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <div class="color-tab-content" id="genes-tab-markers-content">
                         <input class="marker-search" id="marker-gene-search" type="text" placeholder="Search marker genes...">
                         <div class="marker-genes" id="marker-genes"></div>
+                    </div>
+                    <div class="color-tab-content" id="genes-tab-compare-content">
+                        <div class="cluster-de-controls">
+                            <div>
+                                <label>Group by</label>
+                                <select id="cluster-de-groupby"></select>
+                            </div>
+                            <div class="cluster-de-select-row">
+                                <div>
+                                    <label>Cluster A</label>
+                                    <select id="cluster-de-source"></select>
+                                </div>
+                                <div>
+                                    <label>Cluster B</label>
+                                    <select id="cluster-de-reference"></select>
+                                </div>
+                            </div>
+                            <div style="display: flex; justify-content: flex-end;">
+                                <button class="legend-btn" id="cluster-de-swap" type="button">Swap A/B</button>
+                            </div>
+                            <div class="color-aggregation" id="cluster-de-results">
+                                <div class="agg-group-meta">Choose two clusters to browse pairwise DE.</div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -6133,8 +6434,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         const genesDotTab = document.getElementById('genes-tab-dotplot');
         const genesMarkersTab = document.getElementById('genes-tab-markers');
+        const genesCompareTab = document.getElementById('genes-tab-compare');
         const genesDotContent = document.getElementById('genes-tab-dotplot-content');
         const genesMarkersContent = document.getElementById('genes-tab-markers-content');
+        const genesCompareContent = document.getElementById('genes-tab-compare-content');
         aggregateTab.addEventListener('click', () => {{
             aggregateTab.classList.add('active');
             neighborTab.classList.remove('active');
@@ -6163,29 +6466,45 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             aggregateContent.classList.remove('active');
             neighborContent.classList.remove('active');
             // Default to Dotplot subtab.
-            if (!genesDotTab.classList.contains('active') && !genesMarkersTab.classList.contains('active')) {{
+            if (!genesDotTab.classList.contains('active') && !genesMarkersTab.classList.contains('active') && !genesCompareTab.classList.contains('active')) {{
                 genesDotTab.classList.add('active');
                 genesMarkersTab.classList.remove('active');
+                genesCompareTab.classList.remove('active');
                 genesDotContent.classList.add('active');
                 genesMarkersContent.classList.remove('active');
+                genesCompareContent.classList.remove('active');
             }}
             if (genesDotTab.classList.contains('active')) renderDotplot();
-            else renderMarkerGenes();
+            else if (genesMarkersTab.classList.contains('active')) renderMarkerGenes();
+            else renderClusterDE();
         }});
 
         genesDotTab.addEventListener('click', () => {{
             genesDotTab.classList.add('active');
             genesMarkersTab.classList.remove('active');
+            genesCompareTab.classList.remove('active');
             genesDotContent.classList.add('active');
             genesMarkersContent.classList.remove('active');
+            genesCompareContent.classList.remove('active');
             renderDotplot();
         }});
         genesMarkersTab.addEventListener('click', () => {{
             genesMarkersTab.classList.add('active');
             genesDotTab.classList.remove('active');
+            genesCompareTab.classList.remove('active');
             genesMarkersContent.classList.add('active');
             genesDotContent.classList.remove('active');
+            genesCompareContent.classList.remove('active');
             renderMarkerGenes();
+        }});
+        genesCompareTab.addEventListener('click', () => {{
+            genesCompareTab.classList.add('active');
+            genesDotTab.classList.remove('active');
+            genesMarkersTab.classList.remove('active');
+            genesCompareContent.classList.add('active');
+            genesDotContent.classList.remove('active');
+            genesMarkersContent.classList.remove('active');
+            renderClusterDE();
         }});
 
         const markerSearch = document.getElementById('marker-gene-search');
@@ -6227,6 +6546,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const dotplotUseHvgs = document.getElementById('dotplot-use-hvgs');
         const dotplotAgg = document.getElementById('dotplot-aggregate-by');
         const dotplotAggValue = document.getElementById('dotplot-aggregate-value');
+        const clusterDeGroupbySelect = document.getElementById('cluster-de-groupby');
+        const clusterDeSourceSelect = document.getElementById('cluster-de-source');
+        const clusterDeReferenceSelect = document.getElementById('cluster-de-reference');
+        const clusterDeSwap = document.getElementById('cluster-de-swap');
 
         const catCols = getCategoricalColorColumns();
         if (dotplotGroupby) {{
@@ -6257,6 +6580,27 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const hvgs = (DATA.available_genes || []).slice(0, 8);
             if (dotplotGenes) dotplotGenes.value = hvgs.join(', ');
             renderDotplot();
+        }});
+        syncClusterDEControls();
+        clusterDeGroupbySelect?.addEventListener('change', () => {{
+            clusterDeGroupby = clusterDeGroupbySelect.value || null;
+            clusterDeSourceCategory = null;
+            clusterDeReferenceCategory = null;
+            renderClusterDE();
+        }});
+        clusterDeSourceSelect?.addEventListener('change', () => {{
+            clusterDeSourceCategory = clusterDeSourceSelect.value || null;
+            renderClusterDE();
+        }});
+        clusterDeReferenceSelect?.addEventListener('change', () => {{
+            clusterDeReferenceCategory = clusterDeReferenceSelect.value || null;
+            renderClusterDE();
+        }});
+        clusterDeSwap?.addEventListener('click', () => {{
+            const source = clusterDeSourceCategory;
+            clusterDeSourceCategory = clusterDeReferenceCategory;
+            clusterDeReferenceCategory = source;
+            renderClusterDE();
         }});
 
         // Keep initial load fast: only render the list. Other Insights content is computed on-demand
@@ -6520,6 +6864,171 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
 
         container.innerHTML = rows.join('');
+    }}
+
+    function formatClusterDEPct(value) {{
+        if (!Number.isFinite(value)) return 'n/a';
+        return `${{(100 * value).toFixed(1)}}%`;
+    }}
+
+    function syncClusterDEControls() {{
+        const groupbySelect = document.getElementById('cluster-de-groupby');
+        const sourceSelect = document.getElementById('cluster-de-source');
+        const referenceSelect = document.getElementById('cluster-de-reference');
+        const availableGroupbys = getAvailableClusterDEColors();
+
+        if (groupbySelect) {{
+            groupbySelect.innerHTML = availableGroupbys.map(col => `<option value="${{col}}">${{col}}</option>`).join('');
+        }}
+
+        if (!availableGroupbys.length) {{
+            clusterDeGroupby = null;
+            clusterDeSourceCategory = null;
+            clusterDeReferenceCategory = null;
+            if (sourceSelect) sourceSelect.innerHTML = '';
+            if (referenceSelect) referenceSelect.innerHTML = '';
+            return {{ availableGroupbys, categories: [] }};
+        }}
+
+        if (!clusterDeGroupby || !availableGroupbys.includes(clusterDeGroupby)) {{
+            clusterDeGroupby = availableGroupbys.includes(currentColor) ? currentColor : availableGroupbys[0];
+        }}
+        if (groupbySelect) groupbySelect.value = clusterDeGroupby;
+
+        const categories = getClusterDECategories(clusterDeGroupby);
+        const options = categories.map(category => `<option value="${{escapeHtml(category)}}">${{escapeHtml(category)}}</option>`).join('');
+        if (sourceSelect) sourceSelect.innerHTML = options;
+        if (referenceSelect) referenceSelect.innerHTML = options;
+
+        if (!categories.length) {{
+            clusterDeSourceCategory = null;
+            clusterDeReferenceCategory = null;
+            return {{ availableGroupbys, categories }};
+        }}
+
+        if (!clusterDeSourceCategory || !categories.includes(clusterDeSourceCategory)) {{
+            clusterDeSourceCategory = categories[0];
+        }}
+        if (!clusterDeReferenceCategory || !categories.includes(clusterDeReferenceCategory) || clusterDeReferenceCategory === clusterDeSourceCategory) {{
+            clusterDeReferenceCategory = categories.find(category => category !== clusterDeSourceCategory) || null;
+        }}
+
+        if (sourceSelect) sourceSelect.value = clusterDeSourceCategory || '';
+        if (referenceSelect) {{
+            referenceSelect.value = clusterDeReferenceCategory || '';
+            referenceSelect.disabled = categories.length < 2;
+        }}
+
+        return {{ availableGroupbys, categories }};
+    }}
+
+    function renderClusterDE() {{
+        const container = document.getElementById('cluster-de-results');
+        if (!container) return;
+
+        const {{ availableGroupbys, categories }} = syncClusterDEControls();
+        if (!availableGroupbys.length) {{
+            container.innerHTML = '<div class="agg-group-meta">Pairwise cluster DE was not precomputed for this viewer.</div>';
+            return;
+        }}
+        if (!clusterDeGroupby) {{
+            container.innerHTML = '<div class="agg-group-meta">Choose a categorical annotation to browse pairwise DE.</div>';
+            return;
+        }}
+        if (!categories.length) {{
+            container.innerHTML = '<div class="agg-group-meta">No cluster categories are available for this annotation.</div>';
+            return;
+        }}
+        if (!clusterDeSourceCategory || !clusterDeReferenceCategory) {{
+            container.innerHTML = '<div class="agg-group-meta">Choose two different clusters to compare.</div>';
+            return;
+        }}
+        if (clusterDeSourceCategory === clusterDeReferenceCategory) {{
+            container.innerHTML = '<div class="agg-group-meta">Choose two different clusters to compare.</div>';
+            return;
+        }}
+
+        const result = (((DATA.cluster_de || {{}})[clusterDeGroupby] || {{}})[clusterDeSourceCategory] || {{}})[clusterDeReferenceCategory];
+        if (!result) {{
+            container.innerHTML = '<div class="agg-group-meta">No pairwise DE result is available for this comparison.</div>';
+            return;
+        }}
+
+        if (result.available === false) {{
+            const nSource = Number(result.n_source ?? 0).toLocaleString();
+            const nReference = Number(result.n_reference ?? 0).toLocaleString();
+            const minCells = Number(result.min_cells_required ?? 0).toLocaleString();
+            let detail = `n=${{nSource}} vs n=${{nReference}}.`;
+            if (result.reason === 'insufficient_cells') {{
+                detail = `Need >= ${{minCells}} cells per cluster (got ${{nSource}} vs ${{nReference}}).`;
+            }}
+            container.innerHTML = `<div class="agg-group-meta">This comparison is unavailable. ${{escapeHtml(detail)}}</div>`;
+            return;
+        }}
+
+        const genes = Array.isArray(result.genes) ? result.genes : [];
+        const logfc = Array.isArray(result.logfoldchanges) ? result.logfoldchanges : [];
+        const pvalsAdj = Array.isArray(result.pvals_adj) ? result.pvals_adj : [];
+        const scores = Array.isArray(result.scores) ? result.scores : [];
+        const pctSource = Array.isArray(result.pct_source) ? result.pct_source : [];
+        const pctReference = Array.isArray(result.pct_reference) ? result.pct_reference : [];
+        if (!genes.length) {{
+            container.innerHTML = '<div class="agg-group-meta">No DE genes were returned for this comparison.</div>';
+            return;
+        }}
+
+        const meta = `
+            <div class="cluster-de-meta">
+                Comparing <strong>${{escapeHtml(clusterDeSourceCategory)}}</strong> vs <strong>${{escapeHtml(clusterDeReferenceCategory)}}</strong>
+                in <strong>${{escapeHtml(clusterDeGroupby)}}</strong>.
+                Click a gene to load it in the viewer.
+            </div>
+        `;
+        const rows = genes.map((gene, idx) => {{
+            const logfcValue = logfc[idx];
+            const pvalAdjValue = pvalsAdj[idx];
+            const scoreValue = scores[idx];
+            const pctSourceValue = pctSource[idx];
+            const pctReferenceValue = pctReference[idx];
+            return `
+                <tr>
+                    <td><button type="button" class="cluster-de-gene-btn" data-cluster-de-gene="${{escapeHtml(gene)}}">${{escapeHtml(gene)}}</button></td>
+                    <td>${{formatScaleNumber(Number.isFinite(logfcValue) ? logfcValue : NaN)}}</td>
+                    <td>${{formatScaleNumber(Number.isFinite(pvalAdjValue) ? pvalAdjValue : NaN)}}</td>
+                    <td>${{formatScaleNumber(Number.isFinite(scoreValue) ? scoreValue : NaN)}}</td>
+                    <td>${{formatClusterDEPct(Number.isFinite(pctSourceValue) ? pctSourceValue : NaN)}}</td>
+                    <td>${{formatClusterDEPct(Number.isFinite(pctReferenceValue) ? pctReferenceValue : NaN)}}</td>
+                </tr>
+            `;
+        }}).join('');
+
+        container.innerHTML = `
+            <div class="cluster-de-result">
+                ${{meta}}
+                <table class="cluster-de-table">
+                    <thead>
+                        <tr>
+                            <th>Gene</th>
+                            <th>logFC</th>
+                            <th>adj. p</th>
+                            <th>Score</th>
+                            <th>% A</th>
+                            <th>% B</th>
+                        </tr>
+                    </thead>
+                    <tbody>${{rows}}</tbody>
+                </table>
+            </div>
+        `;
+
+        container.querySelectorAll('[data-cluster-de-gene]').forEach((btn) => {{
+            btn.addEventListener('click', async () => {{
+                const gene = btn.getAttribute('data-cluster-de-gene') || '';
+                if (!gene) return;
+                const ok = await activateViewerGene(gene, {{ showErrors: true }});
+                if (ok) renderClusterDE();
+            }});
+        }});
     }}
 
     function renderCellTypeTrend() {{
@@ -7283,8 +7792,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }} else if (isGenes) {{
                 const isDot = document.getElementById('genes-tab-dotplot')?.classList.contains('active');
                 const isMarkers = document.getElementById('genes-tab-markers')?.classList.contains('active');
+                const isCompare = document.getElementById('genes-tab-compare')?.classList.contains('active');
                 if (isDot) renderDotplot();
                 if (isMarkers) renderMarkerGenes();
+                if (isCompare) renderClusterDE();
             }}
         }};
 
@@ -7479,6 +7990,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 }} else if (document.getElementById('color-tab-genes')?.classList.contains('active')) {{
                     if (document.getElementById('genes-tab-dotplot')?.classList.contains('active')) renderDotplot();
                     if (document.getElementById('genes-tab-markers')?.classList.contains('active')) renderMarkerGenes();
+                    if (document.getElementById('genes-tab-compare')?.classList.contains('active')) renderClusterDE();
                 }} else {{
                     renderColorAggregation();
                     renderCellTypeTrend();
@@ -8239,6 +8751,11 @@ def export_to_html(
     marker_genes_groupby: Optional[List[str]] = None,
     marker_genes_top_n: int = 30,
     use_hvgs: bool = True,
+    cluster_de_groupby: Optional[List[str]] = None,
+    cluster_de_top_n: int = 20,
+    cluster_de_method: str = "wilcoxon",
+    cluster_de_layer: Optional[str] = "normalized",
+    cluster_de_min_cells: int = 20,
     neighbor_stats_groupby: Optional[List[str]] = None,
     neighbor_stats_permutations: Union[int, None] = None,
     neighbor_stats_seed: int = 0,
@@ -8250,6 +8767,8 @@ def export_to_html(
     interaction_markers_method: str = "wilcoxon",
     interaction_markers_layer: Optional[str] = "normalized",
     section_rotations: Optional[Mapping[str, Union[int, float]]] = None,
+    gene_correlation_top_n: int = 10,
+    cluster_means_n_genes: int = 500,
 ) -> str:
     """
     Export spatial dataset to a standalone HTML file.
@@ -8303,11 +8822,29 @@ def export_to_html(
         Only pack per-section arrays when section cell count is >= this value. Default: 1024.
     hvg_limit : int
         Max number of highly variable genes to include (default 20)
+    gene_correlation_top_n : int
+        Number of top correlated genes to show per embedded gene (default 10). Set to 0 to disable.
+    cluster_means_n_genes : int
+        Number of top variable genes to precompute per-cluster means for (default 500).
+        These means power the mean-expression panel in the lasso selection summary for
+        all genes including sidecar ones. Set to 0 to disable.
     marker_genes_groupby : list, optional
         Obs columns to compute marker genes for (categorical only). If None/empty,
         marker genes are not computed.
     marker_genes_top_n : int
         Number of top marker genes to keep per group
+    cluster_de_groupby : list, optional
+        Obs columns to compute pairwise cluster-vs-cluster DE for (categorical only).
+        If None/empty, cluster DE is not computed.
+    cluster_de_top_n : int
+        Number of top DE genes to keep per cluster pair.
+    cluster_de_method : str
+        Method passed to scanpy.tl.rank_genes_groups for cluster DE
+        (e.g. "wilcoxon", "t-test").
+    cluster_de_layer : str, optional
+        Layer used for cluster DE (default: "normalized" if present).
+    cluster_de_min_cells : int
+        Minimum cells required in both clusters to report pairwise DE.
     neighbor_stats_groupby : list, optional
         Obs columns to compute neighbor composition stats for (categorical only).
         If None/empty, neighbor stats are not computed.
@@ -8397,6 +8934,10 @@ def export_to_html(
 
     if outline_by and outline_by not in dataset.metadata_columns:
         print(f"  Warning: outline_by '{outline_by}' not in metadata columns; no outlines will be shown.")
+    if int(cluster_de_top_n) < 1:
+        raise ValueError("cluster_de_top_n must be >= 1")
+    if int(cluster_de_min_cells) < 1:
+        raise ValueError("cluster_de_min_cells must be >= 1")
 
     if viewer_info_html is None:
         viewer_info_html = (
@@ -8452,6 +8993,11 @@ def export_to_html(
         section_array_pack_min_len=pack_arrays_min_len,
         marker_genes_groupby=marker_genes_groupby,
         marker_genes_top_n=marker_genes_top_n,
+        cluster_de_groupby=cluster_de_groupby,
+        cluster_de_top_n=cluster_de_top_n,
+        cluster_de_method=cluster_de_method,
+        cluster_de_layer=cluster_de_layer,
+        cluster_de_min_cells=cluster_de_min_cells,
         neighbor_stats_groupby=neighbor_stats_groupby,
         neighbor_stats_permutations=neighbor_stats_permutations,
         neighbor_stats_seed=neighbor_stats_seed,
@@ -8473,6 +9019,32 @@ def export_to_html(
         gene_aux_url = data["gene_aux_url"]
     else:
         data["gene_aux_url"] = None
+
+    if embedded_genes and int(gene_correlation_top_n) > 0:
+        data["gene_correlations"] = _compute_gene_correlations(
+            dataset.adata, embedded_genes, top_n=int(gene_correlation_top_n)
+        )
+    else:
+        data["gene_correlations"] = {}
+
+    if int(cluster_means_n_genes) > 0:
+        cmeans_genes = _select_top_variable_genes(dataset.adata, int(cluster_means_n_genes))
+        categorical_cols = [
+            col for col in (data.get("available_colors") or [])
+            if not (data.get("colors_meta") or {}).get(col, {}).get("is_continuous", True)
+        ]
+        if categorical_cols and cmeans_genes:
+            print(f"  - precomputing cluster gene means ({len(cmeans_genes)} genes × {len(categorical_cols)} columns)...")
+            cmeans_columns = {}
+            for col in categorical_cols:
+                result = _compute_cluster_gene_means(dataset.adata, cmeans_genes, col)
+                if result:
+                    cmeans_columns[col] = result
+            data["cluster_gene_means"] = {"genes": cmeans_genes, "columns": cmeans_columns} if cmeans_columns else None
+        else:
+            data["cluster_gene_means"] = None
+    else:
+        data["cluster_gene_means"] = None
 
     resolved_spot_size, used_auto_spot_size = _resolve_spot_size(
         dataset=dataset,

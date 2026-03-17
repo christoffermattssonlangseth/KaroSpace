@@ -157,10 +157,46 @@ def main():
         help="Comma-separated obs columns to compute contact-conditioned interaction markers for. Empty disables (default)."
     )
     parser.add_argument(
+        "--cluster-de-groupby",
+        type=str,
+        default="",
+        help="Comma-separated categorical obs columns to precompute cluster-vs-cluster differential expression for. Empty disables (default)."
+    )
+    parser.add_argument(
+        "--cluster-de-top-n",
+        type=int,
+        default=20,
+        help="Top N genes to keep per pairwise cluster DE result. (default: 20)"
+    )
+    parser.add_argument(
+        "--cluster-de-method",
+        type=str,
+        default="wilcoxon",
+        help="Method for pairwise cluster DE via scanpy.tl.rank_genes_groups (default: wilcoxon)."
+    )
+    parser.add_argument(
+        "--cluster-de-layer",
+        type=str,
+        default="normalized",
+        help="AnnData layer to use for pairwise cluster DE when present. (default: normalized)"
+    )
+    parser.add_argument(
+        "--cluster-de-min-cells",
+        type=int,
+        default=20,
+        help="Minimum cells required in both clusters to report pairwise DE. (default: 20)"
+    )
+    parser.add_argument(
         "--section-rotations",
         type=str,
         default="",
         help="Comma-separated section_id:angle pairs for initial per-section rotations with exact degree values (example: S1:37.5,S2:-90)."
+    )
+    parser.add_argument(
+        "--gene-correlation-top-n",
+        type=int,
+        default=10,
+        help="Number of top correlated genes to show per embedded gene in the discovery panel. Use 0 to disable. (default: 10)"
     )
 
     args = parser.parse_args()
@@ -211,6 +247,7 @@ def main():
         neighbor_stats_groupby = _parse_csv(args.neighbor_stats_groupby)
     marker_genes_groupby = _parse_csv(args.marker_genes_groupby)
     interaction_markers_groupby = _parse_csv(args.interaction_markers_groupby)
+    cluster_de_groupby = _parse_csv(args.cluster_de_groupby)
     try:
         section_rotations = _parse_section_rotations_arg(args.section_rotations)
     except ValueError as exc:
@@ -244,7 +281,13 @@ def main():
         neighbor_stats_groupby=neighbor_stats_groupby,
         marker_genes_groupby=marker_genes_groupby,
         interaction_markers_groupby=interaction_markers_groupby,
+        cluster_de_groupby=cluster_de_groupby,
+        cluster_de_top_n=args.cluster_de_top_n,
+        cluster_de_method=args.cluster_de_method,
+        cluster_de_layer=args.cluster_de_layer,
+        cluster_de_min_cells=args.cluster_de_min_cells,
         section_rotations=section_rotations,
+        gene_correlation_top_n=args.gene_correlation_top_n,
     )
 
     print(f"Done! Open {output_path} in a browser to view.")

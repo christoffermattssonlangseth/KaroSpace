@@ -32,6 +32,7 @@ def _build_dataset() -> SpatialDataset:
         dtype=float,
     )
     adata = AnnData(X=x, obs=obs, var=var)
+    adata.layers["normalized"] = x.copy()
     adata.obsm["spatial"] = np.array(
         [
             [0.0, 0.0],
@@ -110,8 +111,10 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert 'id="modal-blend-loading"' in html_text
     assert 'id="gene-discovery-panel"' in html_text
     assert 'id="gene-panel-new"' in html_text
+    assert 'id="genes-tab-compare"' in html_text
     assert "function getGeneSearchResults(query, limit = GENE_DISCOVERY_MAX_RESULTS)" in html_text
     assert "function renderGeneDiscoveryPanel()" in html_text
+    assert "function renderClusterDE()" in html_text
     assert "function recordRecentGene(gene)" in html_text
     assert "function loadSavedGenePanels()" in html_text
     assert "const GENE_RECENTS_STORAGE_KEY = getViewerScopedStorageKey('gene-recents');" in html_text
@@ -181,6 +184,56 @@ def test_export_includes_initial_categorical_color_in_marker_genes(tmp_path):
     marker_genes = embedded.get("marker_genes") or {}
     assert "leiden" in marker_genes
     assert "condition" in marker_genes
+
+
+def test_export_embeds_pairwise_cluster_de(tmp_path):
+    dataset = _build_dataset()
+    output_path = tmp_path / "viewer.html"
+
+    export_to_html(
+        dataset,
+        output_path=str(output_path),
+        color="leiden",
+        use_hvgs=False,
+        cluster_de_groupby=["leiden"],
+        cluster_de_top_n=2,
+        cluster_de_method="t-test",
+        cluster_de_min_cells=1,
+    )
+
+    embedded = _extract_data_json(output_path.read_text(encoding="utf-8"))
+    cluster_de = embedded.get("cluster_de") or {}
+    assert "leiden" in cluster_de
+    assert set(cluster_de["leiden"]) == {"A", "B"}
+    assert "A" not in cluster_de["leiden"]["A"]
+    result = cluster_de["leiden"]["A"]["B"]
+    assert result["available"] is True
+    assert result["n_source"] == 2
+    assert result["n_reference"] == 2
+    assert 1 <= len(result["genes"]) <= 2
+    assert len(result["genes"]) == len(result["logfoldchanges"]) == len(result["pvals_adj"]) == len(result["scores"])
+    assert len(result["genes"]) == len(result["pct_source"]) == len(result["pct_reference"])
+
+
+def test_export_marks_cluster_de_unavailable_for_small_clusters(tmp_path):
+    dataset = _build_dataset()
+    output_path = tmp_path / "viewer.html"
+
+    export_to_html(
+        dataset,
+        output_path=str(output_path),
+        color="leiden",
+        use_hvgs=False,
+        cluster_de_groupby=["leiden"],
+        cluster_de_method="t-test",
+        cluster_de_min_cells=3,
+    )
+
+    embedded = _extract_data_json(output_path.read_text(encoding="utf-8"))
+    result = embedded["cluster_de"]["leiden"]["A"]["B"]
+    assert result["available"] is False
+    assert result["reason"] == "insufficient_cells"
+    assert result["min_cells_required"] == 3
 
 
 def test_export_rejects_unknown_section_rotation_ids(tmp_path):
@@ -258,6 +311,48 @@ def test_cli_accepts_fractional_section_rotations(monkeypatch, tmp_path):
     assert captured["kwargs"]["section_rotations"] == {"S1": 37.5, "S2": -12.25}
 
 
+def test_cli_passes_cluster_de_options_to_export(monkeypatch, tmp_path):
+    input_path = tmp_path / "input.h5ad"
+    input_path.write_text("placeholder", encoding="utf-8")
+    captured = {}
+
+    def fake_load(path, groupby):
+        return _build_dataset()
+
+    def fake_export(dataset, **kwargs):
+        captured["kwargs"] = kwargs
+        return str(tmp_path / "viewer.html")
+
+    monkeypatch.setattr("karospace.data_loader.load_spatial_data", fake_load)
+    monkeypatch.setattr("karospace.exporter.export_to_html", fake_export)
+    monkeypatch.setattr(
+        cli_module.sys,
+        "argv",
+        [
+            "karospace",
+            str(input_path),
+            "--cluster-de-groupby",
+            "leiden,condition",
+            "--cluster-de-top-n",
+            "12",
+            "--cluster-de-method",
+            "t-test",
+            "--cluster-de-layer",
+            "normalized",
+            "--cluster-de-min-cells",
+            "7",
+        ],
+    )
+
+    cli_module.main()
+
+    assert captured["kwargs"]["cluster_de_groupby"] == ["leiden", "condition"]
+    assert captured["kwargs"]["cluster_de_top_n"] == 12
+    assert captured["kwargs"]["cluster_de_method"] == "t-test"
+    assert captured["kwargs"]["cluster_de_layer"] == "normalized"
+    assert captured["kwargs"]["cluster_de_min_cells"] == 7
+
+
 def test_cli_rejects_invalid_section_rotations(monkeypatch, tmp_path, capsys):
     input_path = tmp_path / "input.h5ad"
     input_path.write_text("placeholder", encoding="utf-8")
@@ -277,6 +372,83 @@ def test_cli_rejects_invalid_section_rotations(monkeypatch, tmp_path, capsys):
 
     assert exc.value.code == 2
     assert "section_id:angle" in capsys.readouterr().err
+
+
+def test_gene_correlations_embedded_in_export(tmp_path):
+    dataset = _build_dataset()
+    output_path = tmp_path / "viewer.html"
+
+    export_to_html(
+        dataset,
+        output_path=str(output_path),
+        color="leiden",
+        genes=["G1", "G2", "G3"],
+        use_hvgs=False,
+        gene_storage="embedded",
+        gene_correlation_top_n=5,
+    )
+
+    embedded = _extract_data_json(output_path.read_text(encoding="utf-8"))
+    gene_corr = embedded.get("gene_correlations")
+    assert gene_corr is not None, "gene_correlations key missing from exported data"
+    # All three embedded genes should have correlation entries
+    assert set(gene_corr.keys()) == {"G1", "G2", "G3"}
+    # Each entry is a list of dicts with 'gene' and 'r' keys
+    for gene, corrs in gene_corr.items():
+        assert isinstance(corrs, list)
+        for entry in corrs:
+            assert "gene" in entry
+            assert "r" in entry
+            assert entry["gene"] != gene  # no self-correlation
+            assert isinstance(entry["r"], float)
+            assert entry["r"] > 0  # only positive correlations included
+
+
+def test_gene_correlations_disabled_when_top_n_zero(tmp_path):
+    dataset = _build_dataset()
+    output_path = tmp_path / "viewer.html"
+
+    export_to_html(
+        dataset,
+        output_path=str(output_path),
+        color="leiden",
+        genes=["G1", "G2", "G3"],
+        use_hvgs=False,
+        gene_correlation_top_n=0,
+    )
+
+    embedded = _extract_data_json(output_path.read_text(encoding="utf-8"))
+    assert embedded.get("gene_correlations") == {}
+
+
+def test_cli_passes_gene_correlation_top_n_to_export(monkeypatch, tmp_path):
+    input_path = tmp_path / "input.h5ad"
+    input_path.write_text("placeholder", encoding="utf-8")
+    captured = {}
+
+    def fake_load(path, groupby):
+        return _build_dataset()
+
+    def fake_export(dataset, **kwargs):
+        captured["kwargs"] = kwargs
+        return str(tmp_path / "viewer.html")
+
+    monkeypatch.setattr("karospace.data_loader.load_spatial_data", fake_load)
+    monkeypatch.setattr("karospace.exporter.export_to_html", fake_export)
+    monkeypatch.setattr(
+        cli_module.sys,
+        "argv",
+        [
+            "karospace",
+            str(input_path),
+            "--gene-correlation-top-n",
+            "15",
+        ],
+    )
+
+    cli_module.main()
+
+    assert captured["kwargs"]["gene_correlation_top_n"] == 15
 
 
 def test_load_spatial_data_handles_null_encoded_uns_entries(tmp_path):

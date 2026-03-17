@@ -18,6 +18,65 @@ import os
 import shutil
 import tempfile
 
+
+def _extract_rank_genes_groups_values(
+    obj: Union[pd.DataFrame, np.ndarray, List],
+    group: str,
+    n: int,
+    cast=None,
+) -> List:
+    vals = []
+    if obj is None:
+        return vals
+    if isinstance(obj, pd.DataFrame):
+        if group in obj.columns:
+            vals = obj[group].tolist()
+        elif obj.shape[1] > 0:
+            vals = obj.iloc[:, 0].tolist()
+    elif isinstance(obj, np.ndarray) and obj.dtype.names:
+        g = group if group in obj.dtype.names else obj.dtype.names[0]
+        vals = list(obj[g])
+    else:
+        vals = list(np.asarray(obj).ravel())
+    vals = vals[:n]
+    if cast is None:
+        return vals
+    out = []
+    for v in vals:
+        try:
+            out.append(cast(v))
+        except Exception:
+            out.append(None)
+    return out
+
+
+def _compute_positive_fraction(
+    matrix,
+    mask: np.ndarray,
+    gene_positions: List[Optional[int]],
+) -> List[Optional[float]]:
+    out: List[Optional[float]] = [None] * len(gene_positions)
+    if matrix is None:
+        return out
+    mask = np.asarray(mask, dtype=bool)
+    if matrix.shape[0] == 0 or not mask.any():
+        return [0.0 if pos is not None and pos >= 0 else None for pos in gene_positions]
+
+    valid = [(idx, pos) for idx, pos in enumerate(gene_positions) if pos is not None and pos >= 0]
+    if not valid:
+        return out
+
+    valid_indices = [int(pos) for _, pos in valid]
+    subset = matrix[mask][:, valid_indices]
+    if issparse(subset):
+        pct = np.asarray((subset > 0).mean(axis=0)).ravel()
+    else:
+        pct = np.mean(np.asarray(subset) > 0, axis=0)
+    for (out_idx, _), value in zip(valid, np.asarray(pct).ravel()):
+        out[out_idx] = float(value)
+    return out
+
+
 def _strip_null_encoded_h5ad_entries(src_path: str) -> Tuple[str, List[str]]:
     """Copy an h5ad file and remove null-encoded datasets unsupported by older anndata builds."""
     import h5py
@@ -473,6 +532,11 @@ class SpatialDataset:
         section_array_pack_min_len: int = 1024,
         marker_genes_groupby: Optional[List[str]] = None,
         marker_genes_top_n: int = 30,
+        cluster_de_groupby: Optional[List[str]] = None,
+        cluster_de_top_n: int = 20,
+        cluster_de_method: str = "wilcoxon",
+        cluster_de_layer: Optional[str] = "normalized",
+        cluster_de_min_cells: int = 20,
         neighbor_stats_groupby: Optional[List[str]] = None,
         neighbor_stats_permutations: int = 0,
         neighbor_stats_seed: int = 0,
@@ -523,6 +587,16 @@ class SpatialDataset:
             Obs columns to compute marker genes for (categorical only)
         marker_genes_top_n : int
             Number of top marker genes to keep per group
+        cluster_de_groupby : list, optional
+            Obs columns to compute pairwise cluster DE for (categorical only)
+        cluster_de_top_n : int
+            Number of top DE genes to keep per cluster pair
+        cluster_de_method : str
+            Differential expression method for scanpy.tl.rank_genes_groups (e.g. "wilcoxon", "t-test").
+        cluster_de_layer : str, optional
+            AnnData layer to use for cluster DE, if available (default: "normalized").
+        cluster_de_min_cells : int
+            Minimum cells required in both clusters to report pairwise DE.
         neighbor_stats_groupby : list, optional
             Obs columns to compute neighbor composition stats for (categorical only)
         neighbor_stats_permutations : int
@@ -635,6 +709,10 @@ class SpatialDataset:
             raise ValueError("interaction_markers_min_cells must be >= 1")
         if int(interaction_markers_min_neighbors) < 1:
             raise ValueError("interaction_markers_min_neighbors must be >= 1")
+        if int(cluster_de_top_n) < 1:
+            raise ValueError("cluster_de_top_n must be >= 1")
+        if int(cluster_de_min_cells) < 1:
+            raise ValueError("cluster_de_min_cells must be >= 1")
 
         gene_encodings = self._resolve_gene_encodings(gene_data, gene_encoding, gene_sparse_zero_threshold)
 
@@ -719,6 +797,189 @@ class SpatialDataset:
                     }
                 else:
                     print(f"  Warning: Unrecognized marker gene format for '{groupby}'.")
+
+        cluster_de = {}
+        if cluster_de_groupby:
+            print(
+                f"Computing cluster DE for {len(cluster_de_groupby)} "
+                f"groupby column{'s' if len(cluster_de_groupby) != 1 else ''}..."
+            )
+            cluster_de_method_name = str(cluster_de_method or "wilcoxon")
+            cluster_de_n = int(cluster_de_top_n)
+            cluster_de_min_n = int(cluster_de_min_cells)
+            cluster_de_layer_name = None
+            if cluster_de_layer:
+                if cluster_de_layer in self.adata.layers:
+                    cluster_de_layer_name = str(cluster_de_layer)
+                else:
+                    print(
+                        f"  Warning: cluster DE layer '{cluster_de_layer}' not found; "
+                        "using adata.X."
+                    )
+
+            for groupby in cluster_de_groupby:
+                print(f"  - cluster DE: {groupby}")
+                if groupby not in self.adata.obs.columns:
+                    print(f"  Warning: cluster DE groupby '{groupby}' not found in obs.")
+                    continue
+
+                col = self.adata.obs[groupby]
+                if pd.api.types.is_numeric_dtype(col):
+                    print(f"  Warning: cluster DE '{groupby}' is numeric; skipping.")
+                    continue
+                if not isinstance(col.dtype, CategoricalDtype):
+                    self.adata.obs[groupby] = col.astype("category")
+                    col = self.adata.obs[groupby]
+
+                categories = [str(cat) for cat in col.cat.categories]
+                if not categories:
+                    continue
+
+                codes = col.cat.codes.to_numpy()
+                groupby_results = {}
+                for source_idx, source_name in enumerate(categories):
+                    source_mask = codes == source_idx
+                    n_source = int(np.count_nonzero(source_mask))
+                    if n_source <= 0:
+                        continue
+
+                    source_results = {}
+                    for ref_idx, reference_name in enumerate(categories):
+                        if ref_idx == source_idx:
+                            continue
+
+                        reference_mask = codes == ref_idx
+                        n_reference = int(np.count_nonzero(reference_mask))
+                        if n_reference <= 0:
+                            continue
+
+                        if n_source < cluster_de_min_n or n_reference < cluster_de_min_n:
+                            source_results[reference_name] = {
+                                "available": False,
+                                "reason": "insufficient_cells",
+                                "genes": [],
+                                "logfoldchanges": [],
+                                "pvals_adj": [],
+                                "scores": [],
+                                "pct_source": [],
+                                "pct_reference": [],
+                                "n_source": n_source,
+                                "n_reference": n_reference,
+                                "min_cells_required": cluster_de_min_n,
+                            }
+                            continue
+
+                        selected_mask = source_mask | reference_mask
+                        selected_idx = np.flatnonzero(selected_mask)
+                        if selected_idx.size == 0:
+                            continue
+
+                        try:
+                            pair_adata = self.adata[selected_idx].copy()
+                            pair_labels = np.where(source_mask[selected_idx], "source", "reference")
+                            pair_adata.obs["_karospace_cluster_de_group"] = pd.Categorical(
+                                pair_labels,
+                                categories=["source", "reference"],
+                            )
+
+                            rg_kwargs = {
+                                "groupby": "_karospace_cluster_de_group",
+                                "groups": ["source"],
+                                "reference": "reference",
+                                "method": cluster_de_method_name,
+                                "pts": False,
+                                "key_added": "_karospace_cluster_de",
+                                "n_genes": cluster_de_n,
+                            }
+                            if cluster_de_layer_name is not None:
+                                rg_kwargs["layer"] = cluster_de_layer_name
+
+                            sc.tl.rank_genes_groups(pair_adata, **rg_kwargs)
+                            rg = pair_adata.uns.get("_karospace_cluster_de", {})
+
+                            genes = _extract_rank_genes_groups_values(
+                                rg.get("names"),
+                                "source",
+                                cluster_de_n,
+                                cast=str,
+                            )
+                            logfc = _extract_rank_genes_groups_values(
+                                rg.get("logfoldchanges"),
+                                "source",
+                                cluster_de_n,
+                                cast=lambda x: float(x) if np.isfinite(float(x)) else None,
+                            )
+                            pvals_adj = _extract_rank_genes_groups_values(
+                                rg.get("pvals_adj"),
+                                "source",
+                                cluster_de_n,
+                                cast=lambda x: float(x) if np.isfinite(float(x)) else None,
+                            )
+                            scores = _extract_rank_genes_groups_values(
+                                rg.get("scores"),
+                                "source",
+                                cluster_de_n,
+                                cast=lambda x: float(x) if np.isfinite(float(x)) else None,
+                            )
+
+                            gene_positions = []
+                            for gene_name in genes:
+                                if not gene_name:
+                                    gene_positions.append(None)
+                                    continue
+                                position = pair_adata.var_names.get_loc(gene_name)
+                                gene_positions.append(int(position))
+
+                            expr_matrix = (
+                                pair_adata.layers[cluster_de_layer_name]
+                                if cluster_de_layer_name is not None
+                                else pair_adata.X
+                            )
+                            pct_source = _compute_positive_fraction(
+                                expr_matrix,
+                                pair_labels == "source",
+                                gene_positions,
+                            )
+                            pct_reference = _compute_positive_fraction(
+                                expr_matrix,
+                                pair_labels == "reference",
+                                gene_positions,
+                            )
+
+                            source_results[reference_name] = {
+                                "available": True,
+                                "genes": genes,
+                                "logfoldchanges": logfc,
+                                "pvals_adj": pvals_adj,
+                                "scores": scores,
+                                "pct_source": pct_source,
+                                "pct_reference": pct_reference,
+                                "n_source": n_source,
+                                "n_reference": n_reference,
+                            }
+                        except Exception as e:
+                            print(
+                                f"  Warning: Could not compute cluster DE for "
+                                f"'{groupby}' ({source_name} vs {reference_name}): {e}"
+                            )
+                            source_results[reference_name] = {
+                                "available": False,
+                                "reason": "de_failed",
+                                "genes": [],
+                                "logfoldchanges": [],
+                                "pvals_adj": [],
+                                "scores": [],
+                                "pct_source": [],
+                                "pct_reference": [],
+                                "n_source": n_source,
+                                "n_reference": n_reference,
+                            }
+
+                    if source_results:
+                        groupby_results[source_name] = source_results
+
+                if groupby_results:
+                    cluster_de[groupby] = groupby_results
 
         # Compute neighbor composition stats
         neighbor_stats = {}
@@ -845,36 +1106,6 @@ class SpatialDataset:
                         "using adata.X."
                     )
 
-            def _extract_group_values(
-                obj: Union[pd.DataFrame, np.ndarray, List],
-                group: str,
-                n: int,
-                cast=None,
-            ) -> List:
-                vals = []
-                if obj is None:
-                    return vals
-                if isinstance(obj, pd.DataFrame):
-                    if group in obj.columns:
-                        vals = obj[group].tolist()
-                    elif obj.shape[1] > 0:
-                        vals = obj.iloc[:, 0].tolist()
-                elif isinstance(obj, np.ndarray) and obj.dtype.names:
-                    g = group if group in obj.dtype.names else obj.dtype.names[0]
-                    vals = list(obj[g])
-                else:
-                    vals = list(np.asarray(obj).ravel())
-                vals = vals[:n]
-                if cast is None:
-                    return vals
-                out = []
-                for v in vals:
-                    try:
-                        out.append(cast(v))
-                    except Exception:
-                        out.append(None)
-                return out
-
             for groupby in interaction_markers_groupby:
                 print(f"  - interaction markers: {groupby}")
                 ctx = neighbor_stats_context.get(groupby)
@@ -995,14 +1226,14 @@ class SpatialDataset:
                             sc.tl.rank_genes_groups(pair_adata, **rg_kwargs)
                             rg = pair_adata.uns.get("_karospace_interaction_markers", {})
 
-                            genes = _extract_group_values(rg.get("names"), "contact+", top_genes, cast=str)
-                            logfc = _extract_group_values(
+                            genes = _extract_rank_genes_groups_values(rg.get("names"), "contact+", top_genes, cast=str)
+                            logfc = _extract_rank_genes_groups_values(
                                 rg.get("logfoldchanges"),
                                 "contact+",
                                 top_genes,
                                 cast=lambda x: float(x) if np.isfinite(float(x)) else None,
                             )
-                            pvals_adj = _extract_group_values(
+                            pvals_adj = _extract_rank_genes_groups_values(
                                 rg.get("pvals_adj"),
                                 "contact+",
                                 top_genes,
@@ -1193,6 +1424,7 @@ class SpatialDataset:
             "available_colors": list(color_data.keys()),
             "available_genes": list(gene_data.keys()),
             "marker_genes": marker_genes,
+            "cluster_de": cluster_de,
             "has_umap": umap_coords is not None,
             "umap_bounds": umap_bounds,
             "has_neighbors": neighbor_graph is not None,
