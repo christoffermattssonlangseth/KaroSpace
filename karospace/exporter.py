@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 from typing import Dict, Mapping, Optional, List, Tuple, Union
 import numpy as np
+import pandas as pd
 try:
     from tqdm.auto import tqdm
 except Exception:  # pragma: no cover - optional dependency fallback
@@ -146,6 +147,23 @@ def _resolve_section_rotations(
     return resolved
 
 
+def _resolve_marker_genes_groupby(
+    dataset: SpatialDataset,
+    color: str,
+    marker_genes_groupby: Optional[List[str]],
+) -> Optional[List[str]]:
+    if not marker_genes_groupby:
+        return marker_genes_groupby
+    resolved = [str(value) for value in marker_genes_groupby if str(value).strip()]
+    if color not in dataset.adata.obs.columns:
+        return resolved or None
+    if color in resolved:
+        return resolved or None
+    if pd.api.types.is_numeric_dtype(dataset.adata.obs[color]):
+        return resolved or None
+    return [str(color), *resolved]
+
+
 # Default color palettes
 DEFAULT_CATEGORICAL_PALETTE = [
     "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
@@ -272,6 +290,163 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         select {{ min-width: 120px; }}
         input[type="text"] {{ width: 140px; }}
         select:focus, input:focus {{ outline: none; border-color: var(--accent-strong); box-shadow: 0 0 0 2px rgba(135, 0, 82, 0.15); }}
+        .gene-control-group {{
+            position: relative;
+            align-items: flex-start;
+        }}
+        .gene-input-shell {{
+            position: relative;
+            min-width: 180px;
+        }}
+        .gene-input-shell input[type="text"] {{
+            width: 180px;
+        }}
+        .gene-discovery-panel {{
+            position: absolute;
+            top: calc(100% + 6px);
+            left: 0;
+            width: min(360px, calc(100vw - 32px));
+            max-height: 420px;
+            overflow: auto;
+            padding: 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            background:
+                linear-gradient(180deg, rgba(255, 135, 111, 0.08), rgba(135, 0, 82, 0.03)),
+                var(--panel-bg);
+            box-shadow: 0 14px 36px rgba(0, 0, 0, 0.16);
+            display: none;
+            z-index: 40;
+        }}
+        .gene-discovery-panel.active {{
+            display: block;
+        }}
+        .gene-discovery-header {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 8px;
+        }}
+        .gene-discovery-title {{
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: var(--muted-color);
+        }}
+        .gene-discovery-actions {{
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }}
+        .gene-discovery-section + .gene-discovery-section {{
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid rgba(127, 127, 127, 0.18);
+        }}
+        .gene-discovery-label {{
+            font-size: 11px;
+            font-weight: 600;
+            margin-bottom: 6px;
+            color: var(--text-color);
+        }}
+        .gene-discovery-empty {{
+            font-size: 11px;
+            color: var(--muted-color);
+            line-height: 1.4;
+        }}
+        .gene-token-grid {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }}
+        .gene-token-btn {{
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 999px;
+            background: var(--input-bg);
+            color: var(--text-color);
+            cursor: pointer;
+            font-size: 11px;
+            line-height: 1.2;
+            transition: background 0.2s, border-color 0.2s, transform 0.2s;
+        }}
+        .gene-token-btn:hover {{
+            background: var(--hover-bg);
+            border-color: var(--accent-strong);
+            transform: translateY(-1px);
+        }}
+        .gene-token-btn.active {{
+            border-color: var(--accent-strong);
+            background: rgba(135, 0, 82, 0.10);
+        }}
+        .gene-token-btn.search-active {{
+            box-shadow: 0 0 0 2px rgba(135, 0, 82, 0.18);
+        }}
+        .gene-token-btn.unloaded {{
+            border-style: dashed;
+        }}
+        .gene-token-meta {{
+            font-size: 10px;
+            color: var(--muted-color);
+        }}
+        .gene-suggestion-group + .gene-suggestion-group {{
+            margin-top: 8px;
+        }}
+        .gene-suggestion-group-title {{
+            font-size: 10px;
+            color: var(--muted-color);
+            margin-bottom: 5px;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }}
+        .gene-panel-card {{
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 8px;
+            background: rgba(255, 255, 255, 0.04);
+        }}
+        .gene-panel-card + .gene-panel-card {{
+            margin-top: 8px;
+        }}
+        .gene-panel-header {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 6px;
+        }}
+        .gene-panel-name {{
+            font-size: 12px;
+            font-weight: 600;
+        }}
+        .gene-panel-actions {{
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }}
+        .gene-panel-btn {{
+            padding: 3px 7px;
+            border: 1px solid var(--border-color);
+            border-radius: 999px;
+            background: var(--input-bg);
+            color: var(--text-color);
+            cursor: pointer;
+            font-size: 10px;
+            transition: background 0.2s, border-color 0.2s;
+        }}
+        .gene-panel-btn:hover {{
+            background: var(--hover-bg);
+        }}
+        .gene-panel-genes {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }}
         .stats {{ font-size: 11px; color: var(--muted-color); }}
         .size-control {{
             display: inline-flex;
@@ -1699,10 +1874,21 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 <label>Color:</label>
                 <select id="color-select"></select>
             </div>
-            <div class="control-group">
+            <div class="control-group gene-control-group">
                 <label>Gene:</label>
-                <input type="text" id="gene-input" placeholder="e.g. Cd4, Gfap..." list="gene-list">
-                <datalist id="gene-list"></datalist>
+                <div class="gene-input-shell" id="gene-input-shell">
+                    <input type="text" id="gene-input" placeholder="e.g. Cd4, Gfap..." list="gene-list" autocomplete="off" spellcheck="false" aria-expanded="false" aria-controls="gene-discovery-panel">
+                    <datalist id="gene-list"></datalist>
+                    <div class="gene-discovery-panel" id="gene-discovery-panel" aria-hidden="true">
+                        <div class="gene-discovery-header">
+                            <div class="gene-discovery-title">Gene discovery</div>
+                            <div class="gene-discovery-actions">
+                                <button class="gene-panel-btn" id="gene-panel-new" type="button">New panel</button>
+                            </div>
+                        </div>
+                        <div id="gene-discovery-content"></div>
+                    </div>
+                </div>
             </div>
             <div class="control-group" id="expression-scale-section" style="display: none;">
                 <label>Scale:</label>
@@ -2005,6 +2191,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     const OUTLINE_BY = {outline_by_json};
     const VIEWER_INFO_HTML = {viewer_info_html_json};
     const AVAILABLE_GENE_SET = new Set(DATA.available_genes || []);
+    const GENE_NAME_BY_LOWER = new Map(
+        (DATA.available_genes || []).map(gene => [String(gene).toLowerCase(), gene])
+    );
 
     const USER_AGENT = navigator.userAgent || '';
     const IS_SAFARI = /Safari/i.test(USER_AGENT) &&
@@ -2183,6 +2372,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     const GENE_SCALE_PMIN = 1;
     const GENE_SCALE_PMAX = 99;
     const GENE_SCALE_MAX_SAMPLES = 200000;
+    const GENE_DISCOVERY_MAX_RESULTS = 10;
+    const GENE_DISCOVERY_RECENT_LIMIT = 8;
+    const GENE_DISCOVERY_SUGGESTION_GROUP_LIMIT = 6;
+    const GENE_DISCOVERY_SUGGESTION_GENES_PER_GROUP = 4;
     let hiddenCategories = new Set();
     let linkedSpotlightEnabled = false;
     let spotlightPinnedCategory = null;
@@ -2210,6 +2403,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     const geneAuxShardPromises = new Map();
     const modalBlendGeneLoads = new Set();
     let geneAuxLoadingMessage = '';
+    let geneDiscoveryOpen = false;
+    let geneDiscoveryResults = [];
+    let geneDiscoveryActiveIndex = -1;
+    let recentGenes = [];
+    let savedGenePanels = [];
 
     // Modal state
     let modalSection = null;
@@ -3017,6 +3215,206 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}).finally(() => {{
             modalBlendGeneLoads.delete(token);
         }});
+    }}
+
+    function setGeneDiscoveryOpen(isOpen) {{
+        geneDiscoveryOpen = !!isOpen;
+        const panel = document.getElementById('gene-discovery-panel');
+        const input = document.getElementById('gene-input');
+        if (panel) {{
+            panel.classList.toggle('active', geneDiscoveryOpen);
+            panel.setAttribute('aria-hidden', geneDiscoveryOpen ? 'false' : 'true');
+        }}
+        if (input) {{
+            if (!geneDiscoveryOpen) {{
+                input.value = currentGene || '';
+            }}
+            input.setAttribute('aria-expanded', geneDiscoveryOpen ? 'true' : 'false');
+        }}
+    }}
+
+    function renderGeneTokenButton(gene, options = {{}}) {{
+        const token = resolveCanonicalGeneName(gene);
+        if (!token) return '';
+        const classes = ['gene-token-btn'];
+        if (options.isActive) classes.push('active');
+        if (options.isSearchActive) classes.push('search-active');
+        if (!DATA.genes_meta?.[token]) classes.push('unloaded');
+        const metaLabel = options.metaLabel || (DATA.genes_meta?.[token] ? 'loaded' : 'sidecar');
+        return `
+            <button
+                type="button"
+                class="${{classes.join(' ')}}"
+                data-gene-activate="${{escapeHtml(token)}}"
+                title="${{escapeHtml(options.title || token)}}"
+            >
+                <span>${{escapeHtml(token)}}</span>
+                <span class="gene-token-meta">${{escapeHtml(metaLabel)}}</span>
+            </button>
+        `;
+    }}
+
+    function renderGeneDiscoveryPanel() {{
+        const content = document.getElementById('gene-discovery-content');
+        const input = document.getElementById('gene-input');
+        if (!content || !input) return;
+
+        const query = String(input.value || '').trim();
+        geneDiscoveryResults = getGeneSearchResults(query);
+        if (!geneDiscoveryResults.length) {{
+            geneDiscoveryActiveIndex = -1;
+        }} else if (geneDiscoveryActiveIndex < 0 || geneDiscoveryActiveIndex >= geneDiscoveryResults.length) {{
+            geneDiscoveryActiveIndex = 0;
+        }}
+
+        const sections = [];
+        if (query) {{
+            const searchRows = geneDiscoveryResults.length
+                ? `<div class="gene-token-grid">${{geneDiscoveryResults.map((gene, idx) => renderGeneTokenButton(gene, {{
+                    isActive: gene === currentGene,
+                    isSearchActive: idx === geneDiscoveryActiveIndex,
+                    title: 'Load gene into the viewer',
+                }})).join('')}}</div>`
+                : `<div class="gene-discovery-empty">No genes matched "${{escapeHtml(query)}}". Try a shorter token or browse suggestions.</div>`;
+            sections.push(`
+                <div class="gene-discovery-section">
+                    <div class="gene-discovery-label">Search results</div>
+                    ${{searchRows}}
+                </div>
+            `);
+        }}
+
+        const recentRows = recentGenes.length
+            ? `<div class="gene-token-grid">${{recentGenes.map((gene) => renderGeneTokenButton(gene, {{
+                isActive: gene === currentGene,
+                title: 'Recently viewed gene',
+            }})).join('')}}</div>`
+            : '<div class="gene-discovery-empty">Recent genes will appear here after you load them.</div>';
+        sections.push(`
+            <div class="gene-discovery-section">
+                <div class="gene-discovery-label">Recent genes</div>
+                ${{recentRows}}
+            </div>
+        `);
+
+        const suggestionInfo = getGeneSuggestionGroups();
+        const suggestionRows = suggestionInfo.groups.length
+            ? suggestionInfo.groups.map(group => `
+                <div class="gene-suggestion-group">
+                    <div class="gene-suggestion-group-title">${{escapeHtml(group.category)}}</div>
+                    <div class="gene-token-grid">
+                        ${{group.genes.map((gene) => renderGeneTokenButton(gene, {{
+                            isActive: gene === currentGene,
+                            title: `Suggested marker for ${{group.category}}`,
+                        }})).join('')}}
+                    </div>
+                </div>
+            `).join('')
+            : `<div class="gene-discovery-empty">${{escapeHtml(suggestionInfo.subtitle || 'No suggestions available.')}}</div>`;
+        const hiddenSuggestionNote = suggestionInfo.hiddenCount > 0
+            ? `<div class="gene-discovery-empty" style="margin-top: 6px;">+${{suggestionInfo.hiddenCount}} more categories available in Insights → Markers.</div>`
+            : '';
+        sections.push(`
+            <div class="gene-discovery-section">
+                <div class="gene-discovery-label">${{escapeHtml(suggestionInfo.title)}}</div>
+                ${{suggestionRows}}
+                ${{hiddenSuggestionNote}}
+            </div>
+        `);
+
+        const panelRows = savedGenePanels.length
+            ? savedGenePanels.map((panel) => `
+                <div class="gene-panel-card">
+                    <div class="gene-panel-header">
+                        <div class="gene-panel-name">${{escapeHtml(panel.name)}}</div>
+                        <div class="gene-panel-actions">
+                            <button type="button" class="gene-panel-btn" data-gene-panel-add="${{escapeHtml(panel.name)}}" title="Add the current gene to this panel">+ current</button>
+                            <button type="button" class="gene-panel-btn" data-gene-panel-delete="${{escapeHtml(panel.name)}}" title="Delete this panel">Delete</button>
+                        </div>
+                    </div>
+                    <div class="gene-panel-genes">
+                        ${{panel.genes.length
+                            ? panel.genes.map((gene) => renderGeneTokenButton(gene, {{
+                                isActive: gene === currentGene,
+                                title: `Load ${{gene}} from ${{panel.name}}`,
+                            }})).join('')
+                            : '<div class="gene-discovery-empty">Panel is empty. Use + current to add a gene.</div>'
+                        }}
+                    </div>
+                </div>
+            `).join('')
+            : '<div class="gene-discovery-empty">No saved panels yet. Create one from the current active gene or an exact gene in the input.</div>';
+        sections.push(`
+            <div class="gene-discovery-section">
+                <div class="gene-discovery-label">Saved panels</div>
+                ${{panelRows}}
+            </div>
+        `);
+
+        content.innerHTML = sections.join('');
+    }}
+
+    async function activateViewerGene(gene, options = {{}}) {{
+        const rawToken = String(gene || '').trim();
+        const token = resolveCanonicalGeneName(rawToken);
+        const showErrors = options.showErrors !== false;
+        const geneInput = document.getElementById('gene-input');
+
+        if (!rawToken) {{
+            currentGene = null;
+            hiddenCategories.clear();
+            if (geneInput) geneInput.value = '';
+            updateExpressionScaleUI();
+            renderLegend('legend');
+            renderLegend('modal-legend');
+            renderAllSections();
+            if (modalSection) renderModalSection();
+            if (umapVisible) renderUMAP();
+            updateSelectionInfo();
+            recentGenes = loadRecentGenes();
+            savedGenePanels = loadSavedGenePanels();
+            renderGeneDiscoveryPanel();
+            return true;
+        }}
+
+        if (!token) {{
+            if (showErrors) {{
+                alert(`Gene "${{rawToken}}" was not found in this dataset.`);
+            }}
+            renderGeneDiscoveryPanel();
+            return false;
+        }}
+
+        if (geneInput) geneInput.value = token;
+        const ok = await runAsyncUIAction('Gene selection', async () => {{
+            if (!(await ensureGeneAvailable(token, {{ showErrors }}))) {{
+                return false;
+            }}
+            currentGene = token;
+            geneDenseCache.clear();
+            modalSelectedCategory = null;
+            modalTypeSelectEnabled = false;
+            hiddenCategories.clear();
+            ensureGeneAutoScale(currentGene);
+            updateExpressionScaleUI();
+            renderLegend('legend');
+            renderLegend('modal-legend');
+            renderAllSections();
+            if (modalSection) renderModalSection();
+            if (umapVisible) renderUMAP();
+            updateSelectionInfo();
+            return true;
+        }});
+        if (ok) {{
+            recordRecentGene(token);
+            geneDiscoveryResults = [];
+            geneDiscoveryActiveIndex = -1;
+            renderGeneDiscoveryPanel();
+            setGeneDiscoveryOpen(false);
+            return true;
+        }}
+        renderGeneDiscoveryPanel();
+        return false;
     }}
 
     function ensureGeneAutoScale(gene) {{
@@ -3979,6 +4377,229 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;')
             .replace(/'/g, '&#39;');
+    }}
+
+    function getViewerScopedStorageKey(name) {{
+        const scope = `${{window.location.origin || 'file://'}}${{window.location.pathname || ''}}`;
+        return `karospace:${{name}}:${{scope}}`;
+    }}
+
+    const GENE_RECENTS_STORAGE_KEY = getViewerScopedStorageKey('gene-recents');
+    const GENE_PANELS_STORAGE_KEY = getViewerScopedStorageKey('gene-panels');
+
+    function readViewerJsonStorage(key, fallback) {{
+        try {{
+            const raw = localStorage.getItem(key);
+            if (!raw) return fallback;
+            return JSON.parse(raw);
+        }} catch (error) {{
+            console.warn('Failed to read local storage key', key, error);
+            return fallback;
+        }}
+    }}
+
+    function writeViewerJsonStorage(key, value) {{
+        try {{
+            localStorage.setItem(key, JSON.stringify(value));
+            return true;
+        }} catch (error) {{
+            console.warn('Failed to write local storage key', key, error);
+            return false;
+        }}
+    }}
+
+    function resolveCanonicalGeneName(token) {{
+        const text = String(token || '').trim();
+        if (!text) return '';
+        if (AVAILABLE_GENE_SET.has(text)) return text;
+        return GENE_NAME_BY_LOWER.get(text.toLowerCase()) || '';
+    }}
+
+    function loadRecentGenes() {{
+        const stored = readViewerJsonStorage(GENE_RECENTS_STORAGE_KEY, []);
+        if (!Array.isArray(stored)) return [];
+        return stored
+            .map(resolveCanonicalGeneName)
+            .filter(Boolean)
+            .slice(0, GENE_DISCOVERY_RECENT_LIMIT);
+    }}
+
+    function persistRecentGenes() {{
+        writeViewerJsonStorage(GENE_RECENTS_STORAGE_KEY, recentGenes);
+    }}
+
+    function recordRecentGene(gene) {{
+        const token = resolveCanonicalGeneName(gene);
+        if (!token) return;
+        recentGenes = [token, ...recentGenes.filter(item => item !== token)].slice(0, GENE_DISCOVERY_RECENT_LIMIT);
+        persistRecentGenes();
+    }}
+
+    function loadSavedGenePanels() {{
+        const stored = readViewerJsonStorage(GENE_PANELS_STORAGE_KEY, []);
+        if (!Array.isArray(stored)) return [];
+        return stored
+            .map((entry) => {{
+                const name = String(entry?.name || '').trim();
+                const genes = Array.isArray(entry?.genes)
+                    ? entry.genes.map(resolveCanonicalGeneName).filter(Boolean)
+                    : [];
+                if (!name) return null;
+                return {{ name, genes: [...new Set(genes)] }};
+            }})
+            .filter(Boolean);
+    }}
+
+    function persistSavedGenePanels() {{
+        writeViewerJsonStorage(GENE_PANELS_STORAGE_KEY, savedGenePanels);
+    }}
+
+    function getGenePanelSeedToken() {{
+        const fromCurrent = resolveCanonicalGeneName(currentGene);
+        if (fromCurrent) return fromCurrent;
+        const geneInput = document.getElementById('gene-input');
+        return resolveCanonicalGeneName(geneInput?.value || '');
+    }}
+
+    function upsertSavedGenePanel(panelName, gene = '') {{
+        const normalizedName = String(panelName || '').trim();
+        if (!normalizedName) return false;
+        const geneToken = resolveCanonicalGeneName(gene);
+        const existingIndex = savedGenePanels.findIndex(
+            panel => panel.name.toLowerCase() === normalizedName.toLowerCase()
+        );
+        if (existingIndex >= 0) {{
+            if (geneToken && !savedGenePanels[existingIndex].genes.includes(geneToken)) {{
+                savedGenePanels[existingIndex].genes.push(geneToken);
+            }}
+            savedGenePanels[existingIndex].name = normalizedName;
+        }} else {{
+            savedGenePanels.push({{
+                name: normalizedName,
+                genes: geneToken ? [geneToken] : [],
+            }});
+        }}
+        persistSavedGenePanels();
+        return true;
+    }}
+
+    function deleteSavedGenePanel(panelName) {{
+        const normalizedName = String(panelName || '').trim().toLowerCase();
+        if (!normalizedName) return;
+        savedGenePanels = savedGenePanels.filter(panel => panel.name.toLowerCase() !== normalizedName);
+        persistSavedGenePanels();
+    }}
+
+    function fuzzyGeneMatchScore(candidate, query) {{
+        const haystack = String(candidate || '').toLowerCase();
+        const needle = String(query || '').toLowerCase();
+        if (!needle) return null;
+        if (haystack === needle) return {{ bucket: 0, score: 0 }};
+        if (haystack.startsWith(needle)) return {{ bucket: 1, score: haystack.length - needle.length }};
+        const substringIndex = haystack.indexOf(needle);
+        if (substringIndex >= 0) {{
+            return {{ bucket: 2, score: substringIndex * 100 + (haystack.length - needle.length) }};
+        }}
+
+        let cursor = 0;
+        let penalty = 0;
+        for (let i = 0; i < needle.length; i++) {{
+            const next = haystack.indexOf(needle[i], cursor);
+            if (next < 0) return null;
+            penalty += Math.max(0, next - cursor);
+            cursor = next + 1;
+        }}
+        return {{ bucket: 3, score: penalty + Math.max(0, haystack.length - needle.length) }};
+    }}
+
+    function getGeneSearchResults(query, limit = GENE_DISCOVERY_MAX_RESULTS) {{
+        const token = String(query || '').trim();
+        if (!token) return [];
+        return (DATA.available_genes || [])
+            .map((gene) => {{
+                const match = fuzzyGeneMatchScore(gene, token);
+                if (!match) return null;
+                return {{
+                    gene,
+                    bucket: match.bucket,
+                    score: match.score,
+                    loaded: !!DATA.genes_meta?.[gene],
+                }};
+            }})
+            .filter(Boolean)
+            .sort((a, b) => {{
+                if (a.bucket !== b.bucket) return a.bucket - b.bucket;
+                if (a.score !== b.score) return a.score - b.score;
+                if (a.loaded !== b.loaded) return a.loaded ? -1 : 1;
+                if (a.gene.length !== b.gene.length) return a.gene.length - b.gene.length;
+                return a.gene.localeCompare(b.gene);
+            }})
+            .slice(0, Math.max(1, Number(limit) || GENE_DISCOVERY_MAX_RESULTS))
+            .map(entry => entry.gene);
+    }}
+
+    function getAvailableMarkerGeneColors() {{
+        return Object.entries(DATA.marker_genes || {{}})
+            .filter(([, groups]) => groups && typeof groups === 'object' && Object.keys(groups).length > 0)
+            .map(([color]) => color)
+            .sort((a, b) => a.localeCompare(b));
+    }}
+
+    function getMarkerGenesForColorCategory(colorCol, category) {{
+        if (!colorCol || category === null || category === undefined || category === BLEND_ALL_CATEGORIES) return [];
+        const byColor = (DATA.marker_genes || {{}})[colorCol];
+        if (!byColor || typeof byColor !== 'object') return [];
+        if (Array.isArray(byColor[category])) return byColor[category];
+        const catKey = String(category);
+        if (Array.isArray(byColor[catKey])) return byColor[catKey];
+        const matchedKey = Object.keys(byColor).find(k => String(k).toLowerCase() === catKey.toLowerCase());
+        if (matchedKey && Array.isArray(byColor[matchedKey])) return byColor[matchedKey];
+        return [];
+    }}
+
+    function getGeneSuggestionGroups() {{
+        const config = getColorConfig();
+        if (!config || config.is_continuous) {{
+            return {{
+                title: 'Suggestions unavailable',
+                subtitle: 'Switch to a categorical color to use marker-based suggestions.',
+                groups: [],
+                hiddenCount: 0,
+            }};
+        }}
+
+        const markersByColor = (DATA.marker_genes || {{}})[currentColor];
+        if (!markersByColor || typeof markersByColor !== 'object') {{
+            const availableColors = getAvailableMarkerGeneColors();
+            const availableLabel = availableColors.length
+                ? ` Available for: ${{availableColors.join(', ')}}.`
+                : ' No marker genes are embedded in this viewer.';
+            return {{
+                title: `Suggested from ${{formatMetadataLabel(currentColor)}}`,
+                subtitle: `No marker genes are available for the active color.${{availableLabel}}`,
+                groups: [],
+                hiddenCount: 0,
+            }};
+        }}
+
+        const categoryOrder = (config.categories || Object.keys(markersByColor)).map(cat => String(cat));
+        const groups = categoryOrder
+            .map((category) => {{
+                const genes = getMarkerGenesForColorCategory(currentColor, category)
+                    .map(resolveCanonicalGeneName)
+                    .filter(Boolean)
+                    .slice(0, GENE_DISCOVERY_SUGGESTION_GENES_PER_GROUP);
+                if (!genes.length) return null;
+                return {{ category, genes }};
+            }})
+            .filter(Boolean);
+
+        return {{
+            title: `Suggested from ${{formatMetadataLabel(currentColor)}}`,
+            subtitle: groups.length ? '' : 'No marker genes are available for the active color.',
+            groups: groups.slice(0, GENE_DISCOVERY_SUGGESTION_GROUP_LIMIT),
+            hiddenCount: Math.max(0, groups.length - GENE_DISCOVERY_SUGGESTION_GROUP_LIMIT),
+        }};
     }}
 
     function getModalViewTransform(rect) {{
@@ -5717,6 +6338,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 if (modalSection) renderModalSection();
                 if (umapVisible) renderUMAP();
                 updateSelectionInfo();
+                renderGeneDiscoveryPanel();
                 renderColorList(document.getElementById('color-search').value);
                 renderColorAggregation();
                 renderCellTypeTrend();
@@ -5867,7 +6489,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         const groupMarkers = markers[currentColor];
         if (!groupMarkers || Object.keys(groupMarkers).length === 0) {{
-            container.innerHTML = '<div class="agg-group-meta">No marker genes available for this color.</div>';
+            const availableColors = getAvailableMarkerGeneColors();
+            const extra = availableColors.length
+                ? ` Available for: ${{availableColors.join(', ')}}.`
+                : ' No marker genes were embedded in this viewer.';
+            container.innerHTML = `<div class="agg-group-meta">No marker genes available for this color.${{escapeHtml(extra)}}</div>`;
             return;
         }}
 
@@ -6680,6 +7306,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             if (modalSection) renderModalSection();
             if (umapVisible) renderUMAP();
             updateSelectionInfo();
+            renderGeneDiscoveryPanel();
             refreshInsights();
         }});
 
@@ -6691,37 +7318,113 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }});
 
         const geneInput = document.getElementById('gene-input');
-        geneInput.addEventListener('change', async () => {{
-            await runAsyncUIAction('Gene selection', async () => {{
-                const gene = geneInput.value.trim();
-                if (gene && await ensureGeneAvailable(gene)) {{
-                    currentGene = gene;
-                    geneDenseCache.clear();
-                    modalSelectedCategory = null;
-                    modalTypeSelectEnabled = false;
-                    hiddenCategories.clear();
-                    ensureGeneAutoScale(currentGene);
-                    updateExpressionScaleUI();
-                    renderLegend('legend');
-                    renderLegend('modal-legend');
-                    renderAllSections();
-                    if (modalSection) renderModalSection();
-                    if (umapVisible) renderUMAP();
-                    updateSelectionInfo();
-                    refreshInsights();
-                }} else if (!gene) {{
-                    currentGene = null;
-                    hiddenCategories.clear();
-                    updateExpressionScaleUI();
-                    renderLegend('legend');
-                    renderLegend('modal-legend');
-                    renderAllSections();
-                    if (modalSection) renderModalSection();
-                    if (umapVisible) renderUMAP();
-                    updateSelectionInfo();
-                    refreshInsights();
+        const geneInputShell = document.getElementById('gene-input-shell');
+        const geneDiscoveryPanel = document.getElementById('gene-discovery-panel');
+        const genePanelNew = document.getElementById('gene-panel-new');
+        recentGenes = loadRecentGenes();
+        savedGenePanels = loadSavedGenePanels();
+        renderGeneDiscoveryPanel();
+
+        geneInput?.addEventListener('focus', () => {{
+            setGeneDiscoveryOpen(true);
+            renderGeneDiscoveryPanel();
+        }});
+        geneInput?.addEventListener('input', () => {{
+            setGeneDiscoveryOpen(true);
+            geneDiscoveryResults = getGeneSearchResults(geneInput.value);
+            geneDiscoveryActiveIndex = geneDiscoveryResults.length ? 0 : -1;
+            renderGeneDiscoveryPanel();
+        }});
+        geneInput?.addEventListener('keydown', async (e) => {{
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {{
+                setGeneDiscoveryOpen(true);
+                geneDiscoveryResults = getGeneSearchResults(geneInput.value);
+                if (!geneDiscoveryResults.length) {{
+                    geneDiscoveryActiveIndex = -1;
+                    renderGeneDiscoveryPanel();
+                    return;
                 }}
-            }});
+                e.preventDefault();
+                const delta = e.key === 'ArrowDown' ? 1 : -1;
+                geneDiscoveryActiveIndex = (geneDiscoveryActiveIndex + delta + geneDiscoveryResults.length) % geneDiscoveryResults.length;
+                renderGeneDiscoveryPanel();
+                return;
+            }}
+            if (e.key === 'Enter') {{
+                const highlightedGene = geneDiscoveryResults[geneDiscoveryActiveIndex];
+                const exactGene = resolveCanonicalGeneName(geneInput.value);
+                if (!highlightedGene && !exactGene && geneInput.value.trim()) return;
+                e.preventDefault();
+                await activateViewerGene(highlightedGene || exactGene || geneInput.value, {{ showErrors: false }});
+                refreshInsights();
+                return;
+            }}
+            if (e.key === 'Escape') {{
+                setGeneDiscoveryOpen(false);
+            }}
+        }});
+        geneInput?.addEventListener('change', async () => {{
+            const raw = geneInput.value.trim();
+            if (!raw) {{
+                await activateViewerGene('', {{ showErrors: false }});
+                refreshInsights();
+                return;
+            }}
+            const exactGene = resolveCanonicalGeneName(raw);
+            if (exactGene) {{
+                await activateViewerGene(exactGene, {{ showErrors: false }});
+                refreshInsights();
+            }} else {{
+                renderGeneDiscoveryPanel();
+            }}
+        }});
+        genePanelNew?.addEventListener('click', () => {{
+            const suggestedName = currentGene ? `${{currentGene}} panel` : '';
+            const panelName = prompt('Panel name', suggestedName);
+            if (!panelName) return;
+            upsertSavedGenePanel(panelName, getGenePanelSeedToken());
+            renderGeneDiscoveryPanel();
+            setGeneDiscoveryOpen(true);
+        }});
+        geneDiscoveryPanel?.addEventListener('click', async (event) => {{
+            const target = event.target;
+            const activateBtn = target?.closest?.('[data-gene-activate]');
+            if (activateBtn) {{
+                event.preventDefault();
+                await activateViewerGene(activateBtn.getAttribute('data-gene-activate') || '', {{ showErrors: false }});
+                refreshInsights();
+                return;
+            }}
+
+            const addBtn = target?.closest?.('[data-gene-panel-add]');
+            if (addBtn) {{
+                event.preventDefault();
+                const panelName = addBtn.getAttribute('data-gene-panel-add') || '';
+                const geneToken = getGenePanelSeedToken();
+                if (!geneToken) {{
+                    alert('Load or type an exact gene first, then add it to a panel.');
+                    return;
+                }}
+                upsertSavedGenePanel(panelName, geneToken);
+                renderGeneDiscoveryPanel();
+                setGeneDiscoveryOpen(true);
+                return;
+            }}
+
+            const deleteBtn = target?.closest?.('[data-gene-panel-delete]');
+            if (deleteBtn) {{
+                event.preventDefault();
+                const panelName = deleteBtn.getAttribute('data-gene-panel-delete') || '';
+                if (!panelName) return;
+                if (!confirm(`Delete saved panel "${{panelName}}"?`)) return;
+                deleteSavedGenePanel(panelName);
+                renderGeneDiscoveryPanel();
+                setGeneDiscoveryOpen(true);
+            }}
+        }});
+        document.addEventListener('mousedown', (event) => {{
+            if (!geneInputShell || geneInputShell.contains(event.target)) return;
+            setGeneDiscoveryOpen(false);
         }});
 
         const spotRange = document.getElementById('spot-size');
@@ -7020,18 +7723,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
             normalize(modalBlendSpec.a, false);
             normalize(modalBlendSpec.b, true);
-        }}
-
-        function getMarkerGenesForColorCategory(colorCol, category) {{
-            if (!colorCol || category === null || category === undefined || category === BLEND_ALL_CATEGORIES) return [];
-            const byColor = (DATA.marker_genes || {{}})[colorCol];
-            if (!byColor || typeof byColor !== 'object') return [];
-            if (Array.isArray(byColor[category])) return byColor[category];
-            const catKey = String(category);
-            if (Array.isArray(byColor[catKey])) return byColor[catKey];
-            const matchedKey = Object.keys(byColor).find(k => String(k).toLowerCase() === catKey.toLowerCase());
-            if (matchedKey && Array.isArray(byColor[matchedKey])) return byColor[matchedKey];
-            return [];
         }}
 
         function getModalBlendMarkerHtml(side) {{
@@ -7741,6 +8432,12 @@ def export_to_html(
         # Auto-tune: permutation z-scores are expensive for very large datasets.
         # Keep the feature (counts + mean degree) always, but skip permutations unless requested.
         neighbor_stats_permutations = 0 if int(dataset.adata.n_obs) >= 200_000 else 20
+
+    marker_genes_groupby = _resolve_marker_genes_groupby(
+        dataset=dataset,
+        color=color,
+        marker_genes_groupby=marker_genes_groupby,
+    )
 
     data = dataset.to_json_data(
         color,

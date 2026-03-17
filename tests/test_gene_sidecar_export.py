@@ -108,6 +108,14 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert 'id="modal-controls-toggle"' in html_text
     assert ".modal-controls.hidden" in html_text
     assert 'id="modal-blend-loading"' in html_text
+    assert 'id="gene-discovery-panel"' in html_text
+    assert 'id="gene-panel-new"' in html_text
+    assert "function getGeneSearchResults(query, limit = GENE_DISCOVERY_MAX_RESULTS)" in html_text
+    assert "function renderGeneDiscoveryPanel()" in html_text
+    assert "function recordRecentGene(gene)" in html_text
+    assert "function loadSavedGenePanels()" in html_text
+    assert "const GENE_RECENTS_STORAGE_KEY = getViewerScopedStorageKey('gene-recents');" in html_text
+    assert html_text.index("function getMarkerGenesForColorCategory(colorCol, category)") < html_text.index("function getGeneSuggestionGroups()")
     assert "was not pre-loaded" not in html_text
 
 
@@ -154,6 +162,25 @@ def test_export_embeds_normalized_section_rotations(tmp_path):
         "S1": 44.5,
         "S2": 309.75,
     }
+
+
+def test_export_includes_initial_categorical_color_in_marker_genes(tmp_path):
+    dataset = _build_dataset()
+    output_path = tmp_path / "viewer.html"
+
+    export_to_html(
+        dataset,
+        output_path=str(output_path),
+        color="leiden",
+        use_hvgs=False,
+        marker_genes_groupby=["condition"],
+        marker_genes_top_n=5,
+    )
+
+    embedded = _extract_data_json(output_path.read_text(encoding="utf-8"))
+    marker_genes = embedded.get("marker_genes") or {}
+    assert "leiden" in marker_genes
+    assert "condition" in marker_genes
 
 
 def test_export_rejects_unknown_section_rotation_ids(tmp_path):
