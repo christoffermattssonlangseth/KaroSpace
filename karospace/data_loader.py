@@ -5,18 +5,31 @@ Handles loading h5ad files with scanpy and extracting spatial coordinates,
 gene expression, and metadata for visualization.
 """
 
-import numpy as np
-import pandas as pd
-import scanpy as sc
-from pandas.api.types import CategoricalDtype
-from scipy.sparse import issparse
-import scipy.sparse as sp
-from typing import Dict, List, Optional, Tuple, Union
-from dataclasses import dataclass, field
 import json
 import os
 import shutil
 import tempfile
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple, Union
+
+import numpy as np
+import pandas as pd
+import scanpy as sc
+import scipy.sparse as sp
+from pandas.api.types import CategoricalDtype
+from scipy.sparse import issparse
+
+
+COMPANION_ANALYTICS_STORAGE = "json-string-v1"
+COMPANION_ANALYTICS_JSON_FIELDS = {
+    "marker_genes_json": "marker_genes",
+    "cluster_de_json": "cluster_de",
+    "neighbor_stats_json": "neighbor_stats",
+    "interaction_markers_json": "interaction_markers",
+    "gene_correlations_json": "gene_correlations",
+    "spatial_variable_genes_json": "spatial_variable_genes",
+    "cluster_gene_means_json": "cluster_gene_means",
+}
 
 
 def _extract_rank_genes_groups_values(
@@ -123,6 +136,98 @@ def _read_h5ad_with_fallback(path: str) -> sc.AnnData:
                 os.remove(temp_path)
 
 
+def _normalize_uns_scalar(value: Any) -> Any:
+    """Normalize AnnData uns scalars/arrays to plain Python values when possible."""
+    while isinstance(value, np.ndarray) and value.ndim == 0:
+        value = value.item()
+    if isinstance(value, np.ndarray):
+        if value.size == 1:
+            return value.reshape(()).item()
+        return value
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, memoryview):
+        return value.tobytes()
+    if isinstance(value, bytearray):
+        return bytes(value)
+    return value
+
+
+def _normalize_uns_text(value: Any) -> Optional[str]:
+    value = _normalize_uns_scalar(value)
+    if value is None:
+        return None
+    if isinstance(value, np.ndarray):
+        if value.size != 1:
+            return None
+        value = value.reshape(()).item()
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
+def _normalize_uns_text_list(value: Any) -> List[str]:
+    value = _normalize_uns_scalar(value)
+    if value is None:
+        return []
+    if isinstance(value, np.ndarray):
+        items = value.ravel().tolist()
+    elif isinstance(value, (list, tuple)):
+        items = list(value)
+    else:
+        items = [value]
+
+    normalized: List[str] = []
+    for item in items:
+        text = _normalize_uns_text(item)
+        if text is None:
+            continue
+        text = text.strip()
+        if text:
+            normalized.append(text)
+    return normalized
+
+
+def _load_companion_analytics(adata) -> Dict[str, Any]:
+    """Load precomputed viewer analytics emitted by KaroSpaceCompanion from adata.uns."""
+    uns = getattr(adata, "uns", None)
+    if uns is None or "karospace_companion" not in uns:
+        return {}
+
+    companion = uns.get("karospace_companion")
+    if companion is None:
+        return {}
+    if not hasattr(companion, "get"):
+        try:
+            companion = dict(companion)
+        except Exception:
+            return {}
+
+    storage = _normalize_uns_text(companion.get("analytics_storage"))
+    if storage != COMPANION_ANALYTICS_STORAGE:
+        return {}
+
+    analytics: Dict[str, Any] = {}
+    if "analytics_columns" in companion:
+        analytics["analytics_columns"] = _normalize_uns_text_list(companion.get("analytics_columns"))
+
+    for uns_key, analytics_key in COMPANION_ANALYTICS_JSON_FIELDS.items():
+        if uns_key not in companion:
+            continue
+        raw = _normalize_uns_text(companion.get(uns_key))
+        if raw is None or not raw.strip():
+            continue
+        try:
+            analytics[analytics_key] = json.loads(raw)
+        except Exception as exc:
+            print(
+                f"  Warning: Could not parse KaroSpaceCompanion analytics field "
+                f"'{uns_key}': {exc}"
+            )
+
+    return analytics
+
+
 @dataclass
 class SectionData:
     """Data for a single tissue section."""
@@ -168,6 +273,10 @@ class SpatialDataset:
     def has_umap(self) -> bool:
         """Check if UMAP coordinates are available."""
         return "X_umap" in self.adata.obsm
+
+    def get_companion_analytics(self) -> Dict[str, Any]:
+        """Return normalized KaroSpaceCompanion analytics embedded in adata.uns."""
+        return _load_companion_analytics(self.adata)
 
     def get_color_data(
         self,
@@ -737,24 +846,207 @@ class SpatialDataset:
 
         # Get metadata filters
         metadata_filters = self.get_metadata_filters()
+        companion_analytics = self.get_companion_analytics()
+
+        def _prepare_neighbor_stats_groupby(
+            groupby_name: str,
+            precomputed_entry: Optional[dict] = None,
+        ) -> Tuple[Optional[dict], Optional[dict]]:
+            if groupby_name not in self.adata.obs.columns:
+                print(f"  Warning: neighbor stats groupby '{groupby_name}' not found in obs.")
+                return None, None
+
+            col = self.adata.obs[groupby_name]
+            if pd.api.types.is_numeric_dtype(col):
+                print(f"  Warning: neighbor stats '{groupby_name}' is numeric; skipping.")
+                return None, None
+            if not isinstance(col.dtype, CategoricalDtype):
+                col = col.astype("category")
+
+            categories = [str(cat) for cat in col.cat.categories]
+            codes = col.cat.codes.to_numpy()
+            valid_mask = codes >= 0
+            if not valid_mask.any():
+                print(f"  Warning: neighbor stats '{groupby_name}' has no valid categories.")
+                return None, None
+
+            if valid_mask.all():
+                graph = neighbor_graph
+                labels = codes
+                obs_idx = np.arange(self.adata.n_obs, dtype=np.int64)
+            else:
+                obs_idx = np.flatnonzero(valid_mask).astype(np.int64)
+                graph = neighbor_graph[obs_idx][:, obs_idx]
+                labels = codes[valid_mask]
+
+            n_cells = np.bincount(labels, minlength=len(categories)).astype(int)
+            if graph is None or graph.shape[0] == 0:
+                print(f"  Warning: neighbor stats '{groupby_name}' has empty graph.")
+                return None, None
+
+            def _build_context(entry_counts, entry_zscore, entry_n_cells, entry_mean_degree):
+                return {
+                    "categories": categories,
+                    "labels": labels.astype(np.int32, copy=False),
+                    "graph": graph.tocsr(),
+                    "obs_idx": obs_idx,
+                    "counts": entry_counts,
+                    "zscore": entry_zscore,
+                    "n_cells": entry_n_cells,
+                    "mean_degree": entry_mean_degree,
+                }
+
+            if precomputed_entry is not None:
+                companion_categories = [
+                    str(cat) for cat in (precomputed_entry.get("categories") or [])
+                ]
+                if companion_categories and companion_categories != categories:
+                    print(
+                        f"  Warning: companion neighbor stats '{groupby_name}' "
+                        "category mismatch; recomputing."
+                    )
+                else:
+                    try:
+                        counts = np.asarray(precomputed_entry.get("counts"), dtype=float)
+                        if counts.shape != (len(categories), len(categories)):
+                            raise ValueError("counts shape mismatch")
+
+                        n_cells_ctx = n_cells
+                        if precomputed_entry.get("n_cells") is not None:
+                            n_cells_ctx = np.asarray(precomputed_entry.get("n_cells"), dtype=int)
+                            if n_cells_ctx.shape != (len(categories),):
+                                raise ValueError("n_cells shape mismatch")
+
+                        if precomputed_entry.get("mean_degree") is None:
+                            mean_degree = np.zeros(len(categories), dtype=float)
+                            valid_cells = n_cells_ctx > 0
+                            mean_degree[valid_cells] = (
+                                counts.sum(axis=1)[valid_cells] / n_cells_ctx[valid_cells]
+                            )
+                        else:
+                            mean_degree = np.asarray(
+                                precomputed_entry.get("mean_degree"),
+                                dtype=float,
+                            )
+                            if mean_degree.shape != (len(categories),):
+                                raise ValueError("mean_degree shape mismatch")
+
+                        zscore = None
+                        if precomputed_entry.get("zscore") is not None:
+                            zscore = np.asarray(precomputed_entry.get("zscore"), dtype=float)
+                            if zscore.shape != counts.shape:
+                                raise ValueError("zscore shape mismatch")
+
+                        entry = {
+                            "categories": categories,
+                            "counts": counts.tolist(),
+                            "n_cells": n_cells_ctx.astype(int).tolist(),
+                            "mean_degree": mean_degree.tolist(),
+                        }
+                        if precomputed_entry.get("perm_n") is not None:
+                            entry["perm_n"] = int(precomputed_entry.get("perm_n"))
+                        if zscore is not None:
+                            entry["zscore"] = zscore.tolist()
+
+                        return entry, _build_context(counts, zscore, n_cells_ctx, mean_degree)
+                    except Exception as exc:
+                        print(
+                            f"  Warning: companion neighbor stats '{groupby_name}' "
+                            f"malformed; recomputing ({exc})."
+                        )
+
+            onehot = sp.csr_matrix(
+                (np.ones(len(labels), dtype=float), (np.arange(len(labels)), labels)),
+                shape=(len(labels), len(categories)),
+            )
+            counts = onehot.T.dot(graph).dot(onehot)
+            if issparse(counts):
+                counts = counts.toarray()
+            counts = np.asarray(counts, dtype=float)
+            row_sums = counts.sum(axis=1)
+            mean_degree = np.zeros(len(categories), dtype=float)
+            valid_cells = n_cells > 0
+            mean_degree[valid_cells] = row_sums[valid_cells] / n_cells[valid_cells]
+
+            zscore = None
+            entry = {
+                "categories": categories,
+                "counts": counts.tolist(),
+                "n_cells": n_cells.tolist(),
+                "mean_degree": mean_degree.tolist(),
+            }
+            if neighbor_stats_permutations and neighbor_stats_permutations > 0:
+                rng = np.random.default_rng(int(neighbor_stats_seed))
+                perm_mean = np.zeros_like(counts, dtype=float)
+                perm_m2 = np.zeros_like(counts, dtype=float)
+                for i in range(int(neighbor_stats_permutations)):
+                    perm_labels = rng.permutation(labels)
+                    perm_onehot = sp.csr_matrix(
+                        (
+                            np.ones(len(perm_labels), dtype=float),
+                            (np.arange(len(perm_labels)), perm_labels),
+                        ),
+                        shape=(len(perm_labels), len(categories)),
+                    )
+                    perm_counts = perm_onehot.T.dot(graph).dot(perm_onehot)
+                    if issparse(perm_counts):
+                        perm_counts = perm_counts.toarray()
+                    perm_counts = np.asarray(perm_counts, dtype=float)
+                    delta = perm_counts - perm_mean
+                    perm_mean += delta / (i + 1)
+                    perm_m2 += delta * (perm_counts - perm_mean)
+                if neighbor_stats_permutations > 1:
+                    perm_var = perm_m2 / (neighbor_stats_permutations - 1)
+                else:
+                    perm_var = np.zeros_like(counts, dtype=float)
+                perm_std = np.sqrt(perm_var)
+                zscore = np.zeros_like(counts, dtype=float)
+                valid_std = perm_std > 0
+                zscore[valid_std] = (
+                    counts[valid_std] - perm_mean[valid_std]
+                ) / perm_std[valid_std]
+                entry["perm_n"] = int(neighbor_stats_permutations)
+                entry["zscore"] = zscore.tolist()
+
+            return entry, _build_context(counts, zscore, n_cells, mean_degree)
 
         # Compute marker genes for requested groupby columns
         marker_genes = {}
-        if marker_genes_groupby:
+        pending_marker_groupby = list(marker_genes_groupby or [])
+        companion_marker_genes = companion_analytics.get("marker_genes")
+        if pending_marker_groupby and isinstance(companion_marker_genes, dict):
+            reused_marker_groupby = [
+                groupby_name
+                for groupby_name in pending_marker_groupby
+                if groupby_name in companion_marker_genes
+            ]
+            if reused_marker_groupby:
+                print(
+                    f"Using KaroSpaceCompanion marker genes for {len(reused_marker_groupby)} "
+                    f"groupby column{'s' if len(reused_marker_groupby) != 1 else ''}..."
+                )
+                for groupby_name in reused_marker_groupby:
+                    marker_genes[groupby_name] = companion_marker_genes[groupby_name]
+            pending_marker_groupby = [
+                groupby_name
+                for groupby_name in pending_marker_groupby
+                if groupby_name not in marker_genes
+            ]
+        if pending_marker_groupby:
             print(
-                f"Computing marker genes for {len(marker_genes_groupby)} "
-                f"groupby column{'s' if len(marker_genes_groupby) != 1 else ''}..."
+                f"Computing marker genes for {len(pending_marker_groupby)} "
+                f"groupby column{'s' if len(pending_marker_groupby) != 1 else ''}..."
             )
-            for groupby in marker_genes_groupby:
-                print(f"  - marker genes: {groupby}")
-                if groupby not in self.adata.obs.columns:
-                    print(f"  Warning: marker_genes groupby '{groupby}' not found in obs.")
+            for groupby_name in pending_marker_groupby:
+                print(f"  - marker genes: {groupby_name}")
+                if groupby_name not in self.adata.obs.columns:
+                    print(f"  Warning: marker_genes groupby '{groupby_name}' not found in obs.")
                     continue
-                col = self.adata.obs[groupby]
+                col = self.adata.obs[groupby_name]
                 if not isinstance(col.dtype, CategoricalDtype):
-                    self.adata.obs[groupby] = col.astype("category")
-                key_added = f"rank_genes_groups_{groupby}"
-                alt_key_added = f"rank_genes_groups__{groupby}"
+                    self.adata.obs[groupby_name] = col.astype("category")
+                key_added = f"rank_genes_groups_{groupby_name}"
+                alt_key_added = f"rank_genes_groups__{groupby_name}"
                 existing_key = None
                 if key_added in self.adata.uns:
                     existing_key = key_added
@@ -765,44 +1057,64 @@ class SpatialDataset:
                     try:
                         sc.tl.rank_genes_groups(
                             self.adata,
-                            groupby=groupby,
+                            groupby=groupby_name,
                             reference="rest",
                             method="t-test",
                             pts=False,
                             key_added=key_added,
                         )
                     except Exception as e:
-                        print(f"  Warning: Could not compute marker genes for '{groupby}': {e}")
+                        print(f"  Warning: Could not compute marker genes for '{groupby_name}': {e}")
                         continue
 
                 rg = self.adata.uns.get(existing_key or key_added)
                 if not rg:
-                    print(f"  Warning: marker genes not found for '{groupby}'.")
+                    print(f"  Warning: marker genes not found for '{groupby_name}'.")
                     continue
 
                 names = rg.get("names")
                 if names is None:
-                    print(f"  Warning: marker genes missing names for '{groupby}'.")
+                    print(f"  Warning: marker genes missing names for '{groupby_name}'.")
                     continue
 
                 if isinstance(names, pd.DataFrame):
-                    marker_genes[groupby] = {
+                    marker_genes[groupby_name] = {
                         col_name: names[col_name].astype(str).tolist()[:marker_genes_top_n]
                         for col_name in names.columns
                     }
                 elif isinstance(names, np.ndarray) and names.dtype.names:
-                    marker_genes[groupby] = {
+                    marker_genes[groupby_name] = {
                         group: [str(x) for x in names[group][:marker_genes_top_n]]
                         for group in names.dtype.names
                     }
                 else:
-                    print(f"  Warning: Unrecognized marker gene format for '{groupby}'.")
+                    print(f"  Warning: Unrecognized marker gene format for '{groupby_name}'.")
 
         cluster_de = {}
-        if cluster_de_groupby:
+        pending_cluster_de_groupby = list(cluster_de_groupby or [])
+        companion_cluster_de = companion_analytics.get("cluster_de")
+        if pending_cluster_de_groupby and isinstance(companion_cluster_de, dict):
+            reused_cluster_de_groupby = [
+                groupby_name
+                for groupby_name in pending_cluster_de_groupby
+                if groupby_name in companion_cluster_de
+            ]
+            if reused_cluster_de_groupby:
+                print(
+                    f"Using KaroSpaceCompanion cluster DE for {len(reused_cluster_de_groupby)} "
+                    f"groupby column{'s' if len(reused_cluster_de_groupby) != 1 else ''}..."
+                )
+                for groupby_name in reused_cluster_de_groupby:
+                    cluster_de[groupby_name] = companion_cluster_de[groupby_name]
+            pending_cluster_de_groupby = [
+                groupby_name
+                for groupby_name in pending_cluster_de_groupby
+                if groupby_name not in cluster_de
+            ]
+        if pending_cluster_de_groupby:
             print(
-                f"Computing cluster DE for {len(cluster_de_groupby)} "
-                f"groupby column{'s' if len(cluster_de_groupby) != 1 else ''}..."
+                f"Computing cluster DE for {len(pending_cluster_de_groupby)} "
+                f"groupby column{'s' if len(pending_cluster_de_groupby) != 1 else ''}..."
             )
             cluster_de_method_name = str(cluster_de_method or "wilcoxon")
             cluster_de_n = int(cluster_de_top_n)
@@ -817,19 +1129,19 @@ class SpatialDataset:
                         "using adata.X."
                     )
 
-            for groupby in cluster_de_groupby:
-                print(f"  - cluster DE: {groupby}")
-                if groupby not in self.adata.obs.columns:
-                    print(f"  Warning: cluster DE groupby '{groupby}' not found in obs.")
+            for groupby_name in pending_cluster_de_groupby:
+                print(f"  - cluster DE: {groupby_name}")
+                if groupby_name not in self.adata.obs.columns:
+                    print(f"  Warning: cluster DE groupby '{groupby_name}' not found in obs.")
                     continue
 
-                col = self.adata.obs[groupby]
+                col = self.adata.obs[groupby_name]
                 if pd.api.types.is_numeric_dtype(col):
-                    print(f"  Warning: cluster DE '{groupby}' is numeric; skipping.")
+                    print(f"  Warning: cluster DE '{groupby_name}' is numeric; skipping.")
                     continue
                 if not isinstance(col.dtype, CategoricalDtype):
-                    self.adata.obs[groupby] = col.astype("category")
-                    col = self.adata.obs[groupby]
+                    self.adata.obs[groupby_name] = col.astype("category")
+                    col = self.adata.obs[groupby_name]
 
                 categories = [str(cat) for cat in col.cat.categories]
                 if not categories:
@@ -960,7 +1272,7 @@ class SpatialDataset:
                         except Exception as e:
                             print(
                                 f"  Warning: Could not compute cluster DE for "
-                                f"'{groupby}' ({source_name} vs {reference_name}): {e}"
+                                f"'{groupby_name}' ({source_name} vs {reference_name}): {e}"
                             )
                             source_results[reference_name] = {
                                 "available": False,
@@ -979,117 +1291,74 @@ class SpatialDataset:
                         groupby_results[source_name] = source_results
 
                 if groupby_results:
-                    cluster_de[groupby] = groupby_results
+                    cluster_de[groupby_name] = groupby_results
 
         # Compute neighbor composition stats
         neighbor_stats = {}
         neighbor_stats_context = {}
-        if neighbor_graph is not None and neighbor_stats_groupby:
-            print(
-                f"Computing neighbor stats for {len(neighbor_stats_groupby)} "
-                f"groupby column{'s' if len(neighbor_stats_groupby) != 1 else ''}..."
-            )
-            for groupby in neighbor_stats_groupby:
-                print(f"  - neighbor stats: {groupby}")
-                if groupby not in self.adata.obs.columns:
-                    print(f"  Warning: neighbor stats groupby '{groupby}' not found in obs.")
-                    continue
-                col = self.adata.obs[groupby]
-                if pd.api.types.is_numeric_dtype(col):
-                    print(f"  Warning: neighbor stats '{groupby}' is numeric; skipping.")
-                    continue
-                if not isinstance(col.dtype, CategoricalDtype):
-                    col = col.astype("category")
-                categories = list(col.cat.categories)
-                codes = col.cat.codes.to_numpy()
-                valid_mask = codes >= 0
-                if not valid_mask.any():
-                    print(f"  Warning: neighbor stats '{groupby}' has no valid categories.")
-                    continue
-
-                if valid_mask.all():
-                    graph = neighbor_graph
-                    labels = codes
-                else:
-                    valid_idx = np.flatnonzero(valid_mask)
-                    graph = neighbor_graph[valid_idx][:, valid_idx]
-                    labels = codes[valid_mask]
-
-                n_cells = np.bincount(labels, minlength=len(categories)).astype(int)
-                if graph is None or graph.shape[0] == 0:
-                    print(f"  Warning: neighbor stats '{groupby}' has empty graph.")
-                    continue
-
-                onehot = sp.csr_matrix(
-                    (np.ones(len(labels), dtype=float), (np.arange(len(labels)), labels)),
-                    shape=(len(labels), len(categories)),
+        requested_neighbor_stats_groupby = list(neighbor_stats_groupby or [])
+        requested_neighbor_stats_groupby_set = set(requested_neighbor_stats_groupby)
+        companion_neighbor_stats = companion_analytics.get("neighbor_stats")
+        if requested_neighbor_stats_groupby and isinstance(companion_neighbor_stats, dict):
+            reused_neighbor_groupby = [
+                groupby_name
+                for groupby_name in requested_neighbor_stats_groupby
+                if groupby_name in companion_neighbor_stats
+            ]
+            if reused_neighbor_groupby:
+                print(
+                    f"Using KaroSpaceCompanion neighbor stats for {len(reused_neighbor_groupby)} "
+                    f"groupby column{'s' if len(reused_neighbor_groupby) != 1 else ''}..."
                 )
-                counts = onehot.T.dot(graph).dot(onehot)
-                if issparse(counts):
-                    counts = counts.toarray()
-                counts = np.asarray(counts, dtype=float)
-                row_sums = counts.sum(axis=1)
-                mean_degree = np.zeros(len(categories), dtype=float)
-                valid_cells = n_cells > 0
-                mean_degree[valid_cells] = row_sums[valid_cells] / n_cells[valid_cells]
+                for groupby_name in reused_neighbor_groupby:
+                    neighbor_stats[groupby_name] = companion_neighbor_stats[groupby_name]
 
-                zscore = None
-                entry = {
-                    "categories": categories,
-                    "counts": counts.tolist(),
-                    "n_cells": n_cells.tolist(),
-                    "mean_degree": mean_degree.tolist(),
-                }
-                if neighbor_stats_permutations and neighbor_stats_permutations > 0:
-                    rng = np.random.default_rng(int(neighbor_stats_seed))
-                    perm_mean = np.zeros_like(counts, dtype=float)
-                    perm_m2 = np.zeros_like(counts, dtype=float)
-                    for i in range(int(neighbor_stats_permutations)):
-                        perm_labels = rng.permutation(labels)
-                        perm_onehot = sp.csr_matrix(
-                            (np.ones(len(perm_labels), dtype=float), (np.arange(len(perm_labels)), perm_labels)),
-                            shape=(len(perm_labels), len(categories)),
-                        )
-                        perm_counts = perm_onehot.T.dot(graph).dot(perm_onehot)
-                        if issparse(perm_counts):
-                            perm_counts = perm_counts.toarray()
-                        perm_counts = np.asarray(perm_counts, dtype=float)
-                        delta = perm_counts - perm_mean
-                        perm_mean += delta / (i + 1)
-                        perm_m2 += delta * (perm_counts - perm_mean)
-                    if neighbor_stats_permutations > 1:
-                        perm_var = perm_m2 / (neighbor_stats_permutations - 1)
-                    else:
-                        perm_var = np.zeros_like(counts, dtype=float)
-                    perm_std = np.sqrt(perm_var)
-                    zscore = np.zeros_like(counts, dtype=float)
-                    valid_std = perm_std > 0
-                    zscore[valid_std] = (counts[valid_std] - perm_mean[valid_std]) / perm_std[valid_std]
-                    entry["perm_n"] = int(neighbor_stats_permutations)
-                    entry["zscore"] = zscore.tolist()
-                neighbor_stats[groupby] = entry
-                neighbor_stats_context[groupby] = {
-                    "categories": categories,
-                    "labels": labels.astype(np.int32, copy=False),
-                    "graph": graph.tocsr(),
-                    "obs_idx": (
-                        np.arange(self.adata.n_obs, dtype=np.int64)
-                        if valid_mask.all()
-                        else np.flatnonzero(valid_mask).astype(np.int64)
-                    ),
-                    "counts": counts,
-                    "zscore": zscore,
-                    "n_cells": n_cells,
-                    "mean_degree": mean_degree,
-                }
+        pending_neighbor_stats_groupby = [
+            groupby_name
+            for groupby_name in requested_neighbor_stats_groupby
+            if groupby_name not in neighbor_stats
+        ]
+        if neighbor_graph is not None and pending_neighbor_stats_groupby:
+            print(
+                f"Computing neighbor stats for {len(pending_neighbor_stats_groupby)} "
+                f"groupby column{'s' if len(pending_neighbor_stats_groupby) != 1 else ''}..."
+            )
+            for groupby_name in pending_neighbor_stats_groupby:
+                print(f"  - neighbor stats: {groupby_name}")
+                entry, context = _prepare_neighbor_stats_groupby(groupby_name)
+                if entry is None or context is None:
+                    continue
+                neighbor_stats[groupby_name] = entry
+                neighbor_stats_context[groupby_name] = context
 
         # Compute contact-conditioned interaction markers:
         # for source S and target T, compare source cells contacting T vs source cells not contacting T.
         interaction_markers = {}
-        if neighbor_graph is not None and interaction_markers_groupby:
+        pending_interaction_markers_groupby = list(interaction_markers_groupby or [])
+        companion_interaction_markers = companion_analytics.get("interaction_markers")
+        if pending_interaction_markers_groupby and isinstance(companion_interaction_markers, dict):
+            reused_interaction_groupby = [
+                groupby_name
+                for groupby_name in pending_interaction_markers_groupby
+                if groupby_name in companion_interaction_markers
+            ]
+            if reused_interaction_groupby:
+                print(
+                    f"Using KaroSpaceCompanion interaction markers for "
+                    f"{len(reused_interaction_groupby)} "
+                    f"groupby column{'s' if len(reused_interaction_groupby) != 1 else ''}..."
+                )
+                for groupby_name in reused_interaction_groupby:
+                    interaction_markers[groupby_name] = companion_interaction_markers[groupby_name]
+            pending_interaction_markers_groupby = [
+                groupby_name
+                for groupby_name in pending_interaction_markers_groupby
+                if groupby_name not in interaction_markers
+            ]
+        if neighbor_graph is not None and pending_interaction_markers_groupby:
             print(
-                f"Computing interaction markers for {len(interaction_markers_groupby)} "
-                f"groupby column{'s' if len(interaction_markers_groupby) != 1 else ''}..."
+                f"Computing interaction markers for {len(pending_interaction_markers_groupby)} "
+                f"groupby column{'s' if len(pending_interaction_markers_groupby) != 1 else ''}..."
             )
             method = str(interaction_markers_method or "wilcoxon")
             top_targets = int(interaction_markers_top_targets)
@@ -1106,12 +1375,29 @@ class SpatialDataset:
                         "using adata.X."
                     )
 
-            for groupby in interaction_markers_groupby:
-                print(f"  - interaction markers: {groupby}")
-                ctx = neighbor_stats_context.get(groupby)
+            for groupby_name in pending_interaction_markers_groupby:
+                print(f"  - interaction markers: {groupby_name}")
+                if groupby_name not in neighbor_stats_context:
+                    companion_neighbor_entry = None
+                    if isinstance(companion_neighbor_stats, dict):
+                        companion_neighbor_entry = companion_neighbor_stats.get(groupby_name)
+                    entry, context = _prepare_neighbor_stats_groupby(
+                        groupby_name,
+                        precomputed_entry=companion_neighbor_entry,
+                    )
+                    if context is not None:
+                        neighbor_stats_context[groupby_name] = context
+                    if (
+                        entry is not None
+                        and groupby_name in requested_neighbor_stats_groupby_set
+                        and groupby_name not in neighbor_stats
+                    ):
+                        neighbor_stats[groupby_name] = entry
+
+                ctx = neighbor_stats_context.get(groupby_name)
                 if ctx is None:
                     print(
-                        f"  Warning: interaction markers '{groupby}' unavailable "
+                        f"  Warning: interaction markers '{groupby_name}' unavailable "
                         "(missing neighbor stats for this groupby)."
                     )
                     continue
@@ -1126,7 +1412,7 @@ class SpatialDataset:
 
                 if graph.shape[0] != len(labels):
                     print(
-                        f"  Warning: interaction markers '{groupby}' graph/label size mismatch; skipping."
+                        f"  Warning: interaction markers '{groupby_name}' graph/label size mismatch; skipping."
                     )
                     continue
 
@@ -1206,7 +1492,11 @@ class SpatialDataset:
                         adata_idx = obs_idx[selected_idx]
                         try:
                             pair_adata = self.adata[adata_idx].copy()
-                            contact_labels = np.where(pos_mask[selected_idx], "contact+", "contact-")
+                            contact_labels = np.where(
+                                pos_mask[selected_idx],
+                                "contact+",
+                                "contact-",
+                            )
                             pair_adata.obs["_karospace_contact_group"] = pd.Categorical(
                                 contact_labels,
                                 categories=["contact+", "contact-"],
@@ -1226,7 +1516,12 @@ class SpatialDataset:
                             sc.tl.rank_genes_groups(pair_adata, **rg_kwargs)
                             rg = pair_adata.uns.get("_karospace_interaction_markers", {})
 
-                            genes = _extract_rank_genes_groups_values(rg.get("names"), "contact+", top_genes, cast=str)
+                            genes = _extract_rank_genes_groups_values(
+                                rg.get("names"),
+                                "contact+",
+                                top_genes,
+                                cast=str,
+                            )
                             logfc = _extract_rank_genes_groups_values(
                                 rg.get("logfoldchanges"),
                                 "contact+",
@@ -1266,7 +1561,7 @@ class SpatialDataset:
                             }
                         except Exception as e:
                             print(
-                                f"  Warning: interaction markers failed for '{groupby}' "
+                                f"  Warning: interaction markers failed for '{groupby_name}' "
                                 f"{source_name}->{target_name}: {e}"
                             )
 
@@ -1274,7 +1569,7 @@ class SpatialDataset:
                         group_interactions[source_name] = source_result
 
                 if group_interactions:
-                    interaction_markers[groupby] = group_interactions
+                    interaction_markers[groupby_name] = group_interactions
 
         # Build section data with all color layers
         sections_data = []

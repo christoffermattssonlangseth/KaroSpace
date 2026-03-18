@@ -291,6 +291,7 @@ class KaroSpaceExportGUI:
         self.use_hvgs = tk.BooleanVar(value=True)
         self.hvg_limit = tk.StringVar(value="20")
         self.gene_correlation_top_n = tk.StringVar(value="10")
+        self.spatial_variable_genes_n = tk.StringVar(value="200")
         self.gene_encoding = tk.StringVar(value="auto")
         self.gene_storage = tk.StringVar(value="embedded")
         self.gene_aux_path = tk.StringVar(value="")
@@ -635,6 +636,8 @@ class KaroSpaceExportGUI:
         ttk.Entry(genes_opts, textvariable=self.hvg_limit, width=8).pack(side="left")
         ttk.Label(genes_opts, text="Corr. top N").pack(side="left", padx=(12, 4))
         ttk.Entry(genes_opts, textvariable=self.gene_correlation_top_n, width=6).pack(side="left")
+        ttk.Label(genes_opts, text="SVG n").pack(side="left", padx=(12, 4))
+        ttk.Entry(genes_opts, textvariable=self.spatial_variable_genes_n, width=6).pack(side="left")
 
         advanced_group = ttk.LabelFrame(advanced_tab, text="Advanced Options", padding=12, style="Card.TLabelframe")
         advanced_group.pack(fill="x", pady=(0, 10))
@@ -1230,6 +1233,7 @@ class KaroSpaceExportGUI:
         use_hvgs = bool(self.use_hvgs.get())
         hvg_limit = _parse_non_negative_int("HVG limit", self.hvg_limit.get())
         gene_correlation_top_n = _parse_non_negative_int("Corr. top N", self.gene_correlation_top_n.get())
+        spatial_variable_genes_n = _parse_non_negative_int("SVG n", self.spatial_variable_genes_n.get())
         additional_colors = _unique(self.additional_colors_editor.get_items())
         genes = _unique(self.genes_editor.get_items())
         marker_groupby = _unique(self.marker_genes_groupby_editor.get_items())
@@ -1261,6 +1265,7 @@ class KaroSpaceExportGUI:
             "use_hvgs": use_hvgs,
             "hvg_limit": hvg_limit,
             "gene_correlation_top_n": gene_correlation_top_n,
+            "spatial_variable_genes_n": spatial_variable_genes_n,
             "gene_encoding": self.gene_encoding.get().strip() or "auto",
             "gene_storage": gene_storage,
             "gene_aux_path": gene_aux_path,

@@ -198,6 +198,12 @@ def main():
         default=10,
         help="Number of top correlated genes to show per embedded gene in the discovery panel. Use 0 to disable. (default: 10)"
     )
+    parser.add_argument(
+        "--spatial-variable-genes-n",
+        type=int,
+        default=200,
+        help="Number of top variable genes to score with Moran's I spatial autocorrelation. Requires spatial graph in obsp. Use 0 to disable. (default: 200)"
+    )
 
     args = parser.parse_args()
 
@@ -288,6 +294,7 @@ def main():
         cluster_de_min_cells=args.cluster_de_min_cells,
         section_rotations=section_rotations,
         gene_correlation_top_n=args.gene_correlation_top_n,
+        spatial_variable_genes_n=args.spatial_variable_genes_n,
     )
 
     print(f"Done! Open {output_path} in a browser to view.")

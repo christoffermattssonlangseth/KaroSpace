@@ -85,6 +85,74 @@ def _compute_cluster_gene_means(adata, genes: List[str], obs_col: str) -> Option
     return {"categories": categories, "means": means, "background": background}
 
 
+def _compute_morans_i(adata, genes: List[str], n_genes: int = 200) -> list:
+    """Compute Moran's I spatial autocorrelation for the top variable genes.
+
+    Returns a list of {gene, I} dicts sorted descending by I value, or [] if
+    no spatial weight matrix is found in adata.obsp.
+
+    W is kept sparse throughout. All genes are processed in a single sparse
+    matmul (W @ Z), so cost is O(G * nnz) rather than O(G * N^2).
+    """
+    import scipy.sparse as sp
+
+    # Find spatial weight matrix — keep sparse
+    W = None
+    for key in ("spatial_connectivities", "connectivities", "neighbors", "neighbor_graph"):
+        if key in adata.obsp:
+            W = adata.obsp[key]
+            break
+    if W is None:
+        return []
+
+    if not sp.issparse(W):
+        W = sp.csr_matrix(W)
+    else:
+        W = W.tocsr().astype(float)
+
+    N = W.shape[0]
+
+    # Row-normalize in place using sparse diagonal scaling
+    row_sums = np.asarray(W.sum(axis=1)).ravel()
+    row_sums[row_sums == 0] = 1.0
+    W = sp.diags(1.0 / row_sums) @ W
+    S0 = float(W.sum())
+    if S0 == 0:
+        return []
+
+    # Select top variable genes and densify only those (N × G, manageable)
+    selected = _select_top_variable_genes(adata, n_genes)
+    selected = [g for g in selected if g in set(genes)]
+    if not selected:
+        return []
+
+    X = adata[:, selected].X
+    if hasattr(X, "toarray"):
+        X = X.toarray()
+    X = np.asarray(X, dtype=float)          # (N, G)
+
+    # Center each gene
+    Z = X - X.mean(axis=0)                  # (N, G)
+
+    # One sparse matmul for all genes: W @ Z  →  (N, G)
+    WZ = W.dot(Z)                            # sparse × dense = dense (N, G)
+
+    num = N * (Z * WZ).sum(axis=0)          # (G,)
+    denom = S0 * (Z * Z).sum(axis=0)        # (G,)
+
+    valid = denom > 0
+    I_vals = np.where(valid, num / np.where(valid, denom, 1.0), 0.0)
+    I_vals = np.clip(I_vals, -1.0, 1.0)
+
+    results = [
+        {"gene": gene, "I": round(float(I_vals[j]), 4)}
+        for j, gene in enumerate(selected)
+        if valid[j]
+    ]
+    results.sort(key=lambda d: d["I"], reverse=True)
+    return results
+
+
 def _compute_gene_correlations(adata, genes: List[str], top_n: int = 10) -> dict:
     """For each gene, return the top_n most positively correlated genes."""
     if not genes or top_n < 1 or len(genes) < 2:
@@ -917,6 +985,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             font-size: 11px;
         }}
         .marker-group-title {{ font-size: 11px; font-weight: 600; }}
+        .marker-genes .gene-token-grid {{ gap: 4px; }}
+        .marker-genes .gene-token-btn {{
+            gap: 4px;
+            padding: 3px 6px;
+            font-size: 10px;
+        }}
+        .marker-genes .gene-token-meta {{ font-size: 9px; }}
         .marker-genes-list {{
             font-size: 10px;
             color: var(--muted-color);
@@ -1675,6 +1750,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         .selection-summary-expr-bar.sel {{ background: var(--accent-strong); }}
         .selection-summary-expr-bar.rest {{ background: var(--muted-color); opacity: 0.5; }}
+        .selection-summary-expr-bar.region-b {{ background: #4cc9f0; opacity: 0.85; }}
         .selection-summary-expr-fc {{
             width: 34px;
             flex-shrink: 0;
@@ -1683,6 +1759,56 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             font-variant-numeric: tabular-nums;
             color: var(--muted-color);
         }}
+        .selection-summary-compare-btn {{
+            margin-top: 6px;
+            width: 100%;
+            padding: 4px 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: var(--panel-bg);
+            color: var(--text-color);
+            cursor: pointer;
+            font-size: 11px;
+        }}
+        .selection-summary-compare-btn:hover {{ background: var(--hover-bg); }}
+        .selection-summary-compare-header {{
+            display: flex;
+            gap: 4px;
+            margin-bottom: 4px;
+            font-size: 11px;
+            font-weight: 600;
+        }}
+        .selection-summary-compare-label {{
+            flex: 1;
+            text-align: center;
+            padding: 2px 4px;
+            border-radius: 3px;
+        }}
+        .selection-summary-compare-label.region-a {{ background: var(--accent-strong); color: #fff; }}
+        .selection-summary-compare-label.region-b {{ background: #4cc9f0; color: #000; }}
+        .selection-summary-compare-row {{
+            display: grid;
+            grid-template-columns: 1fr auto auto auto;
+            gap: 4px;
+            align-items: center;
+            font-size: 11px;
+            padding: 1px 0;
+        }}
+        .selection-summary-compare-type {{ color: var(--text-color); font-weight: 500; }}
+        .selection-summary-compare-a {{ color: var(--accent-strong); font-variant-numeric: tabular-nums; }}
+        .selection-summary-compare-b {{ color: #4cc9f0; font-variant-numeric: tabular-nums; }}
+        .selection-summary-compare-sep {{ color: var(--muted-color); }}
+        .annot-comp-row {{ margin-bottom: 8px; }}
+        .annot-comp-header {{ display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; margin-bottom: 3px; }}
+        .annot-comp-dot {{ width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0; }}
+        .annot-comp-count {{ color: var(--muted-color); font-weight: normal; margin-left: auto; }}
+        .annot-comp-bar-track {{ display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--border-color); }}
+        .annot-comp-segment {{ height: 100%; }}
+        .annot-comp-legend {{ display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; font-size: 10px; }}
+        .annot-comp-legend-item {{ display: flex; align-items: center; gap: 3px; color: var(--text-color); }}
+        .annot-expr-row {{ display: flex; align-items: center; gap: 6px; margin: 2px 0; }}
+        .annot-expr-bars {{ flex: 1; display: flex; flex-direction: column; gap: 1px; }}
+        .annot-expr-bar {{ height: 4px; border-radius: 2px; min-width: 1px; }}
         .modal-annotation-panel {{
             position: absolute;
             right: 8px;
@@ -2737,6 +2863,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let isDrawingLasso = false;
     let lassoPath = [];  // Array of {{x, y}} points
     let selectedCells = new Set();  // Set of "sectionId:cellIdx" strings
+    let selectedCellsB = new Set();  // Second region for comparison
+    let lassoModeB = false;  // Next lasso draw fills region B
     let selectionSummaryColor = DATA.initial_color;
     let selectionSummaryExpanded = false;
     const sectionById = new Map((DATA.sections || []).map(section => [section.id, section]));
@@ -3670,7 +3798,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (options.isActive) classes.push('active');
         if (options.isSearchActive) classes.push('search-active');
         if (!DATA.genes_meta?.[token]) classes.push('unloaded');
-        const metaLabel = options.metaLabel || (DATA.genes_meta?.[token] ? 'loaded' : 'sidecar');
+        const showMeta = options.showMeta !== false;
+        const metaLabel = options.metaLabel !== undefined
+            ? options.metaLabel
+            : (DATA.genes_meta?.[token] ? 'loaded' : 'sidecar');
+        const metaHtml = showMeta && metaLabel
+            ? `<span class="gene-token-meta">${{escapeHtml(metaLabel)}}</span>`
+            : '';
         return `
             <button
                 type="button"
@@ -3679,7 +3813,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 title="${{escapeHtml(options.title || token)}}"
             >
                 <span>${{escapeHtml(token)}}</span>
-                <span class="gene-token-meta">${{escapeHtml(metaLabel)}}</span>
+                ${{metaHtml}}
             </button>
         `;
     }}
@@ -3740,6 +3874,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 <div class="gene-discovery-section">
                     <div class="gene-discovery-label">Correlated with ${{escapeHtml(currentGene)}}</div>
                     ${{corrRows}}
+                </div>
+            `);
+        }}
+
+        if (DATA.spatial_variable_genes?.length) {{
+            const topSVG = DATA.spatial_variable_genes.slice(0, 12);
+            const svgRows = `<div class="gene-token-grid">${{topSVG.map((item) =>
+                renderGeneTokenButton(item.gene, {{
+                    isActive: item.gene === currentGene,
+                    metaLabel: `I=${{item.I.toFixed(2)}}`,
+                    title: `Moran's I = ${{item.I.toFixed(4)}}`,
+                }})
+            ).join('')}}</div>`;
+            sections.push(`
+                <div class="gene-discovery-section">
+                    <div class="gene-discovery-label">Spatially variable genes</div>
+                    ${{svgRows}}
                 </div>
             `);
         }}
@@ -4504,15 +4655,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return fallbackCols.length ? fallbackCols[0] : null;
     }}
 
-    function computeSelectionSummary() {{
+    function computeSelectionSummary(cells = selectedCells) {{
         const summary = {{
-            total: selectedCells.size,
+            total: cells.size,
             sections: [],
             typeColumn: null,
             types: [],
             missingTypeValues: 0,
+            _cells: cells,
         }};
-        if (selectedCells.size === 0) return summary;
+        if (cells.size === 0) return summary;
 
         const sectionCounts = new Map();
         const typeColumn = getSelectionSummaryColorColumn();
@@ -4521,7 +4673,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const typeMeta = typeColumn ? DATA.colors_meta?.[typeColumn] : null;
         const typeCategories = Array.isArray(typeMeta?.categories) ? typeMeta.categories : null;
 
-        selectedCells.forEach((key) => {{
+        cells.forEach((key) => {{
             const sep = key.lastIndexOf(':');
             if (sep <= 0) return;
             const sectionId = key.slice(0, sep);
@@ -4586,7 +4738,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         // Fallback: compute directly from loaded gene vectors (exact, embedded genes only).
         const loadedGenes = Object.keys(DATA.genes_meta || {{}});
-        if (!loadedGenes.length || !selectedCells.size) return [];
+        if (!loadedGenes.length || !summary.total) return [];
+        // Rebuild cell set from summary sections for O(1) lookup
+        const cellSetKeys = summary._cells || selectedCells;
         const result = [];
         for (const gene of loadedGenes) {{
             let selSum = 0, selCount = 0, restSum = 0, restCount = 0;
@@ -4595,7 +4749,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 if (!vals) continue;
                 for (let i = 0; i < vals.length; i++) {{
                     const v = vals[i] ?? 0;
-                    if (isCellSelected(section.id, i)) {{
+                    if (cellSetKeys.has(`${{section.id}}:${{i}}`)) {{
                         selSum += v; selCount++;
                     }} else {{
                         restSum += v; restCount++;
@@ -4610,9 +4764,74 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return result;
     }}
 
+    function renderSelectionComparisonHtml(summaryA) {{
+        const summaryB = computeSelectionSummary(selectedCellsB);
+        let html = `<div class="selection-summary-compare-header">
+            <span class="selection-summary-compare-label region-a">Region A (${{summaryA.total.toLocaleString()}} cells)</span>
+            <span class="selection-summary-compare-label region-b">Region B (${{summaryB.total.toLocaleString()}} cells)</span>
+        </div>`;
+
+        // Cell type breakdown side-by-side
+        if (summaryA.typeColumn && (summaryA.types.length || summaryB.types.length)) {{
+            html += `<div class="selection-summary-title">Cell types: A vs B</div>`;
+            const allTypes = new Set([
+                ...summaryA.types.map(([t]) => t),
+                ...summaryB.types.map(([t]) => t),
+            ]);
+            const mapA = new Map(summaryA.types);
+            const mapB = new Map(summaryB.types);
+            for (const label of allTypes) {{
+                const cA = mapA.get(label) || 0;
+                const cB = mapB.get(label) || 0;
+                const pA = summaryA.total > 0 ? Math.round(100 * cA / summaryA.total) : 0;
+                const pB = summaryB.total > 0 ? Math.round(100 * cB / summaryB.total) : 0;
+                html += `<div class="selection-summary-compare-row">
+                    <span class="selection-summary-compare-type">${{escapeHtml(label)}}</span>
+                    <span class="selection-summary-compare-a">${{cA.toLocaleString()}} (${{pA}}%)</span>
+                    <span class="selection-summary-compare-sep">|</span>
+                    <span class="selection-summary-compare-b">${{cB.toLocaleString()}} (${{pB}}%)</span>
+                </div>`;
+            }}
+        }}
+
+        // Gene expression A vs B
+        const exprA = computeSelectionMeanExpression(summaryA);
+        const exprB = computeSelectionMeanExpression(summaryB);
+        if (exprA.length && exprB.length) {{
+            const mapB = new Map(exprB.map(e => [e.gene, e.meanSel]));
+            const top = exprA.slice(0, 6);
+            const vmax = Math.max(top[0].meanSel || 1, ...top.map(e => mapB.get(e.gene) || 0));
+            html += '<div class="selection-summary-expr">';
+            html += '<div class="selection-summary-title">Gene expression: A (pink) vs B (blue)</div>';
+            top.forEach(({{gene, meanSel}}) => {{
+                const meanB = mapB.get(gene) || 0;
+                const pA = Math.round(100 * meanSel / vmax);
+                const pB = Math.round(100 * meanB / vmax);
+                const fc = meanB > 0 ? (meanSel / meanB).toFixed(1) + 'x' : '—';
+                html += `<div class="selection-summary-expr-row">
+                    <span class="selection-summary-expr-gene" title="${{escapeHtml(gene)}}">${{escapeHtml(gene)}}</span>
+                    <div class="selection-summary-expr-bars">
+                        <div class="selection-summary-expr-bar sel" style="width:${{pA}}%"></div>
+                        <div class="selection-summary-expr-bar region-b" style="width:${{pB}}%"></div>
+                    </div>
+                    <span class="selection-summary-expr-fc">${{fc}}</span>
+                </div>`;
+            }});
+            html += '</div>';
+        }}
+
+        html += '<button class="selection-summary-compare-btn" type="button" id="lasso-clear-b-btn">Clear Region B</button>';
+        return html;
+    }}
+
     function renderSelectionSummaryHtml(summary) {{
         if (!summary || summary.total === 0) {{
             return '<div class="selection-summary-meta">Draw a region with Magic Wand to inspect selected cells.</div>';
+        }}
+
+        // Comparison mode: two regions drawn
+        if (selectedCellsB.size > 0) {{
+            return renderSelectionComparisonHtml(summary);
         }}
 
         const topSections = summary.sections.slice(0, 3).map(([sid, count]) => `${{sid}} (${{count.toLocaleString()}})`);
@@ -4666,6 +4885,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             html += '</div>';
         }}
 
+        // Compare region button (only when no B yet and lasso mode is available)
+        if (!lassoModeB) {{
+            html += '<button class="selection-summary-compare-btn" type="button" id="lasso-compare-region-btn">Compare region</button>';
+        }} else {{
+            html += '<div class="selection-summary-meta">Draw Region B with Magic Wand…</div>';
+        }}
+
         return html;
     }}
 
@@ -4689,6 +4915,25 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 updateSelectionInfo();
             }});
         }});
+        const compareBtn = container.querySelector('#lasso-compare-region-btn');
+        if (compareBtn) {{
+            compareBtn.addEventListener('click', (e) => {{
+                e.preventDefault();
+                e.stopPropagation();
+                lassoModeB = true;
+                updateSelectionInfo();
+            }});
+        }}
+        const clearBBtn = container.querySelector('#lasso-clear-b-btn');
+        if (clearBBtn) {{
+            clearBBtn.addEventListener('click', (e) => {{
+                e.preventDefault();
+                e.stopPropagation();
+                selectedCellsB.clear();
+                lassoModeB = false;
+                updateSelectionInfo();
+            }});
+        }}
     }}
 
     // UMAP rendering
@@ -4859,8 +5104,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         const config = getColorConfig();
 
-        // Clear previous selection or add to it (could add shift-key support later)
-        selectedCells.clear();
+        // Collect cells inside the lasso
+        const newCells = new Set();
 
         // Check all cells in all sections
         DATA.sections.forEach(section => {{
@@ -4884,10 +5129,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const y = centerY - (section.umap_y[i] - dataCenterY) * scale;
 
                 if (pointInPolygon(x, y, lassoPath)) {{
-                    selectedCells.add(`${{section.id}}:${{i}}`);
+                    newCells.add(`${{section.id}}:${{i}}`);
                 }}
             }}
         }});
+
+        if (lassoModeB) {{
+            selectedCellsB = newCells;
+            lassoModeB = false;
+        }} else {{
+            selectedCells = newCells;
+            selectedCellsB.clear();
+        }}
 
         selectionSummaryExpanded = false;
         updateSelectionInfo();
@@ -5222,6 +5475,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }};
         modalAnnotations.push(annotation);
         renderModalAnnotationPanel();
+        updateAnnotationComparisonTabVisibility();
+        if (document.getElementById('color-tab-regions')?.classList.contains('active')) renderAnnotationComparison();
         return true;
     }}
 
@@ -5230,18 +5485,24 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!Number.isFinite(target)) return;
         modalAnnotations = modalAnnotations.filter(annotation => annotation.id !== target);
         renderModalAnnotationPanel();
+        updateAnnotationComparisonTabVisibility();
+        if (document.getElementById('color-tab-regions')?.classList.contains('active')) renderAnnotationComparison();
         if (modalSection) renderModalSection();
     }}
 
     function clearModalAnnotationsForSection(sectionId) {{
         modalAnnotations = modalAnnotations.filter(annotation => annotation.sectionId !== sectionId);
         renderModalAnnotationPanel();
+        updateAnnotationComparisonTabVisibility();
+        if (document.getElementById('color-tab-regions')?.classList.contains('active')) renderAnnotationComparison();
         if (modalSection) renderModalSection();
     }}
 
     function clearAllModalAnnotations() {{
         modalAnnotations = [];
         renderModalAnnotationPanel();
+        updateAnnotationComparisonTabVisibility();
+        if (document.getElementById('color-tab-regions')?.classList.contains('active')) renderAnnotationComparison();
         if (modalSection) renderModalSection();
     }}
 
@@ -5429,6 +5690,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     // Clear selection
     function clearSelection() {{
         selectedCells.clear();
+        selectedCellsB.clear();
+        lassoModeB = false;
         selectionSummaryExpanded = false;
         updateSelectionInfo();
         renderUMAP();
@@ -6512,6 +6775,120 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
     }}
 
+    function updateAnnotationComparisonTabVisibility() {{
+        const tab = document.getElementById('color-tab-regions');
+        if (!tab) return;
+        const hasAnnotations = modalAnnotations.length > 0;
+        tab.style.display = hasAnnotations ? '' : 'none';
+        // If tab was active but no annotations remain, switch to Stats
+        if (!hasAnnotations && tab.classList.contains('active')) {{
+            tab.classList.remove('active');
+            document.getElementById('color-tab-regions-content')?.classList.remove('active');
+            document.getElementById('color-tab-aggregate')?.classList.add('active');
+            document.getElementById('color-tab-aggregate-content')?.classList.add('active');
+        }}
+    }}
+
+    function renderAnnotationComparison() {{
+        const container = document.getElementById('annotation-comparison');
+        if (!container) return;
+
+        if (!modalAnnotations.length) {{
+            container.innerHTML = '<div class="agg-group-meta">Open a section, draw annotations, then switch to this tab to compare them.</div>';
+            return;
+        }}
+
+        // Build per-annotation summaries
+        const annotSummaries = modalAnnotations.map((annotation) => {{
+            const cellSet = new Set(
+                (annotation.localCellIndices || [])
+                    .filter(idx => Number.isInteger(idx) && idx >= 0)
+                    .map(idx => `${{annotation.sectionId}}:${{idx}}`)
+            );
+            const summary = computeSelectionSummary(cellSet);
+            return {{ annotation, summary }};
+        }});
+
+        let html = '';
+
+        // Composition section: stacked bars per annotation
+        const typeColumn = annotSummaries[0]?.summary?.typeColumn;
+        if (typeColumn) {{
+            // Collect all type names
+            const allTypes = new Set();
+            annotSummaries.forEach((as) => as.summary.types.forEach(([t]) => allTypes.add(t)));
+            const typeList = Array.from(allTypes);
+
+            html += `<div class="selection-summary-title">Cell composition by annotation</div>`;
+            annotSummaries.forEach((as) => {{
+                const annotation = as.annotation;
+                const summary = as.summary;
+                const color = annotation.color || '#888';
+                const label = escapeHtml(annotation.label || `Annotation ${{annotation.id}}`);
+                const total = summary.total;
+                const typeMap = new Map(summary.types);
+
+                html += `<div class="annot-comp-row">`;
+                html += `<div class="annot-comp-header"><span class="annot-comp-dot" style="background:${{color}}"></span><span>${{label}}</span><span class="annot-comp-count">${{total.toLocaleString()}} cells</span></div>`;
+                if (total > 0) {{
+                    html += `<div class="annot-comp-bar-track">`;
+                    let offset = 0;
+                    typeList.forEach((type, ti) => {{
+                        const cnt = typeMap.get(type) || 0;
+                        const pct = Math.round(100 * cnt / total);
+                        if (pct <= 0) return;
+                        const bgColor = getBarColor(ti);
+                        html += `<div class="annot-comp-segment" title="${{escapeHtml(type)}}: ${{cnt}} (${{pct}}%)" style="width:${{pct}}%;background:${{bgColor}}"></div>`;
+                    }});
+                    html += `</div>`;
+                }}
+                html += `</div>`;
+            }});
+
+            // Legend
+            if (typeList.length) {{
+                html += `<div class="annot-comp-legend">`;
+                typeList.slice(0, 8).forEach((type, ti) => {{
+                    html += `<span class="annot-comp-legend-item"><span class="annot-comp-dot" style="background:${{getBarColor(ti)}}"></span>${{escapeHtml(type)}}</span>`;
+                }});
+                if (typeList.length > 8) {{
+                    html += `<span class="annot-comp-legend-item agg-group-meta">+${{typeList.length - 8}} more</span>`;
+                }}
+                html += `</div>`;
+            }}
+        }}
+
+        // Expression section: top 6 genes, one row per gene
+        const exprArrays = annotSummaries.map((as) => computeSelectionMeanExpression(as.summary));
+        const firstNonEmpty = exprArrays.find(arr => arr.length > 0);
+        if (firstNonEmpty) {{
+            const topGenes = firstNonEmpty.slice(0, 6).map(e => e.gene);
+            const vmax = Math.max(1, ...exprArrays.flatMap(arr =>
+                topGenes.map(g => (arr.find(e => e.gene === g)?.meanSel || 0))
+            ));
+
+            html += `<div class="selection-summary-title" style="margin-top:10px">Gene expression by annotation</div>`;
+            topGenes.forEach((gene) => {{
+                html += `<div class="annot-expr-row"><span class="selection-summary-expr-gene">${{escapeHtml(gene)}}</span>`;
+                html += `<div class="annot-expr-bars">`;
+                exprArrays.forEach((arr, ai) => {{
+                    const val = arr.find(e => e.gene === gene)?.meanSel || 0;
+                    const pct = Math.round(100 * val / vmax);
+                    const color = annotSummaries[ai].annotation.color || '#888';
+                    html += `<div class="annot-expr-bar" style="width:${{pct}}%;background:${{color}}" title="${{escapeHtml(annotSummaries[ai].annotation.label || '')}}: ${{val.toFixed(2)}}"></div>`;
+                }});
+                html += `</div></div>`;
+            }});
+        }}
+
+        container.innerHTML = html || '<div class="agg-group-meta">No data available.</div>';
+    }}
+
+    function getBarColor(index) {{
+        const palette = ['#4cc9f0','#f4a261','#2a9d8f','#e63946','#06d6a0','#ffd166','#118ab2','#ef476f','#43aa8b','#ff7f50'];
+        return palette[index % palette.length];
+    }}
+
     function buildColorPanel() {{
         const panel = document.getElementById('color-panel');
         if (!panel) return;
@@ -6540,6 +6917,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <button class="color-tab active" id="color-tab-aggregate" type="button">Stats</button>
                     <button class="color-tab" id="color-tab-neighbors" type="button">Neighbors</button>
                     <button class="color-tab" id="color-tab-genes" type="button">Genes</button>
+                    <button class="color-tab" id="color-tab-regions" type="button" style="display:none">Regions</button>
                 </div>
                 <div class="color-tab-content active" id="color-tab-aggregate-content">
                     <div>
@@ -6650,6 +7028,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     </div>
                 </div>
             </div>
+            <div class="color-tab-content" id="color-tab-regions-content">
+                <div class="color-aggregation" id="annotation-comparison">
+                    <div class="agg-group-meta">Open a section, draw annotations, then switch to this tab to compare them.</div>
+                </div>
+            </div>
         `;
 
         const search = document.getElementById('color-search');
@@ -6695,9 +7078,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             aggregateTab.classList.add('active');
             neighborTab.classList.remove('active');
             genesTab.classList.remove('active');
+            document.getElementById('color-tab-regions')?.classList.remove('active');
             aggregateContent.classList.add('active');
             neighborContent.classList.remove('active');
             genesContent.classList.remove('active');
+            document.getElementById('color-tab-regions-content')?.classList.remove('active');
             renderColorAggregation();
             renderCellTypeTrend();
         }});
@@ -6705,9 +7090,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             neighborTab.classList.add('active');
             aggregateTab.classList.remove('active');
             genesTab.classList.remove('active');
+            document.getElementById('color-tab-regions')?.classList.remove('active');
             neighborContent.classList.add('active');
             aggregateContent.classList.remove('active');
             genesContent.classList.remove('active');
+            document.getElementById('color-tab-regions-content')?.classList.remove('active');
             renderNeighborStats();
             renderInteractionBrowser();
         }});
@@ -6715,9 +7102,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             genesTab.classList.add('active');
             aggregateTab.classList.remove('active');
             neighborTab.classList.remove('active');
+            document.getElementById('color-tab-regions')?.classList.remove('active');
             genesContent.classList.add('active');
             aggregateContent.classList.remove('active');
             neighborContent.classList.remove('active');
+            document.getElementById('color-tab-regions-content')?.classList.remove('active');
             // Default to Dotplot subtab.
             if (!genesDotTab.classList.contains('active') && !genesMarkersTab.classList.contains('active') && !genesCompareTab.classList.contains('active')) {{
                 genesDotTab.classList.add('active');
@@ -6758,6 +7147,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             genesDotContent.classList.remove('active');
             genesMarkersContent.classList.remove('active');
             renderClusterDE();
+        }});
+
+        const regionsTab = document.getElementById('color-tab-regions');
+        const regionsContent = document.getElementById('color-tab-regions-content');
+        regionsTab?.addEventListener('click', () => {{
+            regionsTab.classList.add('active');
+            aggregateTab.classList.remove('active');
+            neighborTab.classList.remove('active');
+            genesTab.classList.remove('active');
+            regionsContent.classList.add('active');
+            aggregateContent.classList.remove('active');
+            neighborContent.classList.remove('active');
+            genesContent.classList.remove('active');
+            renderAnnotationComparison();
         }});
 
         const markerSearch = document.getElementById('marker-gene-search');
@@ -7073,13 +7476,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const query = (searchInput?.value || '').trim().toLowerCase();
         const markers = DATA.marker_genes || {{}};
 
-        if (currentGene) {{
-            container.innerHTML = '<div class="agg-group-meta">Clear the gene input to view marker genes.</div>';
-            return;
-        }}
-
-        const config = getColorConfig();
-        if (config.is_continuous) {{
+        const colorMeta = DATA.colors_meta?.[currentColor];
+        if (!colorMeta || colorMeta.is_continuous) {{
             container.innerHTML = '<div class="agg-group-meta">Marker genes are available for categorical colors only.</div>';
             return;
         }}
@@ -7094,19 +7492,27 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             return;
         }}
 
-        const categories = config.categories || Object.keys(groupMarkers);
+        const categories = colorMeta.categories || Object.keys(groupMarkers);
         const rows = categories.map(cat => {{
             const key = String(cat);
-            const genes = groupMarkers[key] || [];
+            const genes = getMarkerGenesForColorCategory(currentColor, key)
+                .map(resolveCanonicalGeneName)
+                .filter(Boolean);
             if (query) {{
                 const hasMatch = genes.some(g => String(g).toLowerCase().includes(query));
                 if (!hasMatch) return '';
             }}
-            const geneText = genes.length ? genes.join(' ') : 'No genes found.';
+            const geneButtons = genes.length
+                ? genes.map((gene) => renderGeneTokenButton(gene, {{
+                    isActive: gene === currentGene,
+                    showMeta: false,
+                    title: 'Load marker gene into the viewer',
+                }})).join('')
+                : '<div class="agg-group-meta">No marker genes found.</div>';
             return `
                 <div class="marker-group">
                     <div class="marker-group-title">${{key}}</div>
-                    <div class="marker-genes-list">${{geneText}}</div>
+                    <div class="gene-token-grid">${{geneButtons}}</div>
                 </div>
             `;
         }}).filter(Boolean);
@@ -7116,7 +7522,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             return;
         }}
 
-        container.innerHTML = rows.join('');
+        const loadedGeneNote = currentGene
+            ? `<div class="agg-group-meta">Loaded gene: <strong>${{escapeHtml(currentGene)}}</strong>. Click another marker gene to switch.</div>`
+            : '<div class="agg-group-meta">Click a marker gene to load it in the viewer.</div>';
+
+        container.innerHTML = loadedGeneNote + rows.join('');
+        container.querySelectorAll('[data-gene-activate]').forEach((btn) => {{
+            btn.addEventListener('click', async () => {{
+                const gene = btn.getAttribute('data-gene-activate') || '';
+                if (!gene) return;
+                const ok = await activateViewerGene(gene, {{ showErrors: true }});
+                if (ok) renderMarkerGenes();
+            }});
+        }});
     }}
 
     function formatClusterDEPct(value) {{
@@ -8039,6 +8457,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const isStats = document.getElementById('color-tab-aggregate')?.classList.contains('active');
             const isNeighbors = document.getElementById('color-tab-neighbors')?.classList.contains('active');
             const isGenes = document.getElementById('color-tab-genes')?.classList.contains('active');
+            const isRegions = document.getElementById('color-tab-regions')?.classList.contains('active');
             if (isStats) {{
                 renderColorAggregation();
                 renderCellTypeTrend();
@@ -8052,6 +8471,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 if (isDot) renderDotplot();
                 if (isMarkers) renderMarkerGenes();
                 if (isCompare) renderClusterDE();
+            }} else if (isRegions) {{
+                renderAnnotationComparison();
             }}
         }};
 
@@ -9034,6 +9455,7 @@ def export_to_html(
     section_rotations: Optional[Mapping[str, Union[int, float]]] = None,
     gene_correlation_top_n: int = 10,
     cluster_means_n_genes: int = 500,
+    spatial_variable_genes_n: int = 200,
 ) -> str:
     """
     Export spatial dataset to a standalone HTML file.
@@ -9093,6 +9515,9 @@ def export_to_html(
         Number of top variable genes to precompute per-cluster means for (default 500).
         These means power the mean-expression panel in the lasso selection summary for
         all genes including sidecar ones. Set to 0 to disable.
+    spatial_variable_genes_n : int
+        Number of top variable genes to score with Moran's I spatial autocorrelation
+        (default 200). Requires a spatial weight matrix in adata.obsp. Set to 0 to disable.
     marker_genes_groupby : list, optional
         Obs columns to compute marker genes for (categorical only). If None/empty,
         marker genes are not computed.
@@ -9244,6 +9669,7 @@ def export_to_html(
         color=color,
         marker_genes_groupby=marker_genes_groupby,
     )
+    companion_analytics = dataset.get_companion_analytics()
 
     data = dataset.to_json_data(
         color,
@@ -9285,29 +9711,49 @@ def export_to_html(
     else:
         data["gene_aux_url"] = None
 
-    if embedded_genes and int(gene_correlation_top_n) > 0:
-        data["gene_correlations"] = _compute_gene_correlations(
-            dataset.adata, embedded_genes, top_n=int(gene_correlation_top_n)
-        )
+    if int(gene_correlation_top_n) > 0 and embedded_genes:
+        if "gene_correlations" in companion_analytics:
+            print("Using KaroSpaceCompanion gene correlations.")
+            data["gene_correlations"] = companion_analytics["gene_correlations"]
+        else:
+            data["gene_correlations"] = _compute_gene_correlations(
+                dataset.adata, embedded_genes, top_n=int(gene_correlation_top_n)
+            )
     else:
         data["gene_correlations"] = {}
 
-    if int(cluster_means_n_genes) > 0:
-        cmeans_genes = _select_top_variable_genes(dataset.adata, int(cluster_means_n_genes))
-        categorical_cols = [
-            col for col in (data.get("available_colors") or [])
-            if not (data.get("colors_meta") or {}).get(col, {}).get("is_continuous", True)
-        ]
-        if categorical_cols and cmeans_genes:
-            print(f"  - precomputing cluster gene means ({len(cmeans_genes)} genes × {len(categorical_cols)} columns)...")
-            cmeans_columns = {}
-            for col in categorical_cols:
-                result = _compute_cluster_gene_means(dataset.adata, cmeans_genes, col)
-                if result:
-                    cmeans_columns[col] = result
-            data["cluster_gene_means"] = {"genes": cmeans_genes, "columns": cmeans_columns} if cmeans_columns else None
+    if int(spatial_variable_genes_n) > 0:
+        if "spatial_variable_genes" in companion_analytics:
+            print("Using KaroSpaceCompanion spatially variable genes.")
+            data["spatial_variable_genes"] = companion_analytics["spatial_variable_genes"]
         else:
-            data["cluster_gene_means"] = None
+            print(f"  - computing Moran's I for up to {int(spatial_variable_genes_n)} spatially variable genes...")
+            data["spatial_variable_genes"] = _compute_morans_i(
+                dataset.adata, list(dataset.var_names), n_genes=int(spatial_variable_genes_n)
+            )
+    else:
+        data["spatial_variable_genes"] = []
+
+    if int(cluster_means_n_genes) > 0:
+        if "cluster_gene_means" in companion_analytics:
+            print("Using KaroSpaceCompanion cluster gene means.")
+            data["cluster_gene_means"] = companion_analytics["cluster_gene_means"]
+        else:
+            cmeans_genes = _select_top_variable_genes(dataset.adata, int(cluster_means_n_genes))
+            categorical_cols = [
+                col for col in (data.get("available_colors") or [])
+                if not (data.get("colors_meta") or {}).get(col, {}).get("is_continuous", True)
+            ]
+            if categorical_cols and cmeans_genes:
+                print(f"  - precomputing cluster gene means ({len(cmeans_genes)} genes × {len(categorical_cols)} columns)...")
+                cmeans_columns = {}
+                for col in categorical_cols:
+                    result = _compute_cluster_gene_means(dataset.adata, cmeans_genes, col)
+                    if result:
+                        cmeans_columns[col] = result
+                data["cluster_gene_means"] = {"genes": cmeans_genes, "columns": cmeans_columns} if cmeans_columns else None
+            else:
+                data["cluster_gene_means"] = None
     else:
         data["cluster_gene_means"] = None
 

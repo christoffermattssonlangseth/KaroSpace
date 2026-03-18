@@ -66,6 +66,16 @@ def _extract_data_json(html_text: str) -> dict:
     return json.loads(match.group(1).replace("<\\/", "</"))
 
 
+def _attach_companion_analytics(dataset: SpatialDataset, **payloads) -> None:
+    companion_uns = {
+        "analytics_storage": np.array("json-string-v1"),
+        "analytics_columns": np.array([b"leiden"], dtype=object),
+    }
+    for key, value in payloads.items():
+        companion_uns[f"{key}_json"] = json.dumps(value).encode("utf-8")
+    dataset.adata.uns["karospace_companion"] = companion_uns
+
+
 def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     dataset = _build_dataset()
     output_path = tmp_path / "viewer.html"
@@ -118,6 +128,8 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert "function getGeneSearchResults(query, limit = GENE_DISCOVERY_MAX_RESULTS)" in html_text
     assert "function renderGeneDiscoveryPanel()" in html_text
     assert "function renderClusterDE()" in html_text
+    assert "Load marker gene into the viewer" in html_text
+    assert "Click a marker gene to load it in the viewer." in html_text
     assert "function recordRecentGene(gene)" in html_text
     assert "function loadSavedGenePanels()" in html_text
     assert "const GENE_RECENTS_STORAGE_KEY = getViewerScopedStorageKey('gene-recents');" in html_text
@@ -452,6 +464,299 @@ def test_cli_passes_gene_correlation_top_n_to_export(monkeypatch, tmp_path):
     cli_module.main()
 
     assert captured["kwargs"]["gene_correlation_top_n"] == 15
+
+
+def test_spatial_variable_genes_empty_without_spatial_graph(tmp_path):
+    """spatial_variable_genes is [] when no obsp spatial graph exists."""
+    dataset = _build_dataset()
+    output_path = tmp_path / "viewer.html"
+
+    export_to_html(
+        dataset,
+        output_path=str(output_path),
+        color="leiden",
+        use_hvgs=False,
+        spatial_variable_genes_n=100,
+    )
+
+    embedded = _extract_data_json(output_path.read_text(encoding="utf-8"))
+    assert "spatial_variable_genes" in embedded
+    assert embedded["spatial_variable_genes"] == []
+
+
+def _build_dataset_with_spatial_graph() -> "SpatialDataset":
+    """Build a dataset that has a spatial connectivity matrix in obsp."""
+    import scipy.sparse as sp
+    from karospace.data_loader import SectionData, SpatialDataset
+
+    obs = pd.DataFrame(
+        {
+            "sample_id": pd.Categorical(["S1", "S1", "S2", "S2"]),
+            "leiden": pd.Categorical(["A", "B", "A", "B"]),
+        },
+        index=[f"cell_{i}" for i in range(4)],
+    )
+    var = pd.DataFrame(index=["G1", "G2", "G3"])
+    x = np.array(
+        [[1.0, 0.0, 5.0], [2.0, 0.5, 0.0], [3.0, 1.0, 4.0], [4.0, 0.0, 1.0]],
+        dtype=float,
+    )
+    adata = AnnData(X=x, obs=obs, var=var)
+    adata.obsm["spatial"] = np.array(
+        [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]], dtype=float
+    )
+    # Add a simple spatial connectivity matrix (ring graph)
+    W = sp.csr_matrix(
+        np.array(
+            [[0, 1, 1, 0], [1, 0, 0, 1], [1, 0, 0, 1], [0, 1, 1, 0]], dtype=float
+        )
+    )
+    adata.obsp["spatial_connectivities"] = W
+    sections = [
+        SectionData(section_id="S1", coordinates=adata.obsm["spatial"][:2]),
+        SectionData(section_id="S2", coordinates=adata.obsm["spatial"][2:]),
+    ]
+    return SpatialDataset(
+        adata=adata,
+        sections=sections,
+        groupby="sample_id",
+        obs_columns=["sample_id", "leiden"],
+        var_names=["G1", "G2", "G3"],
+        metadata_columns=[],
+    )
+
+
+def test_spatial_variable_genes_computed_with_spatial_graph(tmp_path):
+    """spatial_variable_genes is a sorted list of {gene, I} when obsp graph is present."""
+    dataset = _build_dataset_with_spatial_graph()
+    output_path = tmp_path / "viewer.html"
+
+    export_to_html(
+        dataset,
+        output_path=str(output_path),
+        color="leiden",
+        use_hvgs=False,
+        spatial_variable_genes_n=10,
+    )
+
+    embedded = _extract_data_json(output_path.read_text(encoding="utf-8"))
+    svg = embedded.get("spatial_variable_genes")
+    assert svg is not None
+    assert isinstance(svg, list)
+    assert len(svg) > 0
+    for entry in svg:
+        assert "gene" in entry
+        assert "I" in entry
+        assert isinstance(entry["I"], float)
+        assert -1.0 <= entry["I"] <= 1.0
+    # Should be sorted descending
+    scores = [e["I"] for e in svg]
+    assert scores == sorted(scores, reverse=True)
+
+
+def test_spatial_variable_genes_disabled_when_n_zero(tmp_path):
+    dataset = _build_dataset()
+    output_path = tmp_path / "viewer.html"
+
+    export_to_html(
+        dataset,
+        output_path=str(output_path),
+        color="leiden",
+        use_hvgs=False,
+        spatial_variable_genes_n=0,
+    )
+
+    embedded = _extract_data_json(output_path.read_text(encoding="utf-8"))
+    assert embedded.get("spatial_variable_genes") == []
+
+
+def test_cli_passes_spatial_variable_genes_n_to_export(monkeypatch, tmp_path):
+    import karospace.cli as cli_module
+
+    input_path = tmp_path / "input.h5ad"
+    input_path.write_text("placeholder", encoding="utf-8")
+    captured = {}
+
+    def fake_load(path, groupby):
+        return _build_dataset()
+
+    def fake_export(dataset, **kwargs):
+        captured["kwargs"] = kwargs
+        return str(tmp_path / "viewer.html")
+
+    monkeypatch.setattr("karospace.data_loader.load_spatial_data", fake_load)
+    monkeypatch.setattr("karospace.exporter.export_to_html", fake_export)
+    monkeypatch.setattr(
+        cli_module.sys,
+        "argv",
+        ["karospace", str(input_path), "--spatial-variable-genes-n", "50"],
+    )
+
+    cli_module.main()
+
+    assert captured["kwargs"]["spatial_variable_genes_n"] == 50
+
+
+def test_export_uses_companion_analytics_when_present(monkeypatch, tmp_path):
+    dataset = _build_dataset()
+    output_path = tmp_path / "viewer.html"
+    marker_genes = {"leiden": {"A": ["G1"], "B": ["G2"]}}
+    cluster_de = {
+        "leiden": {
+            "A": {
+                "B": {
+                    "available": True,
+                    "genes": ["G1"],
+                    "logfoldchanges": [1.2],
+                    "pvals_adj": [0.01],
+                    "scores": [2.1],
+                    "pct_source": [1.0],
+                    "pct_reference": [0.5],
+                    "n_source": 2,
+                    "n_reference": 2,
+                }
+            }
+        }
+    }
+    neighbor_stats = {
+        "leiden": {
+            "categories": ["A", "B"],
+            "counts": [[1.0, 2.0], [2.0, 1.0]],
+            "n_cells": [2, 2],
+            "mean_degree": [1.5, 1.5],
+        }
+    }
+    interaction_markers = {
+        "leiden": {
+            "A": {
+                "B": {
+                    "available": True,
+                    "genes": ["G1"],
+                    "logfoldchanges": [0.9],
+                    "pvals_adj": [0.02],
+                    "n_contact": 1,
+                    "n_non_contact": 1,
+                    "pct_contact": 50.0,
+                    "mean_target_neighbors_contact": 1.0,
+                    "mean_target_neighbors_non_contact": 0.0,
+                    "target_edge_count": 2.0,
+                    "target_zscore": None,
+                }
+            }
+        }
+    }
+    gene_correlations = {"G1": [{"gene": "G2", "r": 0.75}]}
+    spatial_variable_genes = [{"gene": "G1", "I": 0.42}]
+    cluster_gene_means = {
+        "genes": ["G1"],
+        "columns": {
+            "leiden": {
+                "categories": ["A", "B"],
+                "means": {"A": [1.0], "B": [2.0]},
+                "background": [1.5],
+            }
+        },
+    }
+    _attach_companion_analytics(
+        dataset,
+        marker_genes=marker_genes,
+        cluster_de=cluster_de,
+        neighbor_stats=neighbor_stats,
+        interaction_markers=interaction_markers,
+        gene_correlations=gene_correlations,
+        spatial_variable_genes=spatial_variable_genes,
+        cluster_gene_means=cluster_gene_means,
+    )
+
+    def _fail(*args, **kwargs):
+        raise AssertionError("unexpected recomputation")
+
+    monkeypatch.setattr("karospace.data_loader.sc.tl.rank_genes_groups", _fail)
+    monkeypatch.setattr("karospace.exporter._compute_gene_correlations", _fail)
+    monkeypatch.setattr("karospace.exporter._compute_morans_i", _fail)
+    monkeypatch.setattr("karospace.exporter._compute_cluster_gene_means", _fail)
+
+    export_to_html(
+        dataset,
+        output_path=str(output_path),
+        color="leiden",
+        genes=["G1"],
+        use_hvgs=False,
+        marker_genes_groupby=["leiden"],
+        cluster_de_groupby=["leiden"],
+        neighbor_stats_groupby=["leiden"],
+        interaction_markers_groupby=["leiden"],
+        gene_correlation_top_n=5,
+        spatial_variable_genes_n=25,
+        cluster_means_n_genes=10,
+    )
+
+    embedded = _extract_data_json(output_path.read_text(encoding="utf-8"))
+    assert embedded["marker_genes"] == marker_genes
+    assert embedded["cluster_de"] == cluster_de
+    assert embedded["neighbor_stats"] == neighbor_stats
+    assert embedded["interaction_markers"] == interaction_markers
+    assert embedded["gene_correlations"] == gene_correlations
+    assert embedded["spatial_variable_genes"] == spatial_variable_genes
+    assert embedded["cluster_gene_means"] == cluster_gene_means
+
+
+def test_export_falls_back_when_companion_analytics_absent(monkeypatch, tmp_path):
+    dataset = _build_dataset()
+    output_path = tmp_path / "viewer.html"
+    expected_gene_correlations = {"G1": [{"gene": "G2", "r": 0.33}]}
+
+    monkeypatch.setattr(
+        "karospace.exporter._compute_gene_correlations",
+        lambda *args, **kwargs: expected_gene_correlations,
+    )
+
+    export_to_html(
+        dataset,
+        output_path=str(output_path),
+        color="leiden",
+        genes=["G1"],
+        use_hvgs=False,
+        gene_correlation_top_n=5,
+        spatial_variable_genes_n=0,
+        cluster_means_n_genes=0,
+    )
+
+    embedded = _extract_data_json(output_path.read_text(encoding="utf-8"))
+    assert embedded["gene_correlations"] == expected_gene_correlations
+
+
+def test_export_recomputes_only_missing_companion_analytics(monkeypatch, tmp_path):
+    dataset = _build_dataset()
+    output_path = tmp_path / "viewer.html"
+    marker_genes = {"leiden": {"A": ["G1"], "B": ["G2"]}}
+    expected_gene_correlations = {"G1": [{"gene": "G2", "r": 0.61}]}
+    _attach_companion_analytics(dataset, marker_genes=marker_genes)
+
+    def _fail(*args, **kwargs):
+        raise AssertionError("marker genes should come from KaroSpaceCompanion")
+
+    monkeypatch.setattr("karospace.data_loader.sc.tl.rank_genes_groups", _fail)
+    monkeypatch.setattr(
+        "karospace.exporter._compute_gene_correlations",
+        lambda *args, **kwargs: expected_gene_correlations,
+    )
+
+    export_to_html(
+        dataset,
+        output_path=str(output_path),
+        color="leiden",
+        genes=["G1"],
+        use_hvgs=False,
+        marker_genes_groupby=["leiden"],
+        gene_correlation_top_n=5,
+        spatial_variable_genes_n=0,
+        cluster_means_n_genes=0,
+    )
+
+    embedded = _extract_data_json(output_path.read_text(encoding="utf-8"))
+    assert embedded["marker_genes"] == marker_genes
+    assert embedded["gene_correlations"] == expected_gene_correlations
 
 
 def test_load_spatial_data_handles_null_encoded_uns_entries(tmp_path):
