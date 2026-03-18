@@ -108,6 +108,9 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert "requestModalBlendGene(gene);" in html_text
     assert 'id="modal-controls-toggle"' in html_text
     assert ".modal-controls.hidden" in html_text
+    assert 'data-modal-group="view"' in html_text
+    assert "function updateModalToolbarState()" in html_text
+    assert "function initModalControlsDragging()" in html_text
     assert 'id="modal-blend-loading"' in html_text
     assert 'id="gene-discovery-panel"' in html_text
     assert 'id="gene-panel-new"' in html_text

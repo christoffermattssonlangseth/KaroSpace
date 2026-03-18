@@ -15,16 +15,17 @@ Originally developed at Karolinska Institutet for visualizing Xenium spatial tra
 For a full feature inventory, see [FEATURES_SUMMARY.md](FEATURES_SUMMARY.md).
 
 - **Grid + modal exploration** - Browse many sections in a responsive grid, then zoom/pan any section in detail
+- **Per-section rotation** - Set exact initial section angles at export time and adjust them interactively in the viewer
 - **Linked UMAP + section selection** - Magic Wand lasso works in UMAP and modal view with synced highlights
 - **Selection summaries** - Selected-cell totals and per-type counts with expandable, scrollable lists
 - **Polygon annotation workflow** - Draw multiple persistent polygons, manage labels, and export JSON for downstream `adata` integration
 - **Split compare slider** - Compare A/B variables in modal view (`Cell type` or `Gene`, including `All categories`)
 - **Legend controls + spotlight** - Toggle/hide categories and spotlight one class across grid and UMAP
-- **Flexible coloring** - Switch between multiple annotation columns and pre-loaded genes
-- **Insights panel** - Categorical stats, neighbor composition/enrichment, marker genes, and interaction markers
+- **Flexible coloring + gene discovery** - Switch between multiple annotation columns, fuzzy-search genes, and reuse recent or saved genes
+- **Insights panel** - Categorical stats, neighbor composition/enrichment, marker genes, pairwise cluster DE, and interaction markers
 - **Metadata-aware browsing** - Filter by metadata and optionally outline sections by `course` (or another column)
 - **Optional neighbor graph tools** - Graph overlay + hover rings (1–3 hops) when `adata.obsp` graph exists
-- **Quality-of-life controls** - Tooltips, screenshots, theme toggle, and adjustable spot size
+- **Quality-of-life controls** - Compact hideable sample-view toolbar, screenshots, theme toggle, and adjustable spot size
 - **Standalone export** - One self-contained HTML file, no backend required
 
 ## Browser Considerations
@@ -208,6 +209,15 @@ export_to_html(
     interaction_markers_min_neighbors=1,        # Source cell needs >= this many target neighbors to be contact+
     interaction_markers_method="wilcoxon",      # DE method for contact+ vs contact-
     interaction_markers_layer="normalized",     # Layer used for DE (falls back to adata.X if missing)
+    cluster_de_groupby=["cell_type"],           # Optional pairwise cluster-vs-cluster DE for Insights -> Genes -> Compare
+    cluster_de_top_n=20,                        # Top genes kept per source/reference pair
+    cluster_de_method="wilcoxon",               # scanpy.tl.rank_genes_groups method
+    cluster_de_layer="normalized",              # Layer used for pairwise DE (falls back to adata.X if missing)
+    cluster_de_min_cells=20,                    # Minimum cells required in both clusters
+    section_rotations={                         # Optional exact initial per-section rotation angles
+        "sample_a": 37.5,
+        "sample_b": -90,
+    },
 )
 ```
 
@@ -239,6 +249,13 @@ karospace your_data.h5ad -o viewer.html --color leiden
 | `--neighbor-stats-groupby` | Comma-separated obs columns to compute neighbor composition stats for (`auto`, empty disables) | `auto` |
 | `--marker-genes-groupby` | Comma-separated obs columns to compute marker genes for (empty disables) | empty |
 | `--interaction-markers-groupby` | Comma-separated obs columns to compute contact-conditioned markers for (empty disables) | empty |
+| `--cluster-de-groupby` | Comma-separated categorical obs columns to precompute pairwise cluster DE for (`Insights -> Genes -> Compare`) | empty |
+| `--cluster-de-top-n` | Top genes kept per source/reference cluster pair | `20` |
+| `--cluster-de-method` | `scanpy.tl.rank_genes_groups` method used for pairwise cluster DE | `wilcoxon` |
+| `--cluster-de-layer` | AnnData layer used for pairwise cluster DE when present | `normalized` |
+| `--cluster-de-min-cells` | Minimum cells required in both clusters to report pairwise DE | `20` |
+| `--section-rotations` | Comma-separated `section_id:angle` pairs for exact initial section rotations | empty |
+| `--gene-correlation-top-n` | Number of correlated genes shown per embedded gene in the discovery panel (`0` disables) | `10` |
 
 ## Data Requirements
 
@@ -291,6 +308,11 @@ Interaction markers are defined per source-target pair as:
 - **contact+**: source cells with at least `interaction_markers_min_neighbors` neighbors of the target type
 - **contact-**: source cells of the same source type with zero neighbors of that target type
 
+To enable pairwise cluster-vs-cluster differential expression in `Insights -> Genes -> Compare`,
+pass `cluster_de_groupby=[...]` to `export_to_html` (or `--cluster-de-groupby` in the CLI).
+Each requested categorical column is precomputed at export time, and the viewer lets you compare
+any source/reference cluster pair without a backend.
+
 ## Examples
 
 See the scripts in [`examples/`](examples/) for complete dataset-specific exports.
@@ -300,13 +322,13 @@ See the scripts in [`examples/`](examples/) for complete dataset-specific export
 ### Grid View
 - **Click a section** - Open detailed modal view
 - **Color dropdown** - Switch between annotation columns
-- **Gene input** - Type a gene name to view expression (must be pre-loaded)
+- **Gene input** - Opens a discovery panel with fuzzy search, keyboard navigation, recent genes, saved panels, and marker-based suggestions
 - **Size slider** - Adjust spot size (drag or +/- buttons)
 - **Filter chips** - Click to filter sections by metadata
 - **Legend items + Spotlight** - Toggle categories and optionally spotlight one across grid + UMAP
 - **Legend button** - Show/hide the legend panel
-- **Insights button** - Toggle the insights panel (colors + stats + marker genes)
-- **Insights tabs** - `Stats`, `Neighbors`, and `Marker genes`
+- **Insights button** - Toggle the insights panel
+- **Insights tabs** - `Stats`, `Neighbors`, and `Genes` (`Dotplot`, `Markers`, `Compare`)
 - **Graph / Neighbors / Hop selector** - Available when a neighbor graph exists
 - **Screenshot button** - Download a snapshot of the current view
 - **Theme button** - Toggle dark/light mode
@@ -316,12 +338,15 @@ See the scripts in [`examples/`](examples/) for complete dataset-specific export
 - **Mouse wheel** - Zoom in/out
 - **Click and drag** - Pan around
 - **Zoom buttons** - +/- zoom controls
+- **Rotate buttons** - Rotate each section view with exact stored angles and quick step buttons
 - **Reset button** - Return to default zoom/pan
 - **Split button** - Open the A/B comparison panel in modal view
 - **A/B variable selectors** - Choose per side: `Cell type` (single category or `All categories`) or `Gene`
 - **Split slider** - Controls left/right display share (e.g. 10% = left 10% uses A, right 90% uses B)
 - **Magic Wand** - Draw lasso selection directly on the section
 - **Annotate + Annotation panel** - Draw persistent polygons, rename/select/delete, clear section/all
+- **Hide tools** - Collapse the bottom sample-view toolbar when you want an unobstructed canvas
+- **Draggable grouped toolbar** - View, Tools, Graph, and Actions controls live in a compact dock that can be repositioned
 - **Export JSON** - Download all polygon annotations including vertices + mapped cell indices
 - **Screenshot button** - Download a PNG of the current sample (modal) view
 - **Clear selection** - Remove current selected cells

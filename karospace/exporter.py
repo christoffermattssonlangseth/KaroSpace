@@ -1310,26 +1310,104 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             transform: translateX(-50%);
             display: flex;
             flex-wrap: wrap;
-            justify-content: center;
-            gap: 6px;
-            background: var(--header-bg);
-            padding: 6px 10px;
-            border-radius: 6px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-            transition: background 0.3s;
+            justify-content: flex-start;
+            align-items: stretch;
+            gap: 3px;
+            width: max-content;
+            max-width: min(960px, calc(100% - 72px));
+            padding: 3px 4px;
+            border: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
+            border-radius: 12px;
+            background: color-mix(in srgb, var(--header-bg) 90%, transparent);
+            backdrop-filter: blur(12px);
+            box-shadow: 0 10px 28px rgba(0,0,0,0.2);
+            transition: background 0.3s, border-color 0.3s, box-shadow 0.3s;
+        }}
+        .modal-controls.dragging {{
+            box-shadow: 0 14px 34px rgba(0,0,0,0.28);
+        }}
+        .modal-control-group {{
+            display: flex;
+            align-items: center;
+            gap: 3px;
+            padding: 2px 4px;
+            border: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
+            border-radius: 8px;
+            background: color-mix(in srgb, var(--panel-bg) 92%, transparent);
+            min-width: 0;
+            cursor: grab;
+        }}
+        .modal-control-group-title {{
+            flex-shrink: 0;
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--muted-color);
+            cursor: inherit;
+            user-select: none;
+        }}
+        .modal-controls.dragging .modal-control-group,
+        .modal-controls.dragging .modal-control-group-title {{ cursor: grabbing; }}
+        .modal-control-group-body {{
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 3px;
+            min-width: 0;
         }}
         .modal-controls button {{
-            padding: 5px 10px;
+            min-height: 22px;
+            padding: 1px 7px;
             border: 1px solid var(--border-color);
-            border-radius: 4px;
+            border-radius: 999px;
             background: var(--input-bg);
             color: var(--text-color);
             cursor: pointer;
-            font-size: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            line-height: 1.4;
             transition: background 0.3s, border-color 0.3s, color 0.3s;
         }}
         .modal-controls button:hover {{ background: var(--hover-bg); }}
+        .modal-controls select {{
+            min-height: 22px;
+            padding: 1px 7px;
+            border: 1px solid var(--border-color);
+            border-radius: 999px;
+            background: var(--input-bg);
+            color: var(--text-color);
+            font-size: 11px;
+            line-height: 1.4;
+        }}
+        .modal-size-block {{
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }}
+        .modal-size-value {{
+            min-width: 26px;
+            font-size: 10px;
+            font-variant-numeric: tabular-nums;
+            color: var(--text-color);
+        }}
         .modal-controls.hidden {{ display: none; }}
+        @media (max-width: 960px) {{
+            .modal-controls {{
+                left: 12px;
+                right: 12px;
+                width: auto;
+                transform: none;
+            }}
+            .modal-control-group {{
+                width: 100%;
+                justify-content: space-between;
+            }}
+            .modal-control-group-body {{
+                justify-content: flex-end;
+                flex: 1;
+            }}
+        }}
         .modal-legend {{
             width: 180px;
             padding: 12px;
@@ -2227,34 +2305,55 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         </div>
                     </div>
                     <div class="modal-controls">
-                        <button id="zoom-in">+ Zoom</button>
-                        <button id="zoom-out">- Zoom</button>
-                        <button id="zoom-reset">Reset</button>
-                        <button id="modal-rotate-left" title="Rotate section -45 degrees">Rot -45</button>
-                        <button id="modal-rotate-right" title="Rotate section +45 degrees">Rot +45</button>
-                        <button id="modal-rotate-reset" title="Reset section rotation">Rot 0</button>
-                        <button class="graph-toggle" id="modal-blend-toggle" title="Split the view between two selected variables">Split</button>
-                        <button class="graph-toggle" id="modal-magic-wand-btn" title="Draw to select cells in this section">Magic Wand</button>
-                        <button class="graph-toggle" id="modal-annotate-btn" title="Draw persistent polygon annotations in this section">Annotate</button>
-                        <button class="graph-toggle" id="modal-screenshot-btn" title="Download screenshot of this sample view">Screenshot</button>
-                        <button class="graph-toggle" id="modal-clear-selection-btn" title="Clear selected cells">Clear selection</button>
-                        <button class="graph-toggle" id="modal-graph-toggle" title="Toggle neighborhood graph" style="display: none;">Graph</button>
-                        <button class="graph-toggle" id="modal-neighbor-hover-toggle" title="Toggle neighbor rings on hover" style="display: none;">Neighbors</button>
-                        <select id="modal-neighbor-hop-select" title="Neighbor hop display" style="display: none; min-width: 90px;">
-                            <option value="1">1-hop</option>
-                            <option value="2">2-hop</option>
-                            <option value="3">3-hop</option>
-                            <option value="all" selected>All hops</option>
-                        </select>
-                        <button class="graph-toggle" id="modal-type-toggle" title="Select a category by clicking a cell">Select type</button>
-                        <button class="graph-toggle" id="modal-type-clear" title="Clear selected type">Clear type</button>
-                        <span style="margin-left: 10px; font-size: 11px; color: {muted_color};">Size:</span>
-                        <div class="size-control">
-                            <button class="size-step" id="modal-spot-size-dec" type="button">−</button>
-                            <input type="range" id="modal-spot-size" min="0.01" max="5" step="0.01" value="{spot_size}" style="width: 80px;">
-                            <button class="size-step" id="modal-spot-size-inc" type="button">+</button>
+                        <div class="modal-control-group" data-modal-group="view">
+                            <div class="modal-control-group-title">View</div>
+                            <div class="modal-control-group-body">
+                                <button id="zoom-in" type="button" title="Zoom in">+</button>
+                                <button id="zoom-out" type="button" title="Zoom out">−</button>
+                                <button id="zoom-reset" type="button" title="Reset zoom and pan">Fit</button>
+                                <button id="modal-rotate-left" type="button" title="Rotate section −45°">↺</button>
+                                <button id="modal-rotate-right" type="button" title="Rotate section +45°">↻</button>
+                                <button id="modal-rotate-reset" type="button" title="Reset section rotation">0°</button>
+                            </div>
                         </div>
-                        <span id="modal-spot-size-label" style="font-size: 11px; min-width: 24px;">{spot_size}</span>
+                        <div class="modal-control-group" data-modal-group="tools">
+                            <div class="modal-control-group-title">Tools</div>
+                            <div class="modal-control-group-body">
+                                <button class="graph-toggle" id="modal-blend-toggle" type="button" title="Split the view between two selected variables">Split</button>
+                                <button class="graph-toggle" id="modal-magic-wand-btn" type="button" title="Draw to select cells in this section">Select</button>
+                                <button class="graph-toggle" id="modal-annotate-btn" type="button" title="Draw persistent polygon annotations in this section">Annotate</button>
+                                <button class="graph-toggle" id="modal-type-toggle" type="button" title="Select a category by clicking a cell">Pick type</button>
+                                <button class="graph-toggle" id="modal-type-clear" type="button" title="Clear selected type" hidden>Clear type</button>
+                            </div>
+                        </div>
+                        <div class="modal-control-group" data-modal-group="graph" hidden>
+                            <div class="modal-control-group-title">Graph</div>
+                            <div class="modal-control-group-body">
+                                <button class="graph-toggle" id="modal-graph-toggle" type="button" title="Toggle neighborhood graph">Graph</button>
+                                <button class="graph-toggle" id="modal-neighbor-hover-toggle" type="button" title="Toggle neighbor rings on hover">Neighbors</button>
+                                <select id="modal-neighbor-hop-select" title="Neighbor hop display" hidden>
+                                    <option value="1">1-hop</option>
+                                    <option value="2">2-hop</option>
+                                    <option value="3">3-hop</option>
+                                    <option value="all" selected>All hops</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="modal-control-group" data-modal-group="actions">
+                            <div class="modal-control-group-title">Actions</div>
+                            <div class="modal-control-group-body">
+                                <button class="graph-toggle" id="modal-screenshot-btn" type="button" title="Download screenshot of this sample view">Screenshot</button>
+                                <button class="graph-toggle" id="modal-clear-selection-btn" type="button" title="Clear selected cells" hidden>Clear sel.</button>
+                                <div class="modal-size-block">
+                                    <div class="size-control">
+                                        <button class="size-step" id="modal-spot-size-dec" type="button">−</button>
+                                        <input type="range" id="modal-spot-size" min="0.01" max="5" step="0.01" value="{spot_size}" style="width: 60px;">
+                                        <button class="size-step" id="modal-spot-size-inc" type="button">+</button>
+                                    </div>
+                                    <span class="modal-size-value" id="modal-spot-size-label">{spot_size}</span>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div class="modal-legend" id="modal-legend"></div>
@@ -2598,6 +2697,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let modalBlendMix = 0.5;  // Split position from left: 0 = all B, 1 = all A
     let modalBlendMarkersCollapsed = true;
     let modalControlsCollapsed = false;
+    let modalControlsCustomPosition = null;
+    let isDraggingModalControls = false;
+    let modalControlsDragOffsetX = 0;
+    let modalControlsDragOffsetY = 0;
     let modalAnnotationPanelCustomPosition = null;
     let isDraggingModalAnnotationPanel = false;
     let modalAnnotationPanelDragOffsetX = 0;
@@ -2660,7 +2763,168 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (controls) controls.classList.toggle('hidden', modalControlsCollapsed);
         const toggle = document.getElementById('modal-controls-toggle');
         if (toggle) toggle.textContent = modalControlsCollapsed ? 'Show tools' : 'Hide tools';
-        if (modalSection) layoutModalAnnotationPanel();
+        if (modalSection) {{
+            layoutModalControls();
+            layoutModalAnnotationPanel();
+        }}
+    }}
+
+    function getModalControlsBounds() {{
+        const container = document.getElementById('modal-canvas-container');
+        const controls = container?.querySelector('.modal-controls');
+        if (!container || !controls) return null;
+        const containerRect = container.getBoundingClientRect();
+        if (containerRect.width <= 0 || containerRect.height <= 0) return null;
+        const margin = 8;
+        const controlsWidth = controls.offsetWidth || Math.min(920, Math.max(220, containerRect.width - margin * 2));
+        const controlsHeight = controls.offsetHeight || 72;
+        return {{
+            minX: margin,
+            maxX: Math.max(margin, containerRect.width - controlsWidth - margin),
+            minY: margin,
+            maxY: Math.max(margin, containerRect.height - controlsHeight - margin),
+        }};
+    }}
+
+    function clampModalControlsPosition(x, y) {{
+        const bounds = getModalControlsBounds();
+        if (!bounds) return {{ x, y }};
+        return {{
+            x: Math.min(bounds.maxX, Math.max(bounds.minX, x)),
+            y: Math.min(bounds.maxY, Math.max(bounds.minY, y)),
+        }};
+    }}
+
+    function applyModalControlsPosition(position) {{
+        const controls = document.querySelector('#modal .modal-controls');
+        if (!controls) return;
+        if (!position) {{
+            controls.style.left = '50%';
+            controls.style.right = '';
+            controls.style.top = '';
+            controls.style.bottom = '12px';
+            controls.style.transform = 'translateX(-50%)';
+            return;
+        }}
+        controls.style.left = `${{position.x}}px`;
+        controls.style.top = `${{position.y}}px`;
+        controls.style.right = 'auto';
+        controls.style.bottom = 'auto';
+        controls.style.transform = 'none';
+    }}
+
+    function layoutModalControls(forceReset = false) {{
+        const controls = document.querySelector('#modal .modal-controls');
+        if (!controls) return;
+        if (forceReset) modalControlsCustomPosition = null;
+        const bounds = getModalControlsBounds();
+        if (!bounds) return;
+        if (modalControlsCollapsed) return;
+        if (modalControlsCustomPosition) {{
+            modalControlsCustomPosition = clampModalControlsPosition(
+                modalControlsCustomPosition.x,
+                modalControlsCustomPosition.y
+            );
+            applyModalControlsPosition(modalControlsCustomPosition);
+            return;
+        }}
+        applyModalControlsPosition(null);
+    }}
+
+    function initModalControlsDragging() {{
+        const controls = document.querySelector('#modal .modal-controls');
+        const container = document.getElementById('modal-canvas-container');
+        if (!controls || !container) return;
+
+        const stopDragging = () => {{
+            if (!isDraggingModalControls) return;
+            isDraggingModalControls = false;
+            controls.classList.remove('dragging');
+        }};
+
+        controls.addEventListener('mousedown', (e) => {{
+            if (e.button !== 0 || modalControlsCollapsed) return;
+            const target = e.target;
+            if (!target || !(target instanceof Element)) return;
+            if (target.closest('button, select, input, option, .size-control')) return;
+            const group = target.closest('.modal-control-group');
+            if (!group) return;
+            const containerRect = container.getBoundingClientRect();
+            const controlsRect = controls.getBoundingClientRect();
+            const next = clampModalControlsPosition(
+                controlsRect.left - containerRect.left,
+                controlsRect.top - containerRect.top
+            );
+            modalControlsCustomPosition = next;
+            applyModalControlsPosition(next);
+            modalControlsDragOffsetX = e.clientX - controlsRect.left;
+            modalControlsDragOffsetY = e.clientY - controlsRect.top;
+            isDraggingModalControls = true;
+            controls.classList.add('dragging');
+            e.preventDefault();
+        }});
+
+        document.addEventListener('mousemove', (e) => {{
+            if (!isDraggingModalControls) return;
+            const containerRect = container.getBoundingClientRect();
+            const next = clampModalControlsPosition(
+                e.clientX - containerRect.left - modalControlsDragOffsetX,
+                e.clientY - containerRect.top - modalControlsDragOffsetY
+            );
+            modalControlsCustomPosition = next;
+            applyModalControlsPosition(next);
+            layoutModalAnnotationPanel();
+        }});
+
+        document.addEventListener('mouseup', stopDragging);
+        window.addEventListener('blur', stopDragging);
+    }}
+
+    function updateModalToolbarState() {{
+        const controls = document.querySelector('#modal .modal-controls');
+        if (!controls) return;
+
+        const clearSelectionBtn = document.getElementById('modal-clear-selection-btn');
+        if (clearSelectionBtn) clearSelectionBtn.hidden = selectedCells.size === 0;
+
+        const graphGroup = controls.querySelector('[data-modal-group="graph"]');
+        if (graphGroup) graphGroup.hidden = !DATA.has_neighbors;
+
+        const typeToggleBtn = document.getElementById('modal-type-toggle');
+        const typeClearBtn = document.getElementById('modal-type-clear');
+        const config = getColorConfig();
+        const blendActive = !!getModalBlendRuntimes(modalSection);
+        const typeSelectionDisabled = !modalSection || config.is_continuous || blendActive || modalAnnotationModeActive;
+        if (typeSelectionDisabled) {{
+            modalSelectedCategory = null;
+            modalTypeSelectEnabled = false;
+        }} else if (modalSelectedCategory && !config.categories?.includes(modalSelectedCategory)) {{
+            modalSelectedCategory = null;
+        }}
+        if (typeToggleBtn) {{
+            typeToggleBtn.disabled = typeSelectionDisabled;
+            typeToggleBtn.classList.toggle('active', modalTypeSelectEnabled && !typeSelectionDisabled);
+        }}
+        if (typeClearBtn) {{
+            typeClearBtn.disabled = typeSelectionDisabled;
+            typeClearBtn.hidden = typeSelectionDisabled || !modalSelectedCategory;
+        }}
+
+        const modalGraphBtn = document.getElementById('modal-graph-toggle');
+        const modalNeighborBtn = document.getElementById('modal-neighbor-hover-toggle');
+        const modalHopSelect = document.getElementById('modal-neighbor-hop-select');
+        if (modalGraphBtn) modalGraphBtn.hidden = !DATA.has_neighbors;
+        if (modalNeighborBtn) modalNeighborBtn.hidden = !DATA.has_neighbors;
+        if (modalHopSelect) {{
+            const showHopSelect = DATA.has_neighbors && neighborHoverEnabled;
+            modalHopSelect.hidden = !showHopSelect;
+            modalHopSelect.disabled = !showHopSelect;
+        }}
+
+        if (modalSection) {{
+            layoutModalControls();
+            layoutModalAnnotationPanel();
+        }}
     }}
 
     function rotateSectionBy(sectionId, deltaDeg) {{
@@ -5159,6 +5423,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             modalSummary.innerHTML = summaryHtml;
             bindSelectionSummaryInteractions(modalSummary);
         }}
+        updateModalToolbarState();
     }}
 
     // Clear selection
@@ -5889,18 +6154,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const values = getSectionValues(modalSection);
         const blendRuntimes = getModalBlendRuntimes(modalSection);
         const blendActive = !!blendRuntimes;
-        const typeToggleBtn = document.getElementById('modal-type-toggle');
-        const typeClearBtn = document.getElementById('modal-type-clear');
-        const typeSelectionDisabled = config.is_continuous || blendActive || modalAnnotationModeActive;
-        if (typeSelectionDisabled) {{
-            modalSelectedCategory = null;
-            modalTypeSelectEnabled = false;
-            typeToggleBtn?.classList.remove('active');
-        }} else if (modalSelectedCategory && !config.categories?.includes(modalSelectedCategory)) {{
-            modalSelectedCategory = null;
-        }}
-        if (typeToggleBtn) typeToggleBtn.disabled = typeSelectionDisabled;
-        if (typeClearBtn) typeClearBtn.disabled = typeSelectionDisabled;
 
         const modalEdges = getSectionEdgesPacked(modalSection);
         if (showGraph && modalEdges && modalEdges.length) {{
@@ -7554,6 +7807,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const canvas = document.getElementById('modal-canvas');
             if (canvas) canvas.style.cursor = 'grab';
             setModalControlsCollapsed(modalControlsCollapsed);
+            updateModalToolbarState();
+            layoutModalControls();
             layoutModalAnnotationPanel();
             renderModalAnnotationPanel();
             renderModalSection();
@@ -7571,6 +7826,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         modalPointerMoved = false;
         document.getElementById('modal-magic-wand-btn')?.classList.remove('active');
         document.getElementById('modal-annotate-btn')?.classList.remove('active');
+        document.querySelector('#modal .modal-controls')?.classList.remove('dragging');
         modalSection = null;
         updateSectionRotationIndicators();
         renderModalAnnotationPanel();
@@ -8167,6 +8423,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const modalAnnotationClearSectionBtn = document.getElementById('modal-annotations-clear-section');
         const modalAnnotationClearAllBtn = document.getElementById('modal-annotations-clear-all');
         initModalAnnotationPanelDragging();
+        initModalControlsDragging();
 
         function updateModalCanvasCursor() {{
             if (!canvas) return;
@@ -8347,6 +8604,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             if (modalBlendToggleBtn) modalBlendToggleBtn.classList.toggle('active', modalBlendEnabled);
             if (modalBlendMixRange) modalBlendMixRange.value = String(Math.round(modalBlendMix * 100));
             updateModalBlendLabels();
+            updateModalToolbarState();
         }}
 
         function applyModalBlendControlChange() {{
@@ -8443,6 +8701,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         syncModalBlendUI();
         renderModalAnnotationPanel();
         layoutModalAnnotationPanel();
+        updateModalToolbarState();
 
         modalAnnotationExportBtn?.addEventListener('click', () => {{
             exportModalAnnotations();
@@ -8459,10 +8718,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const config = getColorConfig();
             if (config.is_continuous) return;
             modalTypeSelectEnabled = !modalTypeSelectEnabled;
-            typeToggleBtn.classList.toggle('active', modalTypeSelectEnabled);
+            updateModalToolbarState();
         }});
         typeClearBtn.addEventListener('click', () => {{
             modalSelectedCategory = null;
+            updateModalToolbarState();
             renderAllSections();
             renderModalSection();
         }});
@@ -8479,6 +8739,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 isDrawingModalLasso = false;
                 modalLassoPath = [];
             }}
+            updateModalToolbarState();
             updateModalCanvasCursor();
             renderModalSection();
         }});
@@ -8494,6 +8755,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 isDrawingModalAnnotation = false;
                 modalAnnotationPath = [];
             }}
+            updateModalToolbarState();
             updateModalCanvasCursor();
             renderModalSection();
         }});
@@ -8545,6 +8807,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     const catIdx = Math.round(val);
                     const catName = config.categories[catIdx];
                     modalSelectedCategory = catName || null;
+                    updateModalToolbarState();
                     renderAllSections();
                     renderModalSection();
                 }}
@@ -8644,25 +8907,25 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         if (DATA.has_neighbors) {{
             const modalGraphBtn = document.getElementById('modal-graph-toggle');
-            modalGraphBtn.style.display = 'inline-block';
             modalGraphBtn.classList.toggle('active', showGraph);
             modalGraphBtn.addEventListener('click', () => {{
                 showGraph = !showGraph;
                 modalGraphBtn.classList.toggle('active', showGraph);
                 const graphBtn = document.getElementById('graph-toggle');
                 if (graphBtn) graphBtn.classList.toggle('active', showGraph);
+                updateModalToolbarState();
                 renderAllSections();
                 if (modalSection) renderModalSection();
             }});
 
             const modalNeighborBtn = document.getElementById('modal-neighbor-hover-toggle');
-            modalNeighborBtn.style.display = 'inline-block';
             modalNeighborBtn.classList.toggle('active', neighborHoverEnabled);
             modalNeighborBtn.addEventListener('click', () => {{
                 neighborHoverEnabled = !neighborHoverEnabled;
                 modalNeighborBtn.classList.toggle('active', neighborHoverEnabled);
                 const neighborBtn = document.getElementById('neighbor-hover-toggle');
                 if (neighborBtn) neighborBtn.classList.toggle('active', neighborHoverEnabled);
+                updateModalToolbarState();
                 if (!neighborHoverEnabled) {{
                     hoverNeighbors = null;
                     if (modalSection) renderModalSection();
@@ -8670,7 +8933,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }});
 
             const modalHopSelect = document.getElementById('modal-neighbor-hop-select');
-            modalHopSelect.style.display = 'inline-block';
             modalHopSelect.value = neighborHopMode;
             modalHopSelect.addEventListener('change', () => {{
                 neighborHopMode = modalHopSelect.value;
@@ -8680,6 +8942,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }});
         }}
 
+        updateModalToolbarState();
+        layoutModalControls();
         layoutModalAnnotationPanel();
     }}
 
@@ -8714,6 +8978,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (DATA.has_umap) applyUMAPPanelState();
         renderAllSections();
         if (modalSection) {{
+            layoutModalControls();
             layoutModalAnnotationPanel();
             renderModalSection();
         }}
