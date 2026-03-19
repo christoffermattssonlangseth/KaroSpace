@@ -1058,6 +1058,24 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             margin-bottom: 4px;
             min-width: 0;
         }}
+        .gene-search-btn {{
+            flex: 0 0 auto;
+            min-width: 0;
+            padding: 2px 7px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: var(--input-bg);
+            color: var(--muted-color);
+            cursor: pointer;
+            font-size: 9px;
+            font-weight: 600;
+            line-height: 1.2;
+            white-space: nowrap;
+        }}
+        .gene-search-btn:hover {{
+            background: var(--hover-bg);
+            color: var(--text-color);
+        }}
         .comparison-card-title span:last-child {{
             min-width: 0;
             overflow-wrap: anywhere;
@@ -1882,6 +1900,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .annot-expr-row {{ display: flex; align-items: center; gap: 6px; margin: 2px 0; }}
         .annot-expr-bars {{ flex: 1; display: flex; flex-direction: column; gap: 1px; }}
         .annot-expr-bar {{ height: 4px; border-radius: 2px; min-width: 1px; }}
+        .annot-de-controls {{
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 10px;
+        }}
         .modal-annotation-panel {{
             position: absolute;
             right: 8px;
@@ -2944,6 +2968,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let lassoModeB = false;  // Next lasso draw fills region B
     let selectionSummaryColor = DATA.initial_color;
     let selectionSummaryExpanded = false;
+    let annotationDeSourceId = null;
+    let annotationDeReferenceId = null;
+    const ANNOTATION_DE_TOP_N = 12;
+    let annotationDeTopN = ANNOTATION_DE_TOP_N;
+    let annotationDeFullRunToken = 0;
+    let annotationDeFullRun = null;
+    const annotationDeFullCache = new Map();
     const sectionById = new Map((DATA.sections || []).map(section => [section.id, section]));
 
     function updateSectionRotationIndicators(sectionId = null) {{
@@ -4062,6 +4093,22 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         `;
     }}
 
+    function renderGeneGoogleSearchButton(gene, options = {{}}) {{
+        const label = String(gene || '').trim();
+        if (!label) return '';
+        const query = options.query || `${{label}} gene`;
+        return `
+            <button
+                type="button"
+                class="gene-search-btn"
+                data-gene-google-search="${{escapeHtml(query)}}"
+                title="${{escapeHtml(options.title || `Search Google for ${{label}}`)}}"
+            >
+                Google
+            </button>
+        `;
+    }}
+
     function bindGeneActivateButtons(container, rerenderFn = null) {{
         if (!container) return;
         container.querySelectorAll('[data-gene-activate]').forEach((btn) => {{
@@ -4070,6 +4117,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 if (!gene) return;
                 const ok = await activateViewerGene(gene, {{ showErrors: true }});
                 if (ok && typeof rerenderFn === 'function') rerenderFn();
+            }});
+        }});
+    }}
+
+    function bindGeneGoogleSearchButtons(container) {{
+        if (!container) return;
+        container.querySelectorAll('[data-gene-google-search]').forEach((btn) => {{
+            btn.addEventListener('click', () => {{
+                const query = btn.getAttribute('data-gene-google-search') || '';
+                if (!query) return;
+                const url = `https://www.google.com/search?q=${{encodeURIComponent(query)}}`;
+                window.open(url, '_blank', 'noopener,noreferrer');
             }});
         }});
     }}
@@ -5020,6 +5079,459 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return result;
     }}
 
+    function getAnnotationCellSet(annotation) {{
+        const cells = new Set();
+        if (!annotation || !annotation.sectionId) return cells;
+        (annotation.localCellIndices || []).forEach((idx) => {{
+            if (Number.isInteger(idx) && idx >= 0) {{
+                cells.add(`${{annotation.sectionId}}:${{idx}}`);
+            }}
+        }});
+        return cells;
+    }}
+
+    function getAnnotationDisplayLabel(annotation) {{
+        if (!annotation) return 'Unknown annotation';
+        const label = String(annotation.label || `Annotation ${{annotation.id}}`).trim();
+        const sectionLabel = annotation.sectionId ? ` · ${{annotation.sectionId}}` : '';
+        return `${{label || `Annotation ${{annotation.id}}`}}${{sectionLabel}}`;
+    }}
+
+    function syncAnnotationDEState(annotations = modalAnnotations) {{
+        const available = (annotations || []).filter((annotation) => Number.isFinite(Number(annotation?.id)));
+        const availableIds = available.map((annotation) => Number(annotation.id));
+        if (!availableIds.length) {{
+            annotationDeSourceId = null;
+            annotationDeReferenceId = null;
+            return {{ annotations: available, source: null, reference: null }};
+        }}
+
+        if (!availableIds.includes(annotationDeSourceId)) {{
+            annotationDeSourceId = availableIds[0];
+        }}
+        if (
+            !availableIds.includes(annotationDeReferenceId) ||
+            annotationDeReferenceId === annotationDeSourceId
+        ) {{
+            annotationDeReferenceId = availableIds.find((id) => id !== annotationDeSourceId) || null;
+        }}
+
+        const source = available.find((annotation) => Number(annotation.id) === annotationDeSourceId) || null;
+        const reference = available.find((annotation) => Number(annotation.id) === annotationDeReferenceId) || null;
+        return {{ annotations: available, source, reference }};
+    }}
+
+    function computeRegionAnnotationDE(annotationA, annotationB, options = {{}}) {{
+        const topN = Math.max(1, Number(options.topN) || ANNOTATION_DE_TOP_N);
+        if (!annotationA || !annotationB) {{
+            return {{ available: false, reason: 'missing_annotations', results: [] }};
+        }}
+        if (Number(annotationA.id) === Number(annotationB.id)) {{
+            return {{ available: false, reason: 'same_annotation', results: [] }};
+        }}
+
+        const sectionA = sectionById.get(annotationA.sectionId);
+        const sectionB = sectionById.get(annotationB.sectionId);
+        const indicesA = Array.from(new Set((annotationA.localCellIndices || []).filter((idx) => Number.isInteger(idx) && idx >= 0)));
+        const indicesB = Array.from(new Set((annotationB.localCellIndices || []).filter((idx) => Number.isInteger(idx) && idx >= 0)));
+        if (!sectionA || !sectionB || !indicesA.length || !indicesB.length) {{
+            return {{
+                available: false,
+                reason: 'empty_region',
+                nA: indicesA.length,
+                nB: indicesB.length,
+                results: [],
+            }};
+        }}
+
+        const loadedGenes = Object.keys(DATA.genes_meta || {{}}).sort((a, b) => a.localeCompare(b));
+        const totalGenes = Array.isArray(DATA.available_genes) ? DATA.available_genes.length : loadedGenes.length;
+        if (!loadedGenes.length) {{
+            return {{
+                available: false,
+                reason: 'no_loaded_genes',
+                nA: indicesA.length,
+                nB: indicesB.length,
+                loadedGeneCount: 0,
+                totalGeneCount: totalGenes,
+                results: [],
+            }};
+        }}
+
+        const sameSection = annotationA.sectionId === annotationB.sectionId;
+        const results = [];
+        const eps = 1e-6;
+
+        loadedGenes.forEach((gene) => {{
+            const valsA = getSectionGeneValues(sectionA, gene);
+            const valsB = sameSection ? valsA : getSectionGeneValues(sectionB, gene);
+            if (!valsA || !valsB) return;
+
+            let sumA = 0;
+            let sumSqA = 0;
+            let nnzA = 0;
+            for (let i = 0; i < indicesA.length; i++) {{
+                const idx = indicesA[i];
+                const value = Number(valsA[idx] ?? 0);
+                if (!Number.isFinite(value)) continue;
+                sumA += value;
+                sumSqA += value * value;
+                if (value > 0) nnzA += 1;
+            }}
+
+            let sumB = 0;
+            let sumSqB = 0;
+            let nnzB = 0;
+            for (let i = 0; i < indicesB.length; i++) {{
+                const idx = indicesB[i];
+                const value = Number(valsB[idx] ?? 0);
+                if (!Number.isFinite(value)) continue;
+                sumB += value;
+                sumSqB += value * value;
+                if (value > 0) nnzB += 1;
+            }}
+
+            const nA = indicesA.length;
+            const nB = indicesB.length;
+            if (!nA || !nB) return;
+
+            const meanA = sumA / nA;
+            const meanB = sumB / nB;
+            const varA = nA > 1 ? Math.max(0, (sumSqA - (sumA * sumA) / nA) / (nA - 1)) : 0;
+            const varB = nB > 1 ? Math.max(0, (sumSqB - (sumB * sumB) / nB) / (nB - 1)) : 0;
+            const pctA = nnzA / nA;
+            const pctB = nnzB / nB;
+            const denominator = Math.sqrt((varA / Math.max(1, nA)) + (varB / Math.max(1, nB)) + 1e-12);
+            const score = denominator > 0 ? (meanA - meanB) / denominator : (meanA - meanB);
+            const log2fc = Math.log2((meanA + eps) / (meanB + eps));
+            if (!(log2fc > 0 || score > 0 || pctA > pctB)) return;
+
+            results.push({{
+                gene,
+                meanA,
+                meanB,
+                pctA,
+                pctB,
+                log2fc,
+                score,
+            }});
+        }});
+
+        results.sort((a, b) => {{
+            const scoreDiff = (b.score - a.score);
+            if (Math.abs(scoreDiff) > 1e-9) return scoreDiff;
+            const fcDiff = (b.log2fc - a.log2fc);
+            if (Math.abs(fcDiff) > 1e-9) return fcDiff;
+            const pctDiff = ((b.pctA - b.pctB) - (a.pctA - a.pctB));
+            if (Math.abs(pctDiff) > 1e-9) return pctDiff > 0 ? 1 : -1;
+            return a.gene.localeCompare(b.gene);
+        }});
+
+        return {{
+            available: true,
+            reason: null,
+            nA: indicesA.length,
+            nB: indicesB.length,
+            loadedGeneCount: loadedGenes.length,
+            totalGeneCount: totalGenes,
+            results: results.slice(0, topN),
+        }};
+    }}
+
+    function getAnnotationDECacheKey(annotationA, annotationB) {{
+        if (!annotationA || !annotationB) return '';
+        return `${{Number(annotationA.id)}}::${{Number(annotationB.id)}}`;
+    }}
+
+    function invalidateAnnotationDEState(clearCache = true) {{
+        cancelAnnotationFullDERun();
+        if (clearCache) annotationDeFullCache.clear();
+    }}
+
+    function cancelAnnotationFullDERun() {{
+        annotationDeFullRunToken += 1;
+        annotationDeFullRun = null;
+    }}
+
+    function resolveViewerRelativeUrl(path) {{
+        if (!path) return '';
+        try {{
+            return new URL(String(path), window.location.href).href;
+        }} catch (_error) {{
+            return String(path);
+        }}
+    }}
+
+    async function fetchGeneAuxShardForAnalysis(shardUrl) {{
+        const resolvedUrl = resolveViewerRelativeUrl(shardUrl);
+        const response = await fetch(resolvedUrl, {{ credentials: 'same-origin' }});
+        if (!response.ok) {{
+            throw new Error(`HTTP ${{response.status}} while loading gene shard`);
+        }}
+        const payload = await response.json();
+        if (!payload || payload.format !== 'karospace-gene-sidecar-shard-v2') {{
+            throw new Error('Unsupported gene sidecar shard format');
+        }}
+        return payload;
+    }}
+
+    function computeRegionStatsFromSectionEntry(sectionEntry, selectedIndices, selectedIndexSet) {{
+        const result = {{ sum: 0, sumSq: 0, nnz: 0 }};
+        if (!sectionEntry || !selectedIndices?.length) return result;
+
+        if (Array.isArray(sectionEntry.dense)) {{
+            for (let i = 0; i < selectedIndices.length; i++) {{
+                const idx = selectedIndices[i];
+                const value = Number(sectionEntry.dense[idx]);
+                if (!Number.isFinite(value)) continue;
+                result.sum += value;
+                result.sumSq += value * value;
+                if (value > 0) result.nnz += 1;
+            }}
+            return result;
+        }}
+
+        const sparse = sectionEntry.sparse;
+        if (!sparse || !selectedIndexSet || !selectedIndexSet.size) return result;
+
+        let idxs = null;
+        let vals = null;
+        if (typeof sparse.ib64 === 'string' && typeof sparse.vb64 === 'string') {{
+            idxs = base64ToUint32Array(sparse.ib64);
+            vals = base64ToFloat32Array(sparse.vb64);
+        }} else if (Array.isArray(sparse.i) && Array.isArray(sparse.v)) {{
+            idxs = sparse.i;
+            vals = sparse.v;
+        }}
+        if (!idxs || !vals) return result;
+
+        const m = Math.min(idxs.length, vals.length);
+        for (let i = 0; i < m; i++) {{
+            const idx = Number(idxs[i]);
+            if (!selectedIndexSet.has(idx)) continue;
+            const value = Number(vals[i]);
+            if (!Number.isFinite(value) || value === 0) continue;
+            result.sum += value;
+            result.sumSq += value * value;
+            result.nnz += 1;
+        }}
+        return result;
+    }}
+
+    function computeRegionAnnotationDEFromSidecarGeneEntry(gene, geneEntry, regionA, regionB) {{
+        const sectionEntryA = geneEntry?.sections?.[regionA.sectionId] || null;
+        const sectionEntryB = geneEntry?.sections?.[regionB.sectionId] || null;
+
+        const statsA = computeRegionStatsFromSectionEntry(sectionEntryA, regionA.indices, regionA.indexSet);
+        const statsB = computeRegionStatsFromSectionEntry(sectionEntryB, regionB.indices, regionB.indexSet);
+        const nA = regionA.indices.length;
+        const nB = regionB.indices.length;
+        if (!nA || !nB) return null;
+
+        const meanA = statsA.sum / nA;
+        const meanB = statsB.sum / nB;
+        const varA = nA > 1 ? Math.max(0, (statsA.sumSq - (statsA.sum * statsA.sum) / nA) / (nA - 1)) : 0;
+        const varB = nB > 1 ? Math.max(0, (statsB.sumSq - (statsB.sum * statsB.sum) / nB) / (nB - 1)) : 0;
+        const pctA = statsA.nnz / nA;
+        const pctB = statsB.nnz / nB;
+        const denominator = Math.sqrt((varA / Math.max(1, nA)) + (varB / Math.max(1, nB)) + 1e-12);
+        const score = denominator > 0 ? (meanA - meanB) / denominator : (meanA - meanB);
+        const log2fc = Math.log2((meanA + 1e-6) / (meanB + 1e-6));
+        if (!(log2fc > 0 || score > 0 || pctA > pctB)) return null;
+
+        return {{
+            gene,
+            meanA,
+            meanB,
+            pctA,
+            pctB,
+            log2fc,
+            score,
+        }};
+    }}
+
+    async function runFullRegionAnnotationDE(annotationA, annotationB) {{
+        if (!annotationA || !annotationB || !DATA.gene_aux_url) return;
+        const manifest = await loadGeneAuxManifest();
+        if (!manifest) {{
+            annotationDeFullRun = {{
+                running: false,
+                key: getAnnotationDECacheKey(annotationA, annotationB),
+                error: 'Failed to load the gene sidecar manifest.',
+            }};
+            renderAnnotationComparison();
+            return;
+        }}
+
+        const key = getAnnotationDECacheKey(annotationA, annotationB);
+        const token = ++annotationDeFullRunToken;
+        const shardEntries = Object.entries(manifest.shards || {{}});
+        const totalGenes = shardEntries.reduce((sum, [, genes]) => sum + (Array.isArray(genes) ? genes.length : 0), 0);
+        annotationDeFullRun = {{
+            token,
+            key,
+            running: true,
+            completedShards: 0,
+            totalShards: shardEntries.length,
+            completedGenes: 0,
+            totalGenes,
+            error: null,
+        }};
+        renderAnnotationComparison();
+
+        const regionA = {{
+            sectionId: annotationA.sectionId,
+            indices: Array.from(new Set((annotationA.localCellIndices || []).filter((idx) => Number.isInteger(idx) && idx >= 0))),
+        }};
+        const regionB = {{
+            sectionId: annotationB.sectionId,
+            indices: Array.from(new Set((annotationB.localCellIndices || []).filter((idx) => Number.isInteger(idx) && idx >= 0))),
+        }};
+        regionA.indexSet = new Set(regionA.indices);
+        regionB.indexSet = new Set(regionB.indices);
+
+        const results = [];
+        try {{
+            for (let shardIdx = 0; shardIdx < shardEntries.length; shardIdx++) {{
+                if (annotationDeFullRunToken !== token) return;
+                const [shardUrl, shardGenes] = shardEntries[shardIdx];
+                const shardPayload = await fetchGeneAuxShardForAnalysis(shardUrl);
+                if (annotationDeFullRunToken !== token) return;
+
+                const genesPayload = shardPayload?.genes || {{}};
+                Object.entries(genesPayload).forEach(([gene, geneEntry]) => {{
+                    const result = computeRegionAnnotationDEFromSidecarGeneEntry(gene, geneEntry, regionA, regionB);
+                    if (result) results.push(result);
+                }});
+
+                if (annotationDeFullRunToken !== token) return;
+                annotationDeFullRun = {{
+                    ...annotationDeFullRun,
+                    token,
+                    key,
+                    running: true,
+                    completedShards: shardIdx + 1,
+                    totalShards: shardEntries.length,
+                    completedGenes: Math.min(totalGenes, (annotationDeFullRun?.completedGenes || 0) + (Array.isArray(shardGenes) ? shardGenes.length : 0)),
+                    totalGenes,
+                    error: null,
+                }};
+                renderAnnotationComparison();
+                await new Promise((resolve) => window.setTimeout(resolve, 0));
+            }}
+
+            if (annotationDeFullRunToken !== token) return;
+            results.sort((a, b) => {{
+                const scoreDiff = (b.score - a.score);
+                if (Math.abs(scoreDiff) > 1e-9) return scoreDiff;
+                const fcDiff = (b.log2fc - a.log2fc);
+                if (Math.abs(fcDiff) > 1e-9) return fcDiff;
+                const pctDiff = ((b.pctA - b.pctB) - (a.pctA - a.pctB));
+                if (Math.abs(pctDiff) > 1e-9) return pctDiff > 0 ? 1 : -1;
+                return a.gene.localeCompare(b.gene);
+            }});
+
+            annotationDeFullCache.set(key, {{
+                available: true,
+                sourceId: Number(annotationA.id),
+                referenceId: Number(annotationB.id),
+                nA: regionA.indices.length,
+                nB: regionB.indices.length,
+                loadedGeneCount: totalGenes,
+                totalGeneCount: totalGenes,
+                results,
+                completedAt: Date.now(),
+                mode: 'full-sidecar',
+            }});
+            annotationDeFullRun = null;
+            renderAnnotationComparison();
+        }} catch (error) {{
+            if (annotationDeFullRunToken !== token) return;
+            annotationDeFullRun = {{
+                token,
+                key,
+                running: false,
+                completedShards: annotationDeFullRun?.completedShards || 0,
+                totalShards: shardEntries.length,
+                completedGenes: annotationDeFullRun?.completedGenes || 0,
+                totalGenes,
+                error: error?.message || 'Unknown error',
+            }};
+            renderAnnotationComparison();
+        }}
+    }}
+
+    function getAnnotationDEExportState(annotationA, annotationB, quickResult = null) {{
+        if (!annotationA || !annotationB) return null;
+        const pairKey = getAnnotationDECacheKey(annotationA, annotationB);
+        const fullCached = pairKey ? annotationDeFullCache.get(pairKey) : null;
+        if (fullCached?.available) {{
+            return {{ mode: 'full-sidecar', result: fullCached }};
+        }}
+        if (quickResult?.available) {{
+            return {{ mode: 'quick-loaded-genes', result: quickResult }};
+        }}
+        return null;
+    }}
+
+    function buildAnnotationDEReport(annotationA, annotationB, exportState) {{
+        if (!annotationA || !annotationB || !exportState?.result) return null;
+        const result = exportState.result;
+        const topN = Math.max(1, Number(annotationDeTopN) || ANNOTATION_DE_TOP_N);
+        const exportedGenes = (result.results || []).slice(0, topN).map((entry, index) => ({{
+            rank: index + 1,
+            gene: entry.gene,
+            log2fc_a_vs_b: entry.log2fc,
+            score: entry.score,
+            pct_expr_a: entry.pctA,
+            pct_expr_b: entry.pctB,
+            mean_a: entry.meanA,
+            mean_b: entry.meanB,
+        }}));
+        return {{
+            format: 'karospace-region-de-report-v1',
+            exported_at: new Date().toISOString(),
+            result_mode: exportState.mode,
+            color_column: currentColor || null,
+            top_genes_requested: topN,
+            region_a: {{
+                id: Number(annotationA.id),
+                label: annotationA.label || `Annotation ${{annotationA.id}}`,
+                section_id: annotationA.sectionId || null,
+                n_cells: Number(result.nA || annotationA.localCellIndices?.length || 0),
+                color: annotationA.color || getAnnotationColorById(annotationA.id),
+                created_at: annotationA.createdAt || null,
+            }},
+            region_b: {{
+                id: Number(annotationB.id),
+                label: annotationB.label || `Annotation ${{annotationB.id}}`,
+                section_id: annotationB.sectionId || null,
+                n_cells: Number(result.nB || annotationB.localCellIndices?.length || 0),
+                color: annotationB.color || getAnnotationColorById(annotationB.id),
+                created_at: annotationB.createdAt || null,
+            }},
+            stats: {{
+                loaded_gene_count: Number(result.loadedGeneCount || 0),
+                total_gene_count: Number(result.totalGeneCount || result.loadedGeneCount || 0),
+                total_hits_available: Array.isArray(result.results) ? result.results.length : 0,
+                genes_exported: exportedGenes.length,
+            }},
+            genes: exportedGenes,
+        }};
+    }}
+
+    function exportAnnotationDEReport(annotationA, annotationB, exportState) {{
+        const report = buildAnnotationDEReport(annotationA, annotationB, exportState);
+        if (!report) {{
+            alert('No region DE result is available to export yet.');
+            return;
+        }}
+        const sourceLabel = sanitizeFilenamePart(annotationA.label || `annotation-${{annotationA.id}}`);
+        const referenceLabel = sanitizeFilenamePart(annotationB.label || `annotation-${{annotationB.id}}`);
+        const filename = `karospace-region-de-${{sourceLabel}}-vs-${{referenceLabel}}-${{getScreenshotTimestamp()}}.json`;
+        downloadJsonFile(report, filename);
+    }}
+
     function renderSelectionComparisonHtml(summaryA) {{
         const summaryB = computeSelectionSummary(selectedCellsB);
         let html = `<div class="selection-summary-compare-header">
@@ -5947,6 +6459,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function removeModalAnnotation(annotationId) {{
         const target = Number(annotationId);
         if (!Number.isFinite(target)) return;
+        invalidateAnnotationDEState();
         modalAnnotations = modalAnnotations.filter(annotation => annotation.id !== target);
         renderModalAnnotationPanel();
         updateAnnotationComparisonTabVisibility();
@@ -5955,6 +6468,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function clearModalAnnotationsForSection(sectionId) {{
+        invalidateAnnotationDEState();
         modalAnnotations = modalAnnotations.filter(annotation => annotation.sectionId !== sectionId);
         renderModalAnnotationPanel();
         updateAnnotationComparisonTabVisibility();
@@ -5963,6 +6477,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function clearAllModalAnnotations() {{
+        invalidateAnnotationDEState();
         modalAnnotations = [];
         renderModalAnnotationPanel();
         updateAnnotationComparisonTabVisibility();
@@ -7292,6 +7807,235 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
     }}
 
+    function renderAnnotationRegionDESection(annotations) {{
+        const {{ annotations: availableAnnotations, source, reference }} = syncAnnotationDEState(annotations);
+        let html = '<div class="annot-de-controls">';
+        html += '<div class="selection-summary-title" style="margin-top:10px">Region-to-Region DE</div>';
+        html += '<div class="agg-group-meta">Quick DE uses genes already loaded in the viewer. Full region DE can scan the sidecar in the background when available.</div>';
+
+        if (availableAnnotations.length < 2) {{
+            html += '<div class="agg-group-meta">Draw at least two annotations to compare region-level DE.</div>';
+            html += '</div>';
+            return html;
+        }}
+
+        const options = availableAnnotations.map((annotation) => {{
+            const id = Number(annotation.id);
+            const label = escapeHtml(getAnnotationDisplayLabel(annotation));
+            return `<option value="${{id}}">${{label}}</option>`;
+        }}).join('');
+
+        html += `
+            <div class="cluster-de-controls">
+                <div class="cluster-de-select-row">
+                    <div>
+                        <label>Region A</label>
+                        <select id="annotation-de-source">${{options}}</select>
+                    </div>
+                    <div>
+                        <label>Region B</label>
+                        <select id="annotation-de-reference">${{options}}</select>
+                    </div>
+                    <div>
+                        <label>Top Genes</label>
+                        <input id="annotation-de-topn" type="number" min="3" max="100" step="1" value="${{Math.max(3, Number(annotationDeTopN) || ANNOTATION_DE_TOP_N)}}">
+                    </div>
+                </div>
+                <div style="display: flex; justify-content: flex-end;">
+                    <button class="legend-btn" id="annotation-de-swap" type="button">Swap A/B</button>
+                </div>
+            </div>
+        `;
+
+        const deResult = computeRegionAnnotationDE(source, reference, {{ topN: annotationDeTopN }});
+        const exportState = getAnnotationDEExportState(source, reference, deResult);
+        const pairKey = getAnnotationDECacheKey(source, reference);
+        const fullCached = pairKey ? annotationDeFullCache.get(pairKey) : null;
+        const fullRun = (annotationDeFullRun && annotationDeFullRun.key === pairKey) ? annotationDeFullRun : null;
+        const sidecarAvailable = !!DATA.gene_aux_url;
+        const renderCards = (result) => {{
+            const topN = Math.max(1, Number(annotationDeTopN) || ANNOTATION_DE_TOP_N);
+            return (result.results || []).slice(0, topN).map((entry) => {{
+                return `
+                    <div class="comparison-card">
+                        <div class="comparison-card-title">
+                            ${{renderGeneTokenButton(entry.gene, {{
+                                isActive: entry.gene === currentGene,
+                                showMeta: false,
+                                title: 'Load region DE gene into the viewer',
+                            }})}}
+                            ${{renderGeneGoogleSearchButton(entry.gene, {{
+                                title: 'Search Google for this gene',
+                            }})}}
+                        </div>
+                        <div class="comparison-metric-grid">
+                            <div class="comparison-metric">
+                                <span class="comparison-metric-label">log2FC A/B</span>
+                                <span class="comparison-metric-value">${{formatScaleNumber(entry.log2fc)}}</span>
+                            </div>
+                            <div class="comparison-metric">
+                                <span class="comparison-metric-label">Score</span>
+                                <span class="comparison-metric-value">${{formatScaleNumber(entry.score)}}</span>
+                            </div>
+                            <div class="comparison-metric">
+                                <span class="comparison-metric-label">% expr A</span>
+                                <span class="comparison-metric-value">${{formatClusterDEPct(entry.pctA)}}</span>
+                            </div>
+                            <div class="comparison-metric">
+                                <span class="comparison-metric-label">% expr B</span>
+                                <span class="comparison-metric-value">${{formatClusterDEPct(entry.pctB)}}</span>
+                            </div>
+                            <div class="comparison-metric">
+                                <span class="comparison-metric-label">Mean A</span>
+                                <span class="comparison-metric-value">${{formatScaleNumber(entry.meanA)}}</span>
+                            </div>
+                            <div class="comparison-metric">
+                                <span class="comparison-metric-label">Mean B</span>
+                                <span class="comparison-metric-value">${{formatScaleNumber(entry.meanB)}}</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }}).join('');
+        }};
+        const sourceLabel = source ? escapeHtml(getAnnotationDisplayLabel(source)) : '';
+        const referenceLabel = reference ? escapeHtml(getAnnotationDisplayLabel(reference)) : '';
+        const topNLabel = Math.max(1, Number(annotationDeTopN) || ANNOTATION_DE_TOP_N).toLocaleString();
+        const quickSummaryHtml = (deResult.available && deResult.results.length)
+            ? `
+                <div class="agg-group-meta">
+                    Region A: <strong>${{sourceLabel}}</strong> (${{Number(deResult.nA || 0).toLocaleString()}} cells)
+                    vs Region B: <strong>${{referenceLabel}}</strong> (${{Number(deResult.nB || 0).toLocaleString()}} cells).
+                </div>
+                <div class="agg-group-meta">
+                    ${{
+                        Number(deResult.loadedGeneCount || 0) < Number(deResult.totalGeneCount || 0)
+                            ? `Using ${{Number(deResult.loadedGeneCount || 0).toLocaleString()}} of ${{Number(deResult.totalGeneCount || 0).toLocaleString()}} genes currently loaded in the viewer.`
+                            : `Using ${{Number(deResult.loadedGeneCount || 0).toLocaleString()}} loaded genes.`
+                    }}
+                    Showing top ${{topNLabel}} genes. Positive scores indicate enrichment in Region A.
+                </div>
+                <div class="comparison-stack">${{renderCards(deResult)}}</div>
+            `
+            : '';
+        const cachedTimestamp = fullCached?.completedAt
+            ? new Date(fullCached.completedAt).toLocaleTimeString([], {{ hour: '2-digit', minute: '2-digit', second: '2-digit' }})
+            : '';
+        const cachedSummaryHtml = fullCached?.available
+            ? (fullCached.results || []).length
+                ? `
+                    <div class="agg-group-meta">
+                        Region A: <strong>${{sourceLabel}}</strong> (${{Number(fullCached.nA || 0).toLocaleString()}} cells)
+                        vs Region B: <strong>${{referenceLabel}}</strong> (${{Number(fullCached.nB || 0).toLocaleString()}} cells).
+                    </div>
+                    <div class="agg-group-meta">
+                        Cached full sidecar DE${{cachedTimestamp ? ` from ${{cachedTimestamp}}` : ''}}
+                        across ${{Number(fullCached.totalGeneCount || 0).toLocaleString()}} genes.
+                        Showing top ${{topNLabel}} genes. Positive scores indicate enrichment in Region A.
+                    </div>
+                    <div class="comparison-stack">${{renderCards(fullCached)}}</div>
+                `
+                : `
+                    <div class="agg-group-meta">
+                        Region A: <strong>${{sourceLabel}}</strong> (${{Number(fullCached.nA || 0).toLocaleString()}} cells)
+                        vs Region B: <strong>${{referenceLabel}}</strong> (${{Number(fullCached.nB || 0).toLocaleString()}} cells).
+                    </div>
+                    <div class="agg-group-meta">
+                        Cached full sidecar DE${{cachedTimestamp ? ` from ${{cachedTimestamp}}` : ''}} found no enriched genes across ${{Number(fullCached.totalGeneCount || 0).toLocaleString()}} genes.
+                    </div>
+                `
+            : '';
+        let resultHtml = '';
+        if (!source || !reference) {{
+            resultHtml = '<div class="agg-group-meta">Choose two different annotations to compare.</div>';
+        }} else if (fullRun?.running) {{
+            const totalShards = Number(fullRun.totalShards || 0);
+            const completedShards = Number(fullRun.completedShards || 0);
+            const totalGenes = Number(fullRun.totalGenes || 0);
+            const completedGenes = Number(fullRun.completedGenes || 0);
+            const progressMax = Math.max(1, totalGenes || totalShards || 1);
+            const progressValue = Math.min(progressMax, totalGenes ? completedGenes : completedShards);
+            const progressPct = progressMax > 0 ? Math.round((progressValue / progressMax) * 100) : 0;
+            resultHtml = `
+                <div class="agg-group-meta">Scanning the full sidecar in the background. The viewer stays interactive while this runs.</div>
+                <progress value="${{progressValue}}" max="${{progressMax}}" style="width:100%; height:12px;"></progress>
+                <div class="agg-group-meta">
+                    ${{progressPct}}% complete
+                    · ${{completedGenes.toLocaleString()}} / ${{totalGenes.toLocaleString()}} genes
+                    · ${{completedShards.toLocaleString()}} / ${{totalShards.toLocaleString()}} shards
+                </div>
+                <div style="display:flex; justify-content:flex-end;">
+                    <button class="legend-btn" id="annotation-de-cancel" type="button">Cancel Full DE</button>
+                </div>
+            `;
+            if (cachedSummaryHtml) {{
+                resultHtml += '<div class="agg-group-meta">Showing the cached full result while the refresh runs:</div>';
+                resultHtml += cachedSummaryHtml;
+            }} else if (quickSummaryHtml) {{
+                resultHtml += '<div class="agg-group-meta">Preview from the genes already loaded in the viewer:</div>';
+                resultHtml += quickSummaryHtml;
+            }}
+        }} else if (fullRun?.error) {{
+            resultHtml = `
+                <div class="agg-group-meta">Full sidecar DE failed: ${{escapeHtml(fullRun.error)}}</div>
+                <div style="display:flex; justify-content:flex-end;">
+                    <button class="legend-btn" id="annotation-de-run-full" type="button">Retry Full Region DE</button>
+                </div>
+            `;
+            if (cachedSummaryHtml) {{
+                resultHtml += '<div class="agg-group-meta">Showing the previous cached full result:</div>';
+                resultHtml += cachedSummaryHtml;
+            }} else if (quickSummaryHtml) {{
+                resultHtml += '<div class="agg-group-meta">Quick DE preview from currently loaded genes:</div>';
+                resultHtml += quickSummaryHtml;
+            }}
+        }} else if (fullCached?.available) {{
+            resultHtml = cachedSummaryHtml;
+            resultHtml += '<div style="display:flex; justify-content:flex-end;"><button class="legend-btn" id="annotation-de-refresh-full" type="button">Refresh Full DE</button></div>';
+        }} else if (!deResult.available && deResult.reason === 'empty_region') {{
+            resultHtml = '<div class="agg-group-meta">One of the selected annotations has no cells.</div>';
+        }} else if (!deResult.available && deResult.reason === 'no_loaded_genes' && sidecarAvailable) {{
+            const totalGenes = Number(deResult.totalGeneCount || 0).toLocaleString();
+            resultHtml = `
+                <div class="agg-group-meta">
+                    No genes are currently loaded for quick region DE.
+                    ${{totalGenes !== '0' ? `This viewer knows about ${{totalGenes}} sidecar genes that can be scanned on demand.` : ''}}
+                </div>
+                <div style="display:flex; justify-content:flex-end;">
+                    <button class="legend-btn" id="annotation-de-run-full" type="button">Run Full Region DE</button>
+                </div>
+            `;
+        }} else if (!deResult.available && deResult.reason === 'no_loaded_genes') {{
+            resultHtml = '<div class="agg-group-meta">No genes are currently loaded for region DE. Load genes in the Genes tab or click marker genes first.</div>';
+        }} else if (!deResult.available) {{
+            resultHtml = '<div class="agg-group-meta">Choose two different annotations to compare.</div>';
+        }} else if (!deResult.results.length) {{
+            if (sidecarAvailable && Number(deResult.loadedGeneCount || 0) < Number(deResult.totalGeneCount || 0)) {{
+                resultHtml = `
+                    <div class="agg-group-meta">No enriched genes were found among the currently loaded genes.</div>
+                    <div style="display:flex; justify-content:flex-end;">
+                        <button class="legend-btn" id="annotation-de-run-full" type="button">Run Full Region DE</button>
+                    </div>
+                `;
+            }} else {{
+                resultHtml = '<div class="agg-group-meta">No enriched genes were found among the genes currently loaded in the viewer.</div>';
+            }}
+        }} else {{
+            resultHtml = quickSummaryHtml;
+            if (sidecarAvailable && Number(deResult.loadedGeneCount || 0) < Number(deResult.totalGeneCount || 0)) {{
+                resultHtml += '<div style="display:flex; justify-content:flex-end;"><button class="legend-btn" id="annotation-de-run-full" type="button">Run Full Region DE</button></div>';
+            }}
+        }}
+
+        if (exportState) {{
+            resultHtml += '<div style="display:flex; justify-content:flex-end; margin-top:6px;"><button class="legend-btn" id="annotation-de-export-report" type="button">Export Report</button></div>';
+        }}
+
+        html += `<div id="annotation-de-results">${{resultHtml}}</div>`;
+        html += '</div>';
+        return html;
+    }}
+
     function renderAnnotationComparison() {{
         const container = document.getElementById('annotation-comparison');
         if (!container) return;
@@ -7322,7 +8066,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             annotSummaries.forEach((as) => as.summary.types.forEach(([t]) => allTypes.add(t)));
             const typeList = Array.from(allTypes);
 
-            html += `<div class="selection-summary-title">Cell composition by annotation</div>`;
+            html += `<div class="selection-summary-title">Cell Composition by Annotation</div>`;
             annotSummaries.forEach((as) => {{
                 const annotation = as.annotation;
                 const summary = as.summary;
@@ -7370,7 +8114,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 topGenes.map(g => (arr.find(e => e.gene === g)?.meanSel || 0))
             ));
 
-            html += `<div class="selection-summary-title" style="margin-top:10px">Gene expression by annotation</div>`;
+            html += `<div class="selection-summary-title" style="margin-top:10px">Gene Expression by Annotation</div>`;
             topGenes.forEach((gene) => {{
                 html += `<div class="annot-expr-row"><span class="selection-summary-expr-gene">${{escapeHtml(gene)}}</span>`;
                 html += `<div class="annot-expr-bars">`;
@@ -7384,7 +8128,76 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }});
         }}
 
+        html += renderAnnotationRegionDESection(modalAnnotations);
+
         container.innerHTML = html || '<div class="agg-group-meta">No data available.</div>';
+        const {{ source, reference }} = syncAnnotationDEState(modalAnnotations);
+        const sourceSelect = container.querySelector('#annotation-de-source');
+        const referenceSelect = container.querySelector('#annotation-de-reference');
+        const topNInput = container.querySelector('#annotation-de-topn');
+        const swapBtn = container.querySelector('#annotation-de-swap');
+        if (sourceSelect) {{
+            sourceSelect.value = annotationDeSourceId ? String(annotationDeSourceId) : '';
+            sourceSelect.addEventListener('change', () => {{
+                cancelAnnotationFullDERun();
+                annotationDeSourceId = Number(sourceSelect.value) || null;
+                renderAnnotationComparison();
+            }});
+        }}
+        if (referenceSelect) {{
+            referenceSelect.value = annotationDeReferenceId ? String(annotationDeReferenceId) : '';
+            referenceSelect.addEventListener('change', () => {{
+                cancelAnnotationFullDERun();
+                annotationDeReferenceId = Number(referenceSelect.value) || null;
+                renderAnnotationComparison();
+            }});
+        }}
+        if (topNInput) {{
+            topNInput.value = String(Math.max(3, Number(annotationDeTopN) || ANNOTATION_DE_TOP_N));
+            topNInput.addEventListener('change', () => {{
+                const next = Math.min(100, Math.max(3, Number(topNInput.value) || ANNOTATION_DE_TOP_N));
+                annotationDeTopN = next;
+                renderAnnotationComparison();
+            }});
+        }}
+        if (swapBtn) {{
+            swapBtn.addEventListener('click', () => {{
+                cancelAnnotationFullDERun();
+                const sourceId = annotationDeSourceId;
+                annotationDeSourceId = annotationDeReferenceId;
+                annotationDeReferenceId = sourceId;
+                renderAnnotationComparison();
+            }});
+        }}
+        const runFullBtn = container.querySelector('#annotation-de-run-full');
+        if (runFullBtn && source && reference) {{
+            runFullBtn.addEventListener('click', () => {{
+                runFullRegionAnnotationDE(source, reference);
+            }});
+        }}
+        const refreshFullBtn = container.querySelector('#annotation-de-refresh-full');
+        if (refreshFullBtn && source && reference) {{
+            refreshFullBtn.addEventListener('click', () => {{
+                runFullRegionAnnotationDE(source, reference);
+            }});
+        }}
+        const cancelBtn = container.querySelector('#annotation-de-cancel');
+        if (cancelBtn) {{
+            cancelBtn.addEventListener('click', () => {{
+                cancelAnnotationFullDERun();
+                renderAnnotationComparison();
+            }});
+        }}
+        const exportReportBtn = container.querySelector('#annotation-de-export-report');
+        if (exportReportBtn && source && reference) {{
+            exportReportBtn.addEventListener('click', () => {{
+                const quickResult = computeRegionAnnotationDE(source, reference, {{ topN: annotationDeTopN }});
+                const exportState = getAnnotationDEExportState(source, reference, quickResult);
+                exportAnnotationDEReport(source, reference, exportState);
+            }});
+        }}
+        bindGeneActivateButtons(container, renderAnnotationComparison);
+        bindGeneGoogleSearchButtons(container);
     }}
 
     function getBarColor(index) {{
@@ -7407,11 +8220,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 <div class="color-panel-title">Color explorer</div>
             </div>
             <div class="color-panel-section">
-                <label>Search colors</label>
+                <label>Search Colors</label>
                 <input class="color-search" id="color-search" type="text" placeholder="Type to filter...">
             </div>
             <div class="color-panel-section">
-                <label>Available colors</label>
+                <label>Available Colors</label>
                 <div class="color-list" id="color-list"></div>
             </div>
             <div class="color-panel-section">
@@ -7425,20 +8238,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 </div>
                 <div class="color-tab-content active" id="color-tab-aggregate-content">
                     <div>
-                        <label>Aggregate by</label>
+                        <label>Aggregate By</label>
                         <select id="color-groupby" ${{!hasMetadata ? 'disabled' : ''}}>
                             ${{options}}
                         </select>
                     </div>
                     <div style="display: flex; justify-content: flex-end;">
-                        <button class="legend-btn" id="color-aggregation-toggle" type="button">Collapse stats</button>
+                        <button class="legend-btn" id="color-aggregation-toggle" type="button">Collapse Stats</button>
                     </div>
                     <div class="color-aggregation" id="color-aggregation">
                         <div class="agg-group-meta">${{hasMetadata ? 'Pick a metadata column to summarize.' : 'No metadata columns available for aggregation.'}}</div>
                     </div>
                     <div>
-                        <label>Cell type trend</label>
-                        <input class="color-search" id="celltype-search" type="text" placeholder="Search cell type...">
+                        <label>Cell Type Trend</label>
+                        <input class="color-search" id="celltype-search" type="text" placeholder="Search Cell Type...">
                     </div>
                     <div class="color-aggregation" id="celltype-trend">
                         <div class="agg-group-meta">${{hasMetadata ? 'Search for a category to see counts across the selected metadata.' : 'No metadata columns available.'}}</div>
@@ -7470,22 +8283,22 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 </div>
                 <div class="color-tab-content" id="color-tab-neighbors-content">
                     <div>
-                        <label>Search cell type</label>
-                        <input class="color-search" id="neighbor-search" type="text" placeholder="Search cell type...">
+                        <label>Search Cell Type</label>
+                        <input class="color-search" id="neighbor-search" type="text" placeholder="Search Cell Type...">
                     </div>
                     <div style="display: flex; justify-content: flex-end;">
-                        <button class="legend-btn" id="neighbor-stats-toggle" type="button">Collapse neighbor stats</button>
+                        <button class="legend-btn" id="neighbor-stats-toggle" type="button">Collapse Neighbor Stats</button>
                     </div>
                     <div class="color-aggregation" id="neighbor-stats">
                         <div class="agg-group-meta">Select a categorical color to view neighbor stats.</div>
                     </div>
                     <div>
-                        <label>Interaction source</label>
+                        <label>Interaction Source</label>
                         <select id="interaction-source"></select>
                     </div>
                     <div>
-                        <label>Target filter</label>
-                        <input class="color-search" id="interaction-search" type="text" placeholder="Filter target cell types...">
+                        <label>Target Filter</label>
+                        <input class="color-search" id="interaction-search" type="text" placeholder="Filter Target Cell Types...">
                     </div>
                     <div class="color-aggregation" id="interaction-browser">
                         <div class="agg-group-meta">Select a source cell type to browse interactions.</div>
@@ -7499,26 +8312,26 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <div class="color-tab-content active" id="genes-tab-dotplot-content">
                         <div class="dotplot-controls">
                             <div>
-                                <label>Group by (categorical color)</label>
+                                <label>Group By (Categorical Color)</label>
                                 <select id="dotplot-groupby"></select>
                             </div>
                             <div>
-                                <label>Aggregate by (metadata)</label>
+                                <label>Aggregate By (Metadata)</label>
                                 <select id="dotplot-aggregate-by" ${{!hasMetadata ? 'disabled' : ''}}>
                                     ${{options}}
                                 </select>
                             </div>
                             <div id="dotplot-aggregate-value-wrap" style="display: none;">
-                                <label>Aggregate value</label>
+                                <label>Aggregate Value</label>
                                 <select id="dotplot-aggregate-value"></select>
                             </div>
                             <div>
-                                <label>Genes (comma-separated)</label>
+                                <label>Genes (Comma-Separated)</label>
                                 <input class="color-search" id="dotplot-genes" type="text" placeholder="e.g. Cd4, Cd8a, Gfap" list="gene-list">
                                 <div class="scale-hint">Dot size = % expressing; dot color = mean expression. Press Tab to autocomplete the current gene token.</div>
                             </div>
                             <div style="display: flex; gap: 6px; justify-content: flex-end;">
-                                <button class="legend-btn" id="dotplot-use-hvgs" type="button">Suggest genes</button>
+                                <button class="legend-btn" id="dotplot-use-hvgs" type="button">Suggest Genes</button>
                                 <button class="legend-btn" id="dotplot-run" type="button">Update</button>
                             </div>
                             <div class="agg-group-meta" id="dotplot-status">Pick a categorical color + genes to compute a dotplot.</div>
@@ -8052,7 +8865,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!countData) {{
             return `
                 <div class="agg-group">
-                    <div class="agg-group-title">Cell counts</div>
+                    <div class="agg-group-title">Cell Counts</div>
                     <div class="agg-group-meta">No categorical counts are available for this annotation.</div>
                 </div>
             `;
@@ -8068,7 +8881,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         return `
             <div class="agg-group">
-                <div class="agg-group-title">Cell counts</div>
+                <div class="agg-group-title">Cell Counts</div>
                 <div class="agg-group-meta">Cells assigned in ${{formatMetadataLabel(colorCol)}}.</div>
                 <div class="comparison-stack">
                     <div class="comparison-card">
@@ -8104,7 +8917,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         </div>
                     </div>
                 </div>
-                <div class="agg-group-meta">Total labeled cells: ${{total.toLocaleString()}}</div>
+                <div class="agg-group-meta">Total Labeled Cells: ${{total.toLocaleString()}}</div>
             </div>
         `;
     }}
@@ -8113,7 +8926,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!DATA.has_neighbors) {{
             return `
                 <div class="agg-group">
-                    <div class="agg-group-title">Neighbor relationship</div>
+                    <div class="agg-group-title">Neighbor Relationship</div>
                     <div class="agg-group-meta">No neighbor graph was found in this dataset.</div>
                 </div>
             `;
@@ -8124,7 +8937,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!sourceToReference && !referenceToSource) {{
             return `
                 <div class="agg-group">
-                    <div class="agg-group-title">Neighbor relationship</div>
+                    <div class="agg-group-title">Neighbor Relationship</div>
                     <div class="agg-group-meta">Neighbor stats were not precomputed for this annotation.</div>
                 </div>
             `;
@@ -8175,7 +8988,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         return `
             <div class="agg-group">
-                <div class="agg-group-title">Neighbor relationship</div>
+                <div class="agg-group-title">Neighbor Relationship</div>
                 <div class="agg-group-meta">Directional neighbor enrichment between the selected categories.</div>
                 <div class="comparison-stack">${{cards}}</div>
             </div>
@@ -8190,7 +9003,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!sourceMarkers.length && !referenceMarkers.length) {{
             return `
                 <div class="agg-group">
-                    <div class="agg-group-title">Marker summary</div>
+                    <div class="agg-group-title">Marker Summary</div>
                     <div class="agg-group-meta">Marker genes were not precomputed for this annotation.</div>
                 </div>
             `;
@@ -8198,7 +9011,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         return `
             <div class="agg-group">
-                <div class="agg-group-title">Marker summary</div>
+                <div class="agg-group-title">Marker Summary</div>
                 <div class="agg-group-meta">Top markers for each category. Click a gene to load it when available.</div>
             </div>
             <div class="agg-group">
@@ -8210,7 +9023,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 ${{renderComparisonGeneTokenGrid(referenceMarkers, 'No marker genes available for Category B.', 'Load Category B marker gene into the viewer')}}
             </div>
             <div class="agg-group">
-                <div class="agg-group-title">Marker overlap</div>
+                <div class="agg-group-title">Marker Overlap</div>
                 <div class="agg-group-meta">Shared names across the top marker lists.</div>
                 ${{renderComparisonGeneTokenGrid(overlap, 'No shared top markers found.', 'Load shared marker gene into the viewer')}}
             </div>
@@ -8251,7 +9064,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!Object.keys(colorData).length) {{
             return `
                 <div class="agg-group">
-                    <div class="agg-group-title">Contact-conditioned markers</div>
+                    <div class="agg-group-title">Contact-Conditioned Markers</div>
                     <div class="agg-group-meta">Interaction markers were not precomputed for this annotation.</div>
                 </div>
             `;
@@ -8259,7 +9072,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         return `
             <div class="agg-group">
-                <div class="agg-group-title">Contact-conditioned markers</div>
+                <div class="agg-group-title">Contact-Conditioned Markers</div>
                 <div class="agg-group-meta">Directional DE between contact-positive and contact-negative source cells.</div>
             </div>
             ${{renderInteractionComparisonCard(colorCol, sourceCategory, referenceCategory)}}
