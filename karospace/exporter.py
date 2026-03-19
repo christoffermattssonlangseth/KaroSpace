@@ -527,6 +527,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .gene-token-btn.unloaded {{
             border-style: dashed;
         }}
+        .gene-token-btn.disabled {{
+            cursor: default;
+            opacity: 0.78;
+        }}
+        .gene-token-btn.disabled:hover {{
+            background: var(--input-bg);
+            border-color: var(--border-color);
+            transform: none;
+        }}
         .gene-token-meta {{
             font-size: 10px;
             color: var(--muted-color);
@@ -1376,8 +1385,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         .modal-close:hover {{ background: var(--hover-bg); }}
         .modal-body {{ flex: 1; display: flex; overflow: hidden; }}
-        .modal-canvas-container {{ flex: 1; position: relative; overflow: hidden; }}
-        .modal-canvas {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; }}
+        .modal-canvas-container {{ flex: 1; position: relative; overflow: hidden; background: var(--panel-bg); }}
+        .modal-canvas {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform-origin: 0 0; will-change: transform; }}
         .modal-controls {{
             position: absolute;
             bottom: 12px;
@@ -2831,6 +2840,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let isDraggingModalAnnotationPanel = false;
     let modalAnnotationPanelDragOffsetX = 0;
     let modalAnnotationPanelDragOffsetY = 0;
+    let modalRenderedView = null;
+    let modalInteractionCommitTimer = null;
     const BLEND_ALL_CATEGORIES = '__ALL__';
     let modalBlendSpec = {{
         a: {{ kind: 'cell', color: null, category: null, gene: '' }},
@@ -3792,16 +3803,21 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function renderGeneTokenButton(gene, options = {{}}) {{
-        const token = resolveCanonicalGeneName(gene);
-        if (!token) return '';
+        const rawToken = String(gene || '').trim();
+        const token = resolveCanonicalGeneName(rawToken);
+        if (!token && options.allowUnknown !== true) return '';
+        const label = token || rawToken;
+        if (!label) return '';
+        const canActivate = !!token;
         const classes = ['gene-token-btn'];
         if (options.isActive) classes.push('active');
         if (options.isSearchActive) classes.push('search-active');
-        if (!DATA.genes_meta?.[token]) classes.push('unloaded');
+        if (!canActivate) classes.push('disabled');
+        else if (!DATA.genes_meta?.[token]) classes.push('unloaded');
         const showMeta = options.showMeta !== false;
         const metaLabel = options.metaLabel !== undefined
             ? options.metaLabel
-            : (DATA.genes_meta?.[token] ? 'loaded' : 'sidecar');
+            : (!canActivate ? 'name only' : (DATA.genes_meta?.[token] ? 'loaded' : 'sidecar'));
         const metaHtml = showMeta && metaLabel
             ? `<span class="gene-token-meta">${{escapeHtml(metaLabel)}}</span>`
             : '';
@@ -3809,10 +3825,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             <button
                 type="button"
                 class="${{classes.join(' ')}}"
-                data-gene-activate="${{escapeHtml(token)}}"
-                title="${{escapeHtml(options.title || token)}}"
+                ${{canActivate ? `data-gene-activate="${{escapeHtml(token)}}"` : ''}}
+                title="${{escapeHtml(options.title || label)}}"
+                ${{canActivate ? '' : 'disabled'}}
             >
-                <span>${{escapeHtml(token)}}</span>
+                <span>${{escapeHtml(label)}}</span>
                 ${{metaHtml}}
             </button>
         `;
@@ -5408,6 +5425,91 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }});
     }}
 
+    function updateModalViewportInfo(transform = null) {{
+        const zoomInfo = document.getElementById('zoom-info');
+        if (zoomInfo) zoomInfo.textContent = `${{Math.round(modalZoom * 100)}}%`;
+        const rotationInfo = document.getElementById('modal-rotation-info');
+        if (rotationInfo) {{
+            const angleDeg = transform ? transform.angleDeg : (modalSection ? getSectionRotationDeg(modalSection) : 0);
+            rotationInfo.textContent = formatRotationLabel(angleDeg);
+        }}
+    }}
+
+    function clearModalInteractionCommitTimer() {{
+        if (modalInteractionCommitTimer !== null) {{
+            window.clearTimeout(modalInteractionCommitTimer);
+            modalInteractionCommitTimer = null;
+        }}
+    }}
+
+    function clearModalInteractionPreview() {{
+        const canvas = document.getElementById('modal-canvas');
+        if (!canvas) return;
+        canvas.style.transform = '';
+        canvas.style.transformOrigin = '0 0';
+    }}
+
+    function cacheModalRenderedView(rect, transform) {{
+        if (!modalSection || !rect || !transform) {{
+            modalRenderedView = null;
+            return;
+        }}
+        modalRenderedView = {{
+            sectionId: modalSection.id,
+            width: rect.width,
+            height: rect.height,
+            dpr: getRenderDpr(),
+            centerX: transform.centerX,
+            centerY: transform.centerY,
+            scale: transform.scale,
+            angleDeg: transform.angleDeg,
+        }};
+    }}
+
+    function invalidateModalRenderedView() {{
+        clearModalInteractionCommitTimer();
+        clearModalInteractionPreview();
+        modalRenderedView = null;
+    }}
+
+    function applyModalInteractionPreview() {{
+        if (!modalSection || !modalRenderedView) return false;
+        const canvas = document.getElementById('modal-canvas');
+        const container = document.getElementById('modal-canvas-container');
+        if (!canvas || !container) return false;
+        const rect = container.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return false;
+
+        const rendered = modalRenderedView;
+        if (rendered.sectionId !== modalSection.id) return false;
+        if (Math.abs(rendered.width - rect.width) > 0.5 || Math.abs(rendered.height - rect.height) > 0.5) return false;
+        if (Math.abs(rendered.dpr - getRenderDpr()) > 0.01) return false;
+
+        const transform = getModalViewTransform(rect);
+        if (!transform) return false;
+        if (Math.abs(rendered.angleDeg - transform.angleDeg) > ROTATION_EPSILON) return false;
+        if (!Number.isFinite(rendered.scale) || rendered.scale <= 0) return false;
+
+        const scaleRatio = transform.scale / rendered.scale;
+        if (!Number.isFinite(scaleRatio) || scaleRatio <= 0) return false;
+
+        const translateX = transform.centerX - scaleRatio * rendered.centerX;
+        const translateY = transform.centerY - scaleRatio * rendered.centerY;
+        canvas.style.transformOrigin = '0 0';
+        canvas.style.transform = `matrix(${{scaleRatio}}, 0, 0, ${{scaleRatio}}, ${{translateX}}, ${{translateY}})`;
+        updateModalViewportInfo(transform);
+        return true;
+    }}
+
+    function scheduleModalInteractionCommit(delayMs = 120) {{
+        clearModalInteractionCommitTimer();
+        if (!modalSection) return;
+        modalInteractionCommitTimer = window.setTimeout(() => {{
+            modalInteractionCommitTimer = null;
+            renderModalSection();
+        }}, Math.max(0, Number(delayMs) || 0));
+    }}
+
     function screenPointToModalData(x, y, transform) {{
         return transform.screenToData(x, y);
     }}
@@ -5454,9 +5556,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function createModalAnnotationFromPath() {{
         if (!modalSection || modalAnnotationPath.length < 3) return false;
-        const canvas = document.getElementById('modal-canvas');
-        if (!canvas) return false;
-        const rect = canvas.getBoundingClientRect();
+        const container = document.getElementById('modal-canvas-container');
+        if (!container) return false;
+        const rect = container.getBoundingClientRect();
         const transform = getModalViewTransform(rect);
         if (!transform) return false;
 
@@ -5625,8 +5727,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!modalSection || modalLassoPath.length < 3) return;
         ensureSectionXY(modalSection);
 
-        const canvas = document.getElementById('modal-canvas');
-        const rect = canvas.getBoundingClientRect();
+        const container = document.getElementById('modal-canvas-container');
+        if (!container) return;
+        const rect = container.getBoundingClientRect();
         const transform = getModalViewTransform(rect);
         if (!transform) return;
 
@@ -6391,11 +6494,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     // Modal rendering
-    function renderModalSection() {{
+    function renderModalSectionExact() {{
         if (!modalSection) return;
         ensureSectionXY(modalSection);
 
         const canvas = document.getElementById('modal-canvas');
+        clearModalInteractionPreview();
         const ctx = canvas.getContext('2d');
         const dpr = getRenderDpr();
         const container = document.getElementById('modal-canvas-container');
@@ -6408,9 +6512,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         ctx.fillStyle = getPanelBg();
         ctx.fillRect(0, 0, width, height);
 
-        if (modalSection.x.length === 0) return;
+        if (modalSection.x.length === 0) {{
+            modalRenderedView = null;
+            updateModalViewportInfo();
+            return;
+        }}
         const transform = getModalViewTransform(rect);
-        if (!transform) return;
+        if (!transform) {{
+            modalRenderedView = null;
+            updateModalViewportInfo();
+            return;
+        }}
         const adjustedSpotSize = Math.max(0.25, modalSpotSize * modalZoom * 0.8);
 
         const config = getColorConfig();
@@ -6603,8 +6715,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ctx.setLineDash([]);
         }}
 
-        document.getElementById('zoom-info').textContent = `${{Math.round(modalZoom * 100)}}%`;
-        document.getElementById('modal-rotation-info').textContent = formatRotationLabel(transform.angleDeg);
+        cacheModalRenderedView(rect, transform);
+        updateModalViewportInfo(transform);
+    }}
+
+    function renderModalSection() {{
+        clearModalInteractionCommitTimer();
+        renderModalSectionExact();
     }}
 
     // Legend
@@ -7496,17 +7613,33 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const rows = categories.map(cat => {{
             const key = String(cat);
             const genes = getMarkerGenesForColorCategory(currentColor, key)
-                .map(resolveCanonicalGeneName)
+                .map((gene) => {{
+                    const raw = String(gene || '').trim();
+                    if (!raw) return null;
+                    return {{
+                        raw,
+                        canonical: resolveCanonicalGeneName(raw),
+                    }};
+                }})
                 .filter(Boolean);
             if (query) {{
-                const hasMatch = genes.some(g => String(g).toLowerCase().includes(query));
+                const hasMatch = genes.some((entry) => {{
+                    const rawMatch = entry.raw.toLowerCase().includes(query);
+                    const canonicalMatch = entry.canonical
+                        ? entry.canonical.toLowerCase().includes(query)
+                        : false;
+                    return rawMatch || canonicalMatch;
+                }});
                 if (!hasMatch) return '';
             }}
             const geneButtons = genes.length
-                ? genes.map((gene) => renderGeneTokenButton(gene, {{
-                    isActive: gene === currentGene,
+                ? genes.map((entry) => renderGeneTokenButton(entry.raw, {{
+                    allowUnknown: true,
+                    isActive: !!entry.canonical && entry.canonical === currentGene,
                     showMeta: false,
-                    title: 'Load marker gene into the viewer',
+                    title: entry.canonical
+                        ? 'Load marker gene into the viewer'
+                        : 'Marker gene name only; this gene was not embedded in the viewer',
                 }})).join('')
                 : '<div class="agg-group-meta">No marker genes found.</div>';
             return `
@@ -7524,7 +7657,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         const loadedGeneNote = currentGene
             ? `<div class="agg-group-meta">Loaded gene: <strong>${{escapeHtml(currentGene)}}</strong>. Click another marker gene to switch.</div>`
-            : '<div class="agg-group-meta">Click a marker gene to load it in the viewer.</div>';
+            : '<div class="agg-group-meta">Click a marker gene to load it in the viewer. Genes not embedded in this viewer are shown as names only.</div>';
 
         container.innerHTML = loadedGeneNote + rows.join('');
         container.querySelectorAll('[data-gene-activate]').forEach((btn) => {{
@@ -8202,6 +8335,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function openModal(sectionId) {{
         modalSection = DATA.sections.find(s => s.id === sectionId);
         if (!modalSection) return;
+        invalidateModalRenderedView();
         modalZoom = 1; modalPanX = 0; modalPanY = 0;
         modalPointerMoved = false;
         modalMagicWandActive = false;
@@ -8234,6 +8368,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function closeModal() {{
+        invalidateModalRenderedView();
         document.getElementById('modal').classList.remove('active');
         modalMagicWandActive = false;
         isDrawingModalLasso = false;
@@ -8802,8 +8937,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 modalPanX += mouseX - nextAnchorScreen.x;
                 modalPanY += mouseY - nextAnchorScreen.y;
             }}
-
-            renderModalSection();
+            if (!applyModalInteractionPreview()) {{
+                renderModalSection();
+                return;
+            }}
+            scheduleModalInteractionCommit(120);
         }});
 
         const canvas = document.getElementById('modal-canvas');
@@ -9186,7 +9324,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             hideTooltip();
             if (modalAnnotationModeActive) {{
                 if (!modalSection) return;
-                const rect = canvas.getBoundingClientRect();
+                const rect = container.getBoundingClientRect();
                 const x = e.clientX - rect.left;
                 const y = e.clientY - rect.top;
                 isDrawingModalAnnotation = true;
@@ -9196,7 +9334,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
             if (modalMagicWandActive) {{
                 if (!modalSection) return;
-                const rect = canvas.getBoundingClientRect();
+                const rect = container.getBoundingClientRect();
                 const x = e.clientX - rect.left;
                 const y = e.clientY - rect.top;
                 isDrawingModalLasso = true;
@@ -9214,7 +9352,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const config = getColorConfig();
             if (config.is_continuous || !modalTypeSelectEnabled) return;
 
-            const rect = canvas.getBoundingClientRect();
+            const rect = container.getBoundingClientRect();
             const mouseX = e.clientX - rect.left;
             const mouseY = e.clientY - rect.top;
             const transform = getModalViewTransform(rect);
@@ -9236,7 +9374,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }});
         document.addEventListener('mousemove', (e) => {{
             if (isDrawingModalAnnotation) {{
-                const rect = canvas.getBoundingClientRect();
+                const rect = container.getBoundingClientRect();
                 const x = e.clientX - rect.left;
                 const y = e.clientY - rect.top;
                 const last = modalAnnotationPath[modalAnnotationPath.length - 1];
@@ -9248,7 +9386,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 return;
             }}
             if (isDrawingModalLasso) {{
-                const rect = canvas.getBoundingClientRect();
+                const rect = container.getBoundingClientRect();
                 const x = e.clientX - rect.left;
                 const y = e.clientY - rect.top;
                 const last = modalLassoPath[modalLassoPath.length - 1];
@@ -9263,7 +9401,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             modalPanX = lastPanX + (e.clientX - dragStartX);
             modalPanY = lastPanY + (e.clientY - dragStartY);
             modalPointerMoved = true;
-            renderModalSection();
+            if (!applyModalInteractionPreview()) {{
+                renderModalSection();
+                return;
+            }}
+            scheduleModalInteractionCommit(90);
         }});
         document.addEventListener('mouseup', () => {{
             if (isDrawingModalAnnotation) {{
@@ -9278,6 +9420,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
             if (isDragging) {{
                 isDragging = false;
+                renderModalSection();
             }}
             updateModalCanvasCursor();
         }});
@@ -9287,7 +9430,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         canvas.addEventListener('mousemove', (e) => {{
             if (isDragging || isDrawingModalLasso || isDrawingModalAnnotation || modalMagicWandActive || modalAnnotationModeActive || !modalSection) return;
 
-            const rect = canvas.getBoundingClientRect();
+            const rect = container.getBoundingClientRect();
             const mouseX = e.clientX - rect.left;
             const mouseY = e.clientY - rect.top;
             const transform = getModalViewTransform(rect);

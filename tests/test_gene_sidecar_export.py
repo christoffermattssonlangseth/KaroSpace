@@ -130,6 +130,9 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert "function renderClusterDE()" in html_text
     assert "Load marker gene into the viewer" in html_text
     assert "Click a marker gene to load it in the viewer." in html_text
+    assert "Marker gene name only; this gene was not embedded in the viewer" in html_text
+    assert "function applyModalInteractionPreview()" in html_text
+    assert "function scheduleModalInteractionCommit(delayMs = 120)" in html_text
     assert "function recordRecentGene(gene)" in html_text
     assert "function loadSavedGenePanels()" in html_text
     assert "const GENE_RECENTS_STORAGE_KEY = getViewerScopedStorageKey('gene-recents');" in html_text

@@ -131,7 +131,7 @@ export_to_html(
 # 4. Click to expand sections with zoom/pan
 # 5. Toggle categories on/off in the legend
 
-print("\nDone! Open eae_mana_viewer.html in a browser.")
+print("\nDone! Open BALO.html in a browser.")
 print("Use the filter chips to show only specific courses (e.g., peak_III)")
 print("Use the Color dropdown to switch between different annotations")
 print("Type a gene name to view expression (must be in the genes list)")
