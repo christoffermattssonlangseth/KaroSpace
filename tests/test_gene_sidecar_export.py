@@ -124,7 +124,9 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert 'id="modal-blend-loading"' in html_text
     assert 'id="gene-discovery-panel"' in html_text
     assert 'id="gene-panel-new"' in html_text
-    assert 'id="genes-tab-compare"' in html_text
+    assert 'id="color-tab-compare"' in html_text
+    assert ">Summary<" in html_text
+    assert ">Neighborhood<" in html_text
     assert "function getGeneSearchResults(query, limit = GENE_DISCOVERY_MAX_RESULTS)" in html_text
     assert "function renderGeneDiscoveryPanel()" in html_text
     assert "function renderClusterDE()" in html_text
@@ -133,11 +135,43 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert "Marker gene name only; this gene was not embedded in the viewer" in html_text
     assert "function applyModalInteractionPreview()" in html_text
     assert "function scheduleModalInteractionCommit(delayMs = 120)" in html_text
+    assert "function ensureSectionSpatialIndex(section)" in html_text
+    assert "function querySectionSpatialIndex(section, bbox)" in html_text
+    assert "function getAvailableComparisonColors()" in html_text
+    assert "function renderComparisonCountSummary(colorCol, sourceCategory, referenceCategory)" in html_text
+    assert "function renderComparisonNeighborSummary(colorCol, sourceCategory, referenceCategory)" in html_text
+    assert "function renderComparisonInteractionSummary(colorCol, sourceCategory, referenceCategory)" in html_text
+    assert "function renderClusterDEResultSection(colorCol, sourceCategory, referenceCategory)" in html_text
+    assert "Category A" in html_text
+    assert "Category B" in html_text
     assert "function recordRecentGene(gene)" in html_text
     assert "function loadSavedGenePanels()" in html_text
     assert "const GENE_RECENTS_STORAGE_KEY = getViewerScopedStorageKey('gene-recents');" in html_text
     assert html_text.index("function getMarkerGenesForColorCategory(colorCol, category)") < html_text.index("function getGeneSuggestionGroups()")
     assert "was not pre-loaded" not in html_text
+
+
+def test_sidecar_export_respects_custom_shard_size(tmp_path):
+    dataset = _build_dataset()
+    output_path = tmp_path / "viewer.html"
+
+    export_to_html(
+        dataset,
+        output_path=str(output_path),
+        color="leiden",
+        genes=["G1"],
+        use_hvgs=False,
+        gene_storage="sidecar",
+        gene_sidecar_shard_size=1,
+    )
+
+    aux_path = tmp_path / "viewer.genes.json"
+    manifest = json.loads(aux_path.read_text(encoding="utf-8"))
+    shard_files = sorted((tmp_path / "viewer.genes").glob("*.json"))
+
+    assert len(shard_files) == 2
+    assert len(manifest["shards"]) == 2
+    assert manifest["gene_to_shard"]["G2"] != manifest["gene_to_shard"]["G3"]
 
 
 def test_embedded_mode_stays_single_file(tmp_path):
