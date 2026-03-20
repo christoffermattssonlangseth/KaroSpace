@@ -13,6 +13,9 @@ Originally developed at Karolinska Institutet for visualizing Xenium spatial tra
 ## Features
 
 For a full feature inventory, see [FEATURES_SUMMARY.md](FEATURES_SUMMARY.md).
+For the shareable package format, see [KAROSPACE_PACKAGE_FORMAT_SPEC.md](KAROSPACE_PACKAGE_FORMAT_SPEC.md).
+The reference browser opener for `.karospace` packages is [karospace-package-loader.html](karospace-package-loader.html).
+When exporting `something.karospace`, KaroSpace also writes `something.loader.html` as a local no-install opener for that package workflow.
 
 - **Grid + modal exploration** - Browse many sections in a responsive grid, then zoom/pan any section in detail
 - **Per-section rotation** - Set exact initial section angles at export time and adjust them interactively in the viewer

@@ -44,8 +44,11 @@ data/
 # Output
 output/
 *.html
+!karospace-package-loader.html
+*.karospace
 *.genes.json
 *.genes/
+tmp_hydrated_script_*.js
 # Keep unpublished local exports out of git
 BALO.html
 

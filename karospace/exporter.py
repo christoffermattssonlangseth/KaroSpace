@@ -8,7 +8,11 @@ for interactive visualization of spatial transcriptomics data.
 import base64
 import json
 import os
+import shutil
+import tempfile
 import time
+import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Mapping, Optional, List, Tuple, Union
 import numpy as np
@@ -21,6 +25,8 @@ except Exception:  # pragma: no cover - optional dependency fallback
 from .data_loader import SpatialDataset
 
 GENE_SIDECAR_SHARD_SIZE = 256
+KAROSPACE_PACKAGE_MANIFEST = "karospace-package.json"
+KAROSPACE_PACKAGE_LOADER_FILENAME = "karospace-package-loader.html"
 
 
 def _load_logo_base64() -> Optional[str]:
@@ -36,6 +42,127 @@ def _chunked(values: List[str], size: int) -> List[List[str]]:
     if size < 1:
         raise ValueError("chunk size must be >= 1")
     return [values[i:i + size] for i in range(0, len(values), size)]
+
+
+def _isoformat_utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _get_karospace_version() -> str:
+    try:
+        from . import __version__
+
+        return str(__version__)
+    except Exception:
+        return "unknown"
+
+
+def _guess_package_media_type(path: Union[str, Path]) -> str:
+    suffix = Path(path).suffix.lower()
+    if suffix == ".html":
+        return "text/html"
+    if suffix == ".json":
+        return "application/json"
+    return "application/octet-stream"
+
+
+def _build_karospace_package_manifest(
+    *,
+    source_root: Path,
+    entry_html: str,
+    gene_manifest_path: str,
+    gene_shard_dir: str,
+    title: str,
+    n_sections: int,
+    total_cells: int,
+) -> dict:
+    files = {}
+    for file_path in sorted(p for p in source_root.rglob("*") if p.is_file()):
+        rel_path = file_path.relative_to(source_root).as_posix()
+        files[rel_path] = {
+            "media_type": _guess_package_media_type(rel_path),
+            "size_bytes": int(file_path.stat().st_size),
+        }
+
+    return {
+        "format": "karospace-package-v1",
+        "package_version": 1,
+        "entry_html": entry_html,
+        "created_at": _isoformat_utc_now(),
+        "producer": {
+            "name": "karospace",
+            "version": _get_karospace_version(),
+        },
+        "title": title,
+        "n_sections": int(n_sections),
+        "total_cells": int(total_cells),
+        "viewer": {
+            "mode": "sidecar-package",
+            "gene_storage": "sidecar",
+            "gene_manifest_path": gene_manifest_path,
+            "gene_shard_dir": gene_shard_dir,
+        },
+        "files": files,
+    }
+
+
+def _write_karospace_package(
+    *,
+    package_path: Path,
+    source_root: Path,
+    entry_html: str,
+    gene_manifest_path: str,
+    gene_shard_dir: str,
+    title: str,
+    n_sections: int,
+    total_cells: int,
+) -> None:
+    if not (source_root / entry_html).exists():
+        raise FileNotFoundError(f"package entry HTML missing: {entry_html}")
+    if not (source_root / gene_manifest_path).exists():
+        raise FileNotFoundError(f"package gene manifest missing: {gene_manifest_path}")
+    if not (source_root / gene_shard_dir).exists():
+        raise FileNotFoundError(f"package gene shard directory missing: {gene_shard_dir}")
+
+    package_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest = _build_karospace_package_manifest(
+        source_root=source_root,
+        entry_html=entry_html,
+        gene_manifest_path=gene_manifest_path,
+        gene_shard_dir=gene_shard_dir,
+        title=title,
+        n_sections=n_sections,
+        total_cells=total_cells,
+    )
+
+    with zipfile.ZipFile(package_path, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(KAROSPACE_PACKAGE_MANIFEST, json.dumps(manifest, separators=(",", ":")))
+        for file_path in sorted(p for p in source_root.rglob("*") if p.is_file()):
+            rel_path = file_path.relative_to(source_root).as_posix()
+            zf.write(file_path, arcname=rel_path)
+
+
+def _find_karospace_package_loader_template() -> Optional[Path]:
+    candidates = [
+        Path(__file__).resolve().with_name("package_loader.html"),
+        Path(__file__).resolve().parent.parent / KAROSPACE_PACKAGE_LOADER_FILENAME,
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _write_karospace_package_loader(
+    *,
+    loader_path: Path,
+) -> Optional[Path]:
+    template_path = _find_karospace_package_loader_template()
+    if template_path is None:
+        return None
+    loader_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(template_path, loader_path)
+    return loader_path
 
 
 def _select_top_variable_genes(adata, n: int) -> List[str]:
@@ -3181,13 +3308,41 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (modalSection && modalSection.id === sectionId) renderModalSection();
     }}
 
+    function createViewerStorage() {{
+        try {{
+            const storage = window.localStorage;
+            if (!storage) throw new Error('localStorage unavailable');
+            const probeKey = '__karospace_storage_probe__';
+            storage.setItem(probeKey, '1');
+            storage.removeItem(probeKey);
+            return storage;
+        }} catch (error) {{
+            console.warn('Persistent browser storage unavailable; using in-memory fallback.', error);
+            const memoryStorage = new Map();
+            return {{
+                getItem(key) {{
+                    const storageKey = String(key);
+                    return memoryStorage.has(storageKey) ? memoryStorage.get(storageKey) : null;
+                }},
+                setItem(key, value) {{
+                    memoryStorage.set(String(key), String(value));
+                }},
+                removeItem(key) {{
+                    memoryStorage.delete(String(key));
+                }},
+            }};
+        }}
+    }}
+
+    const VIEWER_STORAGE = createViewerStorage();
+
     // Theme toggle
     function toggleTheme() {{
         currentTheme = currentTheme === 'light' ? 'dark' : 'light';
         document.documentElement.classList.remove('light', 'dark');
         document.documentElement.classList.add(currentTheme);
         document.getElementById('theme-icon').textContent = currentTheme === 'dark' ? '☀️' : '🌙';
-        localStorage.setItem('spatial-viewer-theme', currentTheme);
+        VIEWER_STORAGE.setItem('spatial-viewer-theme', currentTheme);
         // Re-render canvases with new background
         renderAllSections();
         if (modalSection) renderModalSection();
@@ -3196,7 +3351,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function initTheme() {{
         // Check for saved preference or use initial theme
-        const saved = localStorage.getItem('spatial-viewer-theme');
+        const saved = VIEWER_STORAGE.getItem('spatial-viewer-theme');
         if (saved && (saved === 'light' || saved === 'dark')) {{
             currentTheme = saved;
         }}
@@ -3925,7 +4080,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (geneAuxManifest) return geneAuxManifest;
         if (geneAuxManifestPromise) return geneAuxManifestPromise;
         if (!DATA.gene_aux_url) return null;
-        if (window.location.protocol === 'file:') {{
+        if (window.location.protocol === 'file:' && !window.__karospacePackageMode) {{
             window.__karospaceShowStartupError?.(
                 'This viewer was exported with sidecar gene loading. Open it over HTTP(S) to load additional genes.'
             );
@@ -5267,6 +5422,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function resolveViewerRelativeUrl(path) {{
         if (!path) return '';
+        if (window.__karospacePackageMode) {{
+            return String(path);
+        }}
         try {{
             return new URL(String(path), window.location.href).href;
         }} catch (_error) {{
@@ -5547,7 +5705,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function escapeCsvCell(value) {{
         if (value === null || value === undefined) return '';
         const text = String(value);
-        if (/[",\n\r]/.test(text)) {{
+        if (/[",\\n\\r]/.test(text)) {{
             return `"${{text.replace(/"/g, '""')}}"`;
         }}
         return text;
@@ -5607,7 +5765,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }});
         return rows
             .map((row) => row.map((value) => escapeCsvCell(value)).join(','))
-            .join('\n');
+            .join('\\n');
     }}
 
     function exportAnnotationDECsv(annotationA, annotationB, exportState) {{
@@ -6026,7 +6184,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function readViewerJsonStorage(key, fallback) {{
         try {{
-            const raw = localStorage.getItem(key);
+            const raw = VIEWER_STORAGE.getItem(key);
             if (!raw) return fallback;
             return JSON.parse(raw);
         }} catch (error) {{
@@ -6037,7 +6195,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function writeViewerJsonStorage(key, value) {{
         try {{
-            localStorage.setItem(key, JSON.stringify(value));
+            VIEWER_STORAGE.setItem(key, JSON.stringify(value));
             return true;
         }} catch (error) {{
             console.warn('Failed to write local storage key', key, error);
@@ -6804,7 +6962,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function loadUMAPPanelState() {{
         try {{
-            const saved = localStorage.getItem(UMAP_PANEL_STORAGE_KEY);
+            const saved = VIEWER_STORAGE.getItem(UMAP_PANEL_STORAGE_KEY);
             if (!saved) return;
             const parsed = JSON.parse(saved);
             if (parsed && typeof parsed === 'object') {{
@@ -6818,7 +6976,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function saveUMAPPanelState() {{
         try {{
-            localStorage.setItem(
+            VIEWER_STORAGE.setItem(
                 UMAP_PANEL_STORAGE_KEY,
                 JSON.stringify({{ dock: umapPanelDock, size: umapPanelSize }})
             );
@@ -11157,7 +11315,8 @@ def export_to_html(
     dataset : SpatialDataset
         Dataset to export
     output_path : str
-        Path for output HTML file
+        Path for output HTML file, or a `.karospace` package when
+        `gene_storage="sidecar"`.
     color : str
         Initial color column or gene name
     title : str
@@ -11188,7 +11347,8 @@ def export_to_html(
     gene_storage : str
         "embedded" (default) keeps gene data in the HTML. "sidecar" embeds only
         the selected/preloaded genes and writes remaining genes to an auxiliary
-        JSON file for downstream lazy loading.
+        JSON file for downstream lazy loading. `.karospace` package export
+        requires `"sidecar"`.
     gene_aux_path : str, optional
         Output path for the sidecar gene JSON when gene_storage="sidecar".
     gene_sidecar_shard_size : int
@@ -11260,6 +11420,32 @@ def export_to_html(
     str
         Path to created HTML file
     """
+    requested_output_path = Path(output_path).expanduser()
+    package_mode = requested_output_path.suffix.lower() == ".karospace"
+    package_output_path_obj: Optional[Path] = None
+    package_loader_output_path: Optional[Path] = None
+    package_temp_dir: Optional[tempfile.TemporaryDirectory] = None
+    package_entry_html = "index.html"
+    package_gene_manifest_name: Optional[str] = None
+    if package_mode:
+        package_output_path_obj = requested_output_path.resolve()
+        package_loader_output_path = package_output_path_obj.with_suffix(".loader.html")
+        if str(gene_storage or "embedded").strip().lower() != "sidecar":
+            raise ValueError(".karospace export requires gene_storage='sidecar'")
+        if gene_aux_path:
+            aux_name = Path(gene_aux_path).name
+            if aux_name != str(Path(gene_aux_path)):
+                raise ValueError("gene_aux_path must be a filename when exporting .karospace")
+            if Path(aux_name).suffix.lower() != ".json":
+                raise ValueError("gene_aux_path must end with .json when exporting .karospace")
+            package_gene_manifest_name = aux_name
+        else:
+            package_gene_manifest_name = f"{package_output_path_obj.stem}.genes.json"
+        package_temp_dir = tempfile.TemporaryDirectory(prefix="karospace-package-")
+        requested_output_path = Path(package_temp_dir.name) / package_entry_html
+        gene_aux_path = package_gene_manifest_name
+        output_path = str(requested_output_path)
+
     # Theme colors
     if theme == "dark":
         colors = {
@@ -11311,7 +11497,7 @@ def export_to_html(
     if gene_storage == "sidecar":
         sidecar_genes = [g for g in dataset.var_names if g not in set(embedded_genes)]
         sidecar_export_indices = dataset._get_export_section_indices(downsample=downsample)
-        output_path_obj = Path(output_path).expanduser()
+        output_path_obj = requested_output_path
         if gene_aux_path:
             resolved_gene_aux_path = Path(gene_aux_path).expanduser()
         else:
@@ -11403,7 +11589,7 @@ def export_to_html(
         assert resolved_gene_aux_path is not None
         data["available_genes"] = list(dataset.var_names)
         data["gene_aux_url"] = Path(
-            os.path.relpath(resolved_gene_aux_path, start=Path(output_path).expanduser().resolve().parent)
+            os.path.relpath(resolved_gene_aux_path, start=requested_output_path.resolve().parent)
         ).as_posix()
         gene_aux_url = data["gene_aux_url"]
     else:
@@ -11507,7 +11693,7 @@ def export_to_html(
     )
 
     # Write file
-    output_path = str(Path(output_path).resolve())
+    output_path = str(requested_output_path.resolve())
     if resolved_gene_aux_path is not None:
         resolved_gene_aux_path.parent.mkdir(parents=True, exist_ok=True)
         assert resolved_gene_aux_dir is not None
@@ -11593,10 +11779,38 @@ def export_to_html(
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(html)
 
-    print(f"Exported HTML viewer to: {output_path}")
-    if resolved_gene_aux_path is not None:
-        print(f"Exported gene sidecar to: {resolved_gene_aux_path}")
-        print(f"  - shard directory: {resolved_gene_aux_dir}")
+    if package_mode:
+        assert package_output_path_obj is not None
+        assert resolved_gene_aux_path is not None
+        assert package_gene_manifest_name is not None
+        _write_karospace_package(
+            package_path=package_output_path_obj,
+            source_root=Path(output_path).parent,
+            entry_html=package_entry_html,
+            gene_manifest_path=package_gene_manifest_name,
+            gene_shard_dir=Path(package_gene_manifest_name).with_suffix("").as_posix(),
+            title=title,
+            n_sections=data["n_sections"],
+            total_cells=data["total_cells"],
+        )
+        written_loader_path = None
+        if package_loader_output_path is not None:
+            written_loader_path = _write_karospace_package_loader(
+                loader_path=package_loader_output_path,
+            )
+        print(f"Exported KaroSpace package to: {package_output_path_obj}")
+        print(f"  - entry HTML: {package_entry_html}")
+        print(f"  - packaged gene manifest: {package_gene_manifest_name}")
+        print(f"  - packaged shard directory: {Path(package_gene_manifest_name).with_suffix('').as_posix()}")
+        if written_loader_path is not None:
+            print(f"  - local package loader: {written_loader_path}")
+        else:
+            print(f"  - local package loader: unavailable (template not found)")
+    else:
+        print(f"Exported HTML viewer to: {output_path}")
+        if resolved_gene_aux_path is not None:
+            print(f"Exported gene sidecar to: {resolved_gene_aux_path}")
+            print(f"  - shard directory: {resolved_gene_aux_dir}")
     print(f"  - {data['n_sections']} sections")
     print(f"  - {data['total_cells']:,} cells")
     if used_auto_spot_size:
@@ -11613,5 +11827,6 @@ def export_to_html(
             print(f"  - gene encoding: {n_sparse} sparse, {n_dense} dense")
     if gene_aux_url:
         print(f"  - sidecar genes available via {gene_aux_url}")
-
-    return output_path
+    if package_temp_dir is not None:
+        package_temp_dir.cleanup()
+    return str(package_output_path_obj) if package_output_path_obj is not None else output_path

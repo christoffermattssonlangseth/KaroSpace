@@ -1,5 +1,10 @@
 import json
 import re
+import shutil
+import subprocess
+import tempfile
+import zipfile
+from pathlib import Path
 
 import h5py
 import numpy as np
@@ -121,6 +126,11 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert 'data-modal-group="view"' in html_text
     assert "function updateModalToolbarState()" in html_text
     assert "function initModalControlsDragging()" in html_text
+    assert "function createViewerStorage()" in html_text
+    assert "const VIEWER_STORAGE = createViewerStorage();" in html_text
+    assert "VIEWER_STORAGE.getItem('spatial-viewer-theme')" in html_text
+    assert "VIEWER_STORAGE.setItem('spatial-viewer-theme', currentTheme)" in html_text
+    assert "window.location.protocol === 'file:' && !window.__karospacePackageMode" in html_text
     assert 'id="modal-blend-loading"' in html_text
     assert 'id="gene-discovery-panel"' in html_text
     assert 'id="gene-panel-new"' in html_text
@@ -144,9 +154,11 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert "function renderClusterDEResultSection(colorCol, sourceCategory, referenceCategory)" in html_text
     assert "function computeRegionAnnotationDE(annotationA, annotationB, options = {})" in html_text
     assert "function fetchGeneAuxShardForAnalysis(shardUrl)" in html_text
+    assert "if (window.__karospacePackageMode) {" in html_text
     assert "function runFullRegionAnnotationDE(annotationA, annotationB)" in html_text
     assert "function exportAnnotationDEReport(annotationA, annotationB, exportState)" in html_text
     assert "function exportAnnotationDECsv(annotationA, annotationB, exportState)" in html_text
+    assert 'if (/[",\\n\\r]/.test(text)) {' in html_text
     assert "function renderGeneGoogleSearchButton(gene, options = {})" in html_text
     assert "function renderAnnotationRegionDESection(annotations)" in html_text
     assert 'id="annotation-de-source"' in html_text
@@ -173,6 +185,27 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert html_text.index("function getMarkerGenesForColorCategory(colorCol, category)") < html_text.index("function getGeneSuggestionGroups()")
     assert "was not pre-loaded" not in html_text
 
+    if shutil.which("node"):
+        script_matches = list(re.finditer(r"<script([^>]*)>(.*?)</script>", html_text, re.DOTALL | re.IGNORECASE))
+        runtime_scripts = [
+            match.group(2)
+            for match in script_matches
+            if 'application/json' not in (match.group(1) or '')
+        ]
+        assert runtime_scripts, "expected viewer runtime script"
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".js", delete=False) as handle:
+            handle.write(runtime_scripts[-1])
+            script_path = handle.name
+        try:
+            subprocess.run(
+                ["node", "--check", script_path],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        finally:
+            Path(script_path).unlink(missing_ok=True)
+
 
 def test_sidecar_export_respects_custom_shard_size(tmp_path):
     dataset = _build_dataset()
@@ -195,6 +228,100 @@ def test_sidecar_export_respects_custom_shard_size(tmp_path):
     assert len(shard_files) == 2
     assert len(manifest["shards"]) == 2
     assert manifest["gene_to_shard"]["G2"] != manifest["gene_to_shard"]["G3"]
+
+
+def test_karospace_package_export_wraps_sidecar_assets(tmp_path):
+    dataset = _build_dataset()
+    package_path = tmp_path / "viewer.karospace"
+    loader_path = tmp_path / "viewer.loader.html"
+
+    returned = export_to_html(
+        dataset,
+        output_path=str(package_path),
+        color="leiden",
+        genes=["G1"],
+        use_hvgs=False,
+        gene_encoding="sparse",
+        gene_storage="sidecar",
+    )
+
+    assert returned == str(package_path.resolve())
+    assert package_path.exists()
+    assert loader_path.exists()
+    assert not (tmp_path / "index.html").exists()
+    assert not (tmp_path / "viewer.genes.json").exists()
+    assert not (tmp_path / "viewer.genes").exists()
+
+    loader_html = loader_path.read_text(encoding="utf-8")
+    assert "<title>KaroSpace</title>" in loader_html
+    assert 'id="loading-label">KaroSpace</div>' in loader_html
+    assert "drop a .karospace file to open" in loader_html
+    assert "window.__karospacePackageSessions" in loader_html
+
+    with zipfile.ZipFile(package_path) as zf:
+        names = set(zf.namelist())
+        assert "karospace-package.json" in names
+        assert "index.html" in names
+        assert "viewer.genes.json" in names
+        shard_names = sorted(name for name in names if name.startswith("viewer.genes/") and name.endswith(".json"))
+        assert shard_names
+
+        package_manifest = json.loads(zf.read("karospace-package.json").decode("utf-8"))
+        html_text = zf.read("index.html").decode("utf-8")
+        embedded = _extract_data_json(html_text)
+        manifest = json.loads(zf.read("viewer.genes.json").decode("utf-8"))
+        shard = json.loads(zf.read(shard_names[0]).decode("utf-8"))
+
+    assert package_manifest["format"] == "karospace-package-v1"
+    assert package_manifest["entry_html"] == "index.html"
+    assert package_manifest["viewer"]["mode"] == "sidecar-package"
+    assert package_manifest["viewer"]["gene_storage"] == "sidecar"
+    assert package_manifest["viewer"]["gene_manifest_path"] == "viewer.genes.json"
+    assert package_manifest["viewer"]["gene_shard_dir"] == "viewer.genes"
+    assert "index.html" in package_manifest["files"]
+    assert "viewer.genes.json" in package_manifest["files"]
+    assert shard_names[0] in package_manifest["files"]
+
+    assert embedded["gene_aux_url"] == "viewer.genes.json"
+    assert embedded["available_genes"] == ["G1", "G2", "G3"]
+    assert set(embedded["genes_meta"]) == {"G1"}
+    assert manifest["format"] == "karospace-gene-sidecar-manifest-v2"
+    assert manifest["gene_to_shard"]["G2"].startswith("viewer.genes/")
+    assert shard["format"] == "karospace-gene-sidecar-shard-v2"
+
+
+def test_karospace_package_requires_sidecar_mode(tmp_path):
+    dataset = _build_dataset()
+
+    with pytest.raises(ValueError, match="gene_storage='sidecar'"):
+        export_to_html(
+            dataset,
+            output_path=str(tmp_path / "viewer.karospace"),
+            color="leiden",
+            genes=["G1"],
+            use_hvgs=False,
+            gene_storage="embedded",
+        )
+
+
+def test_karospace_package_loader_page_contains_expected_runtime_hooks():
+    loader_path = Path(__file__).resolve().parents[1] / "karospace-package-loader.html"
+    loader_html = loader_path.read_text(encoding="utf-8")
+
+    assert "<title>KaroSpace</title>" in loader_html
+    assert 'id="loading-label">KaroSpace</div>' in loader_html
+    assert "drop a .karospace file to open" in loader_html
+    assert "karospace-package.json" in loader_html
+    assert "window.__karospacePackageSessions" in loader_html
+    assert "DecompressionStream" in loader_html
+    assert "karospace-gene-sidecar-manifest-v2" in loader_html
+    assert "function injectBootstrap(htmlText, sessionId)" in loader_html
+    assert "window.fetch = function packageAwareFetch(input, init)" in loader_html
+    assert "window.__karospacePackageSession" in loader_html
+    assert "document.write(hydratedHtml);" in loader_html
+    assert "'<scr' + 'ipt>'" in loader_html
+    assert "'</scr' + 'ipt>'" in loader_html
+    assert 'type="file" accept=".karospace,.zip,application/zip,application/x-karospace-package"' in loader_html
 
 
 def test_embedded_mode_stays_single_file(tmp_path):
