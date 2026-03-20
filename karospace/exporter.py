@@ -3246,6 +3246,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         URL.revokeObjectURL(url);
     }}
 
+    function downloadTextFile(text, filename, mimeType = 'text/plain;charset=utf-8') {{
+        const blob = new Blob([String(text ?? '')], {{ type: mimeType }});
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+    }}
+
     function replaceCanvasesWithImages(root) {{
         const originals = document.querySelectorAll('canvas');
         const clones = root.querySelectorAll('canvas');
@@ -5530,6 +5542,84 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const referenceLabel = sanitizeFilenamePart(annotationB.label || `annotation-${{annotationB.id}}`);
         const filename = `karospace-region-de-${{sourceLabel}}-vs-${{referenceLabel}}-${{getScreenshotTimestamp()}}.json`;
         downloadJsonFile(report, filename);
+    }}
+
+    function escapeCsvCell(value) {{
+        if (value === null || value === undefined) return '';
+        const text = String(value);
+        if (/[",\n\r]/.test(text)) {{
+            return `"${{text.replace(/"/g, '""')}}"`;
+        }}
+        return text;
+    }}
+
+    function buildAnnotationDECsv(annotationA, annotationB, exportState) {{
+        const report = buildAnnotationDEReport(annotationA, annotationB, exportState);
+        if (!report) return '';
+        const rows = [];
+        rows.push([
+            'rank',
+            'gene',
+            'log2fc_a_vs_b',
+            'score',
+            'pct_expr_a',
+            'pct_expr_b',
+            'mean_a',
+            'mean_b',
+            'result_mode',
+            'color_column',
+            'region_a_id',
+            'region_a_label',
+            'region_a_section_id',
+            'region_a_n_cells',
+            'region_b_id',
+            'region_b_label',
+            'region_b_section_id',
+            'region_b_n_cells',
+            'loaded_gene_count',
+            'total_gene_count',
+            'exported_at',
+        ]);
+        (report.genes || []).forEach((entry) => {{
+            rows.push([
+                entry.rank,
+                entry.gene,
+                entry.log2fc_a_vs_b,
+                entry.score,
+                entry.pct_expr_a,
+                entry.pct_expr_b,
+                entry.mean_a,
+                entry.mean_b,
+                report.result_mode,
+                report.color_column,
+                report.region_a?.id,
+                report.region_a?.label,
+                report.region_a?.section_id,
+                report.region_a?.n_cells,
+                report.region_b?.id,
+                report.region_b?.label,
+                report.region_b?.section_id,
+                report.region_b?.n_cells,
+                report.stats?.loaded_gene_count,
+                report.stats?.total_gene_count,
+                report.exported_at,
+            ]);
+        }});
+        return rows
+            .map((row) => row.map((value) => escapeCsvCell(value)).join(','))
+            .join('\n');
+    }}
+
+    function exportAnnotationDECsv(annotationA, annotationB, exportState) {{
+        const csvText = buildAnnotationDECsv(annotationA, annotationB, exportState);
+        if (!csvText) {{
+            alert('No region DE result is available to export yet.');
+            return;
+        }}
+        const sourceLabel = sanitizeFilenamePart(annotationA.label || `annotation-${{annotationA.id}}`);
+        const referenceLabel = sanitizeFilenamePart(annotationB.label || `annotation-${{annotationB.id}}`);
+        const filename = `karospace-region-de-${{sourceLabel}}-vs-${{referenceLabel}}-${{getScreenshotTimestamp()}}.csv`;
+        downloadTextFile(csvText, filename, 'text/csv;charset=utf-8');
     }}
 
     function renderSelectionComparisonHtml(summaryA) {{
@@ -8028,7 +8118,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
 
         if (exportState) {{
-            resultHtml += '<div style="display:flex; justify-content:flex-end; margin-top:6px;"><button class="legend-btn" id="annotation-de-export-report" type="button">Export Report</button></div>';
+            resultHtml += `
+                <div style="display:flex; justify-content:flex-end; gap:6px; margin-top:6px;">
+                    <button class="legend-btn" id="annotation-de-export-json" type="button">Export JSON</button>
+                    <button class="legend-btn" id="annotation-de-export-csv" type="button">Export CSV</button>
+                </div>
+            `;
         }}
 
         html += `<div id="annotation-de-results">${{resultHtml}}</div>`;
@@ -8188,12 +8283,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 renderAnnotationComparison();
             }});
         }}
-        const exportReportBtn = container.querySelector('#annotation-de-export-report');
-        if (exportReportBtn && source && reference) {{
-            exportReportBtn.addEventListener('click', () => {{
+        const exportJsonBtn = container.querySelector('#annotation-de-export-json');
+        if (exportJsonBtn && source && reference) {{
+            exportJsonBtn.addEventListener('click', () => {{
                 const quickResult = computeRegionAnnotationDE(source, reference, {{ topN: annotationDeTopN }});
                 const exportState = getAnnotationDEExportState(source, reference, quickResult);
                 exportAnnotationDEReport(source, reference, exportState);
+            }});
+        }}
+        const exportCsvBtn = container.querySelector('#annotation-de-export-csv');
+        if (exportCsvBtn && source && reference) {{
+            exportCsvBtn.addEventListener('click', () => {{
+                const quickResult = computeRegionAnnotationDE(source, reference, {{ topN: annotationDeTopN }});
+                const exportState = getAnnotationDEExportState(source, reference, quickResult);
+                exportAnnotationDECsv(source, reference, exportState);
             }});
         }}
         bindGeneActivateButtons(container, renderAnnotationComparison);

@@ -146,6 +146,7 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert "function fetchGeneAuxShardForAnalysis(shardUrl)" in html_text
     assert "function runFullRegionAnnotationDE(annotationA, annotationB)" in html_text
     assert "function exportAnnotationDEReport(annotationA, annotationB, exportState)" in html_text
+    assert "function exportAnnotationDECsv(annotationA, annotationB, exportState)" in html_text
     assert "function renderGeneGoogleSearchButton(gene, options = {})" in html_text
     assert "function renderAnnotationRegionDESection(annotations)" in html_text
     assert 'id="annotation-de-source"' in html_text
@@ -154,12 +155,14 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert 'id="annotation-de-run-full"' in html_text
     assert 'id="annotation-de-refresh-full"' in html_text
     assert 'id="annotation-de-cancel"' in html_text
-    assert 'id="annotation-de-export-report"' in html_text
+    assert 'id="annotation-de-export-json"' in html_text
+    assert 'id="annotation-de-export-csv"' in html_text
     assert 'data-gene-google-search="' in html_text
     assert "Region-to-Region DE" in html_text
     assert "Run Full Region DE" in html_text
     assert "Refresh Full DE" in html_text
-    assert "Export Report" in html_text
+    assert "Export JSON" in html_text
+    assert "Export CSV" in html_text
     assert "Cached full sidecar DE" in html_text
     assert "karospace-region-de-report-v1" in html_text
     assert "Category A" in html_text
