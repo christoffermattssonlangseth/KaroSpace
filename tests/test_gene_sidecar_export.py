@@ -178,6 +178,11 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert "Global Moran&apos;s I ranking precomputed at export." in html_text
     assert "let modalSpacePanActive = false;" in html_text
     assert "Pan inside the modal even while Select or Annotate is active." in html_text
+    assert 'id="shortcuts-overlay"' in html_text
+    assert "function initShortcutsOverlay()" in html_text
+    assert "function toggleShortcutsOverlay()" in html_text
+    assert "if (key === '?')" in html_text
+    assert "Open the full keyboard shortcuts overlay." in html_text
     assert "--selection-outline-color:" in html_text
     assert "function getSelectionOutlineColor()" in html_text
     assert '<button class="graph-toggle" id="graph-toggle"' not in html_text

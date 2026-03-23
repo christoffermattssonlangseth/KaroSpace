@@ -1439,6 +1439,68 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .info-popover.active {{
             display: block;
         }}
+        .shortcuts-overlay {{
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 1400;
+            background: rgba(0, 0, 0, 0.58);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }}
+        .shortcuts-overlay.active {{
+            display: flex;
+        }}
+        .shortcuts-dialog {{
+            width: min(520px, calc(100vw - 32px));
+            max-height: min(78vh, 720px);
+            overflow: auto;
+            border: 1px solid var(--border-color);
+            border-radius: 14px;
+            background: var(--panel-bg);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.28);
+        }}
+        .shortcuts-dialog-header {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 14px 16px 10px;
+            border-bottom: 1px solid var(--border-color);
+        }}
+        .shortcuts-dialog-title {{
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+        }}
+        .shortcuts-dialog-subtitle {{
+            margin-top: 3px;
+            font-size: 11px;
+            color: var(--muted-color);
+        }}
+        .shortcuts-dialog-close {{
+            border: 1px solid var(--border-color);
+            border-radius: 999px;
+            background: var(--input-bg);
+            color: var(--text-color);
+            padding: 4px 9px;
+            font-size: 11px;
+            cursor: pointer;
+        }}
+        .shortcuts-dialog-close:hover {{
+            background: var(--hover-bg);
+        }}
+        .shortcuts-dialog-body {{
+            padding: 12px 16px 16px;
+        }}
+        .shortcuts-dialog-note {{
+            margin-top: 10px;
+            font-size: 11px;
+            color: var(--muted-color);
+        }}
         .color-list {{
             display: flex;
             flex-direction: column;
@@ -3033,6 +3095,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         <div class="info-title">Keyboard Shortcuts</div>
                         <table class="info-shortcuts-table">
                             <tr><td class="info-shortcuts-key"><kbd>Esc</kbd></td><td>Close the modal, or close gene discovery if the modal is not open.</td></tr>
+                            <tr><td class="info-shortcuts-key"><kbd>?</kbd></td><td>Open the full keyboard shortcuts overlay.</td></tr>
                             <tr><td class="info-shortcuts-key"><kbd>/</kbd></td><td>Focus the gene search input and open gene discovery.</td></tr>
                             <tr><td class="info-shortcuts-key"><kbd>←</kbd> <kbd>→</kbd></td><td>Move to the previous or next section while the modal is open.</td></tr>
                             <tr><td class="info-shortcuts-key"><kbd>T</kbd></td><td>Toggle theme.</td></tr>
@@ -3141,6 +3204,34 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         </div>
         <div class="color-panel collapsed" id="color-panel"></div>
         <div class="legend-container" id="legend"></div>
+    </div>
+
+    <div class="shortcuts-overlay" id="shortcuts-overlay" aria-hidden="true">
+        <div class="shortcuts-dialog" role="dialog" aria-modal="true" aria-labelledby="shortcuts-dialog-title">
+            <div class="shortcuts-dialog-header">
+                <div>
+                    <div class="shortcuts-dialog-title" id="shortcuts-dialog-title">Keyboard Shortcuts</div>
+                    <div class="shortcuts-dialog-subtitle">Quick viewer, modal, and navigation controls.</div>
+                </div>
+                <button class="shortcuts-dialog-close" id="shortcuts-dialog-close" type="button">Close</button>
+            </div>
+            <div class="shortcuts-dialog-body">
+                <table class="info-shortcuts-table">
+                    <tr><td class="info-shortcuts-key"><kbd>?</kbd></td><td>Open or close this shortcuts overlay.</td></tr>
+                    <tr><td class="info-shortcuts-key"><kbd>Esc</kbd></td><td>Close this overlay, then the modal, or close gene discovery if the modal is not open.</td></tr>
+                    <tr><td class="info-shortcuts-key"><kbd>/</kbd></td><td>Focus the gene search input and open gene discovery.</td></tr>
+                    <tr><td class="info-shortcuts-key"><kbd>←</kbd> <kbd>→</kbd></td><td>Move to the previous or next section while the modal is open.</td></tr>
+                    <tr><td class="info-shortcuts-key"><kbd>T</kbd></td><td>Toggle theme.</td></tr>
+                    <tr><td class="info-shortcuts-key"><kbd>U</kbd></td><td>Toggle the UMAP panel.</td></tr>
+                    <tr><td class="info-shortcuts-key"><kbd>L</kbd></td><td>Toggle the legend panel.</td></tr>
+                    <tr><td class="info-shortcuts-key"><kbd>Space</kbd> + drag</td><td>Pan inside the modal even while Select or Annotate is active.</td></tr>
+                    <tr><td class="info-shortcuts-key"><kbd>F</kbd></td><td>Fit the current modal section to view.</td></tr>
+                    <tr><td class="info-shortcuts-key"><kbd>+</kbd> <kbd>=</kbd></td><td>Zoom in inside the modal.</td></tr>
+                    <tr><td class="info-shortcuts-key"><kbd>-</kbd></td><td>Zoom out inside the modal.</td></tr>
+                </table>
+                <div class="shortcuts-dialog-note">Shortcuts stay inactive while typing in inputs, selects, or textareas.</div>
+            </div>
+        </div>
     </div>
 
     <div class="modal-overlay" id="modal">
@@ -3939,6 +4030,40 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return !!target.closest('button, a, summary, [role="button"]');
     }}
 
+    function setShortcutsOverlayOpen(open) {{
+        const overlay = document.getElementById('shortcuts-overlay');
+        if (!overlay) return;
+        overlay.classList.toggle('active', !!open);
+        overlay.setAttribute('aria-hidden', open ? 'false' : 'true');
+        if (open) {{
+            const infoPopover = document.getElementById('info-popover');
+            if (infoPopover?.classList.contains('active')) {{
+                infoPopover.classList.remove('active');
+                infoPopover.setAttribute('aria-hidden', 'true');
+            }}
+        }}
+    }}
+
+    function toggleShortcutsOverlay() {{
+        const overlay = document.getElementById('shortcuts-overlay');
+        if (!overlay) return;
+        setShortcutsOverlayOpen(!overlay.classList.contains('active'));
+    }}
+
+    function initShortcutsOverlay() {{
+        const overlay = document.getElementById('shortcuts-overlay');
+        const closeBtn = document.getElementById('shortcuts-dialog-close');
+        if (!overlay) return;
+        closeBtn?.addEventListener('click', () => {{
+            setShortcutsOverlayOpen(false);
+        }});
+        overlay.addEventListener('click', (event) => {{
+            if (event.target === overlay) {{
+                setShortcutsOverlayOpen(false);
+            }}
+        }});
+    }}
+
     function initKeyboardShortcuts() {{
         document.addEventListener('keydown', (event) => {{
             if (event.defaultPrevented) return;
@@ -3957,6 +4082,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
 
             if (key === 'Escape') {{
+                const shortcutsOverlay = document.getElementById('shortcuts-overlay');
+                if (shortcutsOverlay?.classList.contains('active')) {{
+                    event.preventDefault();
+                    setShortcutsOverlayOpen(false);
+                    return;
+                }}
                 if (modalSection) {{
                     event.preventDefault();
                     closeModal();
@@ -3967,6 +4098,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     setGeneDiscoveryOpen(false);
                     return;
                 }}
+                return;
+            }}
+
+            if (key === '?') {{
+                event.preventDefault();
+                toggleShortcutsOverlay();
                 return;
             }}
 
@@ -13215,6 +13352,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             initFilters();
             initModal();
             initUMAP();
+            initShortcutsOverlay();
             initKeyboardShortcuts();
             initHelpTooltips();
             updateSectionRotationIndicators();
