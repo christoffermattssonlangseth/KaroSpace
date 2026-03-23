@@ -2798,6 +2798,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     const DATA = JSON.parse(document.getElementById('karospace-data').textContent);
     DATA.genes_meta = DATA.genes_meta || {{}};
     DATA.gene_encodings = DATA.gene_encodings || {{}};
+    DATA.gene_value_encodings = DATA.gene_value_encodings || {{}};
     const PALETTE = {palette_json};
     const METADATA_LABELS = {metadata_labels_json};
     const OUTLINE_BY = {outline_by_json};
@@ -3748,6 +3749,27 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return new Uint32Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength / 4));
     }}
 
+    function base64ToUint16Array(b64) {{
+        const bytes = base64ToBytes(b64);
+        return new Uint16Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength / 2));
+    }}
+
+    function base64ToUint8Array(b64) {{
+        const bytes = base64ToBytes(b64);
+        return new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    }}
+
+    function decodeQuantizedValues(qvals, qmin, qmax, maxCode) {{
+        const resolvedMin = Number.isFinite(Number(qmin)) ? Number(qmin) : 0;
+        const resolvedMax = Number.isFinite(Number(qmax)) ? Number(qmax) : resolvedMin;
+        const scale = resolvedMax > resolvedMin ? (resolvedMax - resolvedMin) / Number(maxCode) : 0;
+        const arr = new Float32Array(qvals.length);
+        for (let i = 0; i < qvals.length; i++) {{
+            arr[i] = scale > 0 ? (resolvedMin + qvals[i] * scale) : resolvedMin;
+        }}
+        return arr;
+    }}
+
     function hydratePackedSections() {{
         // Keep initial load fast: don't eagerly base64-decode large arrays here.
         // Decode on-demand when a section is rendered (grid/modal/UMAP).
@@ -3994,7 +4016,30 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         const n = section.n_cells ?? section.x?.length ?? 0;
         const arr = new Float32Array(n);
-        if (typeof sparse.ib64 === 'string' && typeof sparse.vb64 === 'string') {{
+        const geneMeta = DATA.genes_meta?.[gene] || null;
+        if (typeof sparse.ib64 === 'string' && typeof sparse.vq16b64 === 'string') {{
+            const idxs = base64ToUint32Array(sparse.ib64);
+            const vals = base64ToUint16Array(sparse.vq16b64);
+            const m = Math.min(idxs.length, vals.length);
+            const qmin = Number(geneMeta?.vmin ?? 0);
+            const qmax = Number(geneMeta?.vmax ?? qmin);
+            const scale = qmax > qmin ? (qmax - qmin) / 65535.0 : 0;
+            for (let k = 0; k < m; k++) {{
+                const idx = idxs[k];
+                if (idx < n) arr[idx] = scale > 0 ? (qmin + vals[k] * scale) : qmin;
+            }}
+        }} else if (typeof sparse.ib64 === 'string' && typeof sparse.vq8b64 === 'string') {{
+            const idxs = base64ToUint32Array(sparse.ib64);
+            const vals = base64ToUint8Array(sparse.vq8b64);
+            const m = Math.min(idxs.length, vals.length);
+            const qmin = Number(geneMeta?.vmin ?? 0);
+            const qmax = Number(geneMeta?.vmax ?? qmin);
+            const scale = qmax > qmin ? (qmax - qmin) / 255.0 : 0;
+            for (let k = 0; k < m; k++) {{
+                const idx = idxs[k];
+                if (idx < n) arr[idx] = scale > 0 ? (qmin + vals[k] * scale) : qmin;
+            }}
+        }} else if (typeof sparse.ib64 === 'string' && typeof sparse.vb64 === 'string') {{
             const idxs = base64ToUint32Array(sparse.ib64);
             const vals = base64ToFloat32Array(sparse.vb64);
             const m = Math.min(idxs.length, vals.length);
@@ -4018,6 +4063,28 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
         }}
         geneDenseCache.set(key, arr);
+        return arr;
+    }}
+
+    function decodeDenseSidecarSection(sectionEntry) {{
+        if (!sectionEntry) return null;
+        let arr = null;
+        if (typeof sectionEntry.dq16b64 === 'string') {{
+            const qvals = base64ToUint16Array(sectionEntry.dq16b64);
+            arr = decodeQuantizedValues(qvals, sectionEntry.qmin, sectionEntry.qmax, 65535);
+        }} else if (typeof sectionEntry.dq8b64 === 'string') {{
+            const qvals = base64ToUint8Array(sectionEntry.dq8b64);
+            arr = decodeQuantizedValues(qvals, sectionEntry.qmin, sectionEntry.qmax, 255);
+        }} else if (typeof sectionEntry.db64 === 'string') {{
+            arr = base64ToFloat32Array(sectionEntry.db64);
+        }}
+        if (!arr) return null;
+        if (Array.isArray(sectionEntry.nan)) {{
+            for (let k = 0; k < sectionEntry.nan.length; k++) {{
+                const idx = sectionEntry.nan[k];
+                if (idx >= 0 && idx < arr.length) arr[idx] = NaN;
+            }}
+        }}
         return arr;
     }}
 
@@ -4059,13 +4126,26 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (encoding) {{
             DATA.gene_encodings[gene] = encoding;
         }}
+        const valueEncoding = auxData?.gene_value_encodings?.[gene] || geneAuxManifest?.gene_value_encodings?.[gene];
+        if (valueEncoding) {{
+            DATA.gene_value_encodings[gene] = valueEncoding;
+        }}
 
         (DATA.sections || []).forEach((section) => {{
             const sectionEntry = geneEntry.sections?.[section.id];
             if (!sectionEntry) return;
             section.genes = section.genes || {{}};
             section.genes_sparse = section.genes_sparse || {{}};
-            if (Array.isArray(sectionEntry.dense)) {{
+            if (typeof sectionEntry.db64 === 'string' || typeof sectionEntry.dq16b64 === 'string' || typeof sectionEntry.dq8b64 === 'string') {{
+                const denseValues = decodeDenseSidecarSection({{
+                    ...sectionEntry,
+                    qmin: geneMeta?.vmin,
+                    qmax: geneMeta?.vmax,
+                }});
+                if (!denseValues) return;
+                section.genes[gene] = denseValues;
+                if (section.genes_sparse[gene]) delete section.genes_sparse[gene];
+            }} else if (Array.isArray(sectionEntry.dense)) {{
                 section.genes[gene] = sectionEntry.dense;
                 if (section.genes_sparse[gene]) delete section.genes_sparse[gene];
             }} else if (sectionEntry.sparse) {{
@@ -5445,9 +5525,27 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return payload;
     }}
 
-    function computeRegionStatsFromSectionEntry(sectionEntry, selectedIndices, selectedIndexSet) {{
+    function computeRegionStatsFromSectionEntry(sectionEntry, selectedIndices, selectedIndexSet, geneMeta = null) {{
         const result = {{ sum: 0, sumSq: 0, nnz: 0 }};
         if (!sectionEntry || !selectedIndices?.length) return result;
+
+        if (typeof sectionEntry.db64 === 'string' || typeof sectionEntry.dq16b64 === 'string' || typeof sectionEntry.dq8b64 === 'string') {{
+            const dense = decodeDenseSidecarSection({{
+                ...sectionEntry,
+                qmin: geneMeta?.vmin,
+                qmax: geneMeta?.vmax,
+            }});
+            if (!dense) return result;
+            for (let i = 0; i < selectedIndices.length; i++) {{
+                const idx = selectedIndices[i];
+                const value = Number(dense[idx]);
+                if (!Number.isFinite(value)) continue;
+                result.sum += value;
+                result.sumSq += value * value;
+                if (value > 0) result.nnz += 1;
+            }}
+            return result;
+        }}
 
         if (Array.isArray(sectionEntry.dense)) {{
             for (let i = 0; i < selectedIndices.length; i++) {{
@@ -5466,7 +5564,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         let idxs = null;
         let vals = null;
-        if (typeof sparse.ib64 === 'string' && typeof sparse.vb64 === 'string') {{
+        if (typeof sparse.ib64 === 'string' && typeof sparse.vq16b64 === 'string') {{
+            idxs = base64ToUint32Array(sparse.ib64);
+            vals = decodeQuantizedValues(
+                base64ToUint16Array(sparse.vq16b64),
+                geneMeta?.vmin,
+                geneMeta?.vmax,
+                65535
+            );
+        }} else if (typeof sparse.ib64 === 'string' && typeof sparse.vq8b64 === 'string') {{
+            idxs = base64ToUint32Array(sparse.ib64);
+            vals = decodeQuantizedValues(
+                base64ToUint8Array(sparse.vq8b64),
+                geneMeta?.vmin,
+                geneMeta?.vmax,
+                255
+            );
+        }} else if (typeof sparse.ib64 === 'string' && typeof sparse.vb64 === 'string') {{
             idxs = base64ToUint32Array(sparse.ib64);
             vals = base64ToFloat32Array(sparse.vb64);
         }} else if (Array.isArray(sparse.i) && Array.isArray(sparse.v)) {{
@@ -5491,9 +5605,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function computeRegionAnnotationDEFromSidecarGeneEntry(gene, geneEntry, regionA, regionB) {{
         const sectionEntryA = geneEntry?.sections?.[regionA.sectionId] || null;
         const sectionEntryB = geneEntry?.sections?.[regionB.sectionId] || null;
+        const geneMeta = geneAuxManifest?.genes_meta?.[gene] || DATA.genes_meta?.[gene] || null;
 
-        const statsA = computeRegionStatsFromSectionEntry(sectionEntryA, regionA.indices, regionA.indexSet);
-        const statsB = computeRegionStatsFromSectionEntry(sectionEntryB, regionB.indices, regionB.indexSet);
+        const statsA = computeRegionStatsFromSectionEntry(sectionEntryA, regionA.indices, regionA.indexSet, geneMeta);
+        const statsB = computeRegionStatsFromSectionEntry(sectionEntryB, regionB.indices, regionB.indexSet, geneMeta);
         const nA = regionA.indices.length;
         const nB = regionB.indices.length;
         if (!nA || !nB) return null;
@@ -11277,6 +11392,7 @@ def export_to_html(
     additional_colors: Optional[List[str]] = None,
     genes: Optional[List[str]] = None,
     gene_encoding: str = "auto",
+    gene_value_encoding: str = "float32",
     gene_storage: str = "embedded",
     gene_aux_path: Optional[str] = None,
     gene_sidecar_shard_size: int = GENE_SIDECAR_SHARD_SIZE,
@@ -11344,6 +11460,10 @@ def export_to_html(
     gene_encoding : str
         "dense", "sparse", or "auto" (default). "auto" uses sparse encoding for
         zero-inflated genes to reduce HTML size.
+    gene_value_encoding : str
+        Only used for sidecar/package genes. "float32" (default) stores full-
+        precision values; "uint16" and "uint8" store linearly quantized values
+        using each gene's exported vmin/vmax range.
     gene_storage : str
         "embedded" (default) keeps gene data in the HTML. "sidecar" embeds only
         the selected/preloaded genes and writes remaining genes to an auxiliary
@@ -11720,6 +11840,7 @@ def export_to_html(
             "shards": {},
             "genes_meta": {},
             "gene_encodings": {},
+            "gene_value_encodings": {},
             "gene_to_shard": {},
         }
         output_parent = Path(output_path).resolve().parent
@@ -11745,6 +11866,7 @@ def export_to_html(
                 downsample=downsample,
                 export_indices=sidecar_export_indices,
                 gene_encoding=gene_encoding,
+                gene_value_encoding=gene_value_encoding,
                 gene_sparse_zero_threshold=gene_sparse_zero_threshold,
             )
             shard_data["format"] = "karospace-gene-sidecar-shard-v2"
@@ -11755,6 +11877,11 @@ def export_to_html(
                     manifest["genes_meta"][gene] = shard_data["genes_meta"][gene]
                 if gene in shard_data.get("gene_encodings", {}):
                     manifest["gene_encodings"][gene] = shard_data["gene_encodings"][gene]
+                if gene in shard_data.get("gene_value_encodings", {}):
+                    manifest["gene_value_encodings"][gene] = shard_data["gene_value_encodings"][gene]
+            shard_data.pop("genes_meta", None)
+            shard_data.pop("gene_encodings", None)
+            shard_data.pop("gene_value_encodings", None)
             with open(shard_path, "w", encoding="utf-8") as f:
                 json.dump(shard_data, f, separators=(",", ":"))
             genes_written += len(shard_genes)
@@ -11827,6 +11954,7 @@ def export_to_html(
             print(f"  - gene encoding: {n_sparse} sparse, {n_dense} dense")
     if gene_aux_url:
         print(f"  - sidecar genes available via {gene_aux_url}")
+        print(f"  - sidecar value encoding: {gene_value_encoding}")
     if package_temp_dir is not None:
         package_temp_dir.cleanup()
     return str(package_output_path_obj) if package_output_path_obj is not None else output_path

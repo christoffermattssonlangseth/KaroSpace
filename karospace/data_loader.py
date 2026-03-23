@@ -448,6 +448,85 @@ class SpatialDataset:
             raise ValueError("gene_sparse_pack_min_nnz must be >= 0")
 
     @staticmethod
+    def _validate_gene_value_encoding(gene_value_encoding: str) -> str:
+        normalized = str(gene_value_encoding or "float32").lower()
+        if normalized not in {"float32", "uint16", "uint8"}:
+            raise ValueError("gene_value_encoding must be one of: 'float32', 'uint16', 'uint8'")
+        return normalized
+
+    @staticmethod
+    def _quantize_to_uint(values: np.ndarray, vmin: float, vmax: float, max_code: int, dtype) -> np.ndarray:
+        arr = np.asarray(values, dtype=np.float32)
+        finite = np.isfinite(arr)
+        out = np.zeros(arr.shape, dtype=dtype)
+        if not finite.any():
+            return out
+        if not np.isfinite(vmin):
+            vmin = float(np.nanmin(arr[finite])) if finite.any() else 0.0
+        if not np.isfinite(vmax):
+            vmax = float(np.nanmax(arr[finite])) if finite.any() else vmin
+        if vmax <= vmin:
+            return out
+        max_code = int(max_code)
+        scale = np.float32(max_code / (float(vmax) - float(vmin)))
+        clipped = np.clip(np.rint((arr[finite] - np.float32(vmin)) * scale), 0, max_code)
+        out[finite] = clipped.astype(dtype, copy=False)
+        return out
+
+    @classmethod
+    def _quantize_values(cls, values: np.ndarray, vmin: float, vmax: float, value_encoding: str) -> np.ndarray:
+        if value_encoding == "uint16":
+            return cls._quantize_to_uint(values, vmin, vmax, 65535, np.uint16)
+        if value_encoding == "uint8":
+            return cls._quantize_to_uint(values, vmin, vmax, 255, np.uint8)
+        raise ValueError(f"Unsupported quantized gene value encoding: {value_encoding}")
+
+    @staticmethod
+    def _estimate_packed_dense_bytes(n_values: int, nan_count: int = 0, value_bytes: int = 4) -> int:
+        return max(0, int(n_values)) * max(1, int(value_bytes)) + max(0, int(nan_count)) * 4
+
+    @staticmethod
+    def _estimate_packed_sparse_bytes(nnz: int, nan_count: int = 0, value_bytes: int = 4) -> int:
+        return max(0, int(nnz)) * (4 + max(1, int(value_bytes))) + max(0, int(nan_count)) * 4
+
+    @staticmethod
+    def _gene_value_encoding_bytes(gene_value_encoding: str) -> int:
+        if gene_value_encoding == "uint16":
+            return 2
+        if gene_value_encoding == "uint8":
+            return 1
+        return 4
+
+    @classmethod
+    def _resolve_sidecar_gene_encoding_mode(
+        cls,
+        resolved_gene_encoding: str,
+        n_values: int,
+        nonzero_count: int,
+        nan_count: int,
+        gene_sparse_zero_threshold: float,
+        gene_value_encoding: str,
+    ) -> str:
+        if resolved_gene_encoding == "dense":
+            return "dense"
+        if resolved_gene_encoding == "sparse":
+            return "sparse"
+
+        zero_frac = 1.0
+        if n_values:
+            zero_frac = 1.0 - (float(nonzero_count) / float(n_values))
+
+        # Sidecar payloads compare packed dense float32 buffers against packed
+        # sparse index/value buffers. Prefer sparse whenever it is explicitly
+        # requested via zero-threshold or whenever it is estimated to be smaller.
+        value_bytes = cls._gene_value_encoding_bytes(gene_value_encoding)
+        dense_bytes = cls._estimate_packed_dense_bytes(n_values, nan_count, value_bytes=value_bytes)
+        sparse_bytes = cls._estimate_packed_sparse_bytes(nonzero_count, nan_count, value_bytes=value_bytes)
+        if zero_frac >= float(gene_sparse_zero_threshold) or sparse_bytes <= dense_bytes:
+            return "sparse"
+        return "dense"
+
+    @staticmethod
     def _serialize_gene_section_values(
         section_vals: np.ndarray,
         mode: str,
@@ -485,12 +564,14 @@ class SpatialDataset:
         downsample: Optional[int] = None,
         export_indices: Optional[Dict[str, np.ndarray]] = None,
         gene_encoding: str = "auto",
+        gene_value_encoding: str = "float32",
         gene_sparse_zero_threshold: float = 0.8,
         gene_sparse_pack: bool = True,
         gene_sparse_pack_min_nnz: int = 256,
     ) -> Dict:
         """Export a gene-major sidecar payload for downstream viewer loading."""
         self._validate_gene_export_options(gene_encoding, gene_sparse_zero_threshold, gene_sparse_pack_min_nnz)
+        resolved_value_encoding = self._validate_gene_value_encoding(gene_value_encoding)
         export_indices = export_indices or self._get_export_section_indices(downsample=downsample)
         unique_genes = []
         seen = set()
@@ -509,6 +590,7 @@ class SpatialDataset:
         genes_payload = {}
         genes_meta = {}
         gene_encodings: Dict[str, str] = {}
+        gene_value_encodings: Dict[str, str] = {}
         if unique_genes:
             gene_indices = [self.adata.var_names.get_loc(gene) for gene in unique_genes]
             expr_layer = self.adata.layers["normalized"] if "normalized" in self.adata.layers else self.adata.X
@@ -542,12 +624,18 @@ class SpatialDataset:
                     elif resolved_gene_encoding == "sparse":
                         mode = "sparse"
                     else:
-                        nonzero = np.isfinite(raw_vals) & (raw_vals != 0)
-                        zero_frac = 1.0
-                        if n_obs:
-                            zero_frac = 1.0 - (float(np.count_nonzero(nonzero)) / float(n_obs))
-                        mode = "sparse" if zero_frac >= float(gene_sparse_zero_threshold) else "dense"
+                        finite_mask = np.isfinite(raw_vals)
+                        nonzero_mask = finite_mask & (raw_vals != 0)
+                        mode = self._resolve_sidecar_gene_encoding_mode(
+                            resolved_gene_encoding=resolved_gene_encoding,
+                            n_values=n_obs,
+                            nonzero_count=int(np.count_nonzero(nonzero_mask)),
+                            nan_count=int(raw_vals.size - np.count_nonzero(finite_mask)),
+                            gene_sparse_zero_threshold=gene_sparse_zero_threshold,
+                            gene_value_encoding=resolved_value_encoding,
+                        )
                     gene_encodings[gene] = mode
+                    gene_value_encodings[gene] = resolved_value_encoding
 
                     sections_payload = {}
                     for section in self.sections:
@@ -559,27 +647,62 @@ class SpatialDataset:
                             nonzero = finite & (section_vals != 0)
                             nz_idx = section_idx[nonzero].astype(np.uint32, copy=False)
                             nz_vals = section_vals[nonzero].astype(np.float32, copy=False)
-                            if bool(gene_sparse_pack) and int(nz_idx.size) >= int(gene_sparse_pack_min_nnz):
+                            if resolved_value_encoding in {"uint16", "uint8"}:
+                                quantized = self._quantize_values(nz_vals, gene_vmin, gene_vmax, resolved_value_encoding)
                                 sparse_entry = {
                                     "ib64": _b64(np.asarray(nz_idx, dtype="<u4")),
-                                    "vb64": _b64(np.asarray(nz_vals, dtype="<f4")),
+                                    ("vq16b64" if resolved_value_encoding == "uint16" else "vq8b64"): _b64(
+                                        np.asarray(
+                                            quantized,
+                                            dtype="<u2" if resolved_value_encoding == "uint16" else "u1",
+                                        )
+                                    ),
                                 }
                             else:
-                                sparse_entry = {
-                                    "i": nz_idx.astype(int).tolist(),
-                                    "v": nz_vals.astype(float).tolist(),
-                                }
+                                if bool(gene_sparse_pack) and int(nz_idx.size) >= int(gene_sparse_pack_min_nnz):
+                                    sparse_entry = {
+                                        "ib64": _b64(np.asarray(nz_idx, dtype="<u4")),
+                                        "vb64": _b64(np.asarray(nz_vals, dtype="<f4")),
+                                    }
+                                else:
+                                    sparse_entry = {
+                                        "i": nz_idx.astype(int).tolist(),
+                                        "v": nz_vals.astype(float).tolist(),
+                                    }
                             nan_idx = section_idx[np.isnan(section_vals)].astype(int, copy=False)
                             if nan_idx.size:
                                 sparse_entry["nan"] = nan_idx.tolist()
                             sections_payload[section.section_id] = {"sparse": sparse_entry}
                         else:
-                            dense_vals = np.asarray(sec_col.toarray()).ravel()
-                            sections_payload[section.section_id] = {
-                                "dense": [
-                                    float(v) if np.isfinite(v) else None for v in dense_vals
-                                ]
-                            }
+                            dense_vals = np.asarray(sec_col.toarray(), dtype=np.float32).ravel()
+                            finite_mask = np.isfinite(dense_vals)
+                            if resolved_value_encoding in {"uint16", "uint8"}:
+                                quantized = self._quantize_values(
+                                    np.where(finite_mask, dense_vals, 0.0),
+                                    gene_vmin,
+                                    gene_vmax,
+                                    resolved_value_encoding,
+                                )
+                                dense_entry = {
+                                    ("dq16b64" if resolved_value_encoding == "uint16" else "dq8b64"): _b64(
+                                        np.asarray(
+                                            quantized,
+                                            dtype="<u2" if resolved_value_encoding == "uint16" else "u1",
+                                        )
+                                    )
+                                }
+                            else:
+                                dense_entry = {
+                                    "db64": _b64(
+                                        np.asarray(
+                                            np.where(finite_mask, dense_vals, 0.0),
+                                            dtype="<f4",
+                                        )
+                                    )
+                                }
+                            if not finite_mask.all():
+                                dense_entry["nan"] = np.flatnonzero(~finite_mask).astype(int).tolist()
+                            sections_payload[section.section_id] = dense_entry
 
                     genes_payload[gene] = {"sections": sections_payload}
                     genes_meta[gene] = {"vmin": gene_vmin, "vmax": gene_vmax}
@@ -598,23 +721,79 @@ class SpatialDataset:
                         mode = "sparse"
                     else:
                         nonzero = finite & (vals != 0)
-                        zero_frac = 1.0
-                        if vals.size:
-                            zero_frac = 1.0 - (float(np.count_nonzero(nonzero)) / float(vals.size))
-                        mode = "sparse" if zero_frac >= float(gene_sparse_zero_threshold) else "dense"
+                        mode = self._resolve_sidecar_gene_encoding_mode(
+                            resolved_gene_encoding=resolved_gene_encoding,
+                            n_values=int(vals.size),
+                            nonzero_count=int(np.count_nonzero(nonzero)),
+                            nan_count=int(vals.size - np.count_nonzero(finite)),
+                            gene_sparse_zero_threshold=gene_sparse_zero_threshold,
+                            gene_value_encoding=resolved_value_encoding,
+                        )
                     gene_encodings[gene] = mode
+                    gene_value_encodings[gene] = resolved_value_encoding
 
                     sections_payload = {}
                     for section in self.sections:
                         idx = export_indices[section.section_id]
-                        section_vals = batch_dense[idx, gene_pos]
-                        sections_payload[section.section_id] = self._serialize_gene_section_values(
-                            section_vals=np.asarray(section_vals),
-                            mode=mode,
-                            gene_sparse_pack=gene_sparse_pack,
-                            gene_sparse_pack_min_nnz=gene_sparse_pack_min_nnz,
-                            b64_encoder=_b64,
-                        )
+                        section_vals = np.asarray(batch_dense[idx, gene_pos], dtype=np.float32).ravel()
+                        if mode == "dense":
+                            finite_mask = np.isfinite(section_vals)
+                            if resolved_value_encoding in {"uint16", "uint8"}:
+                                quantized = self._quantize_values(
+                                    np.where(finite_mask, section_vals, 0.0),
+                                    gene_vmin,
+                                    gene_vmax,
+                                    resolved_value_encoding,
+                                )
+                                dense_entry = {
+                                    ("dq16b64" if resolved_value_encoding == "uint16" else "dq8b64"): _b64(
+                                        np.asarray(
+                                            quantized,
+                                            dtype="<u2" if resolved_value_encoding == "uint16" else "u1",
+                                        )
+                                    )
+                                }
+                            else:
+                                dense_entry = {
+                                    "db64": _b64(
+                                        np.asarray(
+                                            np.where(finite_mask, section_vals, 0.0),
+                                            dtype="<f4",
+                                        )
+                                    )
+                                }
+                            if not finite_mask.all():
+                                dense_entry["nan"] = np.flatnonzero(~finite_mask).astype(int).tolist()
+                            sections_payload[section.section_id] = dense_entry
+                        else:
+                            finite_vals = np.isfinite(section_vals)
+                            nonzero = finite_vals & (section_vals != 0)
+                            nz_idx = np.flatnonzero(nonzero).astype(np.uint32)
+                            nz_vals = np.asarray(section_vals[nonzero], dtype=np.float32)
+                            if resolved_value_encoding in {"uint16", "uint8"}:
+                                quantized = self._quantize_values(nz_vals, gene_vmin, gene_vmax, resolved_value_encoding)
+                                sparse_entry = {
+                                    "ib64": _b64(np.asarray(nz_idx, dtype="<u4")),
+                                    ("vq16b64" if resolved_value_encoding == "uint16" else "vq8b64"): _b64(
+                                        np.asarray(
+                                            quantized,
+                                            dtype="<u2" if resolved_value_encoding == "uint16" else "u1",
+                                        )
+                                    ),
+                                }
+                            else:
+                                sections_payload[section.section_id] = self._serialize_gene_section_values(
+                                    section_vals=section_vals,
+                                    mode=mode,
+                                    gene_sparse_pack=gene_sparse_pack,
+                                    gene_sparse_pack_min_nnz=gene_sparse_pack_min_nnz,
+                                    b64_encoder=_b64,
+                                )
+                                continue
+                            nan_idx = np.flatnonzero(np.isnan(section_vals)).astype(int)
+                            if nan_idx.size:
+                                sparse_entry["nan"] = nan_idx.tolist()
+                            sections_payload[section.section_id] = {"sparse": sparse_entry}
                     genes_payload[gene] = {"sections": sections_payload}
                     genes_meta[gene] = {"vmin": gene_vmin, "vmax": gene_vmax}
 
@@ -622,6 +801,7 @@ class SpatialDataset:
             "format": "karospace-gene-sidecar-v1",
             "genes_meta": genes_meta,
             "gene_encodings": gene_encodings,
+            "gene_value_encodings": gene_value_encodings,
             "genes": genes_payload,
         }
 

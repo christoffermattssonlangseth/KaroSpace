@@ -114,7 +114,11 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert set(manifest["genes_meta"]) == {"G2", "G3"}
     assert manifest["format"] == "karospace-gene-sidecar-manifest-v2"
     assert manifest["gene_to_shard"]["G2"].startswith("viewer.genes/")
+    assert manifest["gene_value_encodings"]["G2"] == "float32"
     assert shard["format"] == "karospace-gene-sidecar-shard-v2"
+    assert "genes_meta" not in shard
+    assert "gene_encodings" not in shard
+    assert "gene_value_encodings" not in shard
     assert "G1" not in shard["genes"]
     assert "G2" in shard["genes"]
     assert "sparse" in shard["genes"]["G2"]["sections"]["S1"]
@@ -154,6 +158,8 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert "function renderClusterDEResultSection(colorCol, sourceCategory, referenceCategory)" in html_text
     assert "function computeRegionAnnotationDE(annotationA, annotationB, options = {})" in html_text
     assert "function fetchGeneAuxShardForAnalysis(shardUrl)" in html_text
+    assert "function decodeDenseSidecarSection(sectionEntry)" in html_text
+    assert "function base64ToUint8Array(b64)" in html_text
     assert "if (window.__karospacePackageMode) {" in html_text
     assert "function runFullRegionAnnotationDE(annotationA, annotationB)" in html_text
     assert "function exportAnnotationDEReport(annotationA, annotationB, exportState)" in html_text
@@ -228,6 +234,101 @@ def test_sidecar_export_respects_custom_shard_size(tmp_path):
     assert len(shard_files) == 2
     assert len(manifest["shards"]) == 2
     assert manifest["gene_to_shard"]["G2"] != manifest["gene_to_shard"]["G3"]
+
+
+def test_sidecar_auto_encoding_prefers_compact_sparse_and_packed_dense():
+    dataset = _build_dataset()
+
+    sidecar = dataset.to_gene_sidecar_data(
+        genes=["G1", "G3"],
+        gene_encoding="auto",
+    )
+
+    assert sidecar["gene_encodings"]["G1"] == "dense"
+    assert sidecar["gene_encodings"]["G3"] == "sparse"
+
+    g1_s1 = sidecar["genes"]["G1"]["sections"]["S1"]
+    g3_s1 = sidecar["genes"]["G3"]["sections"]["S1"]
+
+    assert "db64" in g1_s1
+    assert "dense" not in g1_s1
+    assert "sparse" in g3_s1
+
+
+def test_sidecar_uint16_quantization_emits_compact_value_payloads(tmp_path):
+    dataset = _build_dataset()
+    output_path = tmp_path / "viewer.html"
+
+    export_to_html(
+        dataset,
+        output_path=str(output_path),
+        color="leiden",
+        genes=[],
+        use_hvgs=False,
+        gene_storage="sidecar",
+        gene_value_encoding="uint16",
+    )
+
+    manifest = json.loads((tmp_path / "viewer.genes.json").read_text(encoding="utf-8"))
+    shard_path = sorted((tmp_path / "viewer.genes").glob("*.json"))[0]
+    shard = json.loads(shard_path.read_text(encoding="utf-8"))
+
+    assert manifest["gene_value_encodings"]["G1"] == "uint16"
+    assert manifest["gene_value_encodings"]["G3"] == "uint16"
+
+    g1_s1 = shard["genes"]["G1"]["sections"]["S1"]
+    g3_s1 = shard["genes"]["G3"]["sections"]["S1"]["sparse"]
+
+    assert "db64" not in g1_s1
+    assert "dq16b64" in g1_s1
+    assert "vb64" not in g3_s1
+    assert "vq16b64" in g3_s1
+
+
+def test_sidecar_uint8_quantization_emits_compact_value_payloads(tmp_path):
+    dataset = _build_dataset()
+    output_path = tmp_path / "viewer.html"
+
+    export_to_html(
+        dataset,
+        output_path=str(output_path),
+        color="leiden",
+        genes=[],
+        use_hvgs=False,
+        gene_storage="sidecar",
+        gene_value_encoding="uint8",
+    )
+
+    manifest = json.loads((tmp_path / "viewer.genes.json").read_text(encoding="utf-8"))
+    shard_path = sorted((tmp_path / "viewer.genes").glob("*.json"))[0]
+    shard = json.loads(shard_path.read_text(encoding="utf-8"))
+
+    assert manifest["gene_value_encodings"]["G1"] == "uint8"
+    assert manifest["gene_value_encodings"]["G3"] == "uint8"
+
+    g1_s1 = shard["genes"]["G1"]["sections"]["S1"]
+    g3_s1 = shard["genes"]["G3"]["sections"]["S1"]
+
+    assert "db64" not in g1_s1
+    assert "dq8b64" in g1_s1
+    assert "dense" not in g3_s1
+    assert "dq8b64" in g3_s1
+
+
+def test_sidecar_uint8_quantization_supports_sparse_payloads():
+    dataset = _build_dataset()
+
+    sidecar = dataset.to_gene_sidecar_data(
+        genes=["G3"],
+        gene_encoding="sparse",
+        gene_value_encoding="uint8",
+    )
+
+    g3_s1 = sidecar["genes"]["G3"]["sections"]["S1"]["sparse"]
+
+    assert sidecar["gene_value_encodings"]["G3"] == "uint8"
+    assert "vb64" not in g3_s1
+    assert "vq8b64" in g3_s1
 
 
 def test_karospace_package_export_wraps_sidecar_assets(tmp_path):
@@ -319,6 +420,13 @@ def test_karospace_package_loader_page_contains_expected_runtime_hooks():
     assert "window.fetch = function packageAwareFetch(input, init)" in loader_html
     assert "window.__karospacePackageSession" in loader_html
     assert "document.write(hydratedHtml);" in loader_html
+    assert "const LAZY_ARCHIVE_THRESHOLD_BYTES" in loader_html
+    assert "class LazyZipArchive" in loader_html
+    assert "async function parseLazyZipArchive(file)" in loader_html
+    assert "async function openZipArchive(file)" in loader_html
+    assert "file.size > LAZY_ARCHIVE_THRESHOLD_BYTES" in loader_html
+    assert "readBlobSlice(" in loader_html
+    assert "centralDirectoryOffset + centralDirectorySize" in loader_html
     assert "'<scr' + 'ipt>'" in loader_html
     assert "'</scr' + 'ipt>'" in loader_html
     assert 'type="file" accept=".karospace,.zip,application/zip,application/x-karospace-package"' in loader_html
