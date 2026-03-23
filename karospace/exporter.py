@@ -1492,12 +1492,22 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         .marker-group-title {{ font-size: 11px; font-weight: 600; }}
         .marker-genes .gene-token-grid {{ gap: 4px; }}
+        .marker-gene-item {{
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            min-width: 0;
+        }}
         .marker-genes .gene-token-btn {{
             gap: 4px;
             padding: 3px 6px;
             font-size: 10px;
         }}
         .marker-genes .gene-token-meta {{ font-size: 9px; }}
+        .marker-genes .gene-search-btn {{
+            padding: 2px 6px;
+            font-size: 8px;
+        }}
         .marker-genes-list {{
             font-size: 10px;
             color: var(--muted-color);
@@ -2115,6 +2125,148 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             pointer-events: auto;
         }}
         .modal-blend-panel.visible {{ display: block; }}
+        .modal-gene-panel {{
+            position: absolute;
+            left: 12px;
+            bottom: 96px;
+            width: min(240px, calc(100% - 24px));
+            max-height: 280px;
+            padding: 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: color-mix(in srgb, var(--header-bg) 92%, transparent);
+            backdrop-filter: blur(6px);
+            box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
+            z-index: 6;
+            display: none;
+            pointer-events: auto;
+            overflow: hidden;
+        }}
+        .modal-gene-panel.visible {{
+            display: flex;
+            flex-direction: column;
+        }}
+        .modal-gene-panel-header {{
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
+        }}
+        .modal-gene-panel-title {{
+            flex: 1 1 auto;
+            min-width: 0;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: var(--muted-color);
+            font-weight: 700;
+        }}
+        .modal-gene-panel-count {{
+            flex: 0 0 auto;
+            font-size: 10px;
+            color: var(--muted-color);
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        }}
+        .modal-gene-panel-close {{
+            flex: 0 0 auto;
+            width: 20px;
+            height: 20px;
+            border: 1px solid var(--border-color);
+            border-radius: 999px;
+            background: var(--input-bg);
+            color: var(--muted-color);
+            cursor: pointer;
+            font-size: 12px;
+            line-height: 1;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s, border-color 0.2s, color 0.2s;
+        }}
+        .modal-gene-panel-close:hover {{
+            background: var(--hover-bg);
+            color: var(--text-color);
+        }}
+        .modal-gene-panel-body {{
+            margin-top: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            min-height: 0;
+            overflow: auto;
+        }}
+        .modal-gene-panel-empty {{
+            font-size: 11px;
+            line-height: 1.4;
+            color: var(--muted-color);
+        }}
+        .modal-gene-panel .gene-token-btn {{
+            width: 100%;
+            justify-content: flex-start;
+            border-radius: 10px;
+            padding: 6px 8px;
+            text-align: left;
+        }}
+        .modal-gene-panel-entry {{
+            display: flex;
+            align-items: stretch;
+            gap: 6px;
+            min-width: 0;
+        }}
+        .modal-gene-panel-entry .gene-token-btn {{
+            flex: 1 1 auto;
+            min-width: 0;
+        }}
+        .modal-gene-panel-entry .gene-search-btn {{
+            flex: 0 0 auto;
+            align-self: center;
+            padding: 3px 7px;
+            font-size: 9px;
+        }}
+        .modal-gene-panel .gene-token-btn.disabled {{
+            width: 100%;
+        }}
+        .modal-gene-panel-stack {{
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            width: 100%;
+            min-width: 0;
+        }}
+        .modal-gene-panel-main {{
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+            min-width: 0;
+        }}
+        .modal-gene-panel-gene {{
+            flex: 1 1 auto;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-weight: 600;
+        }}
+        .modal-gene-panel-score {{
+            flex: 0 0 auto;
+            font-size: 10px;
+            color: var(--muted-color);
+            font-variant-numeric: tabular-nums;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        }}
+        .modal-gene-panel-bar {{
+            width: 100%;
+            height: 4px;
+            border-radius: 999px;
+            background: color-mix(in srgb, var(--border-color) 55%, transparent);
+            overflow: hidden;
+        }}
+        .modal-gene-panel-bar-fill {{
+            height: 100%;
+            border-radius: inherit;
+            background: color-mix(in srgb, var(--accent-strong) 86%, white 14%);
+        }}
         .modal-blend-title {{
             font-size: 10px;
             text-transform: uppercase;
@@ -2867,6 +3019,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                             <tr><td class="info-shortcuts-key"><kbd>T</kbd></td><td>Toggle theme.</td></tr>
                             <tr><td class="info-shortcuts-key"><kbd>U</kbd></td><td>Toggle the UMAP panel.</td></tr>
                             <tr><td class="info-shortcuts-key"><kbd>L</kbd></td><td>Toggle the legend panel.</td></tr>
+                            <tr><td class="info-shortcuts-key"><kbd>Space</kbd> + drag</td><td>Pan inside the modal even while Select or Annotate is active.</td></tr>
                             <tr><td class="info-shortcuts-key"><kbd>F</kbd></td><td>Fit the current modal section to view.</td></tr>
                             <tr><td class="info-shortcuts-key"><kbd>+</kbd> <kbd>=</kbd></td><td>Zoom in inside the modal.</td></tr>
                             <tr><td class="info-shortcuts-key"><kbd>-</kbd></td><td>Zoom out inside the modal.</td></tr>
@@ -2991,6 +3144,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <div class="modal-selection-info" id="modal-selection-info">No cells selected</div>
                     <div class="selection-summary modal-selection-summary" id="modal-selection-summary">
                         <div class="selection-summary-meta">Draw a region with Magic Wand to inspect selected cells.</div>
+                    </div>
+                    <div class="modal-gene-panel" id="modal-gene-panel" aria-hidden="true">
+                        <div class="modal-gene-panel-header">
+                            <div class="modal-gene-panel-title">Genes in selection</div>
+                            <div class="modal-gene-panel-count" id="modal-gene-panel-count">0 cells</div>
+                            <button class="modal-gene-panel-close" id="modal-gene-panel-close" type="button" aria-label="Dismiss selection genes">×</button>
+                        </div>
+                        <div class="modal-gene-panel-body" id="modal-gene-panel-body"></div>
                     </div>
                     <div class="modal-blend-panel" id="modal-blend-panel">
                         <div class="modal-blend-title">Variable Slider</div>
@@ -3445,6 +3606,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let modalZoom = 1;
     let modalPanX = 0, modalPanY = 0;
     let modalSpotSize = {spot_size};
+    let modalSpacePanActive = false;
     let isDragging = false;
     let isSplitDragging = false;
     let dragStartX = 0, dragStartY = 0;
@@ -3513,6 +3675,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let lassoModeB = false;  // Next lasso draw fills region B
     let selectionSummaryColor = DATA.initial_color;
     let selectionSummaryExpanded = false;
+    let modalGenePanelEntries = [];
+    let modalGenePanelState = null;
+    let modalGenePanelRequestToken = 0;
     let annotationDeSourceId = null;
     let annotationDeReferenceId = null;
     const ANNOTATION_DE_TOP_N = 12;
@@ -3750,6 +3915,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return !!target.isContentEditable;
     }}
 
+    function isActionableKeyboardTarget(target) {{
+        if (!target || !(target instanceof Element)) return false;
+        return !!target.closest('button, a, summary, [role="button"]');
+    }}
+
     function initKeyboardShortcuts() {{
         document.addEventListener('keydown', (event) => {{
             if (event.defaultPrevented) return;
@@ -3757,6 +3927,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             if (isEditableKeyboardTarget(event.target)) return;
 
             const key = event.key;
+            const isSpaceKey = event.code === 'Space' || key === ' ' || key === 'Spacebar';
+
+            if (isSpaceKey) {{
+                if (!modalSection || isActionableKeyboardTarget(event.target)) return;
+                modalSpacePanActive = true;
+                updateModalCanvasCursor?.();
+                event.preventDefault();
+                return;
+            }}
 
             if (key === 'Escape') {{
                 if (modalSection) {{
@@ -3837,6 +4016,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 modalZoom = Math.max(modalZoom / 1.5, 0.1);
                 renderModalSection();
             }}
+        }});
+        document.addEventListener('keyup', (event) => {{
+            const key = event.key;
+            const isSpaceKey = event.code === 'Space' || key === ' ' || key === 'Spacebar';
+            if (!isSpaceKey) return;
+            if (!modalSpacePanActive) return;
+            modalSpacePanActive = false;
+            updateModalCanvasCursor?.();
+            event.preventDefault();
+        }});
+        window.addEventListener('blur', () => {{
+            if (!modalSpacePanActive) return;
+            modalSpacePanActive = false;
+            updateModalCanvasCursor?.();
         }});
     }}
 
@@ -6392,6 +6585,281 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return result;
     }}
 
+    function getLoadedGenesForSection(section) {{
+        if (!section) return [];
+        return Array.from(new Set([
+            ...Object.keys(section.genes || {{}}),
+            ...Object.keys(section.genes_sparse || {{}}),
+        ])).sort((a, b) => a.localeCompare(b));
+    }}
+
+    function getModalSelectionTypeSummary(section, selectedCellIndices) {{
+        if (!section || !Array.isArray(selectedCellIndices) || !selectedCellIndices.length) return null;
+        const colorCol = getSelectionSummaryColorColumn();
+        const categories = getCategoriesForColorColumn(colorCol);
+        if (!colorCol || !categories.length) return null;
+        const values = getSectionColorValues(section, colorCol);
+        if (!values) return null;
+
+        const counts = new Map();
+        let validCount = 0;
+        selectedCellIndices.forEach((idx) => {{
+            if (!Number.isInteger(idx) || idx < 0 || idx >= values.length) return;
+            const raw = values[idx];
+            if (!Number.isFinite(raw)) return;
+            const catIdx = Math.round(raw);
+            const category = categories[catIdx];
+            if (category === undefined) return;
+            counts.set(category, (counts.get(category) || 0) + 1);
+            validCount += 1;
+        }});
+
+        if (!counts.size || validCount === 0) return null;
+        const entries = Array.from(counts.entries())
+            .map(([category, count]) => ({{
+                category: String(category),
+                count,
+                weight: count / validCount,
+            }}))
+            .sort((a, b) => b.count - a.count || a.category.localeCompare(b.category));
+        return {{ colorCol, entries }};
+    }}
+
+    function scoreModalSelectionMarkerGenes(section, selectedCellIndices) {{
+        const typeSummary = getModalSelectionTypeSummary(section, selectedCellIndices);
+        if (!typeSummary) return [];
+        const byColor = (DATA.marker_genes || {{}})[typeSummary.colorCol];
+        if (!byColor || typeof byColor !== 'object') return [];
+
+        const ranked = new Map();
+        typeSummary.entries.forEach((entry) => {{
+            const genes = getMarkerGenesForColorCategory(typeSummary.colorCol, entry.category);
+            genes.forEach((rawGene, rankIdx) => {{
+                const token = resolveCanonicalGeneName(rawGene) || (AVAILABLE_GENE_SET.has(String(rawGene || '').trim()) ? String(rawGene || '').trim() : null);
+                if (!token) return;
+                const key = token.toLowerCase();
+                const next = ranked.get(key) || {{
+                    gene: token,
+                    markerScore: 0,
+                    exprScore: null,
+                    meanIn: null,
+                    meanOut: null,
+                }};
+                next.markerScore += entry.weight / (rankIdx + 1);
+                ranked.set(key, next);
+            }});
+        }});
+
+        return Array.from(ranked.values()).sort((a, b) => {{
+            if (a.markerScore !== b.markerScore) return b.markerScore - a.markerScore;
+            return a.gene.localeCompare(b.gene);
+        }});
+    }}
+
+    function scoreLoadedGenesForModalSelection(section, selectedCellIndices) {{
+        if (!section || !Array.isArray(selectedCellIndices) || !selectedCellIndices.length) return [];
+        const loadedGenes = getLoadedGenesForSection(section);
+        if (!loadedGenes.length) return [];
+        const selectedSet = new Set(selectedCellIndices);
+        const scored = [];
+        const epsilon = 1e-6;
+
+        loadedGenes.forEach((gene) => {{
+            const values = getSectionGeneValues(section, gene);
+            if (!values || !values.length) return;
+            let sumIn = 0;
+            let sumOut = 0;
+            let countIn = 0;
+            let countOut = 0;
+            for (let i = 0; i < values.length; i++) {{
+                const value = values[i];
+                if (!Number.isFinite(value)) continue;
+                if (selectedSet.has(i)) {{
+                    sumIn += value;
+                    countIn += 1;
+                }} else {{
+                    sumOut += value;
+                    countOut += 1;
+                }}
+            }}
+            if (countIn === 0) return;
+            const meanIn = sumIn / countIn;
+            const meanOut = countOut > 0 ? (sumOut / countOut) : 0;
+            if (!(meanIn > 0)) return;
+            const exprScore = meanIn / (meanOut + epsilon);
+            scored.push({{
+                gene,
+                markerScore: 0,
+                exprScore,
+                meanIn,
+                meanOut,
+            }});
+        }});
+
+        return scored.sort((a, b) => {{
+            if (a.exprScore !== b.exprScore) return b.exprScore - a.exprScore;
+            if (a.meanIn !== b.meanIn) return b.meanIn - a.meanIn;
+            return a.gene.localeCompare(b.gene);
+        }});
+    }}
+
+    function mergeModalGeneDiscoveryEntries(markerEntries, expressionEntries, limit = 30) {{
+        const merged = new Map();
+        const addEntry = (entry) => {{
+            if (!entry || !entry.gene) return;
+            const key = String(entry.gene).toLowerCase();
+            const next = merged.get(key) || {{
+                gene: entry.gene,
+                markerScore: 0,
+                exprScore: null,
+                meanIn: null,
+                meanOut: null,
+            }};
+            next.markerScore = Math.max(next.markerScore || 0, Number(entry.markerScore || 0));
+            if (Number.isFinite(entry.exprScore)) next.exprScore = Number(entry.exprScore);
+            if (Number.isFinite(entry.meanIn)) next.meanIn = Number(entry.meanIn);
+            if (Number.isFinite(entry.meanOut)) next.meanOut = Number(entry.meanOut);
+            merged.set(key, next);
+        }};
+
+        (Array.isArray(markerEntries) ? markerEntries : []).forEach(addEntry);
+        (Array.isArray(expressionEntries) ? expressionEntries : []).forEach(addEntry);
+
+        const entries = Array.from(merged.values()).map((entry) => {{
+            const markerComponent = Number(entry.markerScore || 0) * 6;
+            const exprComponent = Number.isFinite(entry.exprScore)
+                ? Math.max(0, Math.log2(Math.max(entry.exprScore, 1e-6)))
+                : 0;
+            return {{
+                ...entry,
+                combinedScore: markerComponent + exprComponent,
+            }};
+        }}).sort((a, b) => {{
+            if (a.combinedScore !== b.combinedScore) return b.combinedScore - a.combinedScore;
+            const aExpr = Number.isFinite(a.exprScore) ? a.exprScore : -Infinity;
+            const bExpr = Number.isFinite(b.exprScore) ? b.exprScore : -Infinity;
+            if (aExpr !== bExpr) return bExpr - aExpr;
+            if (a.markerScore !== b.markerScore) return b.markerScore - a.markerScore;
+            return a.gene.localeCompare(b.gene);
+        }});
+
+        const maxScore = entries.length ? Math.max(entries[0].combinedScore, 1e-6) : 1;
+        return entries.slice(0, Math.max(1, Number(limit) || 30)).map((entry) => ({{
+            ...entry,
+            barPct: Math.max(10, Math.round((entry.combinedScore / maxScore) * 100)),
+        }}));
+    }}
+
+    function formatModalGeneDiscoveryEntryScore(entry) {{
+        const hasExpr = Number.isFinite(entry?.exprScore);
+        const hasMarker = Number(entry?.markerScore || 0) > 0;
+        if (hasExpr && hasMarker) return `${{entry.exprScore.toFixed(entry.exprScore >= 10 ? 1 : 2)}}× · marker`;
+        if (hasExpr) return `${{entry.exprScore.toFixed(entry.exprScore >= 10 ? 1 : 2)}}×`;
+        if (hasMarker) return 'marker';
+        return '';
+    }}
+
+    function renderModalGeneDiscoveryPanel() {{
+        const panel = document.getElementById('modal-gene-panel');
+        const countEl = document.getElementById('modal-gene-panel-count');
+        const body = document.getElementById('modal-gene-panel-body');
+        if (!panel || !countEl || !body) return;
+        if (!modalGenePanelState) {{
+            panel.classList.remove('visible');
+            panel.setAttribute('aria-hidden', 'true');
+            countEl.textContent = '0 cells';
+            body.innerHTML = '';
+            return;
+        }}
+
+        const count = Number(modalGenePanelState.cellCount || 0);
+        const entries = Array.isArray(modalGenePanelEntries) ? modalGenePanelEntries : [];
+        countEl.textContent = `${{count.toLocaleString()}} cells`;
+        if (!entries.length) {{
+            body.innerHTML = `<div class="modal-gene-panel-empty">${{escapeHtml(modalGenePanelState.message || 'Load a gene first to rank by expression')}}</div>`;
+        }} else {{
+            body.innerHTML = entries.map((entry) => {{
+                const scoreLabel = formatModalGeneDiscoveryEntryScore(entry);
+                const titleParts = [`Load ${{entry.gene}} into the viewer`];
+                if (Number.isFinite(entry.exprScore)) titleParts.push(`enrichment ${{entry.exprScore.toFixed(3)}}x`);
+                if (Number(entry.markerScore || 0) > 0) titleParts.push('marker-supported');
+                return `
+                    <div class="modal-gene-panel-entry">
+                        <button
+                            type="button"
+                            class="gene-token-btn${{entry.gene === currentGene ? ' active' : ''}}"
+                            data-gene-activate="${{escapeHtml(entry.gene)}}"
+                            title="${{escapeHtml(titleParts.join(' · '))}}"
+                        >
+                            <span class="modal-gene-panel-stack">
+                                <span class="modal-gene-panel-main">
+                                    <span class="modal-gene-panel-gene">${{escapeHtml(entry.gene)}}</span>
+                                    <span class="modal-gene-panel-score">${{escapeHtml(scoreLabel)}}</span>
+                                </span>
+                                <span class="modal-gene-panel-bar">
+                                    <span class="modal-gene-panel-bar-fill" style="width:${{Math.max(0, Math.min(100, entry.barPct || 0))}}%"></span>
+                                </span>
+                            </span>
+                        </button>
+                        ${{renderGeneGoogleSearchButton(entry.gene, {{
+                            title: 'Search Google for this selection gene',
+                        }})}}
+                    </div>
+                `;
+            }}).join('');
+            bindGeneActivateButtons(body, () => renderModalGeneDiscoveryPanel());
+            bindGeneGoogleSearchButtons(body);
+        }}
+        panel.classList.add('visible');
+        panel.setAttribute('aria-hidden', 'false');
+    }}
+
+    function hideModalGeneDiscoveryPanel() {{
+        modalGenePanelRequestToken += 1;
+        modalGenePanelEntries = [];
+        modalGenePanelState = null;
+        renderModalGeneDiscoveryPanel();
+    }}
+
+    function showModalGeneDiscoveryPanel(sectionId, selectedCellIndices) {{
+        const section = sectionById.get(sectionId);
+        const indices = Array.isArray(selectedCellIndices)
+            ? selectedCellIndices.filter((idx) => Number.isInteger(idx) && idx >= 0)
+            : [];
+        if (!section || !indices.length) {{
+            hideModalGeneDiscoveryPanel();
+            return;
+        }}
+
+        modalGenePanelRequestToken += 1;
+        const requestToken = modalGenePanelRequestToken;
+        const markerEntries = scoreModalSelectionMarkerGenes(section, indices);
+        const loadedGenes = getLoadedGenesForSection(section);
+        modalGenePanelState = {{
+            sectionId,
+            cellCount: indices.length,
+            message: markerEntries.length
+                ? ''
+                : (loadedGenes.length ? 'Ranking loaded genes…' : 'Load a gene first to rank by expression'),
+        }};
+        modalGenePanelEntries = mergeModalGeneDiscoveryEntries(markerEntries, [], 30);
+        renderModalGeneDiscoveryPanel();
+
+        if (!loadedGenes.length) return;
+        window.setTimeout(() => {{
+            if (requestToken !== modalGenePanelRequestToken) return;
+            const expressionEntries = scoreLoadedGenesForModalSelection(section, indices);
+            modalGenePanelEntries = mergeModalGeneDiscoveryEntries(markerEntries, expressionEntries, 30);
+            if (!modalGenePanelEntries.length && !markerEntries.length) {{
+                modalGenePanelState = {{
+                    ...modalGenePanelState,
+                    message: 'No enriched genes found among loaded genes.',
+                }};
+            }}
+            renderModalGeneDiscoveryPanel();
+        }}, 0);
+    }}
+
     function getAnnotationCellSet(annotation) {{
         const cells = new Set();
         if (!annotation || !annotation.sectionId) return cells;
@@ -7110,6 +7578,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (canFocusSubview) {{
             actionButtons.push('<button class="selection-summary-compare-btn" type="button" id="selection-focus-subview-btn">Open focused view</button>');
         }}
+        if (options.allowGenePanel && modalSection && summary.total > 0) {{
+            actionButtons.push(
+                `<button class="selection-summary-compare-btn" type="button" id="selection-show-genes-btn">${{
+                    modalGenePanelState ? 'Hide genes' : 'Genes in selection'
+                }}</button>`
+            );
+        }}
 
         // Compare region button (only when no B yet and lasso mode is available)
         if (!lassoModeB && !modalSubview) {{
@@ -7162,6 +7637,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 e.preventDefault();
                 e.stopPropagation();
                 activateModalSubviewFromSelection();
+            }});
+        }}
+        const showGenesBtn = container.querySelector('#selection-show-genes-btn');
+        if (showGenesBtn) {{
+            showGenesBtn.addEventListener('click', (e) => {{
+                e.preventDefault();
+                e.stopPropagation();
+                if (!modalSection) return;
+                if (modalGenePanelState) {{
+                    hideModalGeneDiscoveryPanel();
+                    updateSelectionInfo();
+                    return;
+                }}
+                const selectedIndices = getSelectionIndicesForSection(modalSection.id);
+                if (!selectedIndices || !selectedIndices.length) return;
+                showModalGeneDiscoveryPanel(modalSection.id, selectedIndices);
+                updateSelectionInfo();
             }});
         }}
         const clearBBtn = container.querySelector('#lasso-clear-b-btn');
@@ -7296,8 +7788,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
                 // Draw selection highlight
                 if (isCellSelected(section.id, i)) {{
-                    ctx.strokeStyle = '#ffd700';
-                    ctx.lineWidth = 2;
+                    ctx.strokeStyle = 'rgba(255, 215, 0, 0.52)';
+                    ctx.lineWidth = Math.max(0.85, adjustedSpotSize * 0.18);
                     ctx.stroke();
                 }}
             }}
@@ -7380,6 +7872,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }} else {{
             selectedCells = newCells;
             selectedCellsB.clear();
+            hideModalGeneDiscoveryPanel();
         }}
 
         selectionSummaryExpanded = false;
@@ -8016,6 +8509,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
         }});
         selectionSummaryExpanded = false;
+        hideModalGeneDiscoveryPanel();
         updateSelectionInfo();
         renderAllSections();
         if (umapVisible) renderUMAP();
@@ -8161,6 +8655,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
 
         selectionSummaryExpanded = false;
+        hideModalGeneDiscoveryPanel();
         updateSelectionInfo();
         renderAllSections();
         if (umapVisible) renderUMAP();
@@ -8201,7 +8696,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const modalSummary = document.getElementById('modal-selection-summary');
         if (modalSummary) {{
             modalSummary.classList.toggle('expanded', selectionSummaryExpanded);
-            modalSummary.innerHTML = renderSelectionSummaryHtml(summary, {{ allowFocusSubview: true }});
+            modalSummary.innerHTML = renderSelectionSummaryHtml(summary, {{ allowFocusSubview: true, allowGenePanel: true }});
             bindSelectionSummaryInteractions(modalSummary);
         }}
         updateModalToolbarState();
@@ -8213,6 +8708,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         selectedCellsB.clear();
         lassoModeB = false;
         selectionSummaryExpanded = false;
+        hideModalGeneDiscoveryPanel();
         updateSelectionInfo();
         renderUMAP();
         renderAllSections();
@@ -8576,8 +9072,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         // Third pass: draw selection highlights
         if (selectedCells.size > 0) {{
-            ctx.strokeStyle = '#ffd700';
-            ctx.lineWidth = 2;
+            ctx.strokeStyle = 'rgba(255, 215, 0, 0.5)';
+            ctx.lineWidth = 1.25;
             for (let i = 0; i < section.x.length; i++) {{
                 if (!isCellSelected(section.id, i)) continue;
 
@@ -8595,7 +9091,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const x = point.x;
                 const y = point.y;
                 ctx.beginPath();
-                ctx.arc(x, y, spotSize + 1, 0, Math.PI * 2);
+                ctx.arc(x, y, spotSize + 0.75, 0, Math.PI * 2);
                 ctx.stroke();
             }}
         }}
@@ -9258,8 +9754,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         // Third pass: draw selection highlights
         if (selectedCells.size > 0 && !focusedSubviewActive) {{
-            ctx.strokeStyle = '#ffd700';
-            ctx.lineWidth = 3;
+            ctx.strokeStyle = 'rgba(255, 215, 0, 0.5)';
+            ctx.lineWidth = Math.max(1, Math.min(1.75, adjustedSpotSize * 0.24));
             for (let k = 0; k < nCandidates; k++) {{
                 const i = candidateIndices ? candidateIndices[k] : k;
                 if (!isCellSelected(modalSection.id, i)) continue;
@@ -9280,7 +9776,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 if (!transform.isPointVisible(x, y, adjustedSpotSize)) continue;
 
                 ctx.beginPath();
-                ctx.arc(x, y, adjustedSpotSize + 2, 0, Math.PI * 2);
+                ctx.arc(x, y, adjustedSpotSize + 1, 0, Math.PI * 2);
                 ctx.stroke();
             }}
         }}
@@ -10520,14 +11016,21 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 if (!hasMatch) return '';
             }}
             const geneButtons = genes.length
-                ? genes.map((entry) => renderGeneTokenButton(entry.raw, {{
-                    allowUnknown: true,
-                    isActive: !!entry.canonical && entry.canonical === currentGene,
-                    showMeta: false,
-                    title: entry.canonical
-                        ? 'Load marker gene into the viewer'
-                        : 'Marker gene name only; this gene was not embedded in the viewer',
-                }})).join('')
+                ? genes.map((entry) => `
+                    <div class="marker-gene-item">
+                        ${{renderGeneTokenButton(entry.raw, {{
+                            allowUnknown: true,
+                            isActive: !!entry.canonical && entry.canonical === currentGene,
+                            showMeta: false,
+                            title: entry.canonical
+                                ? 'Load marker gene into the viewer'
+                                : 'Marker gene name only; this gene was not embedded in the viewer',
+                        }})}}
+                        ${{renderGeneGoogleSearchButton(entry.raw, {{
+                            title: 'Search Google for this marker gene',
+                        }})}}
+                    </div>
+                `).join('')
                 : '<div class="agg-group-meta">No marker genes found.</div>';
             return `
                 <div class="marker-group">
@@ -10548,6 +11051,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         container.innerHTML = loadedGeneNote + rows.join('');
         bindGeneActivateButtons(container, renderMarkerGenes);
+        bindGeneGoogleSearchButtons(container);
     }}
 
     function formatClusterDEPct(value) {{
@@ -11520,6 +12024,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function closeModal() {{
         invalidateModalRenderedView();
+        hideModalGeneDiscoveryPanel();
+        modalSpacePanActive = false;
         document.getElementById('modal').classList.remove('active');
         modalMagicWandActive = false;
         isDrawingModalLasso = false;
@@ -12051,6 +12557,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const modalBlendMixRange = document.getElementById('modal-blend-mix');
         const modalBlendMixLabel = document.getElementById('modal-blend-mix-label');
         const modalBlendMeta = document.getElementById('modal-blend-meta');
+        const modalGenePanel = document.getElementById('modal-gene-panel');
+        const modalGenePanelCloseBtn = document.getElementById('modal-gene-panel-close');
         const modalBlendControls = {{
             a: {{
                 kind: document.getElementById('modal-blend-a-kind'),
@@ -12089,6 +12597,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 canvas.style.cursor = 'ew-resize';
             }} else if (isDragging) {{
                 canvas.style.cursor = 'grabbing';
+            }} else if (modalSpacePanActive) {{
+                canvas.style.cursor = 'grab';
             }} else if (modalMagicWandActive || modalAnnotationModeActive) {{
                 canvas.style.cursor = 'crosshair';
             }} else {{
@@ -12356,6 +12866,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }});
         modalBlendPanel?.addEventListener('wheel', (e) => e.stopPropagation());
         modalBlendPanel?.addEventListener('touchmove', (e) => e.stopPropagation());
+        modalGenePanel?.addEventListener('wheel', (e) => e.stopPropagation());
+        modalGenePanel?.addEventListener('touchmove', (e) => e.stopPropagation());
+        modalGenePanelCloseBtn?.addEventListener('click', () => {{
+            hideModalGeneDiscoveryPanel();
+            updateSelectionInfo();
+        }});
         modalAnnotationPanel?.addEventListener('wheel', (e) => e.stopPropagation());
         modalAnnotationPanel?.addEventListener('touchmove', (e) => e.stopPropagation());
         syncModalBlendUI();
@@ -12423,6 +12939,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         canvas.addEventListener('mousedown', (e) => {{
             modalPointerMoved = false;
             hideTooltip();
+            if (modalSpacePanActive) {{
+                if (isSplitDragging) return;
+                isDragging = true;
+                dragStartX = e.clientX; dragStartY = e.clientY;
+                lastPanX = modalPanX; lastPanY = modalPanY;
+                updateModalCanvasCursor();
+                e.preventDefault();
+                return;
+            }}
             if (modalAnnotationModeActive) {{
                 if (!modalSection) return;
                 const rect = container.getBoundingClientRect();

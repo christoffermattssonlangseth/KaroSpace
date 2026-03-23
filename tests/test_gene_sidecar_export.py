@@ -161,6 +161,20 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert "function buildModalSubviewStateFromSelection(section = modalSection)" in html_text
     assert "Open focused view" in html_text
     assert "Focused view active. Use Back view to return to the full section." in html_text
+    assert 'id="modal-gene-panel"' in html_text
+    assert "Genes in selection" in html_text
+    assert "function showModalGeneDiscoveryPanel(sectionId, selectedCellIndices)" in html_text
+    assert "function hideModalGeneDiscoveryPanel()" in html_text
+    assert "function scoreModalSelectionMarkerGenes(section, selectedCellIndices)" in html_text
+    assert "function scoreLoadedGenesForModalSelection(section, selectedCellIndices)" in html_text
+    assert "class=\"modal-gene-panel-entry\"" in html_text
+    assert "Search Google for this selection gene" in html_text
+    assert "id=\"selection-show-genes-btn\"" in html_text
+    assert "Genes in selection" in html_text
+    assert "class=\"marker-gene-item\"" in html_text
+    assert "Search Google for this marker gene" in html_text
+    assert "let modalSpacePanActive = false;" in html_text
+    assert "Pan inside the modal even while Select or Annotate is active." in html_text
     assert '<button class="graph-toggle" id="graph-toggle"' not in html_text
     assert '<button class="graph-toggle" id="neighbor-hover-toggle"' not in html_text
     assert '<select id="neighbor-hop-select"' not in html_text
