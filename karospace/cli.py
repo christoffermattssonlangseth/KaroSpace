@@ -37,7 +37,7 @@ def _parse_section_rotations_arg(raw: str) -> Optional[Dict[str, float]]:
     return rotations or None
 
 
-def main():
+def _run_export_cli(argv=None):
     parser = argparse.ArgumentParser(
         description="Generate HTML viewer for Xenium spatial transcriptomics data"
     )
@@ -205,7 +205,7 @@ def main():
         help="Number of top variable genes to score with Moran's I spatial autocorrelation. Requires spatial graph in obsp. Use 0 to disable. (default: 200)"
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     # Check input file
     input_path = Path(args.input)
@@ -298,6 +298,69 @@ def main():
     )
 
     print(f"Done! Open {output_path} in a browser to view.")
+
+
+def _run_package_sidecar_cli(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Package an existing KaroSpace sidecar viewer into a .karospace archive"
+    )
+    parser.add_argument(
+        "html",
+        type=str,
+        help="Path to an existing sidecar HTML viewer",
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        type=str,
+        default=None,
+        help="Output .karospace file path (default: <html stem>.karospace)",
+    )
+    parser.add_argument(
+        "--gene-aux-path",
+        type=str,
+        default=None,
+        help="Optional actual path to the sidecar gene manifest JSON if it differs from the path referenced in the HTML.",
+    )
+    parser.add_argument(
+        "--gene-shard-dir",
+        type=str,
+        default=None,
+        help="Optional actual path to the sidecar shard directory if it differs from the manifest stem directory.",
+    )
+    parser.add_argument(
+        "--loader-output",
+        type=str,
+        default=None,
+        help="Optional output path for the companion .loader.html file.",
+    )
+
+    args = parser.parse_args(argv)
+
+    html_path = Path(args.html)
+    if not html_path.exists():
+        print(f"Error: Sidecar HTML not found: {args.html}", file=sys.stderr)
+        sys.exit(1)
+
+    from .exporter import package_sidecar_viewer
+
+    print(f"Packaging existing sidecar viewer: {args.html}")
+    package_path = package_sidecar_viewer(
+        html_path,
+        output_path=args.output,
+        gene_manifest_path=args.gene_aux_path,
+        gene_shard_dir=args.gene_shard_dir,
+        loader_output_path=args.loader_output,
+    )
+    print(f"Done! Share {package_path} together with its .loader.html opener.")
+
+
+def main():
+    argv = list(sys.argv[1:])
+    if argv and argv[0] in {"package-sidecar", "package"}:
+        _run_package_sidecar_cli(argv[1:])
+        return
+    _run_export_cli(argv)
 
 
 if __name__ == "__main__":

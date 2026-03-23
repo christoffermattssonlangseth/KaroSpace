@@ -8,6 +8,7 @@ for interactive visualization of spatial transcriptomics data.
 import base64
 import json
 import os
+import re
 import shutil
 import struct
 import tempfile
@@ -339,6 +340,160 @@ def _write_karospace_package_loader(
     loader_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(template_path, loader_path)
     return loader_path
+
+
+def _extract_embedded_viewer_data(html_text: str) -> dict:
+    match = re.search(
+        r'<script id="karospace-data" type="application/json">(.*?)</script>',
+        html_text,
+        re.DOTALL,
+    )
+    if not match:
+        raise ValueError("embedded karospace-data script not found in HTML")
+    return json.loads(match.group(1).replace("<\\/", "</"))
+
+
+def _extract_html_title(html_text: str) -> str:
+    match = re.search(r"<title>(.*?)</title>", html_text, re.DOTALL | re.IGNORECASE)
+    if not match:
+        return "KaroSpace"
+    return str(match.group(1)).strip() or "KaroSpace"
+
+
+def package_sidecar_viewer(
+    html_path: Union[str, Path],
+    *,
+    output_path: Optional[Union[str, Path]] = None,
+    gene_manifest_path: Optional[Union[str, Path]] = None,
+    gene_shard_dir: Optional[Union[str, Path]] = None,
+    loader_output_path: Optional[Union[str, Path]] = None,
+) -> str:
+    """
+    Package an existing sidecar viewer bundle into a `.karospace` archive.
+
+    Parameters
+    ----------
+    html_path : str or Path
+        Path to an existing KaroSpace HTML viewer generated with `gene_storage="sidecar"`.
+    output_path : str or Path, optional
+        Output `.karospace` path. Defaults to `<html stem>.karospace`.
+    gene_manifest_path : str or Path, optional
+        Actual filesystem path to the sidecar gene manifest JSON if it differs from the
+        path referenced in the HTML.
+    gene_shard_dir : str or Path, optional
+        Actual filesystem path to the sidecar shard directory if it differs from the
+        manifest stem directory.
+    loader_output_path : str or Path, optional
+        Optional output path for the companion `.loader.html` file. Defaults to
+        `<output stem>.loader.html`.
+
+    Returns
+    -------
+    str
+        Absolute path to the written `.karospace` package.
+    """
+    source_html_path = Path(html_path).expanduser().resolve()
+    if not source_html_path.exists():
+        raise FileNotFoundError(f"sidecar HTML not found: {source_html_path}")
+
+    print(f"  - reading existing viewer HTML: {source_html_path}")
+    html_text = source_html_path.read_text(encoding="utf-8")
+    data = _extract_embedded_viewer_data(html_text)
+    package_title = _extract_html_title(html_text)
+
+    gene_aux_url = str(data.get("gene_aux_url") or "").strip()
+    if not gene_aux_url:
+        raise ValueError("HTML viewer does not reference a sidecar gene manifest")
+
+    html_parent = source_html_path.parent
+    package_gene_manifest_rel = Path(gene_aux_url).as_posix()
+    actual_gene_manifest_path = (
+        Path(gene_manifest_path).expanduser().resolve()
+        if gene_manifest_path is not None
+        else (html_parent / package_gene_manifest_rel).resolve()
+    )
+    if not actual_gene_manifest_path.exists():
+        raise FileNotFoundError(f"sidecar gene manifest not found: {actual_gene_manifest_path}")
+
+    package_gene_shard_rel = Path(package_gene_manifest_rel).with_suffix("").as_posix()
+    actual_gene_shard_dir = (
+        Path(gene_shard_dir).expanduser().resolve()
+        if gene_shard_dir is not None
+        else (html_parent / package_gene_shard_rel).resolve()
+    )
+    if not actual_gene_shard_dir.exists():
+        raise FileNotFoundError(f"sidecar shard directory not found: {actual_gene_shard_dir}")
+
+    resolved_output_path = (
+        Path(output_path).expanduser().resolve()
+        if output_path is not None
+        else source_html_path.with_suffix(".karospace")
+    )
+    if resolved_output_path.suffix.lower() != ".karospace":
+        raise ValueError("output_path must end with .karospace")
+
+    resolved_loader_output_path = (
+        Path(loader_output_path).expanduser().resolve()
+        if loader_output_path is not None
+        else resolved_output_path.with_suffix(".loader.html")
+    )
+
+    n_sections = int(data.get("n_sections") or 0)
+    total_cells = int(data.get("total_cells") or 0)
+
+    print(f"  - resolved gene manifest: {actual_gene_manifest_path}")
+    print(f"  - resolved shard directory: {actual_gene_shard_dir}")
+    print(f"  - package title: {package_title}")
+    print(f"  - package target: {resolved_output_path}")
+    print(
+        f"  - packaging {n_sections} sections and {total_cells:,} cells "
+        f"from existing sidecar assets"
+    )
+
+    with tempfile.TemporaryDirectory(prefix="karospace-package-") as tmpdir:
+        source_root = Path(tmpdir)
+        print("  - staging package assets...")
+        entry_html = "index.html"
+        staged_entry_html = source_root / entry_html
+        staged_entry_html.write_text(html_text, encoding="utf-8")
+
+        staged_gene_manifest = source_root / package_gene_manifest_rel
+        staged_gene_manifest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(actual_gene_manifest_path, staged_gene_manifest)
+
+        staged_gene_shard_dir = source_root / package_gene_shard_rel
+        staged_gene_shard_dir.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(actual_gene_shard_dir, staged_gene_shard_dir, dirs_exist_ok=True)
+
+        print("  - writing .karospace archive...")
+        _write_karospace_package(
+            package_path=resolved_output_path,
+            source_root=source_root,
+            entry_html=entry_html,
+            gene_manifest_path=package_gene_manifest_rel,
+            gene_shard_dir=package_gene_shard_rel,
+            title=package_title,
+            n_sections=n_sections,
+            total_cells=total_cells,
+        )
+
+    print("  - writing local package loader...")
+    written_loader_path = _write_karospace_package_loader(
+        loader_path=resolved_loader_output_path,
+    )
+
+    print(f"Exported KaroSpace package to: {resolved_output_path}")
+    print(f"  - entry HTML: index.html (from {source_html_path.name})")
+    print(f"  - packaged gene manifest: {package_gene_manifest_rel}")
+    print(f"  - packaged shard directory: {package_gene_shard_rel}")
+    if written_loader_path is not None:
+        print(f"  - local package loader: {written_loader_path}")
+    else:
+        print(f"  - local package loader: unavailable (template not found)")
+    print(f"  - {n_sections} sections")
+    print(f"  - {total_cells:,} cells")
+
+    return str(resolved_output_path)
 
 
 def _select_top_variable_genes(adata, n: int) -> List[str]:

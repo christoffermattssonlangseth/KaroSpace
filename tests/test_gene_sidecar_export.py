@@ -15,7 +15,7 @@ from anndata import AnnData
 
 import karospace.cli as cli_module
 from karospace.data_loader import SectionData, SpatialDataset, load_spatial_data
-from karospace.exporter import export_to_html
+from karospace.exporter import export_to_html, package_sidecar_viewer
 
 
 def _build_dataset() -> SpatialDataset:
@@ -473,6 +473,53 @@ def test_karospace_package_export_wraps_sidecar_assets(tmp_path):
     assert "index.html" in package_manifest["files"]
     assert infos["viewer.genes.json"].header_offset < infos[shard_names[0]].header_offset
     assert infos["index.html"].header_offset < infos[shard_names[0]].header_offset
+
+
+def test_package_sidecar_viewer_wraps_existing_sidecar_bundle(tmp_path, capsys):
+    dataset = _build_dataset()
+    html_path = tmp_path / "viewer.html"
+
+    export_to_html(
+        dataset,
+        output_path=str(html_path),
+        color="leiden",
+        genes=["G1"],
+        use_hvgs=False,
+        gene_storage="sidecar",
+    )
+
+    package_path = tmp_path / "viewer.karospace"
+    returned = package_sidecar_viewer(html_path, output_path=package_path)
+    output = capsys.readouterr().out
+
+    assert returned == str(package_path.resolve())
+    assert package_path.exists()
+    assert (tmp_path / "viewer.loader.html").exists()
+    assert "reading existing viewer HTML" in output
+    assert "resolved gene manifest" in output
+    assert "resolved shard directory" in output
+    assert "staging package assets" in output
+    assert "writing .karospace archive" in output
+    assert "writing local package loader" in output
+
+    with zipfile.ZipFile(package_path) as zf:
+        names = set(zf.namelist())
+        assert "karospace-package.json" in names
+        assert "index.html" in names
+        assert "viewer.genes.json" in names
+        shard_names = sorted(name for name in names if name.startswith("viewer.genes/"))
+        assert shard_names
+        package_manifest = json.loads(zf.read("karospace-package.json").decode("utf-8"))
+        embedded = _extract_data_json(zf.read("index.html").decode("utf-8"))
+        manifest = json.loads(zf.read("viewer.genes.json").decode("utf-8"))
+        shard = json.loads(zf.read(shard_names[0]).decode("utf-8"))
+
+    assert package_manifest["entry_html"] == "index.html"
+    assert package_manifest["title"] == "Spatial Viewer"
+    assert package_manifest["n_sections"] == dataset.n_sections
+    assert package_manifest["total_cells"] == dataset.n_cells
+    assert package_manifest["viewer"]["gene_manifest_path"] == "viewer.genes.json"
+    assert package_manifest["viewer"]["gene_shard_dir"] == "viewer.genes"
     assert "viewer.genes.json" in package_manifest["files"]
     assert shard_names[0] in package_manifest["files"]
 
@@ -989,6 +1036,38 @@ def test_cli_passes_spatial_variable_genes_n_to_export(monkeypatch, tmp_path):
     cli_module.main()
 
     assert captured["kwargs"]["spatial_variable_genes_n"] == 50
+
+
+def test_cli_package_sidecar_dispatches_to_packager(monkeypatch, tmp_path):
+    html_path = tmp_path / "viewer.html"
+    html_path.write_text("<html><head><title>KaroSpace</title></head><body></body></html>", encoding="utf-8")
+    package_path = tmp_path / "viewer.karospace"
+    captured = {}
+
+    def fake_package(html, **kwargs):
+        captured["html"] = html
+        captured["kwargs"] = kwargs
+        return str(package_path)
+
+    monkeypatch.setattr("karospace.exporter.package_sidecar_viewer", fake_package)
+    monkeypatch.setattr(
+        cli_module.sys,
+        "argv",
+        [
+            "karospace",
+            "package-sidecar",
+            str(html_path),
+            "--output",
+            str(package_path),
+        ],
+    )
+
+    cli_module.main()
+
+    assert Path(captured["html"]) == html_path
+    assert captured["kwargs"]["output_path"] == str(package_path)
+    assert captured["kwargs"]["gene_manifest_path"] is None
+    assert captured["kwargs"]["gene_shard_dir"] is None
 
 
 def test_export_uses_companion_analytics_when_present(monkeypatch, tmp_path):
