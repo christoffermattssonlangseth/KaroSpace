@@ -789,6 +789,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             --muted-color: {muted_color};
             --hover-bg: {hover_bg};
             --graph-color: {graph_color};
+            --selection-outline-color: rgba(22, 22, 22, 0.42);
             --accent: #870052;
             --accent-strong: #4F0433;
             --accent-warm: #FF876F;
@@ -805,6 +806,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             --muted-color: #888888;
             --hover-bg: #3a3a3a;
             --graph-color: rgba(255, 255, 255, 0.12);
+            --selection-outline-color: rgba(255, 255, 255, 0.5);
         }}
         :root.light {{
             --background: #f5f5f5;
@@ -816,6 +818,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             --muted-color: #666666;
             --hover-bg: #f0f0f0;
             --graph-color: rgba(0, 0, 0, 0.12);
+            --selection-outline-color: rgba(22, 22, 22, 0.42);
         }}
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
         body {{
@@ -6287,6 +6290,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return color || 'rgba(0, 0, 0, 0.12)';
     }}
 
+    function getSelectionOutlineColor() {{
+        const color = getComputedStyle(document.documentElement).getPropertyValue('--selection-outline-color').trim();
+        return color || 'rgba(22, 22, 22, 0.42)';
+    }}
+
     function getSectionAdjacency(section) {{
         if (section._adj) return section._adj;
         ensureSectionXY(section);
@@ -7788,7 +7796,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
                 // Draw selection highlight
                 if (isCellSelected(section.id, i)) {{
-                    ctx.strokeStyle = 'rgba(255, 215, 0, 0.52)';
+                    ctx.strokeStyle = getSelectionOutlineColor();
                     ctx.lineWidth = Math.max(0.85, adjustedSpotSize * 0.18);
                     ctx.stroke();
                 }}
@@ -9072,7 +9080,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         // Third pass: draw selection highlights
         if (selectedCells.size > 0) {{
-            ctx.strokeStyle = 'rgba(255, 215, 0, 0.5)';
+            ctx.strokeStyle = getSelectionOutlineColor();
             ctx.lineWidth = 1.25;
             for (let i = 0; i < section.x.length; i++) {{
                 if (!isCellSelected(section.id, i)) continue;
@@ -9754,7 +9762,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         // Third pass: draw selection highlights
         if (selectedCells.size > 0 && !focusedSubviewActive) {{
-            ctx.strokeStyle = 'rgba(255, 215, 0, 0.5)';
+            ctx.strokeStyle = getSelectionOutlineColor();
             ctx.lineWidth = Math.max(1, Math.min(1.75, adjustedSpotSize * 0.24));
             for (let k = 0; k < nCandidates; k++) {{
                 const i = candidateIndices ? candidateIndices[k] : k;
