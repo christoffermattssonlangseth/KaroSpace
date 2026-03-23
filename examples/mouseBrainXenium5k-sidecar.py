@@ -22,47 +22,53 @@ os.environ.setdefault("KMP_WARNINGS", "0")
 from karospace import load_spatial_data, export_to_html
 
 # Path to your h5ad file
-H5AD_PATH = os.environ.get("MOUSEBRAIN_H5AD_PATH", "/Users/chrislangseth/work/karolinska_institutet/projects/KaroSpaceDataWrangling/data/mouseBrain5k/mouseBrain5k_cellcharter.h5ad")
+H5AD_PATH = os.environ.get(
+    "MOUSEBRAIN_H5AD_PATH",
+    "/tmp/mouseBrain5k_cellcharter.companion.ready.h5ad",
+)
 
 if H5AD_PATH.startswith("/path/to/"):
-    raise SystemExit("Set MOUSEBRAIN_H5AD_PATH to your .h5ad file before running examples/mouseBrainXenium5k-sidecar.py.")
+    raise SystemExit(
+        "Set MOUSEBRAIN_H5AD_PATH to your .h5ad file before running "
+        "examples/mouseBrainXenium5k-sidecar.py."
+    )
+
+PRIMARY_CLUSTER = "CellCharter_10"
+ANALYTICS_COLUMNS = [PRIMARY_CLUSTER, "CellCharter_5", "leiden_0.5"]
+USE_HVGS = False
+ENABLE_ANALYTICS = True
 
 # Load the dataset
 dataset = load_spatial_data(
     H5AD_PATH,
     groupby="sample_id",
-    metadata_columns=['condition'],
+    metadata_columns=[""],
     metadata_value_order={
-        "stage": [],
+       
     },
 )
 
 print(f"Loaded {dataset.n_sections} sections with {dataset.n_cells:,} total cells")
 print(f"Available color columns: {dataset.obs_columns[:10]}...")
 
-# Choose gene source for expression:
-# - True: use highly variable genes (if present, capped to hvg_limit)
-# - False: use the explicit genes list below for embedded startup genes only
-USE_HVGS = False
-OUTLINE_BY = "condition"
-ENABLE_ANALYTICS = True
-
 export_to_html(
     dataset,
     output_path="mouseBrainXenium5k.html",
-    color='leiden_1.0',
+    color=PRIMARY_CLUSTER,
     title="KaroSpace",
     min_panel_size=120,
     spot_size="auto",
     downsample=100000,
     theme="light",
-    outline_by=OUTLINE_BY,
+    outline_by=None,
     additional_colors=[
-        'CellCharter_5',
-        'CellCharter_10', 'CellCharter_15', 'CellCharter_20', 'leiden_0.1',
-        'leiden_0.5',
+        "CellCharter_5",
+        "CellCharter_15",
+        "CellCharter_20",
+        "leiden_0.1",
+        "leiden_0.5",
+        "leiden_1.0",
     ],
-
     genes=[
         "Arg1",
         "Cd74",
@@ -88,13 +94,12 @@ export_to_html(
     cluster_means_n_genes=500,
     gene_storage="sidecar",
     gene_aux_path="mouseBrainXenium5k.genes.json",
-    marker_genes_groupby=['leiden_1.0','CellCharter_5',
-        'CellCharter_10', 'CellCharter_15', 'CellCharter_20', 'leiden_0.1',
-        'leiden_0.5'] if ENABLE_ANALYTICS else None,
-    marker_genes_top_n=50,
-    neighbor_stats_permutations=25 if ENABLE_ANALYTICS else 0,
+    marker_genes_groupby=ANALYTICS_COLUMNS if ENABLE_ANALYTICS else None,
+    marker_genes_top_n=30,
+    neighbor_stats_groupby=ANALYTICS_COLUMNS if ENABLE_ANALYTICS else None,
+    neighbor_stats_permutations=0,
     neighbor_stats_seed=42,
-    cluster_de_groupby=["leiden_1.0", "CellCharter_5"],
+    cluster_de_groupby=ANALYTICS_COLUMNS if ENABLE_ANALYTICS else None,
     cluster_de_top_n=20,
     cluster_de_method="t-test",
     cluster_de_layer="normalized",

@@ -22,7 +22,7 @@ os.environ.setdefault("KMP_WARNINGS", "0")
 from karospace import load_spatial_data, export_to_html
 
 # Path to your h5ad file
-H5AD_PATH = os.environ.get("BALO_H5AD_PATH", "/Users/chrislangseth/Downloads/baloMS_indep_clust_balo_MANA_balo_annot.h5ad")
+H5AD_PATH = os.environ.get("BALO_H5AD_PATH","/tmp/baloMS_companion.ready.h5ad")# "/Users/chrislangseth/Downloads/baloMS_indep_clust_balo_MANA_balo_annot.h5ad")
 
 if H5AD_PATH.startswith("/path/to/"):
     raise SystemExit("Set BALO_H5AD_PATH to your .h5ad file before running examples/BALO-sidecar.py.")
@@ -45,7 +45,7 @@ print(f"Available color columns: {dataset.obs_columns[:10]}...")
 # - False: use the explicit genes list below for embedded startup genes only
 USE_HVGS = False
 OUTLINE_BY = "condition"
-ENABLE_ANALYTICS = False
+ENABLE_ANALYTICS = True
 
 export_to_html(
     dataset,
@@ -86,6 +86,11 @@ export_to_html(
     marker_genes_groupby=['leiden_0.5'] if ENABLE_ANALYTICS else None,
     marker_genes_top_n=50,
     neighbor_stats_permutations=25 if ENABLE_ANALYTICS else 0,
+    cluster_de_groupby=["leiden_2"],
+    cluster_de_top_n=20,
+    cluster_de_method="t-test",
+    cluster_de_layer="normalized",
+    cluster_de_min_cells=20,
     neighbor_stats_seed=42,
     interaction_markers_groupby=None,
     interaction_markers_top_targets=6,
