@@ -197,6 +197,7 @@
       const ZIP_END_OF_CENTRAL_DIRECTORY = 0x06054b50;
       const PACKAGE_MANIFEST_PATH = 'karospace-package.json';
       const LAZY_ARCHIVE_THRESHOLD_BYTES = 768 * 1024 * 1024;
+      const EAGER_ARCHIVE_COMPAT_MAX_BYTES = 3 * 1024 * 1024 * 1024;
 
       const fileInput = document.getElementById('package-file');
       const dropzone = document.getElementById('dropzone');
@@ -602,11 +603,50 @@
         return new LazyZipArchive(file, entries);
       }
 
-      async function openZipArchive(file) {
-        if (file.size > LAZY_ARCHIVE_THRESHOLD_BYTES) {
-          return await parseLazyZipArchive(file);
+      async function openZipArchive(file, options = {}) {
+        const forceEager = !!(options && options.forceEager);
+        if (!forceEager && file.size > LAZY_ARCHIVE_THRESHOLD_BYTES) {
+          const archive = await parseLazyZipArchive(file);
+          archive.mode = 'lazy';
+          return archive;
         }
-        return parseZipArchive(await file.arrayBuffer());
+        const archive = parseZipArchive(await file.arrayBuffer());
+        archive.mode = 'eager';
+        return archive;
+      }
+
+      function shouldRetryWithEagerArchive(file, archive, error) {
+        if (!archive || archive.mode !== 'lazy') return false;
+        if (!file || !Number.isFinite(file.size) || file.size > EAGER_ARCHIVE_COMPAT_MAX_BYTES) return false;
+        const message = error && error.message ? String(error.message) : '';
+        return (
+          message.includes('ZIP local file header missing') ||
+          message.includes('ZIP entry extends beyond archive bounds')
+        );
+      }
+
+      async function prepareArchiveSession(file, archive) {
+        if (!archive.has(PACKAGE_MANIFEST_PATH)) {
+          throw new Error('karospace-package.json is missing');
+        }
+
+        const manifest = await archive.readJson(PACKAGE_MANIFEST_PATH);
+        const validated = validatePackageManifest(manifest, archive);
+        const packagedGeneManifest = await archive.readJson(validated.geneManifestPath);
+        if (
+          !packagedGeneManifest ||
+          (packagedGeneManifest.format !== 'karospace-gene-sidecar-manifest-v2' &&
+           packagedGeneManifest.format !== 'karospace-gene-sidecar-manifest-v3')
+        ) {
+          throw new Error('Packaged gene manifest format is not supported');
+        }
+
+        return {
+          manifest,
+          validated,
+          packagedGeneManifest,
+          entryHtml: await archive.readText(validated.entryHtml),
+        };
       }
 
       function validatePackageManifest(manifest, archive) {
@@ -707,22 +747,21 @@
         hideToast();
         setLoadingText(file.size > LAZY_ARCHIVE_THRESHOLD_BYTES ? 'reading package index\u2026' : 'reading package\u2026');
 
-        const archive = await openZipArchive(file);
-        if (!archive.has(PACKAGE_MANIFEST_PATH)) {
-          throw new Error('karospace-package.json is missing');
+        let archive = await openZipArchive(file);
+        let prepared;
+        try {
+          setLoadingText('validating\u2026');
+          prepared = await prepareArchiveSession(file, archive);
+        } catch (error) {
+          if (!shouldRetryWithEagerArchive(file, archive, error)) {
+            throw error;
+          }
+          setLoadingText('retrying in compatibility mode\u2026');
+          archive = await openZipArchive(file, { forceEager: true });
+          setLoadingText('validating\u2026');
+          prepared = await prepareArchiveSession(file, archive);
         }
-
-        setLoadingText('validating\u2026');
-        const manifest = await archive.readJson(PACKAGE_MANIFEST_PATH);
-        const validated = validatePackageManifest(manifest, archive);
-        const packagedGeneManifest = await archive.readJson(validated.geneManifestPath);
-        if (
-          !packagedGeneManifest ||
-          (packagedGeneManifest.format !== 'karospace-gene-sidecar-manifest-v2' &&
-           packagedGeneManifest.format !== 'karospace-gene-sidecar-manifest-v3')
-        ) {
-          throw new Error('Packaged gene manifest format is not supported');
-        }
+        const { validated, entryHtml } = prepared;
 
         const sessionId = 'pkg-' + (++sessionCounter);
         currentSessionId = sessionId;
@@ -755,7 +794,6 @@
         };
 
         setLoadingText('launching\u2026');
-        const entryHtml = await archive.readText(validated.entryHtml);
         const hydratedHtml = injectBootstrap(entryHtml, sessionId);
         window.__karospacePackageSession = window.__karospacePackageSessions[sessionId];
         document.open();

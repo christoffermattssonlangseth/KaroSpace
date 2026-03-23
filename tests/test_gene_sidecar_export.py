@@ -417,6 +417,8 @@ def test_binary_karospace_package_stores_bin_shards_uncompressed(tmp_path):
         assert gene_manifest["format"] == "karospace-gene-sidecar-manifest-v3"
         assert gene_manifest["gene_sidecar_format"] == "binary-v1"
         assert infos[bin_names[0]].compress_type == zipfile.ZIP_STORED
+        assert infos[gene_manifest_name].header_offset < infos[bin_names[0]].header_offset
+        assert infos["index.html"].header_offset < infos[bin_names[0]].header_offset
 
 
 def test_karospace_package_export_wraps_sidecar_assets(tmp_path):
@@ -448,7 +450,8 @@ def test_karospace_package_export_wraps_sidecar_assets(tmp_path):
     assert "window.__karospacePackageSessions" in loader_html
 
     with zipfile.ZipFile(package_path) as zf:
-        names = set(zf.namelist())
+        infos = {info.filename: info for info in zf.infolist()}
+        names = set(infos)
         assert "karospace-package.json" in names
         assert "index.html" in names
         assert "viewer.genes.json" in names
@@ -468,6 +471,8 @@ def test_karospace_package_export_wraps_sidecar_assets(tmp_path):
     assert package_manifest["viewer"]["gene_manifest_path"] == "viewer.genes.json"
     assert package_manifest["viewer"]["gene_shard_dir"] == "viewer.genes"
     assert "index.html" in package_manifest["files"]
+    assert infos["viewer.genes.json"].header_offset < infos[shard_names[0]].header_offset
+    assert infos["index.html"].header_offset < infos[shard_names[0]].header_offset
     assert "viewer.genes.json" in package_manifest["files"]
     assert shard_names[0] in package_manifest["files"]
 
@@ -510,10 +515,13 @@ def test_karospace_package_loader_page_contains_expected_runtime_hooks():
     assert "window.__karospacePackageSession" in loader_html
     assert "document.write(hydratedHtml);" in loader_html
     assert "const LAZY_ARCHIVE_THRESHOLD_BYTES" in loader_html
+    assert "const EAGER_ARCHIVE_COMPAT_MAX_BYTES" in loader_html
     assert "class LazyZipArchive" in loader_html
     assert "async function parseLazyZipArchive(file)" in loader_html
-    assert "async function openZipArchive(file)" in loader_html
+    assert "async function openZipArchive(file, options = {})" in loader_html
     assert "file.size > LAZY_ARCHIVE_THRESHOLD_BYTES" in loader_html
+    assert "function shouldRetryWithEagerArchive(file, archive, error)" in loader_html
+    assert "retrying in compatibility mode" in loader_html
     assert "readBlobSlice(" in loader_html
     assert "centralDirectoryOffset + centralDirectorySize" in loader_html
     assert "supportsRange(path)" in loader_html

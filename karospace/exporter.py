@@ -296,13 +296,23 @@ def _write_karospace_package(
         total_cells=total_cells,
     )
 
+    def _package_sort_key(path: Path) -> tuple[int, str]:
+        rel_path = path.relative_to(source_root).as_posix()
+        if rel_path == entry_html:
+            return (0, rel_path)
+        if rel_path == gene_manifest_path:
+            return (1, rel_path)
+        if rel_path.startswith(f"{gene_shard_dir.rstrip('/')}/"):
+            return (3, rel_path)
+        return (2, rel_path)
+
     with zipfile.ZipFile(package_path, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(
             KAROSPACE_PACKAGE_MANIFEST,
             json.dumps(manifest, separators=(",", ":")),
             compress_type=zipfile.ZIP_DEFLATED,
         )
-        for file_path in sorted(p for p in source_root.rglob("*") if p.is_file()):
+        for file_path in sorted((p for p in source_root.rglob("*") if p.is_file()), key=_package_sort_key):
             rel_path = file_path.relative_to(source_root).as_posix()
             compress_type = zipfile.ZIP_STORED if file_path.suffix.lower() == ".bin" else zipfile.ZIP_DEFLATED
             zf.write(file_path, arcname=rel_path, compress_type=compress_type)
