@@ -22,13 +22,17 @@ When exporting `something.karospace`, KaroSpace also writes `something.loader.ht
 - **Linked UMAP + section selection** - Magic Wand lasso works in UMAP and modal view with synced highlights
 - **Selection summaries** - Selected-cell totals and per-type counts with expandable, scrollable lists
 - **Polygon annotation workflow** - Draw multiple persistent polygons, manage labels, and export JSON for downstream `adata` integration
+- **Region-to-region DE** - Compare drawn annotations directly in the viewer, export JSON/CSV reports, and Google-search top hits
 - **Split compare slider** - Compare A/B variables in modal view (`Cell type` or `Gene`, including `All categories`)
 - **Legend controls + spotlight** - Toggle/hide categories and spotlight one class across grid and UMAP
 - **Flexible coloring + gene discovery** - Switch between multiple annotation columns, fuzzy-search genes, and reuse recent or saved genes
-- **Insights panel** - Categorical stats, neighbor composition/enrichment, marker genes, pairwise cluster DE, and interaction markers
+- **Insights panel** - `Summary`, `Compare`, `Genes`, `Neighborhood`, and `Regions` tabs with marker genes, pairwise cluster DE, neighbor composition, interaction markers, and region comparison tools
+- **Modal selection workflow** - Lasso in the sample view, open a focused subview, browse `Genes in selection`, and use `Space` + drag to pan while Select or Annotate is active
+- **Shareable sidecar packaging** - Export sidecar viewers as `.karospace` bundles with matching local loader HTML, or package an existing sidecar bundle later via the CLI
+- **Compact sidecar options** - JSON and binary sidecar formats, sparse-first encoding, and optional `uint16` / `uint8` quantization for large datasets
 - **Metadata-aware browsing** - Filter by metadata and optionally outline sections by `course` (or another column)
 - **Optional neighbor graph tools** - Graph overlay + hover rings (1–3 hops) when `adata.obsp` graph exists
-- **Quality-of-life controls** - Compact hideable sample-view toolbar, screenshots, theme toggle, and adjustable spot size
+- **Quality-of-life controls** - Compact hideable sample-view toolbar, screenshots, theme toggle, keyboard shortcuts, and adjustable spot size
 - **Standalone export** - One self-contained HTML file, no backend required
 
 ## Browser Considerations
@@ -316,6 +320,10 @@ pass `cluster_de_groupby=[...]` to `export_to_html` (or `--cluster-de-groupby` i
 Each requested categorical column is precomputed at export time, and the viewer lets you compare
 any source/reference cluster pair without a backend.
 
+To expose region-to-region differential expression in `Insights -> Regions`, keep genes available
+either embedded in the viewer or via sidecar mode. Sidecar viewers can also run full region DE in
+the browser by streaming the existing sidecar data without a backend.
+
 ## Examples
 
 See the scripts in [`examples/`](examples/) for complete dataset-specific exports.
@@ -331,8 +339,8 @@ See the scripts in [`examples/`](examples/) for complete dataset-specific export
 - **Legend items + Spotlight** - Toggle categories and optionally spotlight one across grid + UMAP
 - **Legend button** - Show/hide the legend panel
 - **Insights button** - Toggle the insights panel
-- **Insights tabs** - `Stats`, `Neighbors`, and `Genes` (`Dotplot`, `Markers`, `Compare`)
-- **Graph / Neighbors / Hop selector** - Available when a neighbor graph exists
+- **Insights tabs** - `Summary`, `Compare`, `Genes`, `Neighborhood`, and `Regions`
+- **Genes subtabs** - `Dotplot` and `Markers`
 - **Screenshot button** - Download a snapshot of the current view
 - **Theme button** - Toggle dark/light mode
 - **Footer badge** - “KaroSpace” label with a GitHub link
@@ -340,6 +348,7 @@ See the scripts in [`examples/`](examples/) for complete dataset-specific export
 ### Modal View (Detailed Section)
 - **Mouse wheel** - Zoom in/out
 - **Click and drag** - Pan around
+- **Space + drag** - Temporarily pan even when `Select` or `Annotate` is active
 - **Zoom buttons** - +/- zoom controls
 - **Rotate buttons** - Rotate each section view with exact stored angles and quick step buttons
 - **Reset button** - Return to default zoom/pan
@@ -347,6 +356,8 @@ See the scripts in [`examples/`](examples/) for complete dataset-specific export
 - **A/B variable selectors** - Choose per side: `Cell type` (single category or `All categories`) or `Gene`
 - **Split slider** - Controls left/right display share (e.g. 10% = left 10% uses A, right 90% uses B)
 - **Magic Wand** - Draw lasso selection directly on the section
+- **Genes in selection** - Open an on-demand ranked gene panel from the lasso selection summary
+- **Focused view** - Open the current single-section selection as a temporary filtered subview and return with `Back view`
 - **Annotate + Annotation panel** - Draw persistent polygons, rename/select/delete, clear section/all
 - **Hide tools** - Collapse the bottom sample-view toolbar when you want an unobstructed canvas
 - **Draggable grouped toolbar** - View, Tools, Graph, and Actions controls live in a compact dock that can be repositioned

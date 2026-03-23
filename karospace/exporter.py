@@ -1495,22 +1495,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         .marker-group-title {{ font-size: 11px; font-weight: 600; }}
         .marker-genes .gene-token-grid {{ gap: 4px; }}
-        .marker-gene-item {{
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            min-width: 0;
-        }}
         .marker-genes .gene-token-btn {{
             gap: 4px;
             padding: 3px 6px;
             font-size: 10px;
         }}
         .marker-genes .gene-token-meta {{ font-size: 9px; }}
-        .marker-genes .gene-search-btn {{
-            padding: 2px 6px;
-            font-size: 8px;
-        }}
         .marker-genes-list {{
             font-size: 10px;
             color: var(--muted-color);
@@ -11024,21 +11014,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 if (!hasMatch) return '';
             }}
             const geneButtons = genes.length
-                ? genes.map((entry) => `
-                    <div class="marker-gene-item">
-                        ${{renderGeneTokenButton(entry.raw, {{
-                            allowUnknown: true,
-                            isActive: !!entry.canonical && entry.canonical === currentGene,
-                            showMeta: false,
-                            title: entry.canonical
-                                ? 'Load marker gene into the viewer'
-                                : 'Marker gene name only; this gene was not embedded in the viewer',
-                        }})}}
-                        ${{renderGeneGoogleSearchButton(entry.raw, {{
-                            title: 'Search Google for this marker gene',
-                        }})}}
-                    </div>
-                `).join('')
+                ? genes.map((entry) => renderGeneTokenButton(entry.raw, {{
+                    allowUnknown: true,
+                    isActive: !!entry.canonical && entry.canonical === currentGene,
+                    showMeta: false,
+                    title: entry.canonical
+                        ? 'Load marker gene into the viewer'
+                        : 'Marker gene name only; this gene was not embedded in the viewer',
+                }})).join('')
                 : '<div class="agg-group-meta">No marker genes found.</div>';
             return `
                 <div class="marker-group">
@@ -11059,7 +11042,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         container.innerHTML = loadedGeneNote + rows.join('');
         bindGeneActivateButtons(container, renderMarkerGenes);
-        bindGeneGoogleSearchButtons(container);
     }}
 
     function formatClusterDEPct(value) {{
