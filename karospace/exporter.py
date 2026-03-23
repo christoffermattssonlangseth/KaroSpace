@@ -9,6 +9,7 @@ import base64
 import json
 import os
 import shutil
+import struct
 import tempfile
 import time
 import zipfile
@@ -27,6 +28,10 @@ from .data_loader import SpatialDataset
 GENE_SIDECAR_SHARD_SIZE = 256
 KAROSPACE_PACKAGE_MANIFEST = "karospace-package.json"
 KAROSPACE_PACKAGE_LOADER_FILENAME = "karospace-package-loader.html"
+GENE_SIDECAR_FORMAT_JSON_V2 = "json-v2"
+GENE_SIDECAR_FORMAT_BINARY_V1 = "binary-v1"
+GENE_SIDECAR_BINARY_MAGIC = b"KSB1"
+GENE_SIDECAR_BINARY_VERSION = 1
 
 
 def _load_logo_base64() -> Optional[str]:
@@ -63,7 +68,163 @@ def _guess_package_media_type(path: Union[str, Path]) -> str:
         return "text/html"
     if suffix == ".json":
         return "application/json"
+    if suffix == ".bin":
+        return "application/octet-stream"
     return "application/octet-stream"
+
+
+def _validate_gene_sidecar_format(gene_sidecar_format: str) -> str:
+    normalized = str(gene_sidecar_format or GENE_SIDECAR_FORMAT_JSON_V2).strip().lower()
+    if normalized not in {GENE_SIDECAR_FORMAT_JSON_V2, GENE_SIDECAR_FORMAT_BINARY_V1}:
+        raise ValueError(
+            "gene_sidecar_format must be one of: "
+            f"'{GENE_SIDECAR_FORMAT_JSON_V2}', '{GENE_SIDECAR_FORMAT_BINARY_V1}'"
+        )
+    return normalized
+
+
+def _u32_bytes(values: List[int]) -> bytes:
+    if not values:
+        return b""
+    arr = np.asarray(values, dtype="<u4")
+    return np.ascontiguousarray(arr).tobytes(order="C")
+
+
+def _decode_sidecar_packed_bytes(value, *, dtype: str) -> bytes:
+    if value is None:
+        return b""
+    if isinstance(value, str):
+        return base64.b64decode(value.encode("ascii"))
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value)
+    arr = np.asarray(value, dtype=dtype)
+    return np.ascontiguousarray(arr).tobytes(order="C")
+
+
+def _binary_payload_kind_from_sections(section_entries: Mapping[str, dict]) -> int:
+    kinds = set()
+    for section_entry in section_entries.values():
+        if not section_entry:
+            continue
+        if "sparse" in section_entry:
+            kinds.add("sparse")
+        else:
+            kinds.add("dense")
+    if kinds == {"dense"}:
+        return 1
+    if kinds == {"sparse"}:
+        return 2
+    return 0
+
+
+def _build_binary_gene_payload(
+    *,
+    gene_entry: Mapping[str, object],
+    section_order: List[str],
+    section_cell_counts: Mapping[str, int],
+) -> Tuple[int, bytes]:
+    section_entries = gene_entry.get("sections") or {}
+    payload_kind = _binary_payload_kind_from_sections(section_entries)
+    chunks: List[bytes] = [struct.pack("<I", len(section_order))]
+
+    for section_index, section_id in enumerate(section_order):
+        section_entry = section_entries.get(section_id) or {}
+        cell_count = int(section_cell_counts.get(section_id, 0))
+        section_encoding = 0
+        nnz = 0
+        nan_values: List[int] = []
+        section_data = b""
+
+        if "sparse" in section_entry:
+            sparse = section_entry.get("sparse") or {}
+            index_bytes = _decode_sidecar_packed_bytes(sparse.get("ib64"), dtype="<u4")
+            if "vq8b64" in sparse:
+                value_bytes = _decode_sidecar_packed_bytes(sparse.get("vq8b64"), dtype="u1")
+                section_encoding = 2
+            elif "vq16b64" in sparse:
+                value_bytes = _decode_sidecar_packed_bytes(sparse.get("vq16b64"), dtype="<u2")
+                section_encoding = 4
+            else:
+                raise ValueError("binary-v1 requires quantized sparse sidecar values")
+            nnz = len(index_bytes) // 4
+            nan_values = [int(v) for v in (sparse.get("nan") or [])]
+            section_data = index_bytes + value_bytes
+        elif section_entry:
+            if "dq8b64" in section_entry:
+                value_bytes = _decode_sidecar_packed_bytes(section_entry.get("dq8b64"), dtype="u1")
+                section_encoding = 1
+            elif "dq16b64" in section_entry:
+                value_bytes = _decode_sidecar_packed_bytes(section_entry.get("dq16b64"), dtype="<u2")
+                section_encoding = 3
+            else:
+                raise ValueError("binary-v1 requires quantized dense sidecar values")
+            nan_values = [int(v) for v in (section_entry.get("nan") or [])]
+            section_data = value_bytes
+
+        chunks.append(
+            struct.pack(
+                "<HBBIII",
+                int(section_index),
+                int(section_encoding),
+                0,
+                int(cell_count),
+                int(nnz),
+                int(len(nan_values)),
+            )
+        )
+        chunks.append(section_data)
+        chunks.append(_u32_bytes(nan_values))
+
+    return payload_kind, b"".join(chunks)
+
+
+def _write_binary_gene_shard(
+    *,
+    shard_path: Path,
+    shard_genes: List[str],
+    shard_data: Mapping[str, object],
+    section_order: List[str],
+    section_cell_counts: Mapping[str, int],
+) -> None:
+    genes_payload = shard_data.get("genes") or {}
+    payload_blobs: List[Tuple[bytes, int, bytes]] = []
+    index_size = 0
+
+    for gene in shard_genes:
+        gene_name_bytes = str(gene).encode("utf-8")
+        payload_kind, payload_bytes = _build_binary_gene_payload(
+            gene_entry=genes_payload.get(gene) or {},
+            section_order=section_order,
+            section_cell_counts=section_cell_counts,
+        )
+        payload_blobs.append((gene_name_bytes, payload_kind, payload_bytes))
+        index_size += 2 + len(gene_name_bytes) + 1 + 1 + 8 + 8
+
+    header = struct.pack(
+        "<4sHHII",
+        GENE_SIDECAR_BINARY_MAGIC,
+        GENE_SIDECAR_BINARY_VERSION,
+        0,
+        len(payload_blobs),
+        0,
+    )
+    payload_offset = len(header) + index_size
+    out = bytearray()
+    out.extend(header)
+
+    current_offset = payload_offset
+    for gene_name_bytes, payload_kind, payload_bytes in payload_blobs:
+        out.extend(struct.pack("<H", len(gene_name_bytes)))
+        out.extend(gene_name_bytes)
+        out.extend(struct.pack("<BBQQ", payload_kind, 0, current_offset, len(payload_bytes)))
+        current_offset += len(payload_bytes)
+
+    for _, _, payload_bytes in payload_blobs:
+        out.extend(payload_bytes)
+
+    shard_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(shard_path, "wb") as handle:
+        handle.write(out)
 
 
 def _build_karospace_package_manifest(
@@ -136,10 +297,15 @@ def _write_karospace_package(
     )
 
     with zipfile.ZipFile(package_path, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr(KAROSPACE_PACKAGE_MANIFEST, json.dumps(manifest, separators=(",", ":")))
+        zf.writestr(
+            KAROSPACE_PACKAGE_MANIFEST,
+            json.dumps(manifest, separators=(",", ":")),
+            compress_type=zipfile.ZIP_DEFLATED,
+        )
         for file_path in sorted(p for p in source_root.rglob("*") if p.is_file()):
             rel_path = file_path.relative_to(source_root).as_posix()
-            zf.write(file_path, arcname=rel_path)
+            compress_type = zipfile.ZIP_STORED if file_path.suffix.lower() == ".bin" else zipfile.ZIP_DEFLATED
+            zf.write(file_path, arcname=rel_path, compress_type=compress_type)
 
 
 def _find_karospace_package_loader_template() -> Optional[Path]:
@@ -3019,6 +3185,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let geneAuxManifestPromise = null;
     const geneAuxShardCache = new Map();
     const geneAuxShardPromises = new Map();
+    const geneAuxBinaryShardIndexCache = new Map();
+    const geneAuxBinaryShardIndexPromises = new Map();
+    const geneAuxBinaryShardBufferCache = new Map();
+    const geneAuxBinaryShardBufferPromises = new Map();
     const modalBlendGeneLoads = new Set();
     let geneAuxLoadingMessage = '';
     let geneDiscoveryOpen = false;
@@ -4047,7 +4217,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const idx = idxs[k];
                 if (idx < n) arr[idx] = vals[k];
             }}
-        }} else if (Array.isArray(sparse.i) && Array.isArray(sparse.v)) {{
+        }} else if (
+            (Array.isArray(sparse.i) || ArrayBuffer.isView(sparse.i)) &&
+            (Array.isArray(sparse.v) || ArrayBuffer.isView(sparse.v))
+        ) {{
             const m = Math.min(sparse.i.length, sparse.v.length);
             for (let k = 0; k < m; k++) {{
                 const idx = sparse.i[k];
@@ -4056,7 +4229,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }} else {{
             return null;
         }}
-        if (Array.isArray(sparse.nan)) {{
+        if (Array.isArray(sparse.nan) || ArrayBuffer.isView(sparse.nan)) {{
             for (let k = 0; k < sparse.nan.length; k++) {{
                 const idx = sparse.nan[k];
                 if (idx >= 0 && idx < n) arr[idx] = NaN;
@@ -4156,6 +4329,246 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return true;
     }}
 
+    function getGeneAuxSidecarFormat(manifest = null) {{
+        const resolved = manifest || geneAuxManifest;
+        return resolved?.gene_sidecar_format || 'json-v2';
+    }}
+
+    function getPackageSession() {{
+        return window.__karospacePackageSession || null;
+    }}
+
+    function parseBinaryShardIndexBuffer(buffer) {{
+        if (!(buffer instanceof ArrayBuffer) || buffer.byteLength < 16) return null;
+        const view = new DataView(buffer);
+        const magic = String.fromCharCode(
+            view.getUint8(0),
+            view.getUint8(1),
+            view.getUint8(2),
+            view.getUint8(3)
+        );
+        if (magic !== 'KSB1') {{
+            throw new Error('Unsupported binary gene shard format');
+        }}
+        const version = view.getUint16(4, true);
+        if (version !== 1) {{
+            throw new Error(`Unsupported binary gene shard version: ${{version}}`);
+        }}
+        const geneCount = view.getUint32(8, true);
+        const decoder = new TextDecoder('utf-8');
+        const entries = Object.create(null);
+        let offset = 16;
+        for (let index = 0; index < geneCount; index++) {{
+            if (offset + 2 > buffer.byteLength) return null;
+            const nameLength = view.getUint16(offset, true);
+            offset += 2;
+            if (offset + nameLength + 18 > buffer.byteLength) return null;
+            const geneName = decoder.decode(new Uint8Array(buffer, offset, nameLength));
+            offset += nameLength;
+            const payloadKind = view.getUint8(offset);
+            offset += 1;
+            offset += 1;
+            const payloadOffset = Number(view.getBigUint64(offset, true));
+            offset += 8;
+            const payloadLength = Number(view.getBigUint64(offset, true));
+            offset += 8;
+            entries[geneName] = {{ payloadKind, payloadOffset, payloadLength }};
+        }}
+        return {{ entries, indexBytes: offset }};
+    }}
+
+    async function loadBinaryShardWholeBuffer(shardUrl) {{
+        if (geneAuxBinaryShardBufferCache.has(shardUrl)) return geneAuxBinaryShardBufferCache.get(shardUrl);
+        if (geneAuxBinaryShardBufferPromises.has(shardUrl)) return geneAuxBinaryShardBufferPromises.get(shardUrl);
+        const promise = fetch(shardUrl, {{ credentials: 'same-origin' }})
+            .then((response) => {{
+                if (!response.ok) {{
+                    throw new Error(`HTTP ${{response.status}} while loading binary gene shard`);
+                }}
+                return response.arrayBuffer();
+            }})
+            .then((buffer) => {{
+                geneAuxBinaryShardBufferCache.set(shardUrl, buffer);
+                return buffer;
+            }})
+            .catch((error) => {{
+                geneAuxBinaryShardBufferPromises.delete(shardUrl);
+                throw error;
+            }});
+        geneAuxBinaryShardBufferPromises.set(shardUrl, promise);
+        return promise;
+    }}
+
+    async function loadBinaryShardIndex(shardUrl) {{
+        if (geneAuxBinaryShardIndexCache.has(shardUrl)) return geneAuxBinaryShardIndexCache.get(shardUrl);
+        if (geneAuxBinaryShardIndexPromises.has(shardUrl)) return geneAuxBinaryShardIndexPromises.get(shardUrl);
+
+        const promise = (async () => {{
+            const session = getPackageSession();
+            if (window.__karospacePackageMode && session && typeof session.readRange === 'function' && session.supportsRange?.(shardUrl)) {{
+                const stat = session.stat?.(shardUrl) || null;
+                const maxBytes = Math.max(16, Number(stat?.uncompressedSize || 262144));
+                let prefixBytes = Math.min(maxBytes, 262144);
+                while (prefixBytes <= maxBytes) {{
+                    const buffer = await session.readRange(shardUrl, 0, prefixBytes);
+                    const parsed = parseBinaryShardIndexBuffer(buffer);
+                    if (parsed) {{
+                        const info = {{ ...parsed, rangeCapable: true, buffer: null }};
+                        geneAuxBinaryShardIndexCache.set(shardUrl, info);
+                        return info;
+                    }}
+                    if (prefixBytes === maxBytes) break;
+                    prefixBytes = Math.min(maxBytes, prefixBytes * 2);
+                }}
+                throw new Error('Binary gene shard index could not be parsed from package range reads');
+            }}
+
+            const buffer = await loadBinaryShardWholeBuffer(shardUrl);
+            const parsed = parseBinaryShardIndexBuffer(buffer);
+            if (!parsed) {{
+                throw new Error('Binary gene shard index could not be parsed');
+            }}
+            const info = {{ ...parsed, rangeCapable: false, buffer }};
+            geneAuxBinaryShardIndexCache.set(shardUrl, info);
+            return info;
+        }})().catch((error) => {{
+            geneAuxBinaryShardIndexPromises.delete(shardUrl);
+            throw error;
+        }});
+
+        geneAuxBinaryShardIndexPromises.set(shardUrl, promise);
+        return promise;
+    }}
+
+    async function readBinaryGenePayload(shardUrl, gene, indexInfo = null) {{
+        const resolvedIndex = indexInfo || await loadBinaryShardIndex(shardUrl);
+        const entry = resolvedIndex?.entries?.[gene];
+        if (!entry) return null;
+        if (resolvedIndex.rangeCapable) {{
+            const session = getPackageSession();
+            if (session && typeof session.readRange === 'function') {{
+                return session.readRange(shardUrl, entry.payloadOffset, entry.payloadOffset + entry.payloadLength);
+            }}
+        }}
+        const buffer = resolvedIndex.buffer || await loadBinaryShardWholeBuffer(shardUrl);
+        return buffer.slice(entry.payloadOffset, entry.payloadOffset + entry.payloadLength);
+    }}
+
+    function parseBinaryGenePayload(buffer, sectionOrder, geneMeta = null) {{
+        if (!(buffer instanceof ArrayBuffer)) return null;
+        if (!Array.isArray(sectionOrder) || !sectionOrder.length) {{
+            throw new Error('Binary gene sidecar manifest is missing section_order');
+        }}
+        if (buffer.byteLength < 4) {{
+            throw new Error('Binary gene payload is truncated');
+        }}
+        const view = new DataView(buffer);
+        let offset = 0;
+        const sectionCount = view.getUint32(offset, true);
+        offset += 4;
+        const sections = {{}};
+        for (let i = 0; i < sectionCount; i++) {{
+            if (offset + 16 > buffer.byteLength) {{
+                throw new Error('Binary gene payload section header is truncated');
+            }}
+            const sectionIndex = view.getUint16(offset, true);
+            offset += 2;
+            const sectionEncoding = view.getUint8(offset);
+            offset += 1;
+            offset += 1;
+            const cellCount = view.getUint32(offset, true);
+            offset += 4;
+            const nnz = view.getUint32(offset, true);
+            offset += 4;
+            const nanCount = view.getUint32(offset, true);
+            offset += 4;
+            const sectionId = sectionOrder[sectionIndex];
+            if (!sectionId) {{
+                throw new Error(`Binary gene payload references unknown section index ${{sectionIndex}}`);
+            }}
+
+            if (sectionEncoding === 0) {{
+                sections[sectionId] = {{ sparse: {{ i: new Uint32Array(0), v: new Float32Array(0), nan: new Uint32Array(0) }} }};
+                continue;
+            }}
+
+            if (sectionEncoding === 1 || sectionEncoding === 3) {{
+                const valueBytes = sectionEncoding === 1 ? cellCount : cellCount * 2;
+                if (offset + valueBytes + (nanCount * 4) > buffer.byteLength) {{
+                    throw new Error('Binary dense gene payload is truncated');
+                }}
+                const valuesBuffer = buffer.slice(offset, offset + valueBytes);
+                offset += valueBytes;
+                const values = sectionEncoding === 1
+                    ? decodeQuantizedValues(new Uint8Array(valuesBuffer), geneMeta?.vmin, geneMeta?.vmax, 255)
+                    : decodeQuantizedValues(new Uint16Array(valuesBuffer), geneMeta?.vmin, geneMeta?.vmax, 65535);
+                const nanBuffer = buffer.slice(offset, offset + (nanCount * 4));
+                const nanIdxs = nanCount ? new Uint32Array(nanBuffer) : new Uint32Array(0);
+                offset += nanCount * 4;
+                for (let k = 0; k < nanIdxs.length; k++) {{
+                    const idx = nanIdxs[k];
+                    if (idx < values.length) values[idx] = NaN;
+                }}
+                sections[sectionId] = {{ dense: values }};
+                continue;
+            }}
+
+            if (sectionEncoding === 2 || sectionEncoding === 4) {{
+                const indexBytes = nnz * 4;
+                const valueBytes = sectionEncoding === 2 ? nnz : nnz * 2;
+                const totalBytes = indexBytes + valueBytes + (nanCount * 4);
+                if (offset + totalBytes > buffer.byteLength) {{
+                    throw new Error('Binary sparse gene payload is truncated');
+                }}
+                const idxBuffer = buffer.slice(offset, offset + indexBytes);
+                const idxs = nnz ? new Uint32Array(idxBuffer) : new Uint32Array(0);
+                offset += indexBytes;
+                const valueBuffer = buffer.slice(offset, offset + valueBytes);
+                offset += valueBytes;
+                const values = sectionEncoding === 2
+                    ? decodeQuantizedValues(new Uint8Array(valueBuffer), geneMeta?.vmin, geneMeta?.vmax, 255)
+                    : decodeQuantizedValues(new Uint16Array(valueBuffer), geneMeta?.vmin, geneMeta?.vmax, 65535);
+                const nanBuffer = buffer.slice(offset, offset + (nanCount * 4));
+                const nanIdxs = nanCount ? new Uint32Array(nanBuffer) : new Uint32Array(0);
+                offset += nanCount * 4;
+                sections[sectionId] = {{ sparse: {{ i: idxs, v: values, nan: nanIdxs }} }};
+                continue;
+            }}
+
+            throw new Error(`Unsupported binary section encoding: ${{sectionEncoding}}`);
+        }}
+        return {{ sections }};
+    }}
+
+    function hydrateGeneFromBinary(gene, geneEntry) {{
+        const geneMeta = geneAuxManifest?.genes_meta?.[gene];
+        if (!geneEntry || !geneMeta) return false;
+        DATA.genes_meta[gene] = geneMeta;
+        const encoding = geneAuxManifest?.gene_encodings?.[gene];
+        if (encoding) {{
+            DATA.gene_encodings[gene] = encoding;
+        }}
+        const valueEncoding = geneAuxManifest?.gene_value_encodings?.[gene];
+        if (valueEncoding) {{
+            DATA.gene_value_encodings[gene] = valueEncoding;
+        }}
+
+        (DATA.sections || []).forEach((section) => {{
+            const sectionEntry = geneEntry?.sections?.[section.id];
+            if (!sectionEntry) return;
+            section.genes = section.genes || {{}};
+            section.genes_sparse = section.genes_sparse || {{}};
+            if (sectionEntry.dense) {{
+                section.genes[gene] = sectionEntry.dense;
+                if (section.genes_sparse[gene]) delete section.genes_sparse[gene];
+            }} else if (sectionEntry.sparse) {{
+                section.genes_sparse[gene] = sectionEntry.sparse;
+                if (section.genes[gene]) delete section.genes[gene];
+            }}
+        }});
+        return true;
+    }}
+
     async function loadGeneAuxManifest() {{
         if (geneAuxManifest) return geneAuxManifest;
         if (geneAuxManifestPromise) return geneAuxManifestPromise;
@@ -4177,8 +4590,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 return response.json();
             }})
             .then((payload) => {{
-                if (!payload || payload.format !== 'karospace-gene-sidecar-manifest-v2') {{
+                const format = payload?.format;
+                if (!payload || (format !== 'karospace-gene-sidecar-manifest-v2' && format !== 'karospace-gene-sidecar-manifest-v3')) {{
                     throw new Error('Unsupported gene sidecar manifest format');
+                }}
+                if (getGeneAuxSidecarFormat(payload) === 'binary-v1' && !Array.isArray(payload.section_order)) {{
+                    throw new Error('Binary gene sidecar manifest is missing section_order');
                 }}
                 geneAuxManifest = payload;
                 return payload;
@@ -4255,9 +4672,27 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
             return false;
         }}
-        const shardData = await loadGeneAuxShard(shardUrl);
-        if (!shardData) return false;
-        const hydrated = hydrateGeneFromAux(token, shardData);
+        let hydrated = false;
+        if (getGeneAuxSidecarFormat(manifest) === 'binary-v1') {{
+            try {{
+                const payloadBuffer = await readBinaryGenePayload(shardUrl, token);
+                if (!payloadBuffer) return false;
+                const geneEntry = parseBinaryGenePayload(payloadBuffer, manifest.section_order || [], manifest?.genes_meta?.[token] || null);
+                hydrated = hydrateGeneFromBinary(token, geneEntry);
+            }} catch (error) {{
+                console.error('Failed to load binary gene payload:', error);
+                if (showErrors) {{
+                    window.__karospaceShowStartupError?.(
+                        `Failed to load requested gene data: ${{error?.message || 'Unknown error'}}`
+                    );
+                }}
+                return false;
+            }}
+        }} else {{
+            const shardData = await loadGeneAuxShard(shardUrl);
+            if (!shardData) return false;
+            hydrated = hydrateGeneFromAux(token, shardData);
+        }}
         if (!hydrated && showErrors) {{
             alert(`Gene "${{token}}" is listed in the dataset but was not found in the auxiliary gene file.`);
         }}
@@ -5583,7 +6018,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }} else if (typeof sparse.ib64 === 'string' && typeof sparse.vb64 === 'string') {{
             idxs = base64ToUint32Array(sparse.ib64);
             vals = base64ToFloat32Array(sparse.vb64);
-        }} else if (Array.isArray(sparse.i) && Array.isArray(sparse.v)) {{
+        }} else if (
+            (Array.isArray(sparse.i) || ArrayBuffer.isView(sparse.i)) &&
+            (Array.isArray(sparse.v) || ArrayBuffer.isView(sparse.v))
+        ) {{
             idxs = sparse.i;
             vals = sparse.v;
         }}
@@ -5651,6 +6089,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const key = getAnnotationDECacheKey(annotationA, annotationB);
         const token = ++annotationDeFullRunToken;
         const shardEntries = Object.entries(manifest.shards || {{}});
+        const sidecarFormat = getGeneAuxSidecarFormat(manifest);
         const totalGenes = shardEntries.reduce((sum, [, genes]) => sum + (Array.isArray(genes) ? genes.length : 0), 0);
         annotationDeFullRun = {{
             token,
@@ -5680,14 +6119,32 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             for (let shardIdx = 0; shardIdx < shardEntries.length; shardIdx++) {{
                 if (annotationDeFullRunToken !== token) return;
                 const [shardUrl, shardGenes] = shardEntries[shardIdx];
-                const shardPayload = await fetchGeneAuxShardForAnalysis(shardUrl);
-                if (annotationDeFullRunToken !== token) return;
+                if (sidecarFormat === 'binary-v1') {{
+                    const indexInfo = await loadBinaryShardIndex(shardUrl);
+                    if (annotationDeFullRunToken !== token) return;
+                    const genesInShard = Array.isArray(shardGenes) ? shardGenes : Object.keys(indexInfo?.entries || {{}});
+                    for (let geneIdx = 0; geneIdx < genesInShard.length; geneIdx++) {{
+                        const gene = genesInShard[geneIdx];
+                        const payloadBuffer = await readBinaryGenePayload(shardUrl, gene, indexInfo);
+                        if (!payloadBuffer) continue;
+                        const geneEntry = parseBinaryGenePayload(
+                            payloadBuffer,
+                            manifest.section_order || [],
+                            manifest?.genes_meta?.[gene] || null
+                        );
+                        const result = computeRegionAnnotationDEFromSidecarGeneEntry(gene, geneEntry, regionA, regionB);
+                        if (result) results.push(result);
+                    }}
+                }} else {{
+                    const shardPayload = await fetchGeneAuxShardForAnalysis(shardUrl);
+                    if (annotationDeFullRunToken !== token) return;
 
-                const genesPayload = shardPayload?.genes || {{}};
-                Object.entries(genesPayload).forEach(([gene, geneEntry]) => {{
-                    const result = computeRegionAnnotationDEFromSidecarGeneEntry(gene, geneEntry, regionA, regionB);
-                    if (result) results.push(result);
-                }});
+                    const genesPayload = shardPayload?.genes || {{}};
+                    Object.entries(genesPayload).forEach(([gene, geneEntry]) => {{
+                        const result = computeRegionAnnotationDEFromSidecarGeneEntry(gene, geneEntry, regionA, regionB);
+                        if (result) results.push(result);
+                    }});
+                }}
 
                 if (annotationDeFullRunToken !== token) return;
                 annotationDeFullRun = {{
@@ -11393,6 +11850,7 @@ def export_to_html(
     genes: Optional[List[str]] = None,
     gene_encoding: str = "auto",
     gene_value_encoding: str = "float32",
+    gene_sidecar_format: str = GENE_SIDECAR_FORMAT_JSON_V2,
     gene_storage: str = "embedded",
     gene_aux_path: Optional[str] = None,
     gene_sidecar_shard_size: int = GENE_SIDECAR_SHARD_SIZE,
@@ -11464,6 +11922,9 @@ def export_to_html(
         Only used for sidecar/package genes. "float32" (default) stores full-
         precision values; "uint16" and "uint8" store linearly quantized values
         using each gene's exported vmin/vmax range.
+    gene_sidecar_format : str
+        Sidecar storage format. "json-v2" (default) writes JSON shard files.
+        "binary-v1" writes indexed binary `.bin` shards for faster random access.
     gene_storage : str
         "embedded" (default) keeps gene data in the HTML. "sidecar" embeds only
         the selected/preloaded genes and writes remaining genes to an auxiliary
@@ -11595,9 +12056,12 @@ def export_to_html(
     gene_storage = str(gene_storage or "embedded").strip().lower()
     if gene_storage not in {"embedded", "sidecar"}:
         raise ValueError("gene_storage must be one of: 'embedded', 'sidecar'")
+    gene_sidecar_format = _validate_gene_sidecar_format(gene_sidecar_format)
     gene_sidecar_shard_size = int(gene_sidecar_shard_size)
     if gene_sidecar_shard_size < 1:
         raise ValueError("gene_sidecar_shard_size must be >= 1")
+    if gene_sidecar_format == GENE_SIDECAR_FORMAT_BINARY_V1 and gene_value_encoding not in {"uint8", "uint16"}:
+        raise ValueError("binary-v1 sidecar format requires gene_value_encoding='uint8' or 'uint16'")
     resolved_section_rotations = _resolve_section_rotations(dataset, section_rotations)
 
     # Prefer highly variable genes for expression if available; otherwise use provided genes
@@ -11836,17 +12300,29 @@ def export_to_html(
                     dynamic_ncols=True,
                 )
         manifest = {
-            "format": "karospace-gene-sidecar-manifest-v2",
+            "format": (
+                "karospace-gene-sidecar-manifest-v3"
+                if gene_sidecar_format == GENE_SIDECAR_FORMAT_BINARY_V1
+                else "karospace-gene-sidecar-manifest-v2"
+            ),
+            "gene_sidecar_format": gene_sidecar_format,
             "shards": {},
             "genes_meta": {},
             "gene_encodings": {},
             "gene_value_encodings": {},
             "gene_to_shard": {},
         }
+        if gene_sidecar_format == GENE_SIDECAR_FORMAT_BINARY_V1:
+            manifest["section_order"] = [section.section_id for section in dataset.sections]
         output_parent = Path(output_path).resolve().parent
+        section_cell_counts = {
+            section_id: int(len(indices))
+            for section_id, indices in (sidecar_export_indices or {}).items()
+        }
         genes_written = 0
         for shard_idx, shard_genes in enumerate(shard_groups):
-            shard_filename = f"{shard_idx:03d}.json"
+            shard_suffix = ".bin" if gene_sidecar_format == GENE_SIDECAR_FORMAT_BINARY_V1 else ".json"
+            shard_filename = f"{shard_idx:03d}{shard_suffix}"
             shard_path = resolved_gene_aux_dir / shard_filename
             shard_rel = Path(os.path.relpath(shard_path, start=output_parent)).as_posix()
             shard_start = genes_written + 1
@@ -11869,7 +12345,6 @@ def export_to_html(
                 gene_value_encoding=gene_value_encoding,
                 gene_sparse_zero_threshold=gene_sparse_zero_threshold,
             )
-            shard_data["format"] = "karospace-gene-sidecar-shard-v2"
             manifest["shards"][shard_rel] = shard_genes
             for gene in shard_genes:
                 manifest["gene_to_shard"][gene] = shard_rel
@@ -11879,11 +12354,21 @@ def export_to_html(
                     manifest["gene_encodings"][gene] = shard_data["gene_encodings"][gene]
                 if gene in shard_data.get("gene_value_encodings", {}):
                     manifest["gene_value_encodings"][gene] = shard_data["gene_value_encodings"][gene]
-            shard_data.pop("genes_meta", None)
-            shard_data.pop("gene_encodings", None)
-            shard_data.pop("gene_value_encodings", None)
-            with open(shard_path, "w", encoding="utf-8") as f:
-                json.dump(shard_data, f, separators=(",", ":"))
+            if gene_sidecar_format == GENE_SIDECAR_FORMAT_BINARY_V1:
+                _write_binary_gene_shard(
+                    shard_path=shard_path,
+                    shard_genes=shard_genes,
+                    shard_data=shard_data,
+                    section_order=manifest["section_order"],
+                    section_cell_counts=section_cell_counts,
+                )
+            else:
+                shard_data["format"] = "karospace-gene-sidecar-shard-v2"
+                shard_data.pop("genes_meta", None)
+                shard_data.pop("gene_encodings", None)
+                shard_data.pop("gene_value_encodings", None)
+                with open(shard_path, "w", encoding="utf-8") as f:
+                    json.dump(shard_data, f, separators=(",", ":"))
             genes_written += len(shard_genes)
             shard_elapsed = time.perf_counter() - shard_t0
             if progress is not None:

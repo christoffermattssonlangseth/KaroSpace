@@ -362,7 +362,23 @@
           return { normalized, entry };
         }
 
-        async readArrayBuffer(path) {
+        stat(path) {
+          const { normalized, entry } = this.getEntry(path);
+          return {
+            path: normalized,
+            compressedSize: entry.compressedSize,
+            uncompressedSize: entry.uncompressedSize,
+            compressionMethod: entry.compressionMethod,
+            directory: entry.directory,
+          };
+        }
+
+        supportsRange(path) {
+          const { entry } = this.getEntry(path);
+          return !entry.directory && entry.compressionMethod === 0;
+        }
+
+        _getEntryDataWindow(path) {
           const { entry } = this.getEntry(path);
           if (entry.directory) {
             throw new Error('Cannot read directory as file: ' + path);
@@ -378,8 +394,24 @@
           if (dataEnd > this.buffer.byteLength) {
             throw new Error('ZIP entry extends beyond archive bounds: ' + path);
           }
+          return { entry, dataStart, dataEnd };
+        }
+
+        async readArrayBuffer(path) {
+          const { entry, dataStart, dataEnd } = this._getEntryDataWindow(path);
           const compressedBuffer = this.buffer.slice(dataStart, dataEnd);
           return await decompressEntry(compressedBuffer, entry.compressionMethod);
+        }
+
+        async readRange(path, start, endExclusive) {
+          const { entry, dataStart } = this._getEntryDataWindow(path);
+          if (entry.compressionMethod !== 0) {
+            throw new Error('Byte-range reads require ZIP stored entries');
+          }
+          const maxBytes = entry.uncompressedSize;
+          const safeStart = Math.max(0, Math.min(maxBytes, Number(start) || 0));
+          const safeEnd = Math.max(safeStart, Math.min(maxBytes, Number(endExclusive) || 0));
+          return this.buffer.slice(dataStart + safeStart, dataStart + safeEnd);
         }
 
         async readText(path) {
@@ -422,7 +454,23 @@
           return { normalized, entry };
         }
 
-        async readArrayBuffer(path) {
+        stat(path) {
+          const { normalized, entry } = this.getEntry(path);
+          return {
+            path: normalized,
+            compressedSize: entry.compressedSize,
+            uncompressedSize: entry.uncompressedSize,
+            compressionMethod: entry.compressionMethod,
+            directory: entry.directory,
+          };
+        }
+
+        supportsRange(path) {
+          const { entry } = this.getEntry(path);
+          return !entry.directory && entry.compressionMethod === 0;
+        }
+
+        async _getEntryDataWindow(path) {
           const { entry } = this.getEntry(path);
           if (entry.directory) {
             throw new Error('Cannot read directory as file: ' + path);
@@ -440,8 +488,24 @@
           if (dataEnd > this.file.size) {
             throw new Error('ZIP entry extends beyond archive bounds: ' + path);
           }
+          return { entry, dataStart, dataEnd };
+        }
+
+        async readArrayBuffer(path) {
+          const { entry, dataStart, dataEnd } = await this._getEntryDataWindow(path);
           const compressedBuffer = await readBlobSlice(this.file, dataStart, dataEnd);
           return await decompressEntry(compressedBuffer, entry.compressionMethod);
+        }
+
+        async readRange(path, start, endExclusive) {
+          const { entry, dataStart } = await this._getEntryDataWindow(path);
+          if (entry.compressionMethod !== 0) {
+            throw new Error('Byte-range reads require ZIP stored entries');
+          }
+          const maxBytes = entry.uncompressedSize;
+          const safeStart = Math.max(0, Math.min(maxBytes, Number(start) || 0));
+          const safeEnd = Math.max(safeStart, Math.min(maxBytes, Number(endExclusive) || 0));
+          return await readBlobSlice(this.file, dataStart + safeStart, dataStart + safeEnd);
         }
 
         async readText(path) {
@@ -652,7 +716,11 @@
         const manifest = await archive.readJson(PACKAGE_MANIFEST_PATH);
         const validated = validatePackageManifest(manifest, archive);
         const packagedGeneManifest = await archive.readJson(validated.geneManifestPath);
-        if (!packagedGeneManifest || packagedGeneManifest.format !== 'karospace-gene-sidecar-manifest-v2') {
+        if (
+          !packagedGeneManifest ||
+          (packagedGeneManifest.format !== 'karospace-gene-sidecar-manifest-v2' &&
+           packagedGeneManifest.format !== 'karospace-gene-sidecar-manifest-v3')
+        ) {
           throw new Error('Packaged gene manifest format is not supported');
         }
 
@@ -670,6 +738,19 @@
           },
           fetch(path) {
             return archive.fetch(path);
+          },
+          stat(path) {
+            return archive.stat(path);
+          },
+          supportsRange(path) {
+            try {
+              return archive.supportsRange(path);
+            } catch (error) {
+              return false;
+            }
+          },
+          readRange(path, start, endExclusive) {
+            return archive.readRange(path, start, endExclusive);
           },
         };
 

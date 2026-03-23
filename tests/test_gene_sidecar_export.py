@@ -1,6 +1,7 @@
 import json
 import re
 import shutil
+import struct
 import subprocess
 import tempfile
 import zipfile
@@ -69,6 +70,30 @@ def _extract_data_json(html_text: str) -> dict:
     )
     assert match, "embedded data script not found"
     return json.loads(match.group(1).replace("<\\/", "</"))
+
+
+def _parse_binary_sidecar_index(path: Path) -> tuple[dict, bytes]:
+    blob = path.read_bytes()
+    assert blob[:4] == b"KSB1"
+    version, _flags, gene_count, _reserved = struct.unpack_from("<HHII", blob, 4)
+    assert version == 1
+    offset = 16
+    entries = {}
+    for _ in range(gene_count):
+        (name_len,) = struct.unpack_from("<H", blob, offset)
+        offset += 2
+        gene = blob[offset:offset + name_len].decode("utf-8")
+        offset += name_len
+        payload_kind, _reserved = struct.unpack_from("<BB", blob, offset)
+        offset += 2
+        payload_offset, payload_length = struct.unpack_from("<QQ", blob, offset)
+        offset += 16
+        entries[gene] = {
+            "payload_kind": payload_kind,
+            "payload_offset": payload_offset,
+            "payload_length": payload_length,
+        }
+    return entries, blob
 
 
 def _attach_companion_analytics(dataset: SpatialDataset, **payloads) -> None:
@@ -331,6 +356,69 @@ def test_sidecar_uint8_quantization_supports_sparse_payloads():
     assert "vq8b64" in g3_s1
 
 
+def test_binary_sidecar_export_writes_indexed_bin_shards(tmp_path):
+    dataset = _build_dataset()
+    output_path = tmp_path / "viewer.html"
+
+    export_to_html(
+        dataset,
+        output_path=str(output_path),
+        color="leiden",
+        genes=["G1"],
+        use_hvgs=False,
+        gene_storage="sidecar",
+        gene_sidecar_format="binary-v1",
+        gene_value_encoding="uint8",
+    )
+
+    html_text = output_path.read_text(encoding="utf-8")
+    embedded = _extract_data_json(html_text)
+    manifest = json.loads((tmp_path / "viewer.genes.json").read_text(encoding="utf-8"))
+    shard_path = sorted((tmp_path / "viewer.genes").glob("*.bin"))[0]
+    entries, blob = _parse_binary_sidecar_index(shard_path)
+
+    assert embedded["gene_aux_url"] == "viewer.genes.json"
+    assert manifest["format"] == "karospace-gene-sidecar-manifest-v3"
+    assert manifest["gene_sidecar_format"] == "binary-v1"
+    assert manifest["section_order"] == ["S1", "S2"]
+    assert manifest["gene_to_shard"]["G2"].endswith(".bin")
+    assert set(entries) == {"G2", "G3"}
+    assert entries["G2"]["payload_offset"] >= 16
+    assert entries["G2"]["payload_offset"] + entries["G2"]["payload_length"] <= len(blob)
+    assert "function parseBinaryShardIndexBuffer(buffer)" in html_text
+    assert "async function readBinaryGenePayload(shardUrl, gene, indexInfo = null)" in html_text
+    assert "function hydrateGeneFromBinary(gene, geneEntry)" in html_text
+
+
+def test_binary_karospace_package_stores_bin_shards_uncompressed(tmp_path):
+    dataset = _build_dataset()
+    package_path = tmp_path / "viewer.karospace"
+
+    export_to_html(
+        dataset,
+        output_path=str(package_path),
+        color="leiden",
+        genes=["G1"],
+        use_hvgs=False,
+        gene_storage="sidecar",
+        gene_sidecar_format="binary-v1",
+        gene_value_encoding="uint8",
+    )
+
+    with zipfile.ZipFile(package_path) as zf:
+        infos = {info.filename: info for info in zf.infolist()}
+        assert "karospace-package.json" in infos
+        bin_names = sorted(name for name in infos if name.endswith(".bin"))
+        assert bin_names
+        manifest = json.loads(zf.read("karospace-package.json").decode("utf-8"))
+        gene_manifest_name = manifest["viewer"]["gene_manifest_path"]
+        gene_manifest = json.loads(zf.read(gene_manifest_name).decode("utf-8"))
+
+        assert gene_manifest["format"] == "karospace-gene-sidecar-manifest-v3"
+        assert gene_manifest["gene_sidecar_format"] == "binary-v1"
+        assert infos[bin_names[0]].compress_type == zipfile.ZIP_STORED
+
+
 def test_karospace_package_export_wraps_sidecar_assets(tmp_path):
     dataset = _build_dataset()
     package_path = tmp_path / "viewer.karospace"
@@ -416,6 +504,7 @@ def test_karospace_package_loader_page_contains_expected_runtime_hooks():
     assert "window.__karospacePackageSessions" in loader_html
     assert "DecompressionStream" in loader_html
     assert "karospace-gene-sidecar-manifest-v2" in loader_html
+    assert "karospace-gene-sidecar-manifest-v3" in loader_html
     assert "function injectBootstrap(htmlText, sessionId)" in loader_html
     assert "window.fetch = function packageAwareFetch(input, init)" in loader_html
     assert "window.__karospacePackageSession" in loader_html
@@ -427,6 +516,8 @@ def test_karospace_package_loader_page_contains_expected_runtime_hooks():
     assert "file.size > LAZY_ARCHIVE_THRESHOLD_BYTES" in loader_html
     assert "readBlobSlice(" in loader_html
     assert "centralDirectoryOffset + centralDirectorySize" in loader_html
+    assert "supportsRange(path)" in loader_html
+    assert "readRange(path, start, endExclusive)" in loader_html
     assert "'<scr' + 'ipt>'" in loader_html
     assert "'</scr' + 'ipt>'" in loader_html
     assert 'type="file" accept=".karospace,.zip,application/zip,application/x-karospace-package"' in loader_html
