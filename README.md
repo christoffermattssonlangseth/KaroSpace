@@ -381,8 +381,35 @@ If your h5ad file contains UMAP coordinates (`adata.obsm['X_umap']`), a UMAP tog
 - **Pancreas deployment workflow**: `.github/workflows/pages-balo.yml` publishes `pancreas.html` and creates an `index.html` redirect.
 - **Pancreas test URL**: `https://christoffermattssonlangseth.github.io/KaroSpace/pancreas.html` (available after a successful Pages workflow run).
 - **Sharing**: In embedded mode, send the HTML file directly and it will work offline. In sidecar mode, share the HTML, `.genes.json`, and matching `.genes/` directory together via a served/static-hosted location.
+- **Package existing sidecar**: If you already have a sidecar export and want a shareable `.karospace` bundle without recomputing the viewer, package it afterwards with the CLI. This writes both `something.karospace` and `something.loader.html`.
 - **Updates**: Re-run `export_to_html` to refresh the file when annotations or metadata change.
 - **File size note**: Large datasets create large HTML files. Consider `downsample` and limiting `genes`/`additional_colors`.
+
+### Package Existing Sidecar Into `.karospace`
+
+Short form, when the HTML already points at the correct sidecar files in the same directory:
+
+```bash
+karospace package-sidecar BALO.html --output BALO.karospace
+```
+
+Explicit form, when you want to pass the existing sidecar paths directly:
+
+```bash
+karospace package-sidecar BALO.html \
+  --output BALO.karospace \
+  --gene-aux-path BALO.genes.json \
+  --gene-shard-dir BALO.genes \
+  --loader-output BALO.loader.html
+```
+
+You can also use the shorter alias:
+
+```bash
+karospace package BALO.html --output BALO.karospace
+```
+
+The packaging command is intended for existing sidecar bundles and does not recompute viewer analytics or rewrite the HTML viewer. It simply wraps the current sidecar assets into a `.karospace` archive and writes the matching local loader HTML.
 
 Selected cells are highlighted with a yellow/gold outline in both UMAP and spatial views.
 
