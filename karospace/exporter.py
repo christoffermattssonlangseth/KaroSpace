@@ -1387,6 +1387,38 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             color: var(--accent-strong);
             border-bottom-color: var(--accent-strong);
         }}
+        .info-shortcuts-table {{
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11px;
+        }}
+        .info-shortcuts-table th,
+        .info-shortcuts-table td {{
+            padding: 4px 0;
+            border-top: 1px solid var(--border-color);
+            text-align: left;
+            vertical-align: top;
+        }}
+        .info-shortcuts-table tr:first-child th,
+        .info-shortcuts-table tr:first-child td {{
+            border-top: none;
+            padding-top: 0;
+        }}
+        .info-shortcuts-key {{
+            width: 76px;
+            white-space: nowrap;
+            color: var(--muted-color);
+            font-variant-numeric: tabular-nums;
+        }}
+        .info-shortcuts-table kbd {{
+            display: inline-block;
+            padding: 1px 5px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: var(--input-bg);
+            color: var(--text-color);
+            font: inherit;
+        }}
         .info-popover {{
             position: absolute;
             top: calc(100% + 8px);
@@ -2320,6 +2352,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             font-size: 11px;
         }}
         .selection-summary-compare-btn:hover {{ background: var(--hover-bg); }}
+        .selection-summary-actions {{
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-top: 6px;
+        }}
+        .selection-summary-actions .selection-summary-compare-btn {{
+            margin-top: 0;
+        }}
         .selection-summary-compare-header {{
             display: flex;
             gap: 4px;
@@ -2788,7 +2829,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             <h1>{title}</h1>
             <button class="info-trigger" id="info-trigger" type="button" title="Viewer info" data-help="Open viewer notes with dataset context, control tips, and usage guidance.">Info</button>
             <div class="info-popover" id="info-popover" aria-hidden="true">
-                <div class="info-content">{viewer_info_html}</div>
+                <div class="info-content">
+                    {viewer_info_html}
+                    <div class="info-block">
+                        <div class="info-title">Keyboard Shortcuts</div>
+                        <table class="info-shortcuts-table">
+                            <tr><td class="info-shortcuts-key"><kbd>Esc</kbd></td><td>Close the modal, or close gene discovery if the modal is not open.</td></tr>
+                            <tr><td class="info-shortcuts-key"><kbd>/</kbd></td><td>Focus the gene search input and open gene discovery.</td></tr>
+                            <tr><td class="info-shortcuts-key"><kbd>←</kbd> <kbd>→</kbd></td><td>Move to the previous or next section while the modal is open.</td></tr>
+                            <tr><td class="info-shortcuts-key"><kbd>T</kbd></td><td>Toggle theme.</td></tr>
+                            <tr><td class="info-shortcuts-key"><kbd>U</kbd></td><td>Toggle the UMAP panel.</td></tr>
+                            <tr><td class="info-shortcuts-key"><kbd>L</kbd></td><td>Toggle the legend panel.</td></tr>
+                            <tr><td class="info-shortcuts-key"><kbd>F</kbd></td><td>Fit the current modal section to view.</td></tr>
+                            <tr><td class="info-shortcuts-key"><kbd>+</kbd> <kbd>=</kbd></td><td>Zoom in inside the modal.</td></tr>
+                            <tr><td class="info-shortcuts-key"><kbd>-</kbd></td><td>Zoom out inside the modal.</td></tr>
+                        </table>
+                    </div>
+                </div>
             </div>
         </div>
         <div class="controls">
@@ -2836,21 +2893,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             <button class="legend-toggle active" id="legend-toggle" title="Toggle legend panel" data-help="Show or hide the legend panel with color keys, category toggles, and spotlight controls.">
                 Legend
             </button>
-            <button class="color-toggle" id="color-toggle" title="Toggle color explorer" data-help="Insights opens analysis tools for the current view: summary, comparison, gene panels, neighborhood patterns, and regions.">
+            <button class="color-toggle" id="color-toggle" title="Toggle insights panel" data-help="Insights opens analysis tools for the current view: summary, comparison, gene panels, neighborhood patterns, and regions.">
                 Insights
             </button>
-            <button class="graph-toggle" id="graph-toggle" title="Toggle neighborhood graph" data-help="Overlay neighborhood graph edges to visualize local connectivity between cells." style="display: none;">
-                Graph
-            </button>
-            <button class="graph-toggle" id="neighbor-hover-toggle" title="Toggle neighbor rings on hover" data-help="When enabled, hovering a cell highlights its neighbors in concentric hop rings." style="display: none;">
-                Neighbors
-            </button>
-            <select id="neighbor-hop-select" title="Neighbor hop display" data-help="Choose how many neighbor hops are highlighted when hover-neighbor mode is enabled." style="display: none; min-width: 90px;">
-                <option value="1">1-hop</option>
-                <option value="2">2-hop</option>
-                <option value="3">3-hop</option>
-                <option value="all" selected>All hops</option>
-            </select>
             <button class="export-btn" id="screenshot-btn" title="Download screenshot" data-help="Download a PNG screenshot of the current main viewer layout.">
                 Screenshot
             </button>
@@ -3025,6 +3070,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                             <div class="modal-control-group-body">
                                 <button class="graph-toggle" id="modal-screenshot-btn" type="button" title="Download screenshot of this sample view">Screenshot</button>
                                 <button class="graph-toggle" id="modal-clear-selection-btn" type="button" title="Clear selected cells" hidden>Clear sel.</button>
+                                <button class="graph-toggle" id="modal-exit-subview-btn" type="button" title="Return to the full section view" hidden>Back view</button>
                                 <div class="modal-size-block">
                                     <div class="size-control">
                                         <button class="size-step" id="modal-spot-size-dec" type="button">−</button>
@@ -3189,7 +3235,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function getSectionRotationMetrics(section) {{
-        const bounds = section?.bounds || {{ xmin: 0, xmax: 0, ymin: 0, ymax: 0 }};
+        return getSectionRotationMetricsWithBounds(section, null);
+    }}
+
+    function getSectionRotationMetricsWithBounds(section, boundsOverride = null) {{
+        const bounds = boundsOverride || ensureSectionBounds(section) || {{ xmin: 0, xmax: 0, ymin: 0, ymax: 0 }};
         const dataCenterX = (bounds.xmin + bounds.xmax) / 2;
         const dataCenterY = (bounds.ymin + bounds.ymax) / 2;
         const halfWidth = Math.max((bounds.xmax - bounds.xmin) / 2, ROTATION_EPSILON);
@@ -3221,7 +3271,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const zoom = Math.max(ROTATION_EPSILON, Number(options.zoom) || 1);
         const panX = Number(options.panX) || 0;
         const panY = Number(options.panY) || 0;
-        const metrics = getSectionRotationMetrics(section);
+        const boundsOverride = options.boundsOverride || null;
+        const metrics = getSectionRotationMetricsWithBounds(section, boundsOverride);
         const fitWidth = Math.max(ROTATION_EPSILON, width - 2 * padding);
         const fitHeight = Math.max(ROTATION_EPSILON, height - 2 * padding);
         const baseScale = Math.min(
@@ -3395,6 +3446,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let modalAnnotationPanelDragOffsetY = 0;
     let modalRenderedView = null;
     let modalInteractionCommitTimer = null;
+    let modalSubview = null;
     const BLEND_ALL_CATEGORIES = '__ALL__';
     let modalBlendSpec = {{
         a: {{ kind: 'cell', color: null, category: null, gene: '' }},
@@ -3454,6 +3506,308 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 ? formatRotationLabel(getSectionRotationDeg(modalSection))
                 : 'Rot 0 deg';
         }}
+    }}
+
+    function getSelectionIndicesForSection(sectionId, cells = selectedCells) {{
+        if (!sectionId || !cells || cells.size === 0) return null;
+        const indices = [];
+        let otherSectionFound = false;
+        cells.forEach((key) => {{
+            const sep = key.lastIndexOf(':');
+            if (sep <= 0) return;
+            const keySectionId = key.slice(0, sep);
+            const idx = Number(key.slice(sep + 1));
+            if (!Number.isInteger(idx) || idx < 0) return;
+            if (keySectionId !== sectionId) {{
+                otherSectionFound = true;
+                return;
+            }}
+            indices.push(idx);
+        }});
+        if (otherSectionFound || !indices.length) return null;
+        indices.sort((a, b) => a - b);
+        return indices;
+    }}
+
+    function expandSubviewBounds(bounds, referenceBounds = null) {{
+        if (!bounds) return null;
+        const ref = referenceBounds || bounds;
+        const spanX = Math.max(bounds.xmax - bounds.xmin, 0);
+        const spanY = Math.max(bounds.ymax - bounds.ymin, 0);
+        const refSpanX = Math.max(ref.xmax - ref.xmin, ROTATION_EPSILON);
+        const refSpanY = Math.max(ref.ymax - ref.ymin, ROTATION_EPSILON);
+        const padX = Math.max(spanX * 0.18, refSpanX * 0.01, ROTATION_EPSILON * 1000);
+        const padY = Math.max(spanY * 0.18, refSpanY * 0.01, ROTATION_EPSILON * 1000);
+        return {{
+            xmin: bounds.xmin - padX,
+            xmax: bounds.xmax + padX,
+            ymin: bounds.ymin - padY,
+            ymax: bounds.ymax + padY,
+        }};
+    }}
+
+    function getSectionBoundsFromIndices(section, indices) {{
+        if (!section || !Array.isArray(indices) || !indices.length) return null;
+        ensureSectionXY(section);
+        let xmin = Infinity;
+        let xmax = -Infinity;
+        let ymin = Infinity;
+        let ymax = -Infinity;
+        for (let k = 0; k < indices.length; k++) {{
+            const idx = indices[k];
+            const x = Number(section.x[idx]);
+            const y = Number(section.y[idx]);
+            if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+            if (x < xmin) xmin = x;
+            if (x > xmax) xmax = x;
+            if (y < ymin) ymin = y;
+            if (y > ymax) ymax = y;
+        }}
+        if (!Number.isFinite(xmin) || !Number.isFinite(xmax) || !Number.isFinite(ymin) || !Number.isFinite(ymax)) {{
+            return null;
+        }}
+        return {{ xmin, xmax, ymin, ymax }};
+    }}
+
+    function buildModalSubviewStateFromSelection(section = modalSection) {{
+        if (!section || selectedCellsB.size > 0 || lassoModeB) return null;
+        const indices = getSelectionIndicesForSection(section.id);
+        if (!indices || !indices.length) return null;
+        const bounds = getSectionBoundsFromIndices(section, indices);
+        if (!bounds) return null;
+        return {{
+            sectionId: section.id,
+            indices,
+            indexSet: new Set(indices),
+            bounds: expandSubviewBounds(bounds, ensureSectionBounds(section)),
+        }};
+    }}
+
+    function getModalSubviewRenderToken() {{
+        if (!modalSubview || !modalSubview.bounds) return '';
+        const bounds = modalSubview.bounds;
+        return [
+            modalSubview.sectionId,
+            modalSubview.indices.length,
+            bounds.xmin.toFixed(3),
+            bounds.xmax.toFixed(3),
+            bounds.ymin.toFixed(3),
+            bounds.ymax.toFixed(3),
+        ].join(':');
+    }}
+
+    function getModalActiveBounds() {{
+        if (!modalSection || !modalSubview || modalSubview.sectionId !== modalSection.id) return null;
+        return modalSubview.bounds || null;
+    }}
+
+    function getModalActiveCellIndexSet(sectionId = modalSection?.id) {{
+        if (!sectionId || !modalSubview || modalSubview.sectionId !== sectionId) return null;
+        return modalSubview.indexSet || null;
+    }}
+
+    function filterModalCandidateIndices(section, candidateIndices = null) {{
+        const activeIndexSet = getModalActiveCellIndexSet(section?.id);
+        if (!activeIndexSet) return candidateIndices;
+        if (!Array.isArray(candidateIndices)) return modalSubview?.indices ? modalSubview.indices.slice() : Array.from(activeIndexSet);
+        return candidateIndices.filter((idx) => activeIndexSet.has(idx));
+    }}
+
+    function updateModalHeader() {{
+        const titleEl = document.getElementById('modal-title');
+        const metaEl = document.getElementById('modal-meta');
+        if (!titleEl || !metaEl) return;
+        if (!modalSection) {{
+            titleEl.textContent = 'Section';
+            metaEl.textContent = '';
+            return;
+        }}
+        titleEl.textContent = modalSubview ? `${{modalSection.id}} • Focused view` : modalSection.id;
+        const metaParts = Object.entries(modalSection.metadata || {{}})
+            .map(([k, v]) => `${{formatMetadataLabel(k)}}: ${{v}}`);
+        if (modalSubview?.indices?.length) {{
+            metaParts.unshift(`Focused selection: ${{modalSubview.indices.length.toLocaleString()}} cells`);
+        }}
+        metaEl.textContent = metaParts.join(' | ');
+    }}
+
+    function activateModalSubviewFromSelection() {{
+        if (!modalSection) return false;
+        const nextSubview = buildModalSubviewStateFromSelection(modalSection);
+        if (!nextSubview) return false;
+        selectedCellsB.clear();
+        lassoModeB = false;
+        modalSubview = nextSubview;
+        modalZoom = 1;
+        modalPanX = 0;
+        modalPanY = 0;
+        invalidateModalRenderedView();
+        updateModalHeader();
+        updateSelectionInfo();
+        renderModalSection();
+        return true;
+    }}
+
+    function exitModalSubview() {{
+        if (!modalSubview) return false;
+        modalSubview = null;
+        modalZoom = 1;
+        modalPanX = 0;
+        modalPanY = 0;
+        invalidateModalRenderedView();
+        updateModalHeader();
+        updateSelectionInfo();
+        renderModalSection();
+        return true;
+    }}
+
+    function zoomModalToFit() {{
+        if (!modalSection) return;
+        modalZoom = 1;
+        modalPanX = 0;
+        modalPanY = 0;
+        renderModalSection();
+    }}
+
+    function toggleLegendPanel() {{
+        const legend = document.getElementById('legend');
+        const btn = document.getElementById('legend-toggle');
+        if (!legend || !btn) return;
+        legend.classList.toggle('collapsed');
+        btn.classList.toggle('active');
+        requestAnimationFrame(renderAllSections);
+    }}
+
+    function toggleInsightsPanel() {{
+        const colorToggle = document.getElementById('color-toggle');
+        const colorPanel = document.getElementById('color-panel');
+        if (!colorToggle || !colorPanel) return;
+        colorPanel.classList.toggle('collapsed');
+        colorToggle.classList.toggle('active');
+        if (!colorPanel.classList.contains('collapsed')) {{
+            if (document.getElementById('color-tab-compare')?.classList.contains('active')) {{
+                renderClusterDE();
+            }} else if (document.getElementById('color-tab-neighbors')?.classList.contains('active')) {{
+                renderNeighborStats();
+                renderInteractionBrowser();
+            }} else if (document.getElementById('color-tab-genes')?.classList.contains('active')) {{
+                if (document.getElementById('genes-tab-dotplot')?.classList.contains('active')) renderDotplot();
+                if (document.getElementById('genes-tab-markers')?.classList.contains('active')) renderMarkerGenes();
+            }} else if (document.getElementById('color-tab-regions')?.classList.contains('active')) {{
+                renderAnnotationComparison();
+            }} else {{
+                renderColorAggregation();
+                renderCellTypeTrend();
+            }}
+        }}
+        requestAnimationFrame(renderAllSections);
+    }}
+
+    function navigateModalSection(step) {{
+        if (!modalSection || !Array.isArray(DATA.sections) || !DATA.sections.length) return false;
+        const currentIndex = DATA.sections.findIndex((section) => section.id === modalSection.id);
+        if (currentIndex < 0) return false;
+        const nextIndex = currentIndex + Number(step || 0);
+        if (nextIndex < 0 || nextIndex >= DATA.sections.length) return false;
+        openModal(DATA.sections[nextIndex].id);
+        return true;
+    }}
+
+    function isEditableKeyboardTarget(target) {{
+        if (!target || !(target instanceof Element)) return false;
+        if (target.closest('input, textarea, select')) return true;
+        if (target.closest('[contenteditable="true"]')) return true;
+        return !!target.isContentEditable;
+    }}
+
+    function initKeyboardShortcuts() {{
+        document.addEventListener('keydown', (event) => {{
+            if (event.defaultPrevented) return;
+            if (event.metaKey || event.ctrlKey || event.altKey) return;
+            if (isEditableKeyboardTarget(event.target)) return;
+
+            const key = event.key;
+
+            if (key === 'Escape') {{
+                if (modalSection) {{
+                    event.preventDefault();
+                    closeModal();
+                    return;
+                }}
+                if (geneDiscoveryOpen) {{
+                    event.preventDefault();
+                    setGeneDiscoveryOpen(false);
+                    return;
+                }}
+                return;
+            }}
+
+            if (key === '/') {{
+                const geneInput = document.getElementById('gene-input');
+                if (!geneInput) return;
+                event.preventDefault();
+                geneInput.focus();
+                geneInput.select?.();
+                setGeneDiscoveryOpen(true);
+                renderGeneDiscoveryPanel();
+                return;
+            }}
+
+            if (key === 'ArrowLeft') {{
+                if (!modalSection) return;
+                event.preventDefault();
+                navigateModalSection(-1);
+                return;
+            }}
+
+            if (key === 'ArrowRight') {{
+                if (!modalSection) return;
+                event.preventDefault();
+                navigateModalSection(1);
+                return;
+            }}
+
+            if (key === 't' || key === 'T') {{
+                event.preventDefault();
+                toggleTheme();
+                return;
+            }}
+
+            if (key === 'u' || key === 'U') {{
+                if (!DATA.has_umap) return;
+                event.preventDefault();
+                toggleUMAP();
+                return;
+            }}
+
+            if (key === 'l' || key === 'L') {{
+                event.preventDefault();
+                toggleLegendPanel();
+                return;
+            }}
+
+            if (key === 'f' || key === 'F') {{
+                if (!modalSection) return;
+                event.preventDefault();
+                zoomModalToFit();
+                return;
+            }}
+
+            if (key === '+' || key === '=') {{
+                if (!modalSection) return;
+                event.preventDefault();
+                modalZoom = Math.min(modalZoom * 1.5, 20);
+                renderModalSection();
+                return;
+            }}
+
+            if (key === '-') {{
+                if (!modalSection) return;
+                event.preventDefault();
+                modalZoom = Math.max(modalZoom / 1.5, 0.1);
+                renderModalSection();
+            }}
+        }});
     }}
 
     function setModalControlsCollapsed(collapsed) {{
@@ -3585,6 +3939,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         const clearSelectionBtn = document.getElementById('modal-clear-selection-btn');
         if (clearSelectionBtn) clearSelectionBtn.hidden = selectedCells.size === 0;
+        const exitSubviewBtn = document.getElementById('modal-exit-subview-btn');
+        if (exitSubviewBtn) exitSubviewBtn.hidden = !modalSubview;
 
         const graphGroup = controls.querySelector('[data-modal-group="graph"]');
         if (graphGroup) graphGroup.hidden = !DATA.has_neighbors;
@@ -5714,6 +6070,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         let rings = hoverNeighbors.rings || [];
         const centerIdx = hoverNeighbors.centerIdx;
         if (centerIdx === null || centerIdx === undefined) return;
+        const activeIndexSet = getModalActiveCellIndexSet(section.id);
+        if (activeIndexSet && !activeIndexSet.has(centerIdx)) return;
 
         const config = getColorConfig();
         const values = getSectionValues(section);
@@ -5739,6 +6097,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ctx.strokeStyle = color;
             ctx.lineWidth = Math.max(1, adjustedSpotSize * 0.25);
             ring.forEach(cellIdx => {{
+                if (activeIndexSet && !activeIndexSet.has(cellIdx)) return;
                 const val = values[cellIdx];
                 if (val === null || val === undefined) return;
                 if (!config.is_continuous) {{
@@ -5763,6 +6122,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ctx.globalAlpha = 0.8;
             ctx.beginPath();
             ring.forEach(cellIdx => {{
+                if (activeIndexSet && !activeIndexSet.has(cellIdx)) return;
                 const val = values[cellIdx];
                 if (val === null || val === undefined) return;
                 if (!config.is_continuous) {{
@@ -6577,7 +6937,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return html;
     }}
 
-    function renderSelectionSummaryHtml(summary) {{
+    function renderSelectionSummaryHtml(summary, options = {{}}) {{
         if (!summary || summary.total === 0) {{
             return '<div class="selection-summary-meta">Draw a region with Magic Wand to inspect selected cells.</div>';
         }}
@@ -6638,11 +6998,24 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             html += '</div>';
         }}
 
+        const actionButtons = [];
+        const allowFocusSubview = !!options.allowFocusSubview && !modalSubview;
+        const canFocusSubview = allowFocusSubview && modalSection && !!buildModalSubviewStateFromSelection(modalSection);
+        if (canFocusSubview) {{
+            actionButtons.push('<button class="selection-summary-compare-btn" type="button" id="selection-focus-subview-btn">Open focused view</button>');
+        }}
+
         // Compare region button (only when no B yet and lasso mode is available)
-        if (!lassoModeB) {{
-            html += '<button class="selection-summary-compare-btn" type="button" id="lasso-compare-region-btn">Compare region</button>';
-        }} else {{
+        if (!lassoModeB && !modalSubview) {{
+            actionButtons.push('<button class="selection-summary-compare-btn" type="button" id="lasso-compare-region-btn">Compare region</button>');
+        }} else if (lassoModeB) {{
             html += '<div class="selection-summary-meta">Draw Region B with Magic Wand…</div>';
+        }}
+        if (modalSubview) {{
+            html += '<div class="selection-summary-meta">Focused view active. Use Back view to return to the full section.</div>';
+        }}
+        if (actionButtons.length) {{
+            html += `<div class="selection-summary-actions">${{actionButtons.join('')}}</div>`;
         }}
 
         return html;
@@ -6675,6 +7048,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 e.stopPropagation();
                 lassoModeB = true;
                 updateSelectionInfo();
+            }});
+        }}
+        const focusSubviewBtn = container.querySelector('#selection-focus-subview-btn');
+        if (focusSubviewBtn) {{
+            focusSubviewBtn.addEventListener('click', (e) => {{
+                e.preventDefault();
+                e.stopPropagation();
+                activateModalSubviewFromSelection();
             }});
         }}
         const clearBBtn = container.querySelector('#lasso-clear-b-btn');
@@ -7277,6 +7658,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             panX: modalPanX,
             panY: modalPanY,
             isModal: true,
+            boundsOverride: getModalActiveBounds(),
         }});
     }}
 
@@ -7318,6 +7700,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             centerY: transform.centerY,
             scale: transform.scale,
             angleDeg: transform.angleDeg,
+            subviewToken: getModalSubviewRenderToken(),
         }};
     }}
 
@@ -7337,6 +7720,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         const rendered = modalRenderedView;
         if (rendered.sectionId !== modalSection.id) return false;
+        if ((rendered.subviewToken || '') !== getModalSubviewRenderToken()) return false;
         if (Math.abs(rendered.width - rect.width) > 0.5 || Math.abs(rendered.height - rect.height) > 0.5) return false;
         if (Math.abs(rendered.dpr - getRenderDpr()) > 0.01) return false;
 
@@ -7599,7 +7983,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const values = getSectionValues(modalSection);
         const polygonData = modalLassoPath.map((point) => screenPointToModalData(point.x, point.y, transform));
         const polygonBounds = getBoundsFromPoints(polygonData);
-        const candidateIndices = polygonBounds ? querySectionSpatialIndex(modalSection, polygonBounds) : null;
+        const candidateIndices = filterModalCandidateIndices(
+            modalSection,
+            polygonBounds ? querySectionSpatialIndex(modalSection, polygonBounds) : null,
+        );
         selectedCells.clear();
 
         const nCandidates = candidateIndices ? candidateIndices.length : modalSection.x.length;
@@ -7630,6 +8017,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     // Update selection info display
     function updateSelectionInfo() {{
+        if (modalSection && modalSubview) {{
+            const nextSubview = buildModalSubviewStateFromSelection(modalSection);
+            if (nextSubview) {{
+                modalSubview = nextSubview;
+            }} else {{
+                modalSubview = null;
+                modalZoom = 1;
+                modalPanX = 0;
+                modalPanY = 0;
+                invalidateModalRenderedView();
+            }}
+            updateModalHeader();
+        }}
         const countText = selectedCells.size === 0
             ? 'No cells selected'
             : `${{selectedCells.size.toLocaleString()}} cells selected`;
@@ -7640,17 +8040,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (modalInfo) modalInfo.textContent = countText;
 
         const summary = computeSelectionSummary();
-        const summaryHtml = renderSelectionSummaryHtml(summary);
         const umapSummary = document.getElementById('umap-selection-summary');
         if (umapSummary) {{
             umapSummary.classList.toggle('expanded', selectionSummaryExpanded);
-            umapSummary.innerHTML = summaryHtml;
+            umapSummary.innerHTML = renderSelectionSummaryHtml(summary);
             bindSelectionSummaryInteractions(umapSummary);
         }}
         const modalSummary = document.getElementById('modal-selection-summary');
         if (modalSummary) {{
             modalSummary.classList.toggle('expanded', selectionSummaryExpanded);
-            modalSummary.innerHTML = summaryHtml;
+            modalSummary.innerHTML = renderSelectionSummaryHtml(summary, {{ allowFocusSubview: true }});
             bindSelectionSummaryInteractions(modalSummary);
         }}
         updateModalToolbarState();
@@ -8226,6 +8625,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const values = getSectionValues(section);
         const ignoreMissing = !!options.ignoreMissing;
         const ignoreHidden = !!options.ignoreHidden;
+        const activeIndexSet = transform.isModal ? getModalActiveCellIndexSet(section?.id) : null;
         const searchRadius = transform.isModal ? modalSpotSize * modalZoom * 2 : spotSize * 3;
         const candidateBounds = getDataBoundsFromScreenRect(
             transform,
@@ -8235,7 +8635,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             mouseY + searchRadius,
         );
         const candidateIndices = (transform.isModal && candidateBounds)
-            ? querySectionSpatialIndex(section, candidateBounds)
+            ? filterModalCandidateIndices(section, querySectionSpatialIndex(section, candidateBounds))
             : null;
 
         let nearestIdx = -1;
@@ -8244,6 +8644,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const nCandidates = candidateIndices ? candidateIndices.length : section.x.length;
         for (let k = 0; k < nCandidates; k++) {{
             const i = candidateIndices ? candidateIndices[k] : k;
+            if (activeIndexSet && !activeIndexSet.has(i)) continue;
             const val = values[i];
             if (!ignoreMissing && (val === null || val === undefined)) continue;
 
@@ -8407,8 +8808,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const values = getSectionValues(modalSection);
         const blendRuntimes = getModalBlendRuntimes(modalSection);
         const blendActive = !!blendRuntimes;
-        const candidateIndices = getSectionVisibleScreenCandidates(modalSection, transform, adjustedSpotSize);
+        const candidateIndices = filterModalCandidateIndices(
+            modalSection,
+            getSectionVisibleScreenCandidates(modalSection, transform, adjustedSpotSize),
+        );
         const nCandidates = candidateIndices ? candidateIndices.length : modalSection.x.length;
+        const focusedSubviewActive = !!getModalActiveCellIndexSet(modalSection.id);
 
         const modalEdges = getSectionEdgesPacked(modalSection);
         if (showGraph && modalEdges && modalEdges.length) {{
@@ -8420,6 +8825,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const visibleIndexSet = candidateIndices ? new Set(candidateIndices) : null;
             const drawEdge = (i, j) => {{
                 if (i < 0 || j < 0 || i >= n || j >= n) return;
+                if (focusedSubviewActive && (!modalSubview.indexSet.has(i) || !modalSubview.indexSet.has(j))) return;
                 if (visibleIndexSet && !visibleIndexSet.has(i) && !visibleIndexSet.has(j)) return;
                 const p1 = transform.dataToScreen(modalSection.x[i], modalSection.y[i]);
                 const p2 = transform.dataToScreen(modalSection.x[j], modalSection.y[j]);
@@ -8542,7 +8948,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         ctx.globalAlpha = 1;
 
         // Third pass: draw selection highlights
-        if (selectedCells.size > 0) {{
+        if (selectedCells.size > 0 && !focusedSubviewActive) {{
             ctx.strokeStyle = '#ffd700';
             ctx.lineWidth = 3;
             for (let k = 0; k < nCandidates; k++) {{
@@ -9215,7 +9621,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         panel.innerHTML = `
             <div class="color-panel-header">
-                <div class="color-panel-title">Color explorer</div>
+                <div class="color-panel-title">Insights</div>
             </div>
             <div class="color-panel-section">
                 <label>Search Colors</label>
@@ -10773,6 +11179,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function openModal(sectionId) {{
         modalSection = DATA.sections.find(s => s.id === sectionId);
         if (!modalSection) return;
+        modalSubview = null;
         invalidateModalRenderedView();
         modalZoom = 1; modalPanX = 0; modalPanY = 0;
         modalPointerMoved = false;
@@ -10785,10 +11192,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         modalAnnotationPath = [];
         document.getElementById('modal-annotate-btn')?.classList.remove('active');
 
-        document.getElementById('modal-title').textContent = sectionId;
-        const metaText = Object.entries(modalSection.metadata || {{}})
-            .map(([k, v]) => `${{formatMetadataLabel(k)}}: ${{v}}`).join(' | ');
-        document.getElementById('modal-meta').textContent = metaText;
+        updateModalHeader();
         document.getElementById('modal').classList.add('active');
         updateSelectionInfo();
         updateSectionRotationIndicators(sectionId);
@@ -10818,7 +11222,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         document.getElementById('modal-magic-wand-btn')?.classList.remove('active');
         document.getElementById('modal-annotate-btn')?.classList.remove('active');
         document.querySelector('#modal .modal-controls')?.classList.remove('dragging');
+        modalSubview = null;
         modalSection = null;
+        updateModalHeader();
         updateSectionRotationIndicators();
         renderModalAnnotationPanel();
         hideTooltip();
@@ -11219,40 +11625,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         document.getElementById('screenshot-btn').addEventListener('click', screenshotFullPage);
 
         // Legend toggle
-        document.getElementById('legend-toggle').addEventListener('click', () => {{
-            const legend = document.getElementById('legend');
-            const btn = document.getElementById('legend-toggle');
-            legend.classList.toggle('collapsed');
-            btn.classList.toggle('active');
-            // Re-render to adjust for new grid size
-            requestAnimationFrame(renderAllSections);
-        }});
+        document.getElementById('legend-toggle').addEventListener('click', toggleLegendPanel);
 
-        // Color explorer toggle
+        // Insights panel toggle
         buildColorPanel();
         const colorToggle = document.getElementById('color-toggle');
-        const colorPanel = document.getElementById('color-panel');
-        colorToggle.addEventListener('click', () => {{
-            colorPanel.classList.toggle('collapsed');
-            colorToggle.classList.toggle('active');
-            if (!colorPanel.classList.contains('collapsed')) {{
-                if (document.getElementById('color-tab-compare')?.classList.contains('active')) {{
-                    renderClusterDE();
-                }} else if (document.getElementById('color-tab-neighbors')?.classList.contains('active')) {{
-                    renderNeighborStats();
-                    renderInteractionBrowser();
-                }} else if (document.getElementById('color-tab-genes')?.classList.contains('active')) {{
-                    if (document.getElementById('genes-tab-dotplot')?.classList.contains('active')) renderDotplot();
-                    if (document.getElementById('genes-tab-markers')?.classList.contains('active')) renderMarkerGenes();
-                }} else if (document.getElementById('color-tab-regions')?.classList.contains('active')) {{
-                    renderAnnotationComparison();
-                }} else {{
-                    renderColorAggregation();
-                    renderCellTypeTrend();
-                }}
-            }}
-            requestAnimationFrame(renderAllSections);
-        }});
+        colorToggle.addEventListener('click', toggleInsightsPanel);
 
         const infoTrigger = document.getElementById('info-trigger');
         if (infoTrigger) {{
@@ -11278,36 +11656,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }});
         }}
 
-        // Neighborhood graph toggle
-        if (DATA.has_neighbors) {{
-            const graphBtn = document.getElementById('graph-toggle');
-            graphBtn.style.display = 'inline-block';
-            graphBtn.addEventListener('click', () => {{
-                showGraph = !showGraph;
-                graphBtn.classList.toggle('active', showGraph);
-                renderAllSections();
-                if (modalSection) renderModalSection();
-            }});
-
-            const neighborBtn = document.getElementById('neighbor-hover-toggle');
-            neighborBtn.style.display = 'inline-block';
-            neighborBtn.addEventListener('click', () => {{
-                neighborHoverEnabled = !neighborHoverEnabled;
-                neighborBtn.classList.toggle('active', neighborHoverEnabled);
-                if (!neighborHoverEnabled) {{
-                    hoverNeighbors = null;
-                    if (modalSection) renderModalSection();
-                }}
-            }});
-
-            const hopSelect = document.getElementById('neighbor-hop-select');
-            hopSelect.style.display = 'inline-block';
-            hopSelect.value = neighborHopMode;
-            hopSelect.addEventListener('change', () => {{
-                neighborHopMode = hopSelect.value;
-                if (modalSection) renderModalSection();
-            }});
-        }}
     }}
 
     function initModal() {{
@@ -11318,7 +11666,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         document.getElementById('modal').addEventListener('click', (e) => {{
             if (e.target.id === 'modal') closeModal();
         }});
-        document.addEventListener('keydown', (e) => {{ if (e.key === 'Escape') closeModal(); }});
 
         document.getElementById('zoom-in').addEventListener('click', () => {{
             modalZoom = Math.min(modalZoom * 1.5, 20);
@@ -11328,10 +11675,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             modalZoom = Math.max(modalZoom / 1.5, 0.1);
             renderModalSection();
         }});
-        document.getElementById('zoom-reset').addEventListener('click', () => {{
-            modalZoom = 1; modalPanX = 0; modalPanY = 0;
-            renderModalSection();
-        }});
+        document.getElementById('zoom-reset').addEventListener('click', zoomModalToFit);
         document.getElementById('modal-rotate-left')?.addEventListener('click', () => {{
             if (!modalSection) return;
             rotateSectionBy(modalSection.id, -ROTATION_STEP_DEG);
@@ -11345,6 +11689,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             resetSectionRotation(modalSection.id);
         }});
         document.getElementById('modal-screenshot-btn')?.addEventListener('click', screenshotModalView);
+        document.getElementById('modal-exit-subview-btn')?.addEventListener('click', () => {{
+            exitModalSubview();
+        }});
 
         const modalRange = document.getElementById('modal-spot-size');
         if (modalRange) {{
@@ -11918,8 +12265,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             modalGraphBtn.addEventListener('click', () => {{
                 showGraph = !showGraph;
                 modalGraphBtn.classList.toggle('active', showGraph);
-                const graphBtn = document.getElementById('graph-toggle');
-                if (graphBtn) graphBtn.classList.toggle('active', showGraph);
                 updateModalToolbarState();
                 renderAllSections();
                 if (modalSection) renderModalSection();
@@ -11930,8 +12275,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             modalNeighborBtn.addEventListener('click', () => {{
                 neighborHoverEnabled = !neighborHoverEnabled;
                 modalNeighborBtn.classList.toggle('active', neighborHoverEnabled);
-                const neighborBtn = document.getElementById('neighbor-hover-toggle');
-                if (neighborBtn) neighborBtn.classList.toggle('active', neighborHoverEnabled);
                 updateModalToolbarState();
                 if (!neighborHoverEnabled) {{
                     hoverNeighbors = null;
@@ -11943,8 +12286,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             modalHopSelect.value = neighborHopMode;
             modalHopSelect.addEventListener('change', () => {{
                 neighborHopMode = modalHopSelect.value;
-                const hopSelect = document.getElementById('neighbor-hop-select');
-                if (hopSelect) hopSelect.value = neighborHopMode;
                 if (modalSection) renderModalSection();
             }});
         }}
@@ -11965,6 +12306,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             initFilters();
             initModal();
             initUMAP();
+            initKeyboardShortcuts();
             initHelpTooltips();
             updateSectionRotationIndicators();
             renderLegend('legend');

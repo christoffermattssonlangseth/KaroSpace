@@ -155,6 +155,27 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert 'data-modal-group="view"' in html_text
     assert "function updateModalToolbarState()" in html_text
     assert "function initModalControlsDragging()" in html_text
+    assert 'id="modal-exit-subview-btn"' in html_text
+    assert "function activateModalSubviewFromSelection()" in html_text
+    assert "function exitModalSubview()" in html_text
+    assert "function buildModalSubviewStateFromSelection(section = modalSection)" in html_text
+    assert "Open focused view" in html_text
+    assert "Focused view active. Use Back view to return to the full section." in html_text
+    assert '<button class="graph-toggle" id="graph-toggle"' not in html_text
+    assert '<button class="graph-toggle" id="neighbor-hover-toggle"' not in html_text
+    assert '<select id="neighbor-hop-select"' not in html_text
+    assert ">Keyboard Shortcuts<" in html_text
+    assert "<kbd>/</kbd>" in html_text
+    assert "function toggleLegendPanel()" in html_text
+    assert "function toggleInsightsPanel()" in html_text
+    assert "function navigateModalSection(step)" in html_text
+    assert "function initKeyboardShortcuts()" in html_text
+    assert "function isEditableKeyboardTarget(target)" in html_text
+    assert "buildColorPanel();" in html_text
+    assert "colorToggle.addEventListener('click', toggleInsightsPanel);" in html_text
+    assert "document.getElementById('legend-toggle').addEventListener('click', toggleLegendPanel);" in html_text
+    assert "initKeyboardShortcuts();" in html_text
+    assert ">Insights<" in html_text
     assert "function createViewerStorage()" in html_text
     assert "const VIEWER_STORAGE = createViewerStorage();" in html_text
     assert "VIEWER_STORAGE.getItem('spatial-viewer-theme')" in html_text
