@@ -2023,9 +2023,36 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             font-size: 11px;
             font-weight: 600;
             line-height: 1.4;
-            transition: background 0.3s, border-color 0.3s, color 0.3s;
+            transition: background 0.3s, border-color 0.3s, color 0.3s, box-shadow 0.3s, opacity 0.3s;
         }}
         .modal-controls button:hover {{ background: var(--hover-bg); }}
+        .modal-controls button.modal-btn-primary {{
+            background: color-mix(in srgb, var(--accent-strong) 92%, var(--panel-bg));
+            border-color: color-mix(in srgb, var(--accent-strong) 94%, white 6%);
+            color: white;
+            box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-strong) 24%, transparent);
+        }}
+        .modal-controls button.modal-btn-primary:hover {{
+            background: color-mix(in srgb, var(--accent-strong) 100%, black 0%);
+        }}
+        .modal-controls button.modal-btn-muted {{
+            color: var(--muted-color);
+            border-color: color-mix(in srgb, var(--border-color) 62%, transparent);
+            background: color-mix(in srgb, var(--input-bg) 72%, transparent);
+            opacity: 0.86;
+        }}
+        .modal-controls button.modal-btn-muted:hover {{
+            color: var(--text-color);
+            opacity: 1;
+        }}
+        .modal-controls button.modal-btn-danger {{
+            color: color-mix(in srgb, #ff7b7b 72%, var(--text-color));
+            border-color: color-mix(in srgb, #ff7b7b 35%, var(--border-color));
+            background: color-mix(in srgb, #ff7b7b 10%, var(--input-bg));
+        }}
+        .modal-controls button.modal-btn-danger:hover {{
+            background: color-mix(in srgb, #ff7b7b 16%, var(--hover-bg));
+        }}
         .modal-controls select {{
             min-height: 22px;
             padding: 1px 7px;
@@ -3419,6 +3446,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let modalPanX = 0, modalPanY = 0;
     let modalSpotSize = {spot_size};
     let isDragging = false;
+    let isSplitDragging = false;
     let dragStartX = 0, dragStartY = 0;
     let lastPanX = 0, lastPanY = 0;
     let modalPointerMoved = false;
@@ -3446,6 +3474,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let modalAnnotationPanelDragOffsetY = 0;
     let modalRenderedView = null;
     let modalInteractionCommitTimer = null;
+    let modalBlendRenderFrame = null;
+    let modalBlendRenderCache = null;
     let modalSubview = null;
     const BLEND_ALL_CATEGORIES = '__ALL__';
     let modalBlendSpec = {{
@@ -3810,6 +3840,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }});
     }}
 
+    function setModalButtonPriority(button, priority = 'default') {{
+        if (!button) return;
+        button.classList.remove('modal-btn-primary', 'modal-btn-muted', 'modal-btn-danger');
+        if (priority === 'primary') {{
+            button.classList.add('modal-btn-primary');
+        }} else if (priority === 'muted') {{
+            button.classList.add('modal-btn-muted');
+        }} else if (priority === 'danger') {{
+            button.classList.add('modal-btn-danger');
+        }}
+    }}
+
     function setModalControlsCollapsed(collapsed) {{
         modalControlsCollapsed = !!collapsed;
         const controls = document.querySelector('#modal .modal-controls');
@@ -3937,6 +3979,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const controls = document.querySelector('#modal .modal-controls');
         if (!controls) return;
 
+        const fitBtn = document.getElementById('zoom-reset');
+        const zoomInBtn = document.getElementById('zoom-in');
+        const zoomOutBtn = document.getElementById('zoom-out');
+        const rotateLeftBtn = document.getElementById('modal-rotate-left');
+        const rotateRightBtn = document.getElementById('modal-rotate-right');
+        const rotateResetBtn = document.getElementById('modal-rotate-reset');
+        const splitBtn = document.getElementById('modal-blend-toggle');
+        const selectBtn = document.getElementById('modal-magic-wand-btn');
+        const annotateBtn = document.getElementById('modal-annotate-btn');
+        const pickTypeBtn = document.getElementById('modal-type-toggle');
+        const clearTypeBtn = document.getElementById('modal-type-clear');
+        const screenshotBtn = document.getElementById('modal-screenshot-btn');
         const clearSelectionBtn = document.getElementById('modal-clear-selection-btn');
         if (clearSelectionBtn) clearSelectionBtn.hidden = selectedCells.size === 0;
         const exitSubviewBtn = document.getElementById('modal-exit-subview-btn');
@@ -3974,6 +4028,58 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const showHopSelect = DATA.has_neighbors && neighborHoverEnabled;
             modalHopSelect.hidden = !showHopSelect;
             modalHopSelect.disabled = !showHopSelect;
+        }}
+
+        [
+            fitBtn,
+            zoomInBtn,
+            zoomOutBtn,
+            rotateLeftBtn,
+            rotateRightBtn,
+            rotateResetBtn,
+            splitBtn,
+            selectBtn,
+            annotateBtn,
+            pickTypeBtn,
+            clearTypeBtn,
+            screenshotBtn,
+            clearSelectionBtn,
+            exitSubviewBtn,
+            modalGraphBtn,
+            modalNeighborBtn,
+        ].forEach((btn) => setModalButtonPriority(btn));
+
+        [rotateLeftBtn, rotateRightBtn, rotateResetBtn, screenshotBtn, modalGraphBtn, modalNeighborBtn].forEach((btn) => {{
+            setModalButtonPriority(btn, 'muted');
+        }});
+
+        if (clearSelectionBtn && !clearSelectionBtn.hidden) {{
+            setModalButtonPriority(clearSelectionBtn, 'danger');
+        }}
+        if (typeClearBtn && !typeClearBtn.hidden) {{
+            setModalButtonPriority(typeClearBtn, 'muted');
+        }}
+
+        if (exitSubviewBtn && !exitSubviewBtn.hidden) {{
+            setModalButtonPriority(exitSubviewBtn, 'primary');
+        }} else if (modalAnnotationModeActive) {{
+            setModalButtonPriority(annotateBtn, 'primary');
+            [selectBtn, splitBtn, pickTypeBtn].forEach((btn) => setModalButtonPriority(btn, 'muted'));
+            setModalButtonPriority(fitBtn, 'muted');
+        }} else if (modalMagicWandActive) {{
+            setModalButtonPriority(selectBtn, 'primary');
+            [annotateBtn, splitBtn, pickTypeBtn].forEach((btn) => setModalButtonPriority(btn, 'muted'));
+            setModalButtonPriority(fitBtn, 'muted');
+        }} else if (modalTypeSelectEnabled && !typeSelectionDisabled) {{
+            setModalButtonPriority(pickTypeBtn, 'primary');
+            setModalButtonPriority(splitBtn, 'muted');
+        }} else if (blendActive) {{
+            setModalButtonPriority(splitBtn, 'primary');
+            setModalButtonPriority(fitBtn, 'muted');
+            setModalButtonPriority(pickTypeBtn, 'muted');
+        }} else {{
+            setModalButtonPriority(fitBtn, 'primary');
+            setModalButtonPriority(splitBtn, 'muted');
         }}
 
         if (modalSection) {{
@@ -7679,6 +7785,47 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
     }}
 
+    function scheduleModalBlendRender() {{
+        if (!modalSection) return;
+        if (modalBlendRenderFrame !== null) return;
+        modalBlendRenderFrame = window.requestAnimationFrame(() => {{
+            modalBlendRenderFrame = null;
+            if (!renderModalBlendFromCache()) {{
+                renderModalSection();
+            }}
+        }});
+    }}
+
+    function updateModalBlendLabels() {{
+        if (modalBlendMixLabel) {{
+            const pctA = Math.round(modalBlendMix * 100);
+            const pctB = 100 - pctA;
+            modalBlendMixLabel.textContent = `A left ${{pctA}}% • B right ${{pctB}}%`;
+        }}
+        if (modalBlendMeta) {{
+            const summary = `${{getModalBlendVariableLabel(modalBlendSpec.a)}} \u2194 ${{getModalBlendVariableLabel(modalBlendSpec.b)}}`;
+            const aMarkers = getModalBlendMarkerHtml('a');
+            const bMarkers = getModalBlendMarkerHtml('b');
+            const markerBlocks = [aMarkers, bMarkers].filter(Boolean);
+            const hasMarkers = markerBlocks.length > 0;
+            const toggleLabel = modalBlendMarkersCollapsed ? 'Show marker genes' : 'Hide marker genes';
+            modalBlendMeta.innerHTML = [
+                `<div class="modal-blend-summary">${{escapeHtml(summary)}}</div>`,
+                hasMarkers
+                    ? `<button type="button" class="modal-blend-markers-toggle" id="modal-blend-markers-toggle" aria-expanded="${{modalBlendMarkersCollapsed ? 'false' : 'true'}}">${{toggleLabel}}</button>`
+                    : '',
+                hasMarkers
+                    ? `<div class="modal-blend-markers ${{modalBlendMarkersCollapsed ? 'collapsed' : ''}}">${{markerBlocks.join('')}}</div>`
+                    : '',
+            ].join('');
+            const markersToggle = document.getElementById('modal-blend-markers-toggle');
+            markersToggle?.addEventListener('click', () => {{
+                modalBlendMarkersCollapsed = !modalBlendMarkersCollapsed;
+                updateModalBlendLabels();
+            }});
+        }}
+    }}
+
     function clearModalInteractionPreview() {{
         const canvas = document.getElementById('modal-canvas');
         if (!canvas) return;
@@ -7706,8 +7853,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function invalidateModalRenderedView() {{
         clearModalInteractionCommitTimer();
+        if (modalBlendRenderFrame !== null) {{
+            window.cancelAnimationFrame(modalBlendRenderFrame);
+            modalBlendRenderFrame = null;
+        }}
         clearModalInteractionPreview();
         modalRenderedView = null;
+        modalBlendRenderCache = null;
     }}
 
     function applyModalInteractionPreview() {{
@@ -8772,6 +8924,164 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }});
     }}
 
+    function createModalBlendLayerCanvas(width, height, dpr) {{
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(width * dpr));
+        canvas.height = Math.max(1, Math.round(height * dpr));
+        const ctx = canvas.getContext('2d');
+        ctx.scale(dpr, dpr);
+        return {{ canvas, ctx }};
+    }}
+
+    function getModalBlendSpecCacheKey(spec, runtime) {{
+        const parts = [
+            spec?.kind || '',
+            spec?.color || '',
+            spec?.category || '',
+            spec?.gene || '',
+            runtime?.kind || '',
+        ];
+        if (runtime?.kind === 'gene') {{
+            parts.push(
+                Number(runtime.vmin || 0).toFixed(6),
+                Number(runtime.vmax || 0).toFixed(6),
+            );
+        }} else if (Number.isFinite(runtime?.catIdx)) {{
+            parts.push(String(runtime.catIdx));
+        }}
+        return parts.join('|');
+    }}
+
+    function getModalBlendRenderCacheKey(section, transform, width, height, dpr, adjustedSpotSize, runtimes) {{
+        return [
+            section?.id || '',
+            width,
+            height,
+            dpr.toFixed(3),
+            transform.centerX.toFixed(3),
+            transform.centerY.toFixed(3),
+            transform.scale.toFixed(6),
+            transform.angleDeg.toFixed(3),
+            adjustedSpotSize.toFixed(4),
+            getModalSubviewRenderToken(),
+            getModalBlendSpecCacheKey(modalBlendSpec.a, runtimes?.a),
+            getModalBlendSpecCacheKey(modalBlendSpec.b, runtimes?.b),
+        ].join('::');
+    }}
+
+    function renderModalBlendRuntimeLayer(ctx, section, runtime, transform, adjustedSpotSize, candidateIndices = null) {{
+        const nCandidates = candidateIndices ? candidateIndices.length : section.x.length;
+        for (let k = 0; k < nCandidates; k++) {{
+            const i = candidateIndices ? candidateIndices[k] : k;
+            const point = transform.dataToScreen(section.x[i], section.y[i]);
+            const x = point.x;
+            const y = point.y;
+            if (!transform.isPointVisible(x, y, adjustedSpotSize)) continue;
+            ctx.fillStyle = rgbToCss(getModalBlendCellRgb(runtime, i));
+            ctx.beginPath();
+            ctx.arc(x, y, adjustedSpotSize, 0, Math.PI * 2);
+            ctx.fill();
+        }}
+    }}
+
+    function ensureModalBlendRenderCache(section, transform, width, height, dpr, adjustedSpotSize, runtimes, candidateIndices = null) {{
+        if (!section || !transform || !runtimes) return null;
+        const cacheKey = getModalBlendRenderCacheKey(section, transform, width, height, dpr, adjustedSpotSize, runtimes);
+        if (modalBlendRenderCache && modalBlendRenderCache.key === cacheKey) {{
+            return modalBlendRenderCache;
+        }}
+
+        const layerA = createModalBlendLayerCanvas(width, height, dpr);
+        const layerB = createModalBlendLayerCanvas(width, height, dpr);
+        renderModalBlendRuntimeLayer(layerA.ctx, section, runtimes.a, transform, adjustedSpotSize, candidateIndices);
+        renderModalBlendRuntimeLayer(layerB.ctx, section, runtimes.b, transform, adjustedSpotSize, candidateIndices);
+
+        modalBlendRenderCache = {{
+            key: cacheKey,
+            width,
+            height,
+            dpr,
+            canvasA: layerA.canvas,
+            canvasB: layerB.canvas,
+        }};
+        return modalBlendRenderCache;
+    }}
+
+    function drawModalBlendCachedLayers(ctx, width, height, cache, splitX) {{
+        if (!ctx || !cache) return false;
+        const clampedSplitX = Math.max(0, Math.min(width, splitX));
+
+        if (clampedSplitX > 0) {{
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(0, 0, clampedSplitX, height);
+            ctx.clip();
+            ctx.drawImage(cache.canvasA, 0, 0, width, height);
+            ctx.restore();
+        }}
+        if (clampedSplitX < width) {{
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(clampedSplitX, 0, width - clampedSplitX, height);
+            ctx.clip();
+            ctx.drawImage(cache.canvasB, 0, 0, width, height);
+            ctx.restore();
+        }}
+
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([5, 3]);
+        ctx.beginPath();
+        ctx.moveTo(clampedSplitX, 0);
+        ctx.lineTo(clampedSplitX, height);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        return true;
+    }}
+
+    function renderModalBlendFromCache() {{
+        if (!modalSection || !modalBlendEnabled) return false;
+        if (showGraph || hoverNeighbors || isDrawingModalLasso || isDrawingModalAnnotation) return false;
+        if (selectedCells.size > 0 && !getModalActiveCellIndexSet(modalSection.id)) return false;
+
+        const canvas = document.getElementById('modal-canvas');
+        const container = document.getElementById('modal-canvas-container');
+        if (!canvas || !container) return false;
+
+        clearModalInteractionPreview();
+        const ctx = canvas.getContext('2d');
+        const dpr = getRenderDpr();
+        const rect = container.getBoundingClientRect();
+        const width = rect.width;
+        const height = rect.height;
+        if (width <= 0 || height <= 0) return false;
+
+        const transform = getModalViewTransform(rect);
+        const runtimes = getModalBlendRuntimes(modalSection);
+        if (!transform || !runtimes || !modalBlendRenderCache) return false;
+
+        const cacheKey = getModalBlendRenderCacheKey(
+            modalSection,
+            transform,
+            width,
+            height,
+            dpr,
+            Math.max(0.25, modalSpotSize * modalZoom * 0.8),
+            runtimes,
+        );
+        if (modalBlendRenderCache.key !== cacheKey) return false;
+
+        canvas.width = width * dpr;
+        canvas.height = height * dpr;
+        ctx.scale(dpr, dpr);
+        ctx.fillStyle = getPanelBg();
+        ctx.fillRect(0, 0, width, height);
+        drawModalBlendCachedLayers(ctx, width, height, modalBlendRenderCache, width * modalBlendMix);
+        cacheModalRenderedView(rect, transform);
+        updateModalViewportInfo(transform);
+        return true;
+    }}
+
     // Modal rendering
     function renderModalSectionExact() {{
         if (!modalSection) return;
@@ -8889,7 +9199,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const x = point.x;
                 const y = point.y;
                 if (!transform.isPointVisible(x, y, adjustedSpotSize)) continue;
-
                 const runtime = x <= splitX ? blendRuntimes.a : blendRuntimes.b;
                 ctx.fillStyle = rgbToCss(getModalBlendCellRgb(runtime, i));
                 ctx.globalAlpha = 1;
@@ -8897,7 +9206,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 ctx.arc(x, y, adjustedSpotSize, 0, Math.PI * 2);
                 ctx.fill();
             }}
-
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
             ctx.lineWidth = 1.5;
             ctx.setLineDash([5, 3]);
@@ -8906,6 +9214,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ctx.lineTo(splitX, height);
             ctx.stroke();
             ctx.setLineDash([]);
+            ensureModalBlendRenderCache(modalSection, transform, width, height, dpr, adjustedSpotSize, blendRuntimes, candidateIndices);
         }} else {{
             const activeSpotlight = getLinkedSpotlightCategory(config);
             const focusCategory = activeSpotlight || modalSelectedCategory;
@@ -11776,7 +12085,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         function updateModalCanvasCursor() {{
             if (!canvas) return;
-            if (isDragging) {{
+            if (isSplitDragging) {{
+                canvas.style.cursor = 'ew-resize';
+            }} else if (isDragging) {{
                 canvas.style.cursor = 'grabbing';
             }} else if (modalMagicWandActive || modalAnnotationModeActive) {{
                 canvas.style.cursor = 'crosshair';
@@ -12004,7 +12315,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         modalBlendMixRange?.addEventListener('input', (e) => {{
             modalBlendMix = clamp01(parseFloat(e.target.value) / 100);
             updateModalBlendLabels();
-            if (modalSection) renderModalSection();
+            scheduleModalBlendRender();
         }});
         ['a', 'b'].forEach((side) => {{
             const controls = modalBlendControls[side];
@@ -12132,10 +12443,40 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 renderModalSection();
                 return;
             }}
+            if (isSplitDragging) return;
             isDragging = true;
             dragStartX = e.clientX; dragStartY = e.clientY;
             lastPanX = modalPanX; lastPanY = modalPanY;
             updateModalCanvasCursor();
+        }});
+        canvas.addEventListener('pointerdown', (e) => {{
+            if (modalAnnotationModeActive || modalMagicWandActive) return;
+            const blendActiveNow = !!(modalSection && getModalBlendRuntimes(modalSection));
+            if (!blendActiveNow) return;
+            const rect = container.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const splitX = rect.width * modalBlendMix;
+            if (Math.abs(mouseX - splitX) > 12) return;
+            canvas.setPointerCapture(e.pointerId);
+            isSplitDragging = true;
+            modalPointerMoved = true;
+            updateModalCanvasCursor();
+            e.preventDefault();
+        }});
+        canvas.addEventListener('pointermove', (e) => {{
+            if (!isSplitDragging) return;
+            const rect = container.getBoundingClientRect();
+            modalBlendMix = clamp01((e.clientX - rect.left) / rect.width);
+            if (modalBlendMixRange) modalBlendMixRange.value = String(Math.round(modalBlendMix * 100));
+            updateModalBlendLabels();
+            scheduleModalBlendRender();
+            e.preventDefault();
+        }});
+        canvas.addEventListener('pointerup', (e) => {{
+            if (!isSplitDragging) return;
+            isSplitDragging = false;
+            updateModalCanvasCursor();
+            e.preventDefault();
         }});
         canvas.addEventListener('click', (e) => {{
             if (!modalSection || isDragging || isDrawingModalLasso || isDrawingModalAnnotation || modalPointerMoved || modalMagicWandActive || modalAnnotationModeActive) return;

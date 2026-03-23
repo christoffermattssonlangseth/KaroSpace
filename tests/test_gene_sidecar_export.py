@@ -171,6 +171,14 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert "function navigateModalSection(step)" in html_text
     assert "function initKeyboardShortcuts()" in html_text
     assert "function isEditableKeyboardTarget(target)" in html_text
+    assert "function setModalButtonPriority(button, priority = 'default')" in html_text
+    assert "function scheduleModalBlendRender()" in html_text
+    assert "function updateModalBlendLabels()" in html_text
+    assert "function ensureModalBlendRenderCache(section, transform, width, height, dpr, adjustedSpotSize, runtimes, candidateIndices = null)" in html_text
+    assert "function renderModalBlendFromCache()" in html_text
+    assert ".modal-controls button.modal-btn-primary" in html_text
+    assert ".modal-controls button.modal-btn-muted" in html_text
+    assert ".modal-controls button.modal-btn-danger" in html_text
     assert "buildColorPanel();" in html_text
     assert "colorToggle.addEventListener('click', toggleInsightsPanel);" in html_text
     assert "document.getElementById('legend-toggle').addEventListener('click', toggleLegendPanel);" in html_text
