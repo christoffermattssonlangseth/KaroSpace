@@ -1501,6 +1501,32 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             font-size: 10px;
         }}
         .marker-genes .gene-token-meta {{ font-size: 9px; }}
+        .spatial-gene-row {{
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            min-width: 0;
+        }}
+        .spatial-gene-rank {{
+            flex: 0 0 24px;
+            font-size: 10px;
+            color: var(--muted-color);
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }}
+        .spatial-gene-row .gene-token-btn {{
+            flex: 1 1 auto;
+            min-width: 0;
+        }}
+        .spatial-gene-score {{
+            flex: 0 0 auto;
+            min-width: 52px;
+            font-size: 10px;
+            color: var(--muted-color);
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        }}
         .marker-genes-list {{
             font-size: 10px;
             color: var(--muted-color);
@@ -3879,8 +3905,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 renderNeighborStats();
                 renderInteractionBrowser();
             }} else if (document.getElementById('color-tab-genes')?.classList.contains('active')) {{
-                if (document.getElementById('genes-tab-dotplot')?.classList.contains('active')) renderDotplot();
                 if (document.getElementById('genes-tab-markers')?.classList.contains('active')) renderMarkerGenes();
+                if (document.getElementById('genes-tab-spatial')?.classList.contains('active')) renderSpatialVariableGenes();
             }} else if (document.getElementById('color-tab-regions')?.classList.contains('active')) {{
                 renderAnnotationComparison();
             }} else {{
@@ -10513,41 +10539,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 </div>
                 <div class="color-tab-content" id="color-tab-genes-content">
                     <div class="color-tabs">
-                        <button class="color-tab active" id="genes-tab-dotplot" type="button">Dotplot</button>
-                        <button class="color-tab" id="genes-tab-markers" type="button">Markers</button>
+                        <button class="color-tab active" id="genes-tab-markers" type="button">Markers</button>
+                        <button class="color-tab" id="genes-tab-spatial" type="button">Spatially variable</button>
                     </div>
-                    <div class="color-tab-content active" id="genes-tab-dotplot-content">
-                        <div class="dotplot-controls">
-                            <div>
-                                <label>Group By (Categorical Color)</label>
-                                <select id="dotplot-groupby"></select>
-                            </div>
-                            <div>
-                                <label>Aggregate By (Metadata)</label>
-                                <select id="dotplot-aggregate-by" ${{!hasMetadata ? 'disabled' : ''}}>
-                                    ${{options}}
-                                </select>
-                            </div>
-                            <div id="dotplot-aggregate-value-wrap" style="display: none;">
-                                <label>Aggregate Value</label>
-                                <select id="dotplot-aggregate-value"></select>
-                            </div>
-                            <div>
-                                <label>Genes (Comma-Separated)</label>
-                                <input class="color-search" id="dotplot-genes" type="text" placeholder="e.g. Cd4, Cd8a, Gfap" list="gene-list">
-                                <div class="scale-hint">Dot size = % expressing; dot color = mean expression. Press Tab to autocomplete the current gene token.</div>
-                            </div>
-                            <div style="display: flex; gap: 6px; justify-content: flex-end;">
-                                <button class="legend-btn" id="dotplot-use-hvgs" type="button">Suggest Genes</button>
-                                <button class="legend-btn" id="dotplot-run" type="button">Update</button>
-                            </div>
-                            <div class="agg-group-meta" id="dotplot-status">Pick a categorical color + genes to compute a dotplot.</div>
-                            <div class="dotplot-grid" id="dotplot-grid"></div>
-                        </div>
-                    </div>
-                    <div class="color-tab-content" id="genes-tab-markers-content">
+                    <div class="color-tab-content active" id="genes-tab-markers-content">
                         <input class="marker-search" id="marker-gene-search" type="text" placeholder="Search marker genes...">
                         <div class="marker-genes" id="marker-genes"></div>
+                    </div>
+                    <div class="color-tab-content" id="genes-tab-spatial-content">
+                        <input class="marker-search" id="spatial-gene-search" type="text" placeholder="Search spatially variable genes...">
+                        <div class="marker-genes" id="spatially-variable-genes"></div>
                     </div>
                 </div>
                 <div class="color-tab-content" id="color-tab-regions-content">
@@ -10570,11 +10571,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const dpAgg = document.getElementById('dotplot-aggregate-by');
             if (dpAgg) dpAgg.value = groupBy.value;
             updateDotplotAggregateValueOptions();
-            const genesTop = document.getElementById('color-tab-genes');
-            const genesDot = document.getElementById('genes-tab-dotplot');
-            if (genesTop?.classList.contains('active') && genesDot?.classList.contains('active')) {{
-                renderDotplot();
-            }}
         }});
 
         const aggregationToggle = document.getElementById('color-aggregation-toggle');
@@ -10595,10 +10591,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const neighborContent = document.getElementById('color-tab-neighbors-content');
         const regionsContent = document.getElementById('color-tab-regions-content');
 
-        const genesDotTab = document.getElementById('genes-tab-dotplot');
         const genesMarkersTab = document.getElementById('genes-tab-markers');
-        const genesDotContent = document.getElementById('genes-tab-dotplot-content');
+        const genesSpatialTab = document.getElementById('genes-tab-spatial');
         const genesMarkersContent = document.getElementById('genes-tab-markers-content');
+        const genesSpatialContent = document.getElementById('genes-tab-spatial-content');
         const topLevelTabs = [
             [aggregateTab, aggregateContent],
             [compareTab, compareContent],
@@ -10624,14 +10620,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }});
         genesTab.addEventListener('click', () => {{
             activateTopLevelInsightsTab(genesTab, genesContent);
-            if (!genesDotTab.classList.contains('active') && !genesMarkersTab.classList.contains('active')) {{
-                genesDotTab.classList.add('active');
-                genesMarkersTab.classList.remove('active');
-                genesDotContent.classList.add('active');
-                genesMarkersContent.classList.remove('active');
+            if (!(genesMarkersTab?.classList.contains('active')) && !(genesSpatialTab?.classList.contains('active'))) {{
+                genesSpatialTab.classList.remove('active');
+                genesMarkersTab.classList.add('active');
+                genesSpatialContent.classList.remove('active');
+                genesMarkersContent.classList.add('active');
             }}
-            if (genesDotTab.classList.contains('active')) renderDotplot();
-            else renderMarkerGenes();
+            if (genesMarkersTab.classList.contains('active')) renderMarkerGenes();
+            else renderSpatialVariableGenes();
         }});
         neighborTab.addEventListener('click', () => {{
             activateTopLevelInsightsTab(neighborTab, neighborContent);
@@ -10639,19 +10635,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             renderInteractionBrowser();
         }});
 
-        genesDotTab.addEventListener('click', () => {{
-            genesDotTab.classList.add('active');
-            genesMarkersTab.classList.remove('active');
-            genesDotContent.classList.add('active');
-            genesMarkersContent.classList.remove('active');
-            renderDotplot();
-        }});
         genesMarkersTab.addEventListener('click', () => {{
             genesMarkersTab.classList.add('active');
-            genesDotTab.classList.remove('active');
+            genesSpatialTab.classList.remove('active');
             genesMarkersContent.classList.add('active');
-            genesDotContent.classList.remove('active');
+            genesSpatialContent.classList.remove('active');
             renderMarkerGenes();
+        }});
+        genesSpatialTab.addEventListener('click', () => {{
+            genesSpatialTab.classList.add('active');
+            genesMarkersTab.classList.remove('active');
+            genesSpatialContent.classList.add('active');
+            genesMarkersContent.classList.remove('active');
+            renderSpatialVariableGenes();
         }});
         regionsTab?.addEventListener('click', () => {{
             activateTopLevelInsightsTab(regionsTab, regionsContent);
@@ -10662,6 +10658,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         markerSearch.addEventListener('input', () => {{
             if (genesTab.classList.contains('active') && genesMarkersTab.classList.contains('active')) {{
                 renderMarkerGenes();
+            }}
+        }});
+        const spatialGeneSearch = document.getElementById('spatial-gene-search');
+        spatialGeneSearch?.addEventListener('input', () => {{
+            if (genesTab.classList.contains('active') && genesSpatialTab.classList.contains('active')) {{
+                renderSpatialVariableGenes();
             }}
         }});
 
@@ -11042,6 +11044,57 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         container.innerHTML = loadedGeneNote + rows.join('');
         bindGeneActivateButtons(container, renderMarkerGenes);
+    }}
+
+    function renderSpatialVariableGenes() {{
+        const container = document.getElementById('spatially-variable-genes');
+        if (!container) return;
+        const searchInput = document.getElementById('spatial-gene-search');
+        const query = (searchInput?.value || '').trim().toLowerCase();
+        const entries = Array.isArray(DATA.spatial_variable_genes) ? DATA.spatial_variable_genes : [];
+
+        if (!entries.length) {{
+            container.innerHTML = '<div class="agg-group-meta">No spatially variable genes were precomputed for this viewer.</div>';
+            return;
+        }}
+
+        const filtered = entries
+            .map((entry, idx) => {{
+                const gene = String(entry?.gene || '').trim();
+                if (!gene) return null;
+                const score = Number.isFinite(entry?.score) ? Number(entry.score) : Number(entry?.I);
+                return {{
+                    rank: idx + 1,
+                    gene,
+                    score: Number.isFinite(score) ? score : 0,
+                }};
+            }})
+            .filter(Boolean)
+            .filter((entry) => !query || entry.gene.toLowerCase().includes(query));
+
+        if (!filtered.length) {{
+            container.innerHTML = '<div class="agg-group-meta">No spatially variable genes match your search.</div>';
+            return;
+        }}
+
+        const summaryNote = `<div class="agg-group-meta">Global Moran&apos;s I ranking precomputed at export. Click a gene to load it into the viewer.</div>`;
+        const rows = filtered.map((entry) => {{
+            const scoreLabel = `I=${{entry.score.toFixed(4)}}`;
+            return `
+                <div class="spatial-gene-row">
+                    <span class="spatial-gene-rank">#${{entry.rank}}</span>
+                    ${{renderGeneTokenButton(entry.gene, {{
+                        isActive: entry.gene === currentGene,
+                        showMeta: false,
+                        title: `Load spatially variable gene into the viewer (Moran's I ${{entry.score.toFixed(4)}})`,
+                    }})}}
+                    <span class="spatial-gene-score">${{scoreLabel}}</span>
+                </div>
+            `;
+        }}).join('');
+
+        container.innerHTML = summaryNote + rows;
+        bindGeneActivateButtons(container, renderSpatialVariableGenes);
     }}
 
     function formatClusterDEPct(value) {{
@@ -12252,10 +12305,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 renderNeighborStats();
                 renderInteractionBrowser();
             }} else if (isGenes) {{
-                const isDot = document.getElementById('genes-tab-dotplot')?.classList.contains('active');
                 const isMarkers = document.getElementById('genes-tab-markers')?.classList.contains('active');
-                if (isDot) renderDotplot();
+                const isSpatial = document.getElementById('genes-tab-spatial')?.classList.contains('active');
                 if (isMarkers) renderMarkerGenes();
+                if (isSpatial) renderSpatialVariableGenes();
             }} else if (isRegions) {{
                 renderAnnotationComparison();
             }}
