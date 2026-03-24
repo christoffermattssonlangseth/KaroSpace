@@ -238,6 +238,24 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert "function renderComparisonNeighborSummary(colorCol, sourceCategory, referenceCategory)" in html_text
     assert "function renderComparisonInteractionSummary(colorCol, sourceCategory, referenceCategory)" in html_text
     assert "function renderClusterDEResultSection(colorCol, sourceCategory, referenceCategory)" in html_text
+    assert "Find cells" in html_text
+    assert 'data-selection-query-toggle' in html_text
+    assert 'data-selection-query-input' in html_text
+    assert 'data-selection-query-run' in html_text
+    assert 'data-selection-query-add' in html_text
+    assert 'data-selection-query-clear' in html_text
+    assert "Click an example to fill the box, then edit it." in html_text
+    assert "function tokenizeSelectionQuery(input)" in html_text
+    assert "function parseSelectionQuery(input)" in html_text
+    assert "function getSelectionQueryExamplePresets()" in html_text
+    assert "function getSelectionQueryPlaceholder()" in html_text
+    assert "Find cells by annotation, gene value, or section metadata." in html_text
+    assert "function normalizeSelectionQueryAst(node)" in html_text
+    assert "function evaluateSelectionQueryNode(node, section, cellIdx)" in html_text
+    assert "async function runSelectionQuery(mode = 'replace')" in html_text
+    assert "const MAX_SELECTION_QUERY_MATCHES = 150000;" in html_text
+    assert "Most columns and genes work as bare names." in html_text
+    assert "Use <code>obs(...)</code>, <code>gene(...)</code>," in html_text
     assert "function computeRegionAnnotationDE(annotationA, annotationB, options = {})" in html_text
     assert "function fetchGeneAuxShardForAnalysis(shardUrl)" in html_text
     assert "function decodeDenseSidecarSection(sectionEntry)" in html_text

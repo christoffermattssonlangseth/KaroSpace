@@ -2659,6 +2659,101 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .selection-summary-compare-a {{ color: var(--accent-strong); font-variant-numeric: tabular-nums; }}
         .selection-summary-compare-b {{ color: #4cc9f0; font-variant-numeric: tabular-nums; }}
         .selection-summary-compare-sep {{ color: var(--muted-color); }}
+        .selection-query {{
+            margin-top: 8px;
+            padding-top: 6px;
+            border-top: 1px solid var(--border-color);
+        }}
+        .selection-query-toggle {{
+            width: 100%;
+            padding: 0;
+            border: none;
+            background: none;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            color: inherit;
+            cursor: pointer;
+            text-align: left;
+        }}
+        .selection-query-toggle-label {{
+            flex-shrink: 0;
+            padding: 2px 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 999px;
+            font-size: 10px;
+            color: var(--muted-color);
+            background: color-mix(in srgb, var(--header-bg) 80%, transparent);
+        }}
+        .selection-query-summary {{
+            margin-top: 2px;
+        }}
+        .selection-query-body {{
+            margin-top: 8px;
+        }}
+        .selection-query-help {{
+            margin-top: 0;
+        }}
+        .selection-query-examples {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 6px;
+            margin-bottom: 6px;
+        }}
+        .selection-query-example {{
+            padding: 4px 7px;
+            border: 1px solid var(--border-color);
+            border-radius: 999px;
+            background: color-mix(in srgb, var(--header-bg) 82%, transparent);
+            color: var(--text-color);
+            cursor: pointer;
+            font-size: 10px;
+            line-height: 1.25;
+        }}
+        .selection-query-example:hover {{
+            background: var(--hover-bg);
+            border-color: var(--accent-strong);
+            color: var(--accent-strong);
+        }}
+        .selection-query-example code {{
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            font-size: 10px;
+        }}
+        .selection-query-input {{
+            width: 100%;
+            min-height: 52px;
+            margin-top: 4px;
+            padding: 6px 7px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: var(--input-bg);
+            color: var(--text-color);
+            font-size: 11px;
+            line-height: 1.35;
+            resize: vertical;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        }}
+        .selection-query-actions {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 6px;
+        }}
+        .selection-query-actions .selection-summary-compare-btn {{
+            flex: 1 1 110px;
+            margin-top: 0;
+        }}
+        .selection-query-status {{
+            margin-top: 6px;
+            font-size: 10px;
+            line-height: 1.35;
+        }}
+        .selection-query-status.muted {{ color: var(--muted-color); }}
+        .selection-query-status.working {{ color: var(--accent-strong); }}
+        .selection-query-status.success {{ color: #2a9d8f; }}
+        .selection-query-status.error {{ color: #c1121f; }}
         .annot-comp-row {{ margin-bottom: 8px; }}
         .annot-comp-header {{ display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; margin-bottom: 3px; }}
         .annot-comp-dot {{ width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0; }}
@@ -3815,6 +3910,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let lassoModeB = false;  // Next lasso draw fills region B
     let selectionSummaryColor = DATA.initial_color;
     let selectionSummaryExpanded = false;
+    const MAX_SELECTION_QUERY_MATCHES = 150000;
+    let selectionQueryExpanded = false;
+    let selectionQueryText = '';
+    let selectionQueryStatus = '';
+    let selectionQueryStatusKind = 'muted';
+    let selectionQueryRunning = false;
+    let selectionQueryRunToken = 0;
     let modalGenePanelEntries = [];
     let modalGenePanelState = null;
     let modalGenePanelRequestToken = 0;
@@ -3826,6 +3928,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let annotationDeFullRun = null;
     const annotationDeFullCache = new Map();
     const sectionById = new Map((DATA.sections || []).map(section => [section.id, section]));
+    const colorNameByLower = new Map((DATA.available_colors || []).map((name) => [String(name).toLowerCase(), String(name)]));
+    const sectionMetadataKeyByLower = new Map();
+    (DATA.sections || []).forEach((section) => {{
+        Object.keys(section?.metadata || {{}}).forEach((key) => {{
+            const token = String(key);
+            const lowered = token.toLowerCase();
+            if (!sectionMetadataKeyByLower.has(lowered)) {{
+                sectionMetadataKeyByLower.set(lowered, token);
+            }}
+        }});
+    }});
 
     function updateSectionRotationIndicators(sectionId = null) {{
         document.querySelectorAll('.section-panel').forEach((panel) => {{
@@ -7655,6 +7768,154 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         downloadTextFile(csvText, filename, 'text/csv;charset=utf-8');
     }}
 
+    function formatSelectionQueryLiteral(value) {{
+        if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+        if (typeof value === 'boolean') return value ? 'true' : 'false';
+        const text = String(value ?? '');
+        if (/^[A-Za-z_][A-Za-z0-9_.:-]*$/.test(text)) return text;
+        return JSON.stringify(text);
+    }}
+
+    function getSelectionQueryPreviewText(maxLength = 72) {{
+        const text = String(selectionQueryText || '').trim();
+        if (!text) return '';
+        if (text.length <= maxLength) return text;
+        return `${{text.slice(0, Math.max(0, maxLength - 1))}}…`;
+    }}
+
+    function getSelectionQueryExamplePresets() {{
+        const examples = [];
+        const seen = new Set();
+        const addExample = (query) => {{
+            const text = String(query || '').trim();
+            if (!text || seen.has(text)) return;
+            seen.add(text);
+            examples.push(text);
+        }};
+
+        let categoryColumn = '';
+        let categoryValue = null;
+        for (const colorName of (DATA.available_colors || [])) {{
+            const meta = DATA.colors_meta?.[colorName];
+            if (!meta || meta.is_continuous || !Array.isArray(meta.categories) || !meta.categories.length) continue;
+            const firstCategory = meta.categories.find((value) => String(value ?? '').trim().length > 0);
+            if (firstCategory === undefined) continue;
+            categoryColumn = colorName;
+            categoryValue = firstCategory;
+            break;
+        }}
+
+        const firstGene = (DATA.available_genes || []).find((gene) => String(gene || '').trim().length > 0) || '';
+        let geneThreshold = 1;
+        if (firstGene) {{
+            const vmax = Number(DATA.genes_meta?.[firstGene]?.vmax);
+            if (Number.isFinite(vmax) && vmax > 0) {{
+                geneThreshold = Math.max(0.5, Math.round(vmax * 0.25 * 10) / 10);
+            }}
+        }}
+
+        let sectionKey = '';
+        let sectionValue = null;
+        for (const key of sectionMetadataKeyByLower.values()) {{
+            const match = (DATA.sections || [])
+                .map((section) => section?.metadata?.[key])
+                .find((value) => value !== undefined && value !== null && String(value).trim().length > 0);
+            if (match === undefined) continue;
+            sectionKey = key;
+            sectionValue = match;
+            break;
+        }}
+
+        if (categoryColumn && categoryValue !== null && firstGene) {{
+            addExample(
+                `${{categoryColumn}} == ${{formatSelectionQueryLiteral(categoryValue)}} and ` +
+                `${{firstGene}} > ${{formatSelectionQueryLiteral(geneThreshold)}}`
+            );
+        }}
+        if (categoryColumn && categoryValue !== null) {{
+            addExample(`${{categoryColumn}} == ${{formatSelectionQueryLiteral(categoryValue)}}`);
+        }}
+        if (firstGene) {{
+            addExample(`${{firstGene}} > ${{formatSelectionQueryLiteral(geneThreshold)}}`);
+        }}
+        if (sectionKey && sectionValue !== null) {{
+            addExample(
+                `section(${{formatSelectionQueryLiteral(sectionKey)}}) == ` +
+                `${{formatSelectionQueryLiteral(sectionValue)}}`
+            );
+        }}
+        if (!examples.length) {{
+            addExample('cell_type == astrocyte and Gfap > 2');
+        }}
+        return examples.slice(0, 3);
+    }}
+
+    function getSelectionQueryPlaceholder() {{
+        return getSelectionQueryExamplePresets()[0] || 'cell_type == astrocyte and Gfap > 2';
+    }}
+
+    function renderSelectionQueryPanelHtml() {{
+        const expanded = selectionQueryExpanded;
+        const examples = getSelectionQueryExamplePresets();
+        const preview = getSelectionQueryPreviewText();
+        const summaryHtml = expanded
+            ? 'Use a simple rule with annotations, genes, or section metadata.'
+            : selectionQueryStatus
+                ? escapeHtml(selectionQueryStatus)
+                : preview
+                    ? `Current query: <code>${{escapeHtml(preview)}}</code>`
+                    : 'Find cells by annotation, gene value, or section metadata.';
+        return `
+            <div class="selection-query">
+                <button class="selection-query-toggle" type="button" data-selection-query-toggle aria-expanded="${{expanded ? 'true' : 'false'}}">
+                    <span class="selection-summary-title">Find cells</span>
+                    <span class="selection-query-toggle-label">${{expanded ? 'Hide' : 'Show'}}</span>
+                </button>
+                <div class="selection-summary-meta selection-query-summary">${{summaryHtml}}</div>
+                ${{expanded ? `
+                    <div class="selection-query-body">
+                        ${{examples.length ? `
+                            <div class="selection-summary-meta selection-query-help">Click an example to fill the box, then edit it.</div>
+                            <div class="selection-query-examples">
+                                ${{examples.map((query) => `
+                                    <button
+                                        class="selection-query-example"
+                                        type="button"
+                                        data-selection-query-example="${{escapeHtml(query)}}"
+                                    ><code>${{escapeHtml(query)}}</code></button>
+                                `).join('')}}
+                            </div>
+                        ` : ''}}
+                        <textarea
+                            class="selection-query-input"
+                            data-selection-query-input
+                            rows="2"
+                            placeholder="${{escapeHtml(getSelectionQueryPlaceholder())}}"
+                        >${{escapeHtml(selectionQueryText)}}</textarea>
+                        <div class="selection-query-actions">
+                            <button class="selection-summary-compare-btn" type="button" data-selection-query-run${{selectionQueryRunning ? ' disabled' : ''}}>
+                                ${{selectionQueryRunning ? 'Running…' : 'Replace selection'}}
+                            </button>
+                            <button class="selection-summary-compare-btn" type="button" data-selection-query-add${{selectionQueryRunning ? ' disabled' : ''}}>
+                                ${{selectionQueryRunning ? 'Working…' : 'Add to selection'}}
+                            </button>
+                            <button class="selection-summary-compare-btn" type="button" data-selection-query-clear${{selectionQueryRunning ? ' disabled' : ''}}>
+                                Clear
+                            </button>
+                        </div>
+                        <div class="${{getSelectionQueryStatusClassName()}}" data-selection-query-status${{selectionQueryStatus ? '' : ' hidden'}}>
+                            ${{escapeHtml(selectionQueryStatus || '')}}
+                        </div>
+                        <div class="selection-summary-meta">
+                            Most columns and genes work as bare names. Use <code>obs(...)</code>, <code>gene(...)</code>,
+                            or <code>section(...)</code> only when needed. Press Ctrl/Cmd+Enter to run.
+                        </div>
+                    </div>
+                ` : ''}}
+            </div>
+        `;
+    }}
+
     function renderSelectionComparisonHtml(summaryA) {{
         const summaryB = computeSelectionSummary(selectedCellsB);
         let html = `<div class="selection-summary-compare-header">
@@ -7712,12 +7973,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
 
         html += '<button class="selection-summary-compare-btn" type="button" id="lasso-clear-b-btn">Clear Region B</button>';
-        return html;
+        return html + renderSelectionQueryPanelHtml();
     }}
 
     function renderSelectionSummaryHtml(summary, options = {{}}) {{
         if (!summary || summary.total === 0) {{
-            return '<div class="selection-summary-meta">Draw a region with Magic Wand to inspect selected cells.</div>';
+            return '<div class="selection-summary-meta">Draw a region with Magic Wand to inspect selected cells.</div>' + renderSelectionQueryPanelHtml();
         }}
 
         // Comparison mode: two regions drawn
@@ -7803,7 +8064,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             html += `<div class="selection-summary-actions">${{actionButtons.join('')}}</div>`;
         }}
 
-        return html;
+        return html + renderSelectionQueryPanelHtml();
     }}
 
     function bindSelectionSummaryInteractions(container) {{
@@ -7826,6 +8087,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 updateSelectionInfo();
             }});
         }});
+        const queryToggle = container.querySelector('[data-selection-query-toggle]');
+        if (queryToggle) {{
+            queryToggle.addEventListener('click', (e) => {{
+                e.preventDefault();
+                e.stopPropagation();
+                selectionQueryExpanded = !selectionQueryExpanded;
+                updateSelectionInfo();
+            }});
+        }}
         const compareBtn = container.querySelector('#lasso-compare-region-btn');
         if (compareBtn) {{
             compareBtn.addEventListener('click', (e) => {{
@@ -7870,6 +8140,65 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 updateSelectionInfo();
             }});
         }}
+        const queryInput = container.querySelector('[data-selection-query-input]');
+        if (queryInput) {{
+            queryInput.addEventListener('input', () => {{
+                selectionQueryText = queryInput.value;
+            }});
+            queryInput.addEventListener('keydown', (e) => {{
+                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {{
+                    e.preventDefault();
+                    e.stopPropagation();
+                    void runSelectionQuery('replace');
+                }}
+            }});
+        }}
+        const runQueryBtn = container.querySelector('[data-selection-query-run]');
+        if (runQueryBtn) {{
+            runQueryBtn.addEventListener('click', (e) => {{
+                e.preventDefault();
+                e.stopPropagation();
+                selectionQueryExpanded = true;
+                if (queryInput) selectionQueryText = queryInput.value;
+                void runSelectionQuery('replace');
+            }});
+        }}
+        const addQueryBtn = container.querySelector('[data-selection-query-add]');
+        if (addQueryBtn) {{
+            addQueryBtn.addEventListener('click', (e) => {{
+                e.preventDefault();
+                e.stopPropagation();
+                selectionQueryExpanded = true;
+                if (queryInput) selectionQueryText = queryInput.value;
+                void runSelectionQuery('add');
+            }});
+        }}
+        const clearQueryBtn = container.querySelector('[data-selection-query-clear]');
+        if (clearQueryBtn) {{
+            clearQueryBtn.addEventListener('click', (e) => {{
+                e.preventDefault();
+                e.stopPropagation();
+                selectionQueryText = '';
+                selectionQueryStatus = '';
+                selectionQueryStatusKind = 'muted';
+                syncSelectionQueryUi();
+            }});
+        }}
+        container.querySelectorAll('[data-selection-query-example]').forEach((btn) => {{
+            btn.addEventListener('click', (e) => {{
+                e.preventDefault();
+                e.stopPropagation();
+                selectionQueryExpanded = true;
+                selectionQueryText = btn.getAttribute('data-selection-query-example') || '';
+                syncSelectionQueryUi();
+                const input = container.querySelector('[data-selection-query-input]');
+                if (input) {{
+                    input.focus();
+                    input.setSelectionRange(selectionQueryText.length, selectionQueryText.length);
+                }}
+            }});
+        }});
+        syncSelectionQueryUi();
     }}
 
     // UMAP rendering
@@ -8129,6 +8458,556 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!text) return '';
         if (AVAILABLE_GENE_SET.has(text)) return text;
         return GENE_NAME_BY_LOWER.get(text.toLowerCase()) || '';
+    }}
+
+    function resolveCanonicalColorName(token) {{
+        const text = String(token || '').trim();
+        if (!text) return '';
+        return colorNameByLower.get(text.toLowerCase()) || '';
+    }}
+
+    function resolveCanonicalSectionMetadataKey(token) {{
+        const text = String(token || '').trim();
+        if (!text) return '';
+        return sectionMetadataKeyByLower.get(text.toLowerCase()) || '';
+    }}
+
+    function tokenizeSelectionQuery(input) {{
+        const text = String(input || '');
+        const tokens = [];
+        let i = 0;
+
+        const readEscapedString = (quote) => {{
+            let value = '';
+            i += 1;
+            while (i < text.length) {{
+                const ch = text[i];
+                if (ch === '\\\\') {{
+                    const next = text[i + 1];
+                    if (next === undefined) break;
+                    if (next === 'n') value += '\\n';
+                    else if (next === 't') value += '\\t';
+                    else value += next;
+                    i += 2;
+                    continue;
+                }}
+                if (ch === quote) {{
+                    i += 1;
+                    return value;
+                }}
+                value += ch;
+                i += 1;
+            }}
+            throw new Error('Unterminated string literal.');
+        }};
+
+        while (i < text.length) {{
+            const ch = text[i];
+            if (/\\s/.test(ch)) {{
+                i += 1;
+                continue;
+            }}
+            if (ch === '"' || ch === "'") {{
+                const start = i;
+                const value = readEscapedString(ch);
+                tokens.push({{ type: 'string', value, pos: start }});
+                continue;
+            }}
+            const numberMatch = text.slice(i).match(/^(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?/);
+            if (numberMatch) {{
+                tokens.push({{
+                    type: 'number',
+                    value: Number(numberMatch[0]),
+                    raw: numberMatch[0],
+                    pos: i,
+                }});
+                i += numberMatch[0].length;
+                continue;
+            }}
+            const twoChar = text.slice(i, i + 2);
+            if (['==', '!=', '>=', '<='].includes(twoChar)) {{
+                tokens.push({{ type: 'operator', value: twoChar, pos: i }});
+                i += 2;
+                continue;
+            }}
+            if (['>', '<', '(', ')', '[', ']', ','].includes(ch)) {{
+                tokens.push({{
+                    type: ['(', ')', '[', ']', ','].includes(ch) ? 'punct' : 'operator',
+                    value: ch,
+                    pos: i,
+                }});
+                i += 1;
+                continue;
+            }}
+            if (/[A-Za-z_]/.test(ch)) {{
+                let j = i + 1;
+                while (j < text.length && /[A-Za-z0-9_.:-]/.test(text[j])) j += 1;
+                const raw = text.slice(i, j);
+                const lower = raw.toLowerCase();
+                if (['and', 'or', 'not', 'in', 'true', 'false'].includes(lower)) {{
+                    tokens.push({{ type: 'keyword', value: lower, raw, pos: i }});
+                }} else {{
+                    tokens.push({{ type: 'identifier', value: raw, pos: i }});
+                }}
+                i = j;
+                continue;
+            }}
+            throw new Error(`Unexpected token "${{ch}}" at position ${{i + 1}}.`);
+        }}
+        tokens.push({{ type: 'eof', value: '', pos: text.length }});
+        return tokens;
+    }}
+
+    function parseSelectionQuery(input) {{
+        const tokens = tokenizeSelectionQuery(input);
+        let idx = 0;
+
+        const peek = () => tokens[idx];
+        const consume = (type = null, value = null) => {{
+            const token = peek();
+            if (type && token.type !== type) {{
+                throw new Error(`Expected ${{type}} at position ${{token.pos + 1}}, found "${{token.value || token.type}}".`);
+            }}
+            if (value && token.value !== value) {{
+                throw new Error(`Expected "${{value}}" at position ${{token.pos + 1}}, found "${{token.value || token.type}}".`);
+            }}
+            idx += 1;
+            return token;
+        }};
+        const match = (type, value = null) => {{
+            const token = peek();
+            if (token.type !== type) return false;
+            if (value !== null && token.value !== value) return false;
+            idx += 1;
+            return true;
+        }};
+
+        const parsePrimary = () => {{
+            const token = peek();
+            if (token.type === 'number') {{
+                consume('number');
+                return {{ type: 'number', value: token.value }};
+            }}
+            if (token.type === 'string') {{
+                consume('string');
+                return {{ type: 'string', value: token.value }};
+            }}
+            if (token.type === 'keyword' && (token.value === 'true' || token.value === 'false')) {{
+                consume('keyword');
+                return {{ type: 'boolean', value: token.value === 'true' }};
+            }}
+            if (token.type === 'identifier') {{
+                consume('identifier');
+                if (match('punct', '(')) {{
+                    const args = [];
+                    if (!match('punct', ')')) {{
+                        do {{
+                            args.push(parseExpression());
+                        }} while (match('punct', ','));
+                        consume('punct', ')');
+                    }}
+                    return {{ type: 'call', name: token.value, args }};
+                }}
+                return {{ type: 'symbol', value: token.value }};
+            }}
+            if (match('punct', '(')) {{
+                const expr = parseExpression();
+                consume('punct', ')');
+                return expr;
+            }}
+            if (match('punct', '[')) {{
+                const items = [];
+                if (!match('punct', ']')) {{
+                    do {{
+                        items.push(parseExpression());
+                    }} while (match('punct', ','));
+                    consume('punct', ']');
+                }}
+                return {{ type: 'array', items }};
+            }}
+            throw new Error(`Unexpected token "${{token.value || token.type}}" at position ${{token.pos + 1}}.`);
+        }};
+
+        const parseComparison = () => {{
+            let node = parsePrimary();
+            const token = peek();
+            if (token.type === 'operator' && ['==', '!=', '>', '>=', '<', '<='].includes(token.value)) {{
+                consume('operator');
+                node = {{
+                    type: 'binary',
+                    op: token.value,
+                    left: node,
+                    right: parsePrimary(),
+                }};
+            }} else if (token.type === 'keyword' && token.value === 'in') {{
+                consume('keyword', 'in');
+                node = {{
+                    type: 'binary',
+                    op: 'in',
+                    left: node,
+                    right: parsePrimary(),
+                }};
+            }}
+            return node;
+        }};
+
+        const parseNot = () => {{
+            if (match('keyword', 'not')) {{
+                return {{ type: 'unary', op: 'not', expr: parseNot() }};
+            }}
+            return parseComparison();
+        }};
+
+        const parseAnd = () => {{
+            let node = parseNot();
+            while (match('keyword', 'and')) {{
+                node = {{ type: 'binary', op: 'and', left: node, right: parseNot() }};
+            }}
+            return node;
+        }};
+
+        const parseExpression = () => {{
+            let node = parseAnd();
+            while (match('keyword', 'or')) {{
+                node = {{ type: 'binary', op: 'or', left: node, right: parseAnd() }};
+            }}
+            return node;
+        }};
+
+        const ast = parseExpression();
+        consume('eof');
+        return ast;
+    }}
+
+    function getSelectionQueryFieldName(node, label) {{
+        if (!node) throw new Error(`${{label}} expects a field name.`);
+        if (node.type === 'string' || node.type === 'symbol') {{
+            const text = String(node.value || '').trim();
+            if (text) return text;
+        }}
+        throw new Error(`${{label}} expects a quoted name or simple identifier.`);
+    }}
+
+    function normalizeSelectionQueryCall(node) {{
+        const fnName = String(node?.name || '').trim().toLowerCase();
+        const args = Array.isArray(node?.args) ? node.args : [];
+        if (args.length !== 1) {{
+            throw new Error(`${{fnName || 'Query function'}} expects exactly one argument.`);
+        }}
+        const rawName = getSelectionQueryFieldName(args[0], `${{fnName}}()`);
+        if (fnName === 'obs' || fnName === 'col' || fnName === 'color') {{
+            const colorName = resolveCanonicalColorName(rawName);
+            if (!colorName) throw new Error(`Unknown obs column "${{rawName}}".`);
+            return {{ type: 'ref', kind: 'obs', name: colorName }};
+        }}
+        if (fnName === 'gene') {{
+            const geneName = resolveCanonicalGeneName(rawName);
+            if (!geneName) throw new Error(`Unknown gene "${{rawName}}".`);
+            return {{ type: 'ref', kind: 'gene', name: geneName }};
+        }}
+        if (fnName === 'section' || fnName === 'meta') {{
+            const key = resolveCanonicalSectionMetadataKey(rawName);
+            if (!key) throw new Error(`Unknown section metadata field "${{rawName}}".`);
+            return {{ type: 'ref', kind: 'section', name: key }};
+        }}
+        throw new Error(`Unknown query function "${{node.name}}". Use obs(...), gene(...), or section(...).`);
+    }}
+
+    function normalizeSelectionQuerySymbol(text) {{
+        const raw = String(text || '').trim();
+        if (!raw) return {{ type: 'string', value: '' }};
+        const colorName = resolveCanonicalColorName(raw);
+        if (colorName) return {{ type: 'ref', kind: 'obs', name: colorName }};
+        const metadataKey = resolveCanonicalSectionMetadataKey(raw);
+        if (metadataKey) return {{ type: 'ref', kind: 'section', name: metadataKey }};
+        const geneName = resolveCanonicalGeneName(raw);
+        if (geneName) return {{ type: 'ref', kind: 'gene', name: geneName }};
+        return {{ type: 'string', value: raw }};
+    }}
+
+    function normalizeSelectionQueryAst(node) {{
+        if (!node || typeof node !== 'object') return node;
+        if (node.type === 'call') return normalizeSelectionQueryCall(node);
+        if (node.type === 'symbol') return normalizeSelectionQuerySymbol(node.value);
+        if (node.type === 'array') {{
+            return {{
+                type: 'array',
+                items: (node.items || []).map((item) => normalizeSelectionQueryAst(item)),
+            }};
+        }}
+        if (node.type === 'unary') {{
+            return {{
+                type: 'unary',
+                op: node.op,
+                expr: normalizeSelectionQueryAst(node.expr),
+            }};
+        }}
+        if (node.type === 'binary') {{
+            return {{
+                type: 'binary',
+                op: node.op,
+                left: normalizeSelectionQueryAst(node.left),
+                right: normalizeSelectionQueryAst(node.right),
+            }};
+        }}
+        return node;
+    }}
+
+    function collectSelectionQueryRefs(node, refs = {{ genes: new Set() }}) {{
+        if (!node || typeof node !== 'object') return refs;
+        if (node.type === 'ref' && node.kind === 'gene' && node.name) {{
+            refs.genes.add(node.name);
+            return refs;
+        }}
+        if (node.type === 'array') {{
+            (node.items || []).forEach((item) => collectSelectionQueryRefs(item, refs));
+            return refs;
+        }}
+        if (node.type === 'unary') return collectSelectionQueryRefs(node.expr, refs);
+        if (node.type === 'binary') {{
+            collectSelectionQueryRefs(node.left, refs);
+            collectSelectionQueryRefs(node.right, refs);
+        }}
+        return refs;
+    }}
+
+    function getSelectionQueryRefValue(section, cellIdx, ref) {{
+        if (!section || !ref) return null;
+        if (ref.kind === 'section') {{
+            const value = section.metadata?.[ref.name];
+            return value === undefined ? null : value;
+        }}
+        if (ref.kind === 'obs') {{
+            const values = getSectionColorValues(section, ref.name);
+            if (!values || cellIdx < 0 || cellIdx >= values.length) return null;
+            const raw = values[cellIdx];
+            if (!Number.isFinite(raw)) return null;
+            const meta = DATA.colors_meta?.[ref.name];
+            if (meta && !meta.is_continuous && Array.isArray(meta.categories)) {{
+                const catIdx = Math.round(raw);
+                return meta.categories[catIdx] ?? null;
+            }}
+            return Number(raw);
+        }}
+        if (ref.kind === 'gene') {{
+            const values = getSectionGeneValues(section, ref.name);
+            if (!values || cellIdx < 0 || cellIdx >= values.length) return null;
+            const raw = Number(values[cellIdx]);
+            return Number.isFinite(raw) ? raw : 0;
+        }}
+        return null;
+    }}
+
+    function selectionQueryValuesEqual(left, right) {{
+        if (left === null || left === undefined || right === null || right === undefined) {{
+            return left === right;
+        }}
+        if (typeof left === 'boolean' || typeof right === 'boolean') {{
+            return Boolean(left) === Boolean(right);
+        }}
+        if (Number.isFinite(left) && Number.isFinite(right)) {{
+            return Math.abs(Number(left) - Number(right)) < 1e-9;
+        }}
+        return String(left).trim().toLowerCase() === String(right).trim().toLowerCase();
+    }}
+
+    function toSelectionQueryBoolean(value) {{
+        if (Array.isArray(value)) return value.length > 0;
+        if (value === null || value === undefined) return false;
+        if (typeof value === 'boolean') return value;
+        if (typeof value === 'number') return Number.isFinite(value) && value !== 0;
+        return String(value).trim().length > 0;
+    }}
+
+    function evaluateSelectionQueryNode(node, section, cellIdx) {{
+        if (!node) return null;
+        if (node.type === 'number' || node.type === 'string' || node.type === 'boolean') {{
+            return node.value;
+        }}
+        if (node.type === 'array') {{
+            return (node.items || []).map((item) => evaluateSelectionQueryNode(item, section, cellIdx));
+        }}
+        if (node.type === 'ref') {{
+            return getSelectionQueryRefValue(section, cellIdx, node);
+        }}
+        if (node.type === 'unary' && node.op === 'not') {{
+            return !toSelectionQueryBoolean(evaluateSelectionQueryNode(node.expr, section, cellIdx));
+        }}
+        if (node.type === 'binary') {{
+            if (node.op === 'and') {{
+                return toSelectionQueryBoolean(evaluateSelectionQueryNode(node.left, section, cellIdx))
+                    && toSelectionQueryBoolean(evaluateSelectionQueryNode(node.right, section, cellIdx));
+            }}
+            if (node.op === 'or') {{
+                return toSelectionQueryBoolean(evaluateSelectionQueryNode(node.left, section, cellIdx))
+                    || toSelectionQueryBoolean(evaluateSelectionQueryNode(node.right, section, cellIdx));
+            }}
+            const left = evaluateSelectionQueryNode(node.left, section, cellIdx);
+            const right = evaluateSelectionQueryNode(node.right, section, cellIdx);
+            if (node.op === '==') return selectionQueryValuesEqual(left, right);
+            if (node.op === '!=') return !selectionQueryValuesEqual(left, right);
+            if (node.op === 'in') {{
+                if (!Array.isArray(right)) {{
+                    throw new Error('Operator "in" expects a list on the right side, e.g. sample_id in ["S1", "S2"].');
+                }}
+                return right.some((item) => selectionQueryValuesEqual(left, item));
+            }}
+            if (left === null || left === undefined || right === null || right === undefined) return false;
+            const leftNum = Number(left);
+            const rightNum = Number(right);
+            if (!Number.isFinite(leftNum) || !Number.isFinite(rightNum)) {{
+                throw new Error(`Operator "${{node.op}}" requires numeric values.`);
+            }}
+            if (node.op === '>') return leftNum > rightNum;
+            if (node.op === '>=') return leftNum >= rightNum;
+            if (node.op === '<') return leftNum < rightNum;
+            if (node.op === '<=') return leftNum <= rightNum;
+        }}
+        throw new Error('Unsupported query expression.');
+    }}
+
+    function getSelectionQueryStatusClassName() {{
+        const kind = selectionQueryStatusKind || 'muted';
+        return `selection-query-status ${{kind}}`;
+    }}
+
+    function syncSelectionQueryUi() {{
+        document.querySelectorAll('[data-selection-query-input]').forEach((input) => {{
+            if (document.activeElement !== input) input.value = selectionQueryText;
+            input.disabled = selectionQueryRunning;
+        }});
+        document.querySelectorAll('[data-selection-query-run]').forEach((btn) => {{
+            btn.disabled = selectionQueryRunning;
+            btn.textContent = selectionQueryRunning ? 'Running…' : 'Replace selection';
+        }});
+        document.querySelectorAll('[data-selection-query-add]').forEach((btn) => {{
+            btn.disabled = selectionQueryRunning;
+            btn.textContent = selectionQueryRunning ? 'Working…' : 'Add to selection';
+        }});
+        document.querySelectorAll('[data-selection-query-clear]').forEach((btn) => {{
+            btn.disabled = selectionQueryRunning;
+        }});
+        document.querySelectorAll('[data-selection-query-status]').forEach((statusEl) => {{
+            statusEl.className = getSelectionQueryStatusClassName();
+            statusEl.textContent = selectionQueryStatus || '';
+            statusEl.hidden = !selectionQueryStatus;
+        }});
+    }}
+
+    async function runSelectionQuery(mode = 'replace') {{
+        const query = String(selectionQueryText || '').trim();
+        selectionQueryExpanded = true;
+        if (!query) {{
+            selectionQueryStatus = 'Type a query first.';
+            selectionQueryStatusKind = 'error';
+            syncSelectionQueryUi();
+            return false;
+        }}
+
+        const runToken = ++selectionQueryRunToken;
+        selectionQueryRunning = true;
+        selectionQueryStatus = 'Parsing query…';
+        selectionQueryStatusKind = 'working';
+        syncSelectionQueryUi();
+
+        try {{
+            const parsed = parseSelectionQuery(query);
+            const normalized = normalizeSelectionQueryAst(parsed);
+            const refs = collectSelectionQueryRefs(normalized);
+            const genes = Array.from(refs.genes);
+            for (let i = 0; i < genes.length; i++) {{
+                if (runToken !== selectionQueryRunToken) return false;
+                const gene = genes[i];
+                selectionQueryStatus = genes.length === 1
+                    ? `Loading gene ${{gene}}…`
+                    : `Loading gene ${{i + 1}}/${{genes.length}}: ${{gene}}…`;
+                syncSelectionQueryUi();
+                const ok = await ensureGeneAvailable(gene, {{ showErrors: false }});
+                if (!ok) throw new Error(`Failed to load gene "${{gene}}".`);
+            }}
+
+            const nextSelection = mode === 'add' ? new Set(selectedCells) : new Set();
+            const sections = DATA.sections || [];
+            let matchedCount = 0;
+            let addedCount = 0;
+            let matchedSections = 0;
+            const chunkSize = 20000;
+
+            for (let sIdx = 0; sIdx < sections.length; sIdx++) {{
+                if (runToken !== selectionQueryRunToken) return false;
+                const section = sections[sIdx];
+                const cellCount = Number(section?.n_cells || section?.x?.length || 0);
+                if (!(cellCount > 0)) continue;
+                selectionQueryStatus = `Scanning ${{section.id}} (${{sIdx + 1}}/${{sections.length}})…`;
+                syncSelectionQueryUi();
+                let sectionMatches = 0;
+
+                for (let start = 0; start < cellCount; start += chunkSize) {{
+                    const end = Math.min(cellCount, start + chunkSize);
+                    for (let i = start; i < end; i++) {{
+                        if (!toSelectionQueryBoolean(evaluateSelectionQueryNode(normalized, section, i))) continue;
+                        matchedCount += 1;
+                        sectionMatches += 1;
+                        const key = `${{section.id}}:${{i}}`;
+                        if (!nextSelection.has(key)) {{
+                            nextSelection.add(key);
+                            addedCount += 1;
+                            if (nextSelection.size > MAX_SELECTION_QUERY_MATCHES) {{
+                                throw new Error(
+                                    `Query would select more than ${{MAX_SELECTION_QUERY_MATCHES.toLocaleString()}} cells. Refine the query first.`
+                                );
+                            }}
+                        }}
+                    }}
+                    if (end < cellCount) {{
+                        await new Promise((resolve) => window.setTimeout(resolve, 0));
+                        if (runToken !== selectionQueryRunToken) return false;
+                    }}
+                }}
+                if (sectionMatches > 0) matchedSections += 1;
+                if (sIdx < sections.length - 1) {{
+                    await new Promise((resolve) => window.setTimeout(resolve, 0));
+                }}
+            }}
+
+            selectedCells = nextSelection;
+            selectedCellsB.clear();
+            lassoModeB = false;
+            selectionSummaryExpanded = false;
+            hideModalGeneDiscoveryPanel();
+
+            if (matchedCount === 0) {{
+                selectionQueryStatus = 'No cells matched the query.';
+                selectionQueryStatusKind = 'muted';
+            }} else if (mode === 'add') {{
+                selectionQueryStatus =
+                    `Added ${{addedCount.toLocaleString()}} cells from ${{matchedCount.toLocaleString()}} matches across ` +
+                    `${{matchedSections.toLocaleString()}} section${{matchedSections === 1 ? '' : 's'}}.`;
+                selectionQueryStatusKind = 'success';
+            }} else {{
+                selectionQueryStatus =
+                    `Selected ${{matchedCount.toLocaleString()}} cells across ` +
+                    `${{matchedSections.toLocaleString()}} section${{matchedSections === 1 ? '' : 's'}}.`;
+                selectionQueryStatusKind = 'success';
+            }}
+
+            updateSelectionInfo();
+            renderAllSections();
+            if (umapVisible) renderUMAP();
+            if (modalSection) renderModalSection();
+            return true;
+        }} catch (error) {{
+            if (runToken !== selectionQueryRunToken) return false;
+            selectionQueryStatus = error?.message || 'Query failed.';
+            selectionQueryStatusKind = 'error';
+            syncSelectionQueryUi();
+            return false;
+        }} finally {{
+            if (runToken === selectionQueryRunToken) {{
+                selectionQueryRunning = false;
+                syncSelectionQueryUi();
+            }}
+        }}
     }}
 
     function loadRecentGenes() {{
