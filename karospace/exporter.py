@@ -2159,6 +2159,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             align-items: center;
             gap: 4px;
         }}
+        .modal-gene-view-block {{
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }}
+        .modal-gene-view-label {{
+            font-size: 10px;
+            color: var(--muted-color);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }}
         .modal-size-value {{
             min-width: 26px;
             font-size: 10px;
@@ -3141,6 +3152,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 </div>
                 <div class="scale-hint" id="expr-scale-hint">Auto scale: 1-99 percentile.</div>
             </div>
+            <div class="control-group" id="overview-gene-view-block" style="display: none;">
+                <label>Gene view:</label>
+                <select id="overview-gene-view-mode" title="Choose how active gene expression is rendered in the overview panels">
+                    <option value="cells">Cells</option>
+                    <option value="density">Density</option>
+                    <option value="both">Both</option>
+                </select>
+            </div>
             <div class="control-group">
                 <label>Size:</label>
                 <div class="size-control">
@@ -3369,6 +3388,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                                 <button class="graph-toggle" id="modal-screenshot-btn" type="button" title="Download screenshot of this sample view">Screenshot</button>
                                 <button class="graph-toggle" id="modal-clear-selection-btn" type="button" title="Clear selected cells" hidden>Clear sel.</button>
                                 <button class="graph-toggle" id="modal-exit-subview-btn" type="button" title="Return to the full section view" hidden>Back view</button>
+                                <div class="modal-gene-view-block" id="modal-gene-view-block" hidden>
+                                    <span class="modal-gene-view-label">Gene view</span>
+                                    <select id="modal-gene-view-mode" title="Choose how active gene expression is rendered in the sample view">
+                                        <option value="cells">Cells</option>
+                                        <option value="density">Density</option>
+                                        <option value="both">Both</option>
+                                    </select>
+                                </div>
                                 <div class="modal-size-block">
                                     <div class="size-control">
                                         <button class="size-step" id="modal-spot-size-dec" type="button">−</button>
@@ -3660,6 +3687,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     // State
     let currentColor = DATA.initial_color;
     let currentGene = null;
+    let overviewGeneRenderMode = 'cells';
     const geneScaleOverrides = {{}};
     const geneScaleAuto = {{}};
     const GENE_SCALE_PMIN = 1;
@@ -3717,6 +3745,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let modalPanX = 0, modalPanY = 0;
     let modalSpotSize = {spot_size};
     let modalSpacePanActive = false;
+    let modalGeneRenderMode = 'cells';
     let isDragging = false;
     let isSplitDragging = false;
     let dragStartX = 0, dragStartY = 0;
@@ -3748,6 +3777,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let modalInteractionCommitTimer = null;
     let modalBlendRenderFrame = null;
     let modalBlendRenderCache = null;
+    let modalGeneDensityCache = null;
     let modalSubview = null;
     const BLEND_ALL_CATEGORIES = '__ALL__';
     let modalBlendSpec = {{
@@ -4344,6 +4374,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (clearSelectionBtn) clearSelectionBtn.hidden = selectedCells.size === 0;
         const exitSubviewBtn = document.getElementById('modal-exit-subview-btn');
         if (exitSubviewBtn) exitSubviewBtn.hidden = !modalSubview;
+        const geneViewBlock = document.getElementById('modal-gene-view-block');
+        const geneViewModeSelect = document.getElementById('modal-gene-view-mode');
 
         const graphGroup = controls.querySelector('[data-modal-group="graph"]');
         if (graphGroup) graphGroup.hidden = !DATA.has_neighbors;
@@ -4377,6 +4409,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const showHopSelect = DATA.has_neighbors && neighborHoverEnabled;
             modalHopSelect.hidden = !showHopSelect;
             modalHopSelect.disabled = !showHopSelect;
+        }}
+
+        const showGeneViewBlock = !!modalSection && !!currentGene && !blendActive;
+        if (geneViewBlock) geneViewBlock.hidden = !showGeneViewBlock;
+        if (geneViewModeSelect) {{
+            geneViewModeSelect.disabled = !showGeneViewBlock;
+            geneViewModeSelect.value = modalGeneRenderMode;
         }}
 
         [
@@ -4774,6 +4813,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function rerenderForExpressionScaleChange() {{
+        invalidateGeneDensityCaches();
         updateExpressionScaleUI();
         renderLegend('legend');
         renderLegend('modal-legend');
@@ -5933,6 +5973,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         if (!rawToken) {{
             currentGene = null;
+            invalidateGeneDensityCaches();
             hiddenCategories.clear();
             if (geneInput) geneInput.value = '';
             updateExpressionScaleUI();
@@ -5963,6 +6004,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
             currentGene = token;
             geneDenseCache.clear();
+            invalidateGeneDensityCaches();
             modalSelectedCategory = null;
             modalTypeSelectEnabled = false;
             hiddenCategories.clear();
@@ -6002,6 +6044,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const vmaxInput = document.getElementById('expr-vmax');
         const hint = document.getElementById('expr-scale-hint');
         if (!section || !vminInput || !vmaxInput || !hint) return;
+        updateOverviewGeneViewState();
         if (!currentGene) {{
             section.style.display = 'none';
             return;
@@ -8514,6 +8557,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         clearModalInteractionPreview();
         modalRenderedView = null;
         modalBlendRenderCache = null;
+        modalGeneDensityCache = null;
+    }}
+
+    function invalidateGeneDensityCaches() {{
+        modalGeneDensityCache = null;
+        (DATA.sections || []).forEach((section) => {{
+            if (section) section._geneDensityCache = null;
+        }});
     }}
 
     function applyModalInteractionPreview() {{
@@ -9132,6 +9183,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         const config = getColorConfig();
         const values = getSectionValues(section);
+        const showGeneDensity = !!currentGene && (overviewGeneRenderMode === 'density' || overviewGeneRenderMode === 'both');
+        const showGeneCells = !currentGene || overviewGeneRenderMode !== 'density';
+
+        if (showGeneDensity) {{
+            const densityCache = ensureSectionGeneDensityCache(
+                section,
+                transform,
+                width,
+                height,
+                values,
+            );
+            drawGeneDensityLayer(ctx, width, height, densityCache);
+        }}
 
         const edges = getSectionEdgesPacked(section);
         if (showGraph && edges && edges.length) {{
@@ -9173,7 +9237,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
 
         // First pass: draw grey background for hidden categories (if any are hidden)
-        const hasHidden = hiddenCategories.size > 0 && !config.is_continuous;
+        const hasHidden = showGeneCells && hiddenCategories.size > 0 && !config.is_continuous;
         if (hasHidden) {{
             ctx.fillStyle = '#cccccc';
             ctx.globalAlpha = 0.2;
@@ -9198,36 +9262,38 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const activeSpotlight = getLinkedSpotlightCategory(config);
         const focusCategory = activeSpotlight || modalSelectedCategory;
         const hasTypeFocus = !config.is_continuous && focusCategory;
-        for (let i = 0; i < section.x.length; i++) {{
-            const val = values[i];
-            if (val === null || val === undefined) continue;
+        if (showGeneCells) {{
+            for (let i = 0; i < section.x.length; i++) {{
+                const val = values[i];
+                if (val === null || val === undefined) continue;
 
-            let color;
-            let isSelectedCat = false;
-            if (config.is_continuous) {{
-                const t = (val - config.vmin) / (config.vmax - config.vmin);
-                color = magma(Math.max(0, Math.min(1, t)));
-            }} else {{
-                const catIdx = Math.round(val);
-                const catName = config.categories[catIdx];
-                if (hiddenCategories.has(catName)) continue;  // Skip hidden, already drawn as grey
-                isSelectedCat = focusCategory && catName === focusCategory;
-                color = getCategoryColor(catIdx);
-            }}
+                let color;
+                let isSelectedCat = false;
+                if (config.is_continuous) {{
+                    const t = (val - config.vmin) / (config.vmax - config.vmin);
+                    color = magma(Math.max(0, Math.min(1, t)));
+                }} else {{
+                    const catIdx = Math.round(val);
+                    const catName = config.categories[catIdx];
+                    if (hiddenCategories.has(catName)) continue;  // Skip hidden, already drawn as grey
+                    isSelectedCat = focusCategory && catName === focusCategory;
+                    color = getCategoryColor(catIdx);
+                }}
 
-            const point = transform.dataToScreen(section.x[i], section.y[i]);
-            const x = point.x;
-            const y = point.y;
-            if (hasTypeFocus && !isSelectedCat) {{
-                ctx.fillStyle = '#bbbbbb';
-                ctx.globalAlpha = 0.15;
-            }} else {{
-                ctx.fillStyle = color;
-                ctx.globalAlpha = 1;
+                const point = transform.dataToScreen(section.x[i], section.y[i]);
+                const x = point.x;
+                const y = point.y;
+                if (hasTypeFocus && !isSelectedCat) {{
+                    ctx.fillStyle = '#bbbbbb';
+                    ctx.globalAlpha = 0.15;
+                }} else {{
+                    ctx.fillStyle = color;
+                    ctx.globalAlpha = 1;
+                }}
+                ctx.beginPath();
+                ctx.arc(x, y, spotSize, 0, Math.PI * 2);
+                ctx.fill();
             }}
-            ctx.beginPath();
-            ctx.arc(x, y, spotSize, 0, Math.PI * 2);
-            ctx.fill();
         }}
         ctx.globalAlpha = 1;
 
@@ -9590,6 +9656,207 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return {{ canvas, ctx }};
     }}
 
+    function updateOverviewGeneViewState() {{
+        const block = document.getElementById('overview-gene-view-block');
+        const select = document.getElementById('overview-gene-view-mode');
+        const show = !!currentGene;
+        if (block) block.style.display = show ? 'flex' : 'none';
+        if (select) {{
+            select.disabled = !show;
+            select.value = overviewGeneRenderMode;
+        }}
+    }}
+
+    function getGeneDensityCacheKey(section, transform, width, height, gene, vmin, vmax, cacheToken = '') {{
+        return [
+            section?.id || '',
+            width,
+            height,
+            transform.centerX.toFixed(3),
+            transform.centerY.toFixed(3),
+            transform.scale.toFixed(6),
+            transform.angleDeg.toFixed(3),
+            gene || '',
+            Number(vmin || 0).toFixed(6),
+            Number(vmax || 0).toFixed(6),
+            cacheToken,
+        ].join('::');
+    }}
+
+    function getGeneDensityGridSize(width, height) {{
+        return {{
+            gridW: Math.max(88, Math.min(420, Math.round(width / 3.25))),
+            gridH: Math.max(88, Math.min(420, Math.round(height / 3.25))),
+        }};
+    }}
+
+    function smoothDensityGrid(values, width, height) {{
+        const source = values instanceof Float32Array ? values : new Float32Array(values || []);
+        const target = new Float32Array(source.length);
+        for (let y = 0; y < height; y++) {{
+            const y0 = Math.max(0, y - 1);
+            const y1 = Math.min(height - 1, y + 1);
+            for (let x = 0; x < width; x++) {{
+                const x0 = Math.max(0, x - 1);
+                const x1 = Math.min(width - 1, x + 1);
+                let sum = 0;
+                let weight = 0;
+                for (let yy = y0; yy <= y1; yy++) {{
+                    const rowOffset = yy * width;
+                    for (let xx = x0; xx <= x1; xx++) {{
+                        const kernel = (xx === x && yy === y) ? 4 : ((xx === x || yy === y) ? 2 : 1);
+                        sum += source[rowOffset + xx] * kernel;
+                        weight += kernel;
+                    }}
+                }}
+                target[y * width + x] = weight > 0 ? (sum / weight) : 0;
+            }}
+        }}
+        return target;
+    }}
+
+    function buildGeneDensityCache(section, transform, width, height, values, cacheKey, candidateIndices = null) {{
+        if (!section || !transform || !currentGene || !values) return null;
+        const {{ vmin, vmax }} = getGeneScaleRange(currentGene);
+        const scaleDenom = Math.max(1e-9, vmax - vmin);
+        const {{ gridW, gridH }} = getGeneDensityGridSize(width, height);
+        const accum = new Float32Array(gridW * gridH);
+        const nCandidates = candidateIndices ? candidateIndices.length : section.x.length;
+        for (let k = 0; k < nCandidates; k++) {{
+            const i = candidateIndices ? candidateIndices[k] : k;
+            const rawValue = Number(values[i]);
+            if (!Number.isFinite(rawValue) || rawValue <= vmin) continue;
+            const intensity = clamp01((rawValue - vmin) / scaleDenom);
+            if (!(intensity > 0)) continue;
+
+            const point = transform.dataToScreen(section.x[i], section.y[i]);
+            const fx = (point.x / Math.max(1, width)) * (gridW - 1);
+            const fy = (point.y / Math.max(1, height)) * (gridH - 1);
+            if (!Number.isFinite(fx) || !Number.isFinite(fy)) continue;
+            if (fx < -1 || fx > gridW || fy < -1 || fy > gridH) continue;
+
+            const x0 = Math.max(0, Math.min(gridW - 1, Math.floor(fx)));
+            const y0 = Math.max(0, Math.min(gridH - 1, Math.floor(fy)));
+            const x1 = Math.min(gridW - 1, x0 + 1);
+            const y1 = Math.min(gridH - 1, y0 + 1);
+            const tx = Math.max(0, Math.min(1, fx - x0));
+            const ty = Math.max(0, Math.min(1, fy - y0));
+
+            accum[y0 * gridW + x0] += intensity * (1 - tx) * (1 - ty);
+            accum[y0 * gridW + x1] += intensity * tx * (1 - ty);
+            accum[y1 * gridW + x0] += intensity * (1 - tx) * ty;
+            accum[y1 * gridW + x1] += intensity * tx * ty;
+        }}
+
+        const smoothA = smoothDensityGrid(accum, gridW, gridH);
+        let maxValue = 0;
+        for (let i = 0; i < smoothA.length; i++) {{
+            if (smoothA[i] > maxValue) maxValue = smoothA[i];
+        }}
+        if (!(maxValue > 0)) {{
+            return {{
+                key: cacheKey,
+                width,
+                height,
+                canvas: null,
+            }};
+        }}
+
+        const canvas = document.createElement('canvas');
+        canvas.width = gridW;
+        canvas.height = gridH;
+        const ctx = canvas.getContext('2d');
+        const image = ctx.createImageData(gridW, gridH);
+        const pixels = image.data;
+        for (let i = 0; i < smoothA.length; i++) {{
+            const t = clamp01(smoothA[i] / maxValue);
+            const px = i * 4;
+            if (t <= 0.028) {{
+                pixels[px + 3] = 0;
+                continue;
+            }}
+            const rgb = magmaRgb(t);
+            pixels[px] = rgb[0];
+            pixels[px + 1] = rgb[1];
+            pixels[px + 2] = rgb[2];
+            pixels[px + 3] = Math.max(10, Math.round(255 * Math.pow(t, 0.92) * 0.9));
+        }}
+        ctx.putImageData(image, 0, 0);
+
+        return {{
+            key: cacheKey,
+            width,
+            height,
+            canvas,
+        }};
+    }}
+
+    function ensureSectionGeneDensityCache(section, transform, width, height, values, candidateIndices = null) {{
+        if (!section || !transform || !currentGene || !values) return null;
+        const {{ vmin, vmax }} = getGeneScaleRange(currentGene);
+        const cacheKey = getGeneDensityCacheKey(
+            section,
+            transform,
+            width,
+            height,
+            currentGene,
+            vmin,
+            vmax,
+            'overview',
+        );
+        if (section._geneDensityCache && section._geneDensityCache.key === cacheKey) {{
+            return section._geneDensityCache;
+        }}
+        section._geneDensityCache = buildGeneDensityCache(
+            section,
+            transform,
+            width,
+            height,
+            values,
+            cacheKey,
+            candidateIndices,
+        );
+        return section._geneDensityCache;
+    }}
+
+    function ensureModalGeneDensityCache(section, transform, width, height, values, candidateIndices = null) {{
+        if (!section || !transform || !currentGene || !values) return null;
+        const {{ vmin, vmax }} = getGeneScaleRange(currentGene);
+        const cacheKey = getGeneDensityCacheKey(
+            section,
+            transform,
+            width,
+            height,
+            currentGene,
+            vmin,
+            vmax,
+            `modal::${{getModalSubviewRenderToken()}}`,
+        );
+        if (modalGeneDensityCache && modalGeneDensityCache.key === cacheKey) {{
+            return modalGeneDensityCache;
+        }}
+        modalGeneDensityCache = buildGeneDensityCache(
+            section,
+            transform,
+            width,
+            height,
+            values,
+            cacheKey,
+            candidateIndices,
+        );
+        return modalGeneDensityCache;
+    }}
+
+    function drawGeneDensityLayer(ctx, width, height, cache) {{
+        if (!ctx || !cache?.canvas) return false;
+        ctx.save();
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(cache.canvas, 0, 0, width, height);
+        ctx.restore();
+        return true;
+    }}
+
     function getModalBlendSpecCacheKey(spec, runtime) {{
         const parts = [
             spec?.kind || '',
@@ -9779,8 +10046,28 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             modalSection,
             getSectionVisibleScreenCandidates(modalSection, transform, adjustedSpotSize),
         );
+        const showGeneDensity = !!currentGene && !blendActive && (modalGeneRenderMode === 'density' || modalGeneRenderMode === 'both');
+        const showGeneCells = !currentGene || blendActive || modalGeneRenderMode !== 'density';
+        const densityCandidateIndices = showGeneDensity
+            ? filterModalCandidateIndices(
+                modalSection,
+                getSectionVisibleScreenCandidates(modalSection, transform, Math.max(36, adjustedSpotSize * 8)),
+            )
+            : null;
         const nCandidates = candidateIndices ? candidateIndices.length : modalSection.x.length;
         const focusedSubviewActive = !!getModalActiveCellIndexSet(modalSection.id);
+
+        if (showGeneDensity) {{
+            const densityCache = ensureModalGeneDensityCache(
+                modalSection,
+                transform,
+                width,
+                height,
+                values,
+                densityCandidateIndices,
+            );
+            drawGeneDensityLayer(ctx, width, height, densityCache);
+        }}
 
         const modalEdges = getSectionEdgesPacked(modalSection);
         if (showGraph && modalEdges && modalEdges.length) {{
@@ -9823,7 +10110,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
 
         // First pass: draw grey background for hidden categories
-        const hasHidden = !blendActive && hiddenCategories.size > 0 && !config.is_continuous;
+        const hasHidden = showGeneCells && !blendActive && hiddenCategories.size > 0 && !config.is_continuous;
         if (hasHidden) {{
             ctx.fillStyle = '#cccccc';
             ctx.globalAlpha = 0.2;
@@ -9872,7 +10159,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ctx.stroke();
             ctx.setLineDash([]);
             ensureModalBlendRenderCache(modalSection, transform, width, height, dpr, adjustedSpotSize, blendRuntimes, candidateIndices);
-        }} else {{
+        }} else if (showGeneCells) {{
             const activeSpotlight = getLinkedSpotlightCategory(config);
             const focusCategory = activeSpotlight || modalSelectedCategory;
             const hasTypeFocus = !config.is_continuous && focusCategory;
@@ -10957,6 +11244,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 if (!col) return;
                 currentColor = col;
                 currentGene = null;
+                invalidateGeneDensityCaches();
                 modalSelectedCategory = null;
                 modalTypeSelectEnabled = false;
                 document.getElementById('color-select').value = col;
@@ -12454,6 +12742,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         colorSelect.addEventListener('change', (e) => {{
             currentColor = e.target.value;
             currentGene = null;
+            invalidateGeneDensityCaches();
             celltypeTrendTarget = null;
             modalSelectedCategory = null;
             modalTypeSelectEnabled = false;
@@ -12591,6 +12880,21 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             setGeneDiscoveryOpen(false);
         }});
 
+        const overviewGeneViewModeSelect = document.getElementById('overview-gene-view-mode');
+        if (overviewGeneViewModeSelect) {{
+            overviewGeneViewModeSelect.value = overviewGeneRenderMode;
+            overviewGeneViewModeSelect.addEventListener('change', () => {{
+                const nextMode = overviewGeneViewModeSelect.value;
+                if (!['cells', 'density', 'both'].includes(nextMode)) {{
+                    overviewGeneViewModeSelect.value = overviewGeneRenderMode;
+                    return;
+                }}
+                overviewGeneRenderMode = nextMode;
+                renderAllSections();
+            }});
+        }}
+        updateOverviewGeneViewState();
+
         const spotRange = document.getElementById('spot-size');
         if (spotRange) {{
             const min = parseFloat(spotRange.min || '0');
@@ -12703,6 +13007,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         document.getElementById('modal-spot-size-dec')?.addEventListener('click', () => stepRange(modalRange, -1));
         document.getElementById('modal-spot-size-inc')?.addEventListener('click', () => stepRange(modalRange, 1));
+        const modalGeneViewModeSelect = document.getElementById('modal-gene-view-mode');
+        if (modalGeneViewModeSelect) {{
+            modalGeneViewModeSelect.value = modalGeneRenderMode;
+            modalGeneViewModeSelect.addEventListener('change', () => {{
+                const nextMode = modalGeneViewModeSelect.value;
+                if (!['cells', 'density', 'both'].includes(nextMode)) {{
+                    modalGeneViewModeSelect.value = modalGeneRenderMode;
+                    return;
+                }}
+                modalGeneRenderMode = nextMode;
+                invalidateModalRenderedView();
+                renderModalSection();
+            }});
+        }}
 
         const container = document.getElementById('modal-canvas-container');
         container.addEventListener('wheel', (e) => {{

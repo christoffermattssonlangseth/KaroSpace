@@ -167,6 +167,10 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert "function hideModalGeneDiscoveryPanel()" in html_text
     assert "function scoreModalSelectionMarkerGenes(section, selectedCellIndices)" in html_text
     assert "function scoreLoadedGenesForModalSelection(section, selectedCellIndices)" in html_text
+    assert 'id="overview-gene-view-mode"' in html_text
+    assert "function updateOverviewGeneViewState()" in html_text
+    assert "function ensureSectionGeneDensityCache(section, transform, width, height, values, candidateIndices = null)" in html_text
+    assert "function drawGeneDensityLayer(ctx, width, height, cache)" in html_text
     assert "class=\"modal-gene-panel-entry\"" in html_text
     assert "Search Google for this selection gene" in html_text
     assert "id=\"selection-show-genes-btn\"" in html_text
