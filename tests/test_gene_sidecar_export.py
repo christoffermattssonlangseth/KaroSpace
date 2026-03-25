@@ -256,6 +256,27 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert "const MAX_SELECTION_QUERY_MATCHES = 150000;" in html_text
     assert "Most columns and genes work as bare names." in html_text
     assert "Use <code>obs(...)</code>, <code>gene(...)</code>," in html_text
+    assert 'data-neighbor-view="table"' in html_text
+    assert 'data-neighbor-view="bubble"' in html_text
+    assert 'data-neighbor-view="chord"' in html_text
+    assert "let neighborStatsView = 'table';" in html_text
+    assert "function getNeighborStatsViewState()" in html_text
+    assert "function renderNeighborNetworkView(viewState)" in html_text
+    assert "function renderNeighborChordDiagram(viewState)" in html_text
+    assert "function renderNeighborStatsTableView(viewState)" in html_text
+    assert "function renderNeighborVisualizationToolbar(viewKey, label)" in html_text
+    assert "function applyNeighborVisualizationViewport(container, viewKey, options = {})" in html_text
+    assert "function bindNeighborVisualizationControls(container, viewKey)" in html_text
+    assert "function renderNeighborFocusDetail(focus, viewState)" in html_text
+    assert "function bindNeighborVisualizationInteractions(container, viewState)" in html_text
+    assert 'data-neighbor-detail' in html_text
+    assert 'data-neighbor-auto-sync="1"' in html_text
+    assert 'data-neighbor-scroll' in html_text
+    assert 'data-neighbor-svg' in html_text
+    assert 'data-neighbor-zoom-action="in"' in html_text
+    assert 'data-neighbor-zoom-action="expand"' in html_text
+    assert "Neighbor enrichment network" in html_text
+    assert "Neighbor connection chord diagram" in html_text
     assert "function computeRegionAnnotationDE(annotationA, annotationB, options = {})" in html_text
     assert "function fetchGeneAuxShardForAnalysis(shardUrl)" in html_text
     assert "function decodeDenseSidecarSection(sectionEntry)" in html_text
