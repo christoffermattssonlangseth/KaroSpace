@@ -768,28 +768,44 @@
         window.__karospacePackageSessions[sessionId] = {
           fileName: file.name,
           archive,
+          async ensureArchiveCompatibility(error) {
+            if (!shouldRetryWithEagerArchive(file, this.archive, error)) {
+              throw error;
+            }
+            console.warn('Retrying .karospace package in compatibility mode after lazy archive read failed:', error);
+            this.archive = await openZipArchive(file, { forceEager: true });
+            return this.archive;
+          },
+          async withArchiveRetry(operation) {
+            try {
+              return await operation(this.archive);
+            } catch (error) {
+              const compatibleArchive = await this.ensureArchiveCompatibility(error);
+              return operation(compatibleArchive);
+            }
+          },
           has(path) {
             try {
-              return archive.has(path);
+              return this.archive.has(path);
             } catch (error) {
               return false;
             }
           },
           fetch(path) {
-            return archive.fetch(path);
+            return this.withArchiveRetry((activeArchive) => activeArchive.fetch(path));
           },
           stat(path) {
-            return archive.stat(path);
+            return this.archive.stat(path);
           },
           supportsRange(path) {
             try {
-              return archive.supportsRange(path);
+              return this.archive.supportsRange(path);
             } catch (error) {
               return false;
             }
           },
           readRange(path, start, endExclusive) {
-            return archive.readRange(path, start, endExclusive);
+            return this.withArchiveRetry((activeArchive) => activeArchive.readRange(path, start, endExclusive));
           },
         };
 

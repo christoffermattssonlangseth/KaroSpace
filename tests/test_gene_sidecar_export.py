@@ -664,6 +664,8 @@ def test_karospace_package_loader_page_contains_expected_runtime_hooks():
     assert "async function openZipArchive(file, options = {})" in loader_html
     assert "file.size > LAZY_ARCHIVE_THRESHOLD_BYTES" in loader_html
     assert "function shouldRetryWithEagerArchive(file, archive, error)" in loader_html
+    assert "async ensureArchiveCompatibility(error)" in loader_html
+    assert "async withArchiveRetry(operation)" in loader_html
     assert "retrying in compatibility mode" in loader_html
     assert "readBlobSlice(" in loader_html
     assert "centralDirectoryOffset + centralDirectorySize" in loader_html
