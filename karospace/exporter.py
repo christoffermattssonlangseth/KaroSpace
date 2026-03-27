@@ -6836,6 +6836,47 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return true;
     }}
 
+    function getFilteredSections() {{
+        return (DATA.sections || []).filter((section) => sectionPassesFilter(section));
+    }}
+
+    function cellKeyPassesCurrentFilters(key) {{
+        if (!key) return false;
+        const sep = key.lastIndexOf(':');
+        if (sep <= 0) return false;
+        const sectionId = key.slice(0, sep);
+        const section = sectionById.get(sectionId);
+        return !!section && sectionPassesFilter(section);
+    }}
+
+    function trimSelectionSetToFilteredSections(cells) {{
+        if (!cells || cells.size === 0) return false;
+        let changed = false;
+        Array.from(cells).forEach((key) => {{
+            if (cellKeyPassesCurrentFilters(key)) return;
+            cells.delete(key);
+            changed = true;
+        }});
+        return changed;
+    }}
+
+    function trimSelectionsToFilteredSections() {{
+        const changedA = trimSelectionSetToFilteredSections(selectedCells);
+        const changedB = trimSelectionSetToFilteredSections(selectedCellsB);
+        if ((changedA || changedB) && selectedCells.size === 0 && selectedCellsB.size === 0) {{
+            hideModalGeneDiscoveryPanel();
+        }}
+        return changedA || changedB;
+    }}
+
+    function applyMetadataFilters() {{
+        trimSelectionsToFilteredSections();
+        updateSelectionInfo();
+        renderAllSections();
+        if (umapVisible) renderUMAP();
+        if (modalSection) renderModalSection();
+    }}
+
     // Get current panel background color from CSS variable
     function getPanelBg() {{
         return getComputedStyle(document.documentElement).getPropertyValue('--panel-bg').trim();
@@ -8483,6 +8524,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const adjustedSpotSize = Math.max(0.25, umapSpotSize * umapZoom * 0.5);
         const activeSpotlight = getLinkedSpotlightCategory(config);
         const hasSpotlight = !!activeSpotlight;
+        const filteredSections = getFilteredSections();
 
         // Check if any categories are hidden
         const hasHidden = hiddenCategories.size > 0 && !config.is_continuous;
@@ -8491,7 +8533,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (hasHidden) {{
             ctx.fillStyle = '#888888';
             ctx.globalAlpha = 0.2;
-            DATA.sections.forEach(section => {{
+            filteredSections.forEach(section => {{
                 ensureSectionUMAP(section);
                 if (!section.umap_x || !section.umap_y) return;
                 const values = getSectionValues(section);
@@ -8519,7 +8561,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
 
         // Second pass: draw visible categories with full color
-        DATA.sections.forEach(section => {{
+        filteredSections.forEach(section => {{
             ensureSectionUMAP(section);
             if (!section.umap_x || !section.umap_y) return;
 
@@ -8615,12 +8657,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const dataCenterY = (bounds.ymin + bounds.ymax) / 2;
 
         const config = getColorConfig();
+        const filteredSections = getFilteredSections();
 
         // Collect cells inside the lasso
         const newCells = new Set();
 
         // Check all cells in all sections
-        DATA.sections.forEach(section => {{
+        filteredSections.forEach(section => {{
             ensureSectionUMAP(section);
             if (!section.umap_x || !section.umap_y) return;
 
@@ -14599,7 +14642,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 chip.classList.remove('inactive');
             }});
             updateFilterResetState();
-            renderAllSections();
+            applyMetadataFilters();
         }};
 
         document.getElementById('filter-reset-btn')?.addEventListener('click', resetAllFilters);
@@ -14626,7 +14669,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 }});
 
                 updateFilterResetState();
-                renderAllSections();
+                applyMetadataFilters();
             }});
         }});
         updateFilterResetState();
