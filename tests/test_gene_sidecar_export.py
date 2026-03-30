@@ -292,6 +292,19 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert "function runFullRegionAnnotationDE(annotationA, annotationB)" in html_text
     assert "function exportAnnotationDEReport(annotationA, annotationB, exportState)" in html_text
     assert "function exportAnnotationDECsv(annotationA, annotationB, exportState)" in html_text
+    assert "function computeCellSetDE(groupA, groupB, options = {})" in html_text
+    assert "function runFullGroupDE(groupA, groupB)" in html_text
+    assert "function renderGroupDE()" in html_text
+    assert "function renderCompareInsights()" in html_text
+    assert "Group-to-Group DE" in html_text
+    assert 'id="group-de-panel"' in html_text
+    assert 'id="group-de-source-spec"' in html_text
+    assert 'id="group-de-source-value"' in html_text
+    assert 'id="group-de-reference-value"' in html_text
+    assert 'id="group-de-restrict-spec"' in html_text
+    assert 'id="group-de-restrict-value"' in html_text
+    assert 'id="group-de-scope"' in html_text
+    assert "karospace-group-de-report-v1" in html_text
     assert 'if (/[",\\n\\r]/.test(text)) {' in html_text
     assert "function renderGeneGoogleSearchButton(gene, options = {})" in html_text
     assert "function renderAnnotationRegionDESection(annotations)" in html_text
