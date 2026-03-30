@@ -1265,7 +1265,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             border-left: none;
         }}
         .color-panel {{
-            width: 240px;
+            width: 280px;
             padding: 12px;
             background: var(--panel-bg);
             border-left: 1px solid var(--border-color);
@@ -1681,6 +1681,66 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             font-variant-numeric: tabular-nums;
             overflow-wrap: anywhere;
             word-break: break-word;
+        }}
+        .insight-subsection {{
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: var(--input-bg);
+            overflow: hidden;
+            margin-top: 8px;
+        }}
+        .insight-subsection:first-child {{
+            margin-top: 0;
+        }}
+        .insight-subsection-header {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 8px 10px;
+            cursor: pointer;
+            list-style: none;
+            user-select: none;
+        }}
+        .insight-subsection-header::-webkit-details-marker {{
+            display: none;
+        }}
+        .insight-subsection-title {{
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-color);
+            flex: 0 0 auto;
+        }}
+        .insight-subsection-summary {{
+            min-width: 0;
+            flex: 1 1 auto;
+            text-align: right;
+            font-size: 10px;
+            color: var(--muted-color);
+            overflow-wrap: anywhere;
+            word-break: break-word;
+        }}
+        .insight-subsection-header::after {{
+            content: '+';
+            flex: 0 0 auto;
+            width: 16px;
+            text-align: center;
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--muted-color);
+        }}
+        .insight-subsection[open] .insight-subsection-header::after {{
+            content: '−';
+        }}
+        .insight-subsection-body {{
+            border-top: 1px solid var(--border-color);
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }}
+        .insight-subsection-body .agg-group-meta:last-child {{
+            margin-bottom: 0;
         }}
         .trend-table {{
             width: 100%;
@@ -12577,31 +12637,47 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     </div>
                 </div>
                 <div class="color-tab-content" id="color-tab-compare-content">
-                    <div class="cluster-de-controls">
-                        <div>
-                            <label>Annotation</label>
-                            <select id="cluster-de-groupby"></select>
-                        </div>
-                        <div class="cluster-de-select-row">
-                            <div>
-                                <label>Category A</label>
-                                <select id="cluster-de-source"></select>
+                    <details class="insight-subsection" id="compare-category-card" open>
+                        <summary class="insight-subsection-header">
+                            <span class="insight-subsection-title">Category Compare</span>
+                            <span class="insight-subsection-summary" id="cluster-de-summary">Choose two categories to compare.</span>
+                        </summary>
+                        <div class="insight-subsection-body">
+                            <div class="cluster-de-controls">
+                                <div>
+                                    <label>Annotation</label>
+                                    <select id="cluster-de-groupby"></select>
+                                </div>
+                                <div class="cluster-de-select-row">
+                                    <div>
+                                        <label>Category A</label>
+                                        <select id="cluster-de-source"></select>
+                                    </div>
+                                    <div>
+                                        <label>Category B</label>
+                                        <select id="cluster-de-reference"></select>
+                                    </div>
+                                </div>
+                                <div style="display: flex; justify-content: flex-end;">
+                                    <button class="legend-btn" id="cluster-de-swap" type="button">Swap A/B</button>
+                                </div>
                             </div>
-                            <div>
-                                <label>Category B</label>
-                                <select id="cluster-de-reference"></select>
+                            <div class="color-aggregation" id="cluster-de-results">
+                                <div class="agg-group-meta">Choose two categories to compare.</div>
                             </div>
                         </div>
-                        <div style="display: flex; justify-content: flex-end;">
-                            <button class="legend-btn" id="cluster-de-swap" type="button">Swap A/B</button>
+                    </details>
+                    <details class="insight-subsection" id="compare-group-card">
+                        <summary class="insight-subsection-header">
+                            <span class="insight-subsection-title">Group-to-Group DE</span>
+                            <span class="insight-subsection-summary" id="group-de-summary">Compare samples, metadata groups, or annotations.</span>
+                        </summary>
+                        <div class="insight-subsection-body">
+                            <div class="color-aggregation" id="group-de-panel">
+                                <div class="agg-group-meta">Configure two samples, metadata groups, or annotation groups for exploratory group DE.</div>
+                            </div>
                         </div>
-                    </div>
-                    <div class="color-aggregation" id="cluster-de-results">
-                        <div class="agg-group-meta">Choose two categories to compare.</div>
-                    </div>
-                    <div class="color-aggregation" id="group-de-panel">
-                        <div class="agg-group-meta">Configure two samples, metadata groups, or annotation groups for exploratory group DE.</div>
-                    </div>
+                    </details>
                 </div>
                 <div class="color-tab-content" id="color-tab-neighbors-content">
                     <div>
@@ -13539,6 +13615,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         `;
     }}
 
+    function setCompareSectionSummary(elementId, text) {{
+        const el = document.getElementById(elementId);
+        if (el) el.textContent = text || '';
+    }}
+
     function syncClusterDEControls() {{
         const groupbySelect = document.getElementById('cluster-de-groupby');
         const sourceSelect = document.getElementById('cluster-de-source');
@@ -13596,25 +13677,34 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         const {{ availableGroupbys, categories }} = syncClusterDEControls();
         if (!availableGroupbys.length) {{
+            setCompareSectionSummary('cluster-de-summary', 'Available for categorical annotations only.');
             container.innerHTML = '<div class="agg-group-meta">Category comparison is available for categorical colors only.</div>';
             return;
         }}
         if (!clusterDeGroupby) {{
+            setCompareSectionSummary('cluster-de-summary', 'Choose a categorical annotation.');
             container.innerHTML = '<div class="agg-group-meta">Choose a categorical annotation to compare.</div>';
             return;
         }}
         if (!categories.length) {{
+            setCompareSectionSummary('cluster-de-summary', `${{formatMetadataLabel(clusterDeGroupby)}} has no categories.`);
             container.innerHTML = '<div class="agg-group-meta">No categories are available for this annotation.</div>';
             return;
         }}
         if (!clusterDeSourceCategory || !clusterDeReferenceCategory) {{
+            setCompareSectionSummary('cluster-de-summary', 'Choose two categories.');
             container.innerHTML = '<div class="agg-group-meta">Choose two different categories to compare.</div>';
             return;
         }}
         if (clusterDeSourceCategory === clusterDeReferenceCategory) {{
+            setCompareSectionSummary('cluster-de-summary', 'Choose two different categories.');
             container.innerHTML = '<div class="agg-group-meta">Choose two different categories to compare.</div>';
             return;
         }}
+        setCompareSectionSummary(
+            'cluster-de-summary',
+            `${{formatMetadataLabel(clusterDeGroupby)}}: ${{clusterDeSourceCategory}} vs ${{clusterDeReferenceCategory}}`,
+        );
 
         container.innerHTML = `
             <div class="cluster-de-meta">
@@ -13917,6 +14007,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         const {{ sources, sourceSpec, groupValues, restrictSpec, restrictValues }} = syncGroupDEUiState();
         if (!sources.length) {{
+            setCompareSectionSummary('group-de-summary', 'Needs section metadata or categorical annotations.');
             container.innerHTML = '<div class="agg-group-meta">Group DE needs section metadata or categorical annotations to define the two groups.</div>';
             return;
         }}
@@ -13946,7 +14037,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             .join('');
 
         let html = `
-            <div class="selection-summary-title" style="margin-top:10px">Group-to-Group DE</div>
             <div class="agg-group-meta">Exploratory DE between two arbitrary cell groups. Compare samples, section metadata groups, or cell annotations, and optionally restrict within a second annotation such as a cell type.</div>
             <div class="cluster-de-controls">
                 <div>
@@ -13998,10 +14088,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         `;
 
         if (!sourceSpec) {{
+            setCompareSectionSummary('group-de-summary', 'Choose a grouping field.');
             container.innerHTML = html + '<div class="agg-group-meta">Choose a section metadata field or categorical annotation to define the two groups.</div>';
             return;
         }}
         if (groupValues.length < 2) {{
+            setCompareSectionSummary('group-de-summary', `${{formatGroupDESourceSpecLabel(sourceSpec)}} needs at least two values.`);
             container.innerHTML = html + '<div class="agg-group-meta">This grouping field needs at least two values.</div>';
             return;
         }}
@@ -14069,6 +14161,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }};
         const sourceLabel = groupA ? escapeHtml(groupA.description) : '';
         const referenceLabel = groupB ? escapeHtml(groupB.description) : '';
+        const summaryLabel = formatGroupDESourceSpecLabel(sourceSpec);
+        const restrictSummary = restrictSpec && groupDeRestrictValue
+            ? ` · within ${{formatGroupDESourceSpecLabel(restrictSpec)}}=${{groupDeRestrictValue}}`
+            : '';
+        const sizeSummary = (groupA && groupB)
+            ? ` · ${{Number(groupA.nCells || 0).toLocaleString()}} vs ${{Number(groupB.nCells || 0).toLocaleString()}} cells`
+            : '';
+        setCompareSectionSummary(
+            'group-de-summary',
+            `${{summaryLabel}}: ${{String(groupDeSourceValue ?? 'A')}} vs ${{String(groupDeReferenceValue ?? 'B')}}${{restrictSummary}}${{sizeSummary}}`,
+        );
         const topNLabel = Math.max(1, Number(groupDeTopN) || ANNOTATION_DE_TOP_N).toLocaleString();
         const quickSummaryHtml = (quickResult.available && quickResult.results.length)
             ? `

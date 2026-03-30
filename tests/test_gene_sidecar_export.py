@@ -296,6 +296,9 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert "function runFullGroupDE(groupA, groupB)" in html_text
     assert "function renderGroupDE()" in html_text
     assert "function renderCompareInsights()" in html_text
+    assert 'class="insight-subsection"' in html_text
+    assert 'id="cluster-de-summary"' in html_text
+    assert 'id="group-de-summary"' in html_text
     assert "Group-to-Group DE" in html_text
     assert 'id="group-de-panel"' in html_text
     assert 'id="group-de-source-spec"' in html_text
