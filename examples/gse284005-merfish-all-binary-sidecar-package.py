@@ -1,7 +1,7 @@
 """
 Example usage of KaroSpace with binary sidecar and .karospace export targets.
 
-This script is configured for the autism companion-ready h5ad and writes:
+This script is configured for the GSE284005 MERFISH All companion-ready h5ad and writes:
 1. an unpacked binary sidecar viewer bundle
 2. a packaged .karospace bundle with matching settings
 """
@@ -21,30 +21,31 @@ os.environ.setdefault("MPLCONFIGDIR", "/tmp/karospace-mpl-cache")
 from karospace import export_to_html, load_spatial_data
 
 H5AD_PATH = os.environ.get(
-    "AUTISM_H5AD_PATH",
-    "/Volumes/processing2/autism/autism_concatenated_filtered_sparse.companion.ready.h5ad",
+    "GSE284005_MERFISH_ALL_H5AD_PATH",
+    "/Users/chrislangseth/Downloads/GSE284005_merfish_all.companion.ready.h5ad",
 )
 
-PRIMARY_COLOR = "tangram_cell_type"
+PRIMARY_COLOR = "majorCluster_final"
 ADDITIONAL_COLORS = [
-    "anatomical_region",
+    "Region_banksy_major",
+    "Region_banksy",
 ]
-SIDECAR_OUTPUT = "autism-binary-sidecar.html"
-PACKAGE_OUTPUT = "autism-binary.karospace"
-GENE_AUX_PATH = "autism-binary.genes.json"
+SIDECAR_OUTPUT = "gse284005-merfish-all-binary-sidecar.html"
+PACKAGE_OUTPUT = "gse284005-merfish-all-binary.karospace"
+GENE_AUX_PATH = "gse284005-merfish-all-binary.genes.json"
 
 if not Path(H5AD_PATH).exists():
     raise SystemExit(
-        "Autism h5ad not found. Set AUTISM_H5AD_PATH before running "
-        "examples/autism-binary-sidecar-package.py."
+        "GSE284005 MERFISH All h5ad not found. Set GSE284005_MERFISH_ALL_H5AD_PATH before running "
+        "examples/gse284005-merfish-all-binary-sidecar-package.py."
     )
 
 dataset = load_spatial_data(
     H5AD_PATH,
-    groupby="slide",
+    groupby="sample",
     spatial_key="spatial",
     metadata_columns=[
-        "slide"
+        "sample",
     ],
 )
 
@@ -53,7 +54,7 @@ print(f"Available color columns: {dataset.obs_columns[:10]}...")
 
 common_kwargs = dict(
     color=PRIMARY_COLOR,
-    title="Autism",
+    title="GSE284005 MERFISH All",
     min_panel_size=120,
     spot_size="auto",
     downsample=10_000_000,
@@ -66,15 +67,26 @@ common_kwargs = dict(
     gene_storage="sidecar",
     gene_sidecar_format="binary-v1",
     gene_encoding="auto",
-    gene_value_encoding="uint8",
+    gene_value_encoding="uint16",
     gene_aux_path=GENE_AUX_PATH,
-    gene_sidecar_shard_size=10,
-    marker_genes_groupby=[PRIMARY_COLOR] + ADDITIONAL_COLORS,
+    gene_sidecar_shard_size=16,
+    marker_genes_groupby=[
+        "majorCluster_final",
+        "Region_banksy_major",
+        "Region_banksy",
+    ],
     marker_genes_top_n=30,
-    neighbor_stats_groupby=[PRIMARY_COLOR] + ADDITIONAL_COLORS,
+    neighbor_stats_groupby=[
+        "majorCluster_final",
+        "Region_banksy_major",
+        "Region_banksy",
+    ],
     neighbor_stats_permutations=0,
     neighbor_stats_seed=42,
-    cluster_de_groupby=[PRIMARY_COLOR] + ADDITIONAL_COLORS,
+    cluster_de_groupby=[
+        "majorCluster_final",
+        "Region_banksy_major",
+    ],
     cluster_de_top_n=20,
     cluster_de_method="t-test",
     cluster_de_layer=None,
@@ -101,4 +113,7 @@ print(f"Wrote packaged binary viewer: {PACKAGE_OUTPUT}")
 print(f"  - local opener: {Path(PACKAGE_OUTPUT).with_suffix('.loader.html')}")
 print("Share either route:")
 print(f"  - local web server flow: {SIDECAR_OUTPUT} + {GENE_AUX_PATH} + shard directory")
-print(f"  - no-install local package flow: {PACKAGE_OUTPUT} + {Path(PACKAGE_OUTPUT).with_suffix('.loader.html')}")
+print(
+    "  - no-install local package flow: "
+    f"{PACKAGE_OUTPUT} + {Path(PACKAGE_OUTPUT).with_suffix('.loader.html')}"
+)

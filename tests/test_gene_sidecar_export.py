@@ -258,6 +258,8 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert "function trimSelectionSetToFilteredSections(cells)" in html_text
     assert "function trimSelectionsToFilteredSections()" in html_text
     assert "function applyMetadataFilters()" in html_text
+    assert "function isMissingDisplayValue(value)" in html_text
+    assert "function getCategoricalValueInfo(config, value)" in html_text
     assert "const filteredSections = getFilteredSections();" in html_text
     assert "Most columns and genes work as bare names." in html_text
     assert "Use <code>obs(...)</code>, <code>gene(...)</code>," in html_text

@@ -6826,6 +6826,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return colVals || [];
     }}
 
+    function isMissingDisplayValue(value) {{
+        return value === null || value === undefined || Number.isNaN(value);
+    }}
+
+    function getCategoricalValueInfo(config, value) {{
+        if (!config || config.is_continuous || !Number.isFinite(value)) return null;
+        const categories = Array.isArray(config.categories) ? config.categories : [];
+        const catIdx = Math.round(value);
+        if (!Number.isInteger(catIdx) || catIdx < 0 || catIdx >= categories.length) return null;
+        const catName = categories[catIdx];
+        if (catName === null || catName === undefined) return null;
+        return {{ catIdx, catName }};
+    }}
+
     // Check if section passes filters
     function sectionPassesFilter(section) {{
         for (const [key, values] of Object.entries(activeFilters)) {{
@@ -7003,11 +7017,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ring.forEach(cellIdx => {{
                 if (activeIndexSet && !activeIndexSet.has(cellIdx)) return;
                 const val = values[cellIdx];
-                if (val === null || val === undefined) return;
+                if (isMissingDisplayValue(val)) return;
                 if (!config.is_continuous) {{
-                    const catIdx = Math.round(val);
-                    const catName = config.categories[catIdx];
-                    if (hiddenCategories.has(catName)) return;
+                    const catInfo = getCategoricalValueInfo(config, val);
+                    if (!catInfo || hiddenCategories.has(catInfo.catName)) return;
                 }}
                 const point = transform.dataToScreen(section.x[cellIdx], section.y[cellIdx]);
                 const x = point.x;
@@ -7028,11 +7041,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ring.forEach(cellIdx => {{
                 if (activeIndexSet && !activeIndexSet.has(cellIdx)) return;
                 const val = values[cellIdx];
-                if (val === null || val === undefined) return;
+                if (isMissingDisplayValue(val)) return;
                 if (!config.is_continuous) {{
-                    const catIdx = Math.round(val);
-                    const catName = config.categories[catIdx];
-                    if (hiddenCategories.has(catName)) return;
+                    const catInfo = getCategoricalValueInfo(config, val);
+                    if (!catInfo || hiddenCategories.has(catInfo.catName)) return;
                 }}
                 const point = transform.dataToScreen(section.x[cellIdx], section.y[cellIdx]);
                 const x = point.x;
@@ -8540,11 +8552,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
                 for (let i = 0; i < section.umap_x.length; i++) {{
                     const val = values[i];
-                    if (val === null || val === undefined) continue;
+                    if (isMissingDisplayValue(val)) continue;
 
-                    const catIdx = Math.round(val);
-                    const catName = config.categories[catIdx];
-                    if (!hiddenCategories.has(catName)) continue; // Only draw hidden cells in first pass
+                    const catInfo = getCategoricalValueInfo(config, val);
+                    if (!catInfo || !hiddenCategories.has(catInfo.catName)) continue; // Only draw hidden cells in first pass
 
                     const x = centerX + (section.umap_x[i] - dataCenterX) * scale;
                     const y = centerY - (section.umap_y[i] - dataCenterY) * scale;
@@ -8569,13 +8580,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
             for (let i = 0; i < section.umap_x.length; i++) {{
                 const val = values[i];
-                if (val === null || val === undefined) continue;
+                if (isMissingDisplayValue(val)) continue;
 
                 // Skip hidden categories (they were drawn in first pass)
+                let catInfo = null;
                 if (!config.is_continuous) {{
-                    const catIdx = Math.round(val);
-                    const catName = config.categories[catIdx];
-                    if (hiddenCategories.has(catName)) continue;
+                    catInfo = getCategoricalValueInfo(config, val);
+                    if (!catInfo || hiddenCategories.has(catInfo.catName)) continue;
                 }}
 
                 const x = centerX + (section.umap_x[i] - dataCenterX) * scale;
@@ -8591,10 +8602,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     const t = (val - config.vmin) / (config.vmax - config.vmin);
                     color = magma(Math.max(0, Math.min(1, t)));
                 }} else {{
-                    const catIdx = Math.round(val);
-                    const catName = config.categories[catIdx];
-                    isSpotlightCategory = hasSpotlight && catName === activeSpotlight;
-                    color = getCategoryColor(catIdx);
+                    isSpotlightCategory = hasSpotlight && catInfo.catName === activeSpotlight;
+                    color = getCategoryColor(catInfo.catIdx);
                 }}
 
                 if (hasSpotlight && !isSpotlightCategory) {{
@@ -8671,13 +8680,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
             for (let i = 0; i < section.umap_x.length; i++) {{
                 const val = values[i];
-                if (val === null || val === undefined) continue;
+                if (isMissingDisplayValue(val)) continue;
 
                 // Skip hidden categories
                 if (!config.is_continuous) {{
-                    const catIdx = Math.round(val);
-                    const catName = config.categories[catIdx];
-                    if (hiddenCategories.has(catName)) continue;
+                    const catInfo = getCategoricalValueInfo(config, val);
+                    if (!catInfo || hiddenCategories.has(catInfo.catName)) continue;
                 }}
 
                 const x = centerX + (section.umap_x[i] - dataCenterX) * scale;
@@ -10020,12 +10028,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         for (let k = 0; k < nCandidates; k++) {{
             const i = candidateIndices ? candidateIndices[k] : k;
             const val = values[i];
-            if (val === null || val === undefined) continue;
+            if (isMissingDisplayValue(val)) continue;
 
             if (!config.is_continuous) {{
-                const catIdx = Math.round(val);
-                const catName = config.categories[catIdx];
-                if (hiddenCategories.has(catName)) continue;
+                const catInfo = getCategoricalValueInfo(config, val);
+                if (!catInfo || hiddenCategories.has(catInfo.catName)) continue;
             }}
 
             const x = modalSection.x[i];
@@ -10412,10 +10419,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ctx.globalAlpha = 0.2;
             for (let i = 0; i < section.x.length; i++) {{
                 const val = values[i];
-                if (val === null || val === undefined) continue;
-                const catIdx = Math.round(val);
-                const catName = config.categories[catIdx];
-                if (!hiddenCategories.has(catName)) continue;  // Only draw hidden ones
+                if (isMissingDisplayValue(val)) continue;
+                const catInfo = getCategoricalValueInfo(config, val);
+                if (!catInfo || !hiddenCategories.has(catInfo.catName)) continue;  // Only draw hidden ones
 
                 const point = transform.dataToScreen(section.x[i], section.y[i]);
                 const x = point.x;
@@ -10434,7 +10440,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (showGeneCells) {{
             for (let i = 0; i < section.x.length; i++) {{
                 const val = values[i];
-                if (val === null || val === undefined) continue;
+                if (isMissingDisplayValue(val)) continue;
 
                 let color;
                 let isSelectedCat = false;
@@ -10442,11 +10448,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     const t = (val - config.vmin) / (config.vmax - config.vmin);
                     color = magma(Math.max(0, Math.min(1, t)));
                 }} else {{
-                    const catIdx = Math.round(val);
-                    const catName = config.categories[catIdx];
-                    if (hiddenCategories.has(catName)) continue;  // Skip hidden, already drawn as grey
-                    isSelectedCat = focusCategory && catName === focusCategory;
-                    color = getCategoryColor(catIdx);
+                    const catInfo = getCategoricalValueInfo(config, val);
+                    if (!catInfo || hiddenCategories.has(catInfo.catName)) continue;  // Skip hidden, already drawn as grey
+                    isSelectedCat = focusCategory && catInfo.catName === focusCategory;
+                    color = getCategoryColor(catInfo.catIdx);
                 }}
 
                 const point = transform.dataToScreen(section.x[i], section.y[i]);
@@ -10474,13 +10479,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 if (!isCellSelected(section.id, i)) continue;
 
                 const val = values[i];
-                if (val === null || val === undefined) continue;
+                if (isMissingDisplayValue(val)) continue;
 
                 // Skip hidden categories
                 if (!config.is_continuous) {{
-                    const catIdx = Math.round(val);
-                    const catName = config.categories[catIdx];
-                    if (hiddenCategories.has(catName)) continue;
+                    const catInfo = getCategoricalValueInfo(config, val);
+                    if (!catInfo || hiddenCategories.has(catInfo.catName)) continue;
                 }}
 
                 const point = transform.dataToScreen(section.x[i], section.y[i]);
@@ -10690,13 +10694,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const i = candidateIndices ? candidateIndices[k] : k;
             if (activeIndexSet && !activeIndexSet.has(i)) continue;
             const val = values[i];
-            if (!ignoreMissing && (val === null || val === undefined)) continue;
+            if (!ignoreMissing && isMissingDisplayValue(val)) continue;
 
             // Skip hidden categories
-            if (!ignoreHidden && !config.is_continuous && Number.isFinite(val)) {{
-                const catIdx = Math.round(val);
-                const catName = config.categories[catIdx];
-                if (hiddenCategories.has(catName)) continue;
+            if (!ignoreHidden && !config.is_continuous) {{
+                const catInfo = getCategoricalValueInfo(config, val);
+                if (!catInfo) {{
+                    if (!ignoreMissing) continue;
+                }} else if (hiddenCategories.has(catInfo.catName)) {{
+                    continue;
+                }}
             }}
 
             const point = transform.dataToScreen(section.x[i], section.y[i]);
@@ -10720,17 +10727,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const colorLabel = currentGene || currentColor;
 
         if (config.is_continuous) {{
+            if (isMissingDisplayValue(val)) {{
+                return `<span class="cell-tooltip-label">${{colorLabel}}:</span>
+                        <span class="cell-tooltip-value">n/a</span>`;
+            }}
             const t = (val - config.vmin) / (config.vmax - config.vmin);
             const color = magma(Math.max(0, Math.min(1, t)));
             return `<span class="cell-tooltip-color" style="background: ${{color}}"></span>
                     <span class="cell-tooltip-label">${{colorLabel}}:</span>
                     <span class="cell-tooltip-value">${{val.toFixed(3)}}</span>`;
         }} else {{
-            const catIdx = Math.round(val);
-            const catName = config.categories[catIdx];
-            const color = getCategoryColor(catIdx);
+            const catInfo = getCategoricalValueInfo(config, val);
+            if (!catInfo) {{
+                return `<span class="cell-tooltip-label">Missing ${{escapeHtml(colorLabel)}}</span>`;
+            }}
+            const color = getCategoryColor(catInfo.catIdx);
             return `<span class="cell-tooltip-color" style="background: ${{color}}"></span>
-                    <span class="cell-tooltip-label">${{catName}}</span>`;
+                    <span class="cell-tooltip-label">${{catInfo.catName}}</span>`;
         }}
     }}
 
@@ -11286,10 +11299,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             for (let k = 0; k < nCandidates; k++) {{
                 const i = candidateIndices ? candidateIndices[k] : k;
                 const val = values[i];
-                if (val === null || val === undefined) continue;
-                const catIdx = Math.round(val);
-                const catName = config.categories[catIdx];
-                if (!hiddenCategories.has(catName)) continue;
+                if (isMissingDisplayValue(val)) continue;
+                const catInfo = getCategoricalValueInfo(config, val);
+                if (!catInfo || !hiddenCategories.has(catInfo.catName)) continue;
 
                 const point = transform.dataToScreen(modalSection.x[i], modalSection.y[i]);
                 const x = point.x;
@@ -11335,7 +11347,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             for (let k = 0; k < nCandidates; k++) {{
                 const i = candidateIndices ? candidateIndices[k] : k;
                 const val = values[i];
-                if (val === null || val === undefined) continue;
+                if (isMissingDisplayValue(val)) continue;
 
                 let color;
                 let isSelectedCat = false;
@@ -11343,11 +11355,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     const t = (val - config.vmin) / (config.vmax - config.vmin);
                     color = magma(Math.max(0, Math.min(1, t)));
                 }} else {{
-                    const catIdx = Math.round(val);
-                    const catName = config.categories[catIdx];
-                    if (hiddenCategories.has(catName)) continue;
-                    isSelectedCat = focusCategory && catName === focusCategory;
-                    color = getCategoryColor(catIdx);
+                    const catInfo = getCategoricalValueInfo(config, val);
+                    if (!catInfo || hiddenCategories.has(catInfo.catName)) continue;
+                    isSelectedCat = focusCategory && catInfo.catName === focusCategory;
+                    color = getCategoryColor(catInfo.catIdx);
                 }}
 
                 const point = transform.dataToScreen(modalSection.x[i], modalSection.y[i]);
@@ -11378,13 +11389,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 if (!isCellSelected(modalSection.id, i)) continue;
 
                 const val = values[i];
-                if (!blendActive && (val === null || val === undefined)) continue;
+                if (!blendActive && isMissingDisplayValue(val)) continue;
 
                 // Skip hidden categories
                 if (!blendActive && !config.is_continuous) {{
-                    const catIdx = Math.round(val);
-                    const catName = config.categories[catIdx];
-                    if (hiddenCategories.has(catName)) continue;
+                    const catInfo = getCategoricalValueInfo(config, val);
+                    if (!catInfo || hiddenCategories.has(catInfo.catName)) continue;
                 }}
 
                 const point = transform.dataToScreen(modalSection.x[i], modalSection.y[i]);
@@ -15737,10 +15747,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             if (cellIdx >= 0) {{
                 const values = getSectionValues(modalSection);
                 const val = values[cellIdx];
-                if (val !== null && val !== undefined) {{
-                    const catIdx = Math.round(val);
-                    const catName = config.categories[catIdx];
-                    modalSelectedCategory = catName || null;
+                const catInfo = getCategoricalValueInfo(config, val);
+                if (catInfo) {{
+                    modalSelectedCategory = catInfo.catName || null;
                     updateModalToolbarState();
                     renderAllSections();
                     renderModalSection();

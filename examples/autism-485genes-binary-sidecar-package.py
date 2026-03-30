@@ -1,7 +1,7 @@
 """
 Example usage of KaroSpace with binary sidecar and .karospace export targets.
 
-This script is configured for the autism companion-ready h5ad and writes:
+This script is configured for the autism 485-gene companion-ready h5ad and writes:
 1. an unpacked binary sidecar viewer bundle
 2. a packaged .karospace bundle with matching settings
 """
@@ -21,22 +21,22 @@ os.environ.setdefault("MPLCONFIGDIR", "/tmp/karospace-mpl-cache")
 from karospace import export_to_html, load_spatial_data
 
 H5AD_PATH = os.environ.get(
-    "AUTISM_H5AD_PATH",
-    "/Volumes/processing2/autism/autism_concatenated_filtered_sparse.companion.ready.h5ad",
+    "AUTISM_485GENES_H5AD_PATH",
+    "/Volumes/processing2/autism/autism_concatenated_filtered_sparse_485genes.companion.ready.h5ad",
 )
 
 PRIMARY_COLOR = "tangram_cell_type"
 ADDITIONAL_COLORS = [
     "anatomical_region",
 ]
-SIDECAR_OUTPUT = "autism-binary-sidecar.html"
-PACKAGE_OUTPUT = "autism-binary.karospace"
-GENE_AUX_PATH = "autism-binary.genes.json"
+SIDECAR_OUTPUT = "autism-485genes-binary-sidecar.html"
+PACKAGE_OUTPUT = "autism-485genes-binary.karospace"
+GENE_AUX_PATH = "autism-485genes-binary.genes.json"
 
 if not Path(H5AD_PATH).exists():
     raise SystemExit(
-        "Autism h5ad not found. Set AUTISM_H5AD_PATH before running "
-        "examples/autism-binary-sidecar-package.py."
+        "Autism 485-gene h5ad not found. Set AUTISM_485GENES_H5AD_PATH "
+        "before running examples/autism-485genes-binary-sidecar-package.py."
     )
 
 dataset = load_spatial_data(
@@ -44,7 +44,7 @@ dataset = load_spatial_data(
     groupby="slide",
     spatial_key="spatial",
     metadata_columns=[
-        "slide"
+        "slide",
     ],
 )
 
@@ -53,7 +53,7 @@ print(f"Available color columns: {dataset.obs_columns[:10]}...")
 
 common_kwargs = dict(
     color=PRIMARY_COLOR,
-    title="Autism",
+    title="Autism 485 Genes",
     min_panel_size=120,
     spot_size="auto",
     downsample=10_000_000,
@@ -68,7 +68,7 @@ common_kwargs = dict(
     gene_encoding="auto",
     gene_value_encoding="uint8",
     gene_aux_path=GENE_AUX_PATH,
-    gene_sidecar_shard_size=10,
+    gene_sidecar_shard_size=16,
     marker_genes_groupby=[PRIMARY_COLOR] + ADDITIONAL_COLORS,
     marker_genes_top_n=30,
     neighbor_stats_groupby=[PRIMARY_COLOR] + ADDITIONAL_COLORS,
