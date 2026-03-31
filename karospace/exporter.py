@@ -2199,6 +2199,31 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             color: var(--muted-color);
             border-bottom: 1px solid var(--border-color);
         }}
+        .volcano-container {{
+            position: relative;
+            padding: 8px 8px 4px;
+            border-bottom: 1px solid var(--border-color);
+        }}
+        .volcano-svg {{ display: block; overflow: visible; }}
+        .volcano-dot {{ cursor: pointer; }}
+        .volcano-dot:hover {{ stroke: var(--text-color); stroke-width: 1.5px; }}
+        .volcano-tooltip {{
+            position: absolute;
+            background: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 4px 7px;
+            font-size: 10px;
+            line-height: 1.5;
+            pointer-events: none;
+            white-space: nowrap;
+            z-index: 10;
+            display: none;
+            color: var(--text-color);
+            box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+        }}
+        .volcano-axis-label {{ font-size: 9px; fill: var(--muted-color); font-family: inherit; }}
+        .volcano-threshold-line {{ stroke: var(--border-color); stroke-width: 1; stroke-dasharray: 3 3; }}
         .legend-title {{
             font-size: 13px;
             font-weight: 600;
@@ -12369,6 +12394,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     }}
                     Showing top ${{topNLabel}} genes. Positive scores indicate enrichment in Region A.
                 </div>
+                ${{buildGroupVolcanoPlot(deResult.results || [])}}
                 <div class="comparison-stack">${{renderCards(deResult)}}</div>
             `
             : '';
@@ -12387,6 +12413,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         across ${{Number(fullCached.totalGeneCount || 0).toLocaleString()}} genes.
                         Showing top ${{topNLabel}} genes. Positive scores indicate enrichment in Region A.
                     </div>
+                    ${{buildGroupVolcanoPlot(fullCached.results || [])}}
                     <div class="comparison-stack">${{renderCards(fullCached)}}</div>
                 `
                 : `
@@ -12663,6 +12690,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 exportAnnotationDECsv(source, reference, exportState);
             }});
         }}
+        bindVolcanoGroupInteraction(container, renderAnnotationComparison);
         bindGeneActivateButtons(container, renderAnnotationComparison);
         bindGeneGoogleSearchButtons(container);
     }}
@@ -13620,6 +13648,139 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         `;
     }}
 
+    function buildVolcanoPlot(genes, logfc, pvalsAdj) {{
+        if (!genes.length) return '';
+        const W = 310, H = 190, ml = 34, mr = 10, mt = 10, mb = 26;
+        const iw = W - ml - mr, ih = H - mt - mb;
+        const logfcValues = genes.map(function(_, i) {{
+            const value = Number(logfc[i]);
+            return Number.isFinite(value) ? value : 0;
+        }});
+        const nlp = genes.map(function(_, i) {{
+            const value = Number(pvalsAdj[i]);
+            const safe = Number.isFinite(value) && value > 0 ? value : 1;
+            return -Math.log10(Math.max(safe, 1e-300));
+        }});
+        const maxAbsFC = Math.max.apply(null, logfcValues.map(function(v) {{ return Math.abs(v); }}).concat([0.5]));
+        const fcRange = maxAbsFC * 1.15;
+        const maxNLP = Math.max.apply(null, nlp.concat([2])) * 1.1;
+        function xs(fc) {{ return ml + (fc + fcRange) / (2 * fcRange) * iw; }}
+        function ys(v) {{ return mt + ih - (v / maxNLP) * ih; }}
+        const sigNLP = -Math.log10(0.05);
+        const fcThr = 0.5;
+        const parts = [];
+        parts.push('<svg class="volcano-svg" viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '">');
+        parts.push('<line x1="' + ml + '" y1="' + mt + '" x2="' + ml + '" y2="' + (mt+ih) + '" stroke="var(--border-color)"/>');
+        parts.push('<line x1="' + ml + '" y1="' + (mt+ih) + '" x2="' + (ml+iw) + '" y2="' + (mt+ih) + '" stroke="var(--border-color)"/>');
+        const yThr = ys(sigNLP), xL = xs(-fcThr), xR = xs(fcThr);
+        parts.push('<line class="volcano-threshold-line" x1="' + ml + '" y1="' + yThr.toFixed(1) + '" x2="' + (ml+iw) + '" y2="' + yThr.toFixed(1) + '"/>');
+        parts.push('<line class="volcano-threshold-line" x1="' + xL.toFixed(1) + '" y1="' + mt + '" x2="' + xL.toFixed(1) + '" y2="' + (mt+ih) + '"/>');
+        parts.push('<line class="volcano-threshold-line" x1="' + xR.toFixed(1) + '" y1="' + mt + '" x2="' + xR.toFixed(1) + '" y2="' + (mt+ih) + '"/>');
+        [Math.ceil(-maxAbsFC), 0, Math.ceil(maxAbsFC)].forEach(function(t) {{
+            const tx = xs(t);
+            parts.push('<line x1="' + tx.toFixed(1) + '" y1="' + (mt+ih) + '" x2="' + tx.toFixed(1) + '" y2="' + (mt+ih+3) + '" stroke="var(--border-color)"/>');
+            parts.push('<text class="volcano-axis-label" x="' + tx.toFixed(1) + '" y="' + (mt+ih+13) + '" text-anchor="middle">' + t + '</text>');
+        }});
+        const nlpTick = Math.floor(maxNLP * 0.75);
+        [0, nlpTick].forEach(function(t) {{
+            const ty = ys(t);
+            parts.push('<line x1="' + (ml-3) + '" y1="' + ty.toFixed(1) + '" x2="' + ml + '" y2="' + ty.toFixed(1) + '" stroke="var(--border-color)"/>');
+            parts.push('<text class="volcano-axis-label" x="' + (ml-5) + '" y="' + ty.toFixed(1) + '" text-anchor="end" dy="0.35em">' + t + '</text>');
+        }});
+        parts.push('<text class="volcano-axis-label" x="' + (ml+iw/2).toFixed(1) + '" y="' + (H-2) + '" text-anchor="middle">log\u2082FC</text>');
+        parts.push('<text class="volcano-axis-label" x="8" y="' + (mt+ih/2).toFixed(1) + '" text-anchor="middle" transform="rotate(-90,8,' + (mt+ih/2).toFixed(1) + ')">\u2212log\u2081\u2080p</text>');
+        genes.forEach(function(gene, i) {{
+            const fc = logfcValues[i], nlpi = nlp[i];
+            const sig = nlpi >= sigNLP && Math.abs(fc) >= fcThr;
+            const col = sig ? (fc > 0 ? '#d94f4f' : '#4f82d9') : 'var(--border-color)';
+            const pvalAdj = Number(pvalsAdj[i]);
+            const safePAdj = Number.isFinite(pvalAdj) ? pvalAdj : 1;
+            const padjDisplay = safePAdj < 0.001 ? safePAdj.toExponential(2) : safePAdj.toFixed(4);
+            parts.push('<circle class="volcano-dot" cx="' + xs(fc).toFixed(1) + '" cy="' + ys(nlpi).toFixed(1) + '" r="3" fill="' + col + '" fill-opacity="0.82" data-volcano-gene="' + escapeHtml(gene) + '" data-volcano-fc="' + fc.toFixed(3) + '" data-volcano-padj="' + padjDisplay + '"/>');
+        }});
+        parts.push('</svg>');
+        return '<div class="volcano-container">' + parts.join('') + '<div class="volcano-tooltip"></div></div>';
+    }}
+
+    function buildGroupVolcanoPlot(entries) {{
+        if (!entries || !entries.length) return '';
+        const W = 310, H = 190, ml = 34, mr = 10, mt = 10, mb = 26;
+        const iw = W - ml - mr, ih = H - mt - mb;
+        const logfc = entries.map(function(e) {{ return Number(e.log2fc) || 0; }});
+        const scores = entries.map(function(e) {{ return Number(e.score) || 0; }});
+        const maxAbsFC = Math.max.apply(null, logfc.map(function(v) {{ return Math.abs(v); }}).concat([0.5]));
+        const fcRange = maxAbsFC * 1.15;
+        const maxAbsScore = Math.max.apply(null, scores.map(function(v) {{ return Math.abs(v); }}).concat([1]));
+        const scoreRange = maxAbsScore * 1.15;
+        function xs(fc) {{ return ml + (fc + fcRange) / (2 * fcRange) * iw; }}
+        function ys(s) {{ return mt + ih - (s + scoreRange) / (2 * scoreRange) * ih; }}
+        const x0 = xs(0), y0 = ys(0);
+        const parts = [];
+        parts.push('<svg class="volcano-svg" viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '">');
+        parts.push('<line x1="' + ml + '" y1="' + mt + '" x2="' + ml + '" y2="' + (mt+ih) + '" stroke="var(--border-color)"/>');
+        parts.push('<line x1="' + ml + '" y1="' + (mt+ih) + '" x2="' + (ml+iw) + '" y2="' + (mt+ih) + '" stroke="var(--border-color)"/>');
+        parts.push('<line class="volcano-threshold-line" x1="' + x0.toFixed(1) + '" y1="' + mt + '" x2="' + x0.toFixed(1) + '" y2="' + (mt+ih) + '"/>');
+        if (Math.abs(y0 - (mt + ih)) > 5) {{
+            parts.push('<line class="volcano-threshold-line" x1="' + ml + '" y1="' + y0.toFixed(1) + '" x2="' + (ml+iw) + '" y2="' + y0.toFixed(1) + '"/>');
+        }}
+        [Math.ceil(-maxAbsFC), 0, Math.ceil(maxAbsFC)].forEach(function(t) {{
+            const tx = xs(t);
+            parts.push('<line x1="' + tx.toFixed(1) + '" y1="' + (mt+ih) + '" x2="' + tx.toFixed(1) + '" y2="' + (mt+ih+3) + '" stroke="var(--border-color)"/>');
+            parts.push('<text class="volcano-axis-label" x="' + tx.toFixed(1) + '" y="' + (mt+ih+13) + '" text-anchor="middle">' + t + '</text>');
+        }});
+        const scoreTick = parseFloat(maxAbsScore.toFixed(1));
+        [-scoreTick, 0, scoreTick].forEach(function(t) {{
+            const ty = ys(t);
+            const tLabel = Math.abs(t) >= 100 ? t.toExponential(1) : t.toFixed(1);
+            parts.push('<line x1="' + (ml-3) + '" y1="' + ty.toFixed(1) + '" x2="' + ml + '" y2="' + ty.toFixed(1) + '" stroke="var(--border-color)"/>');
+            parts.push('<text class="volcano-axis-label" x="' + (ml-5) + '" y="' + ty.toFixed(1) + '" text-anchor="end" dy="0.35em">' + tLabel + '</text>');
+        }});
+        parts.push('<text class="volcano-axis-label" x="' + (ml+iw/2).toFixed(1) + '" y="' + (H-2) + '" text-anchor="middle">log\u2082FC</text>');
+        parts.push('<text class="volcano-axis-label" x="8" y="' + (mt+ih/2).toFixed(1) + '" text-anchor="middle" transform="rotate(-90,8,' + (mt+ih/2).toFixed(1) + ')">Score</text>');
+        entries.forEach(function(entry, i) {{
+            const fc = logfc[i], sc = scores[i];
+            const col = fc >= 0 ? '#d94f4f' : '#4f82d9';
+            parts.push('<circle class="volcano-dot" cx="' + xs(fc).toFixed(1) + '" cy="' + ys(sc).toFixed(1) + '" r="3.5" fill="' + col + '" fill-opacity="0.82" data-volcano-gene="' + escapeHtml(entry.gene) + '" data-volcano-fc="' + fc.toFixed(3) + '" data-volcano-score="' + sc.toFixed(3) + '"/>');
+        }});
+        parts.push('</svg>');
+        return '<div class="volcano-container">' + parts.join('') + '<div class="volcano-tooltip"></div></div>';
+    }}
+
+    function bindVolcanoGroupInteraction(container, rerenderFn) {{
+        const volcanoSvg = container.querySelector('.volcano-svg');
+        const volcanoTooltip = container.querySelector('.volcano-tooltip');
+        if (!volcanoSvg || !volcanoTooltip) return;
+        const volcanoContainer = volcanoSvg.parentElement;
+        volcanoSvg.addEventListener('mouseover', (e) => {{
+            const dot = e.target.closest('[data-volcano-gene]');
+            if (!dot) return;
+            const gene = dot.getAttribute('data-volcano-gene') || '';
+            const fc = dot.getAttribute('data-volcano-fc') || '';
+            const score = dot.getAttribute('data-volcano-score') || '';
+            volcanoTooltip.innerHTML = '<strong>' + escapeHtml(gene) + '</strong><br>log\u2082FC: ' + fc + '<br>score: ' + score;
+            volcanoTooltip.style.display = 'block';
+            const cRect = volcanoContainer.getBoundingClientRect();
+            const dRect = dot.getBoundingClientRect();
+            let left = dRect.left - cRect.left + 10;
+            let top = dRect.top - cRect.top - 8;
+            if (left + volcanoTooltip.offsetWidth > cRect.width - 4) left -= volcanoTooltip.offsetWidth + 16;
+            if (top < 0) top = dRect.bottom - cRect.top + 4;
+            volcanoTooltip.style.left = left + 'px';
+            volcanoTooltip.style.top = top + 'px';
+        }});
+        volcanoContainer.addEventListener('mouseleave', () => {{
+            volcanoTooltip.style.display = 'none';
+        }});
+        volcanoSvg.addEventListener('click', async (e) => {{
+            const dot = e.target.closest('[data-volcano-gene]');
+            if (!dot) return;
+            const gene = dot.getAttribute('data-volcano-gene') || '';
+            if (!gene) return;
+            const ok = await activateViewerGene(gene, {{ showErrors: true }});
+            if (ok) rerenderFn();
+        }});
+    }}
+
     function renderClusterDEResultSection(colorCol, sourceCategory, referenceCategory) {{
         const result = getPairwiseClusterDEResult(colorCol, sourceCategory, referenceCategory);
         if (!result) {{
@@ -13686,6 +13847,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     Pairwise DE for <strong>${{escapeHtml(sourceCategory)}}</strong> vs <strong>${{escapeHtml(referenceCategory)}}</strong>.
                     Click a gene to load it in the viewer.
                 </div>
+                ${{buildVolcanoPlot(genes, logfc, pvalsAdj)}}
                 <table class="cluster-de-table">
                     <thead>
                         <tr>
@@ -13815,6 +13977,40 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 if (ok) renderCompareInsights();
             }});
         }});
+
+        const volcanoSvg = container.querySelector('.volcano-svg');
+        const volcanoTooltip = container.querySelector('.volcano-tooltip');
+        if (volcanoSvg && volcanoTooltip) {{
+            const volcanoContainer = volcanoSvg.parentElement;
+            volcanoSvg.addEventListener('mouseover', (e) => {{
+                const dot = e.target.closest('[data-volcano-gene]');
+                if (!dot) return;
+                const gene = dot.getAttribute('data-volcano-gene') || '';
+                const fc = dot.getAttribute('data-volcano-fc') || '';
+                const padj = dot.getAttribute('data-volcano-padj') || '';
+                volcanoTooltip.innerHTML = '<strong>' + escapeHtml(gene) + '</strong><br>logFC: ' + fc + '<br>adj.p: ' + padj;
+                volcanoTooltip.style.display = 'block';
+                const cRect = volcanoContainer.getBoundingClientRect();
+                const dRect = dot.getBoundingClientRect();
+                let left = dRect.left - cRect.left + 10;
+                let top = dRect.top - cRect.top - 8;
+                if (left + volcanoTooltip.offsetWidth > cRect.width - 4) left -= volcanoTooltip.offsetWidth + 16;
+                if (top < 0) top = dRect.bottom - cRect.top + 4;
+                volcanoTooltip.style.left = left + 'px';
+                volcanoTooltip.style.top = top + 'px';
+            }});
+            volcanoContainer.addEventListener('mouseleave', () => {{
+                volcanoTooltip.style.display = 'none';
+            }});
+            volcanoSvg.addEventListener('click', async (e) => {{
+                const dot = e.target.closest('[data-volcano-gene]');
+                if (!dot) return;
+                const gene = dot.getAttribute('data-volcano-gene') || '';
+                if (!gene) return;
+                const ok = await activateViewerGene(gene, {{ showErrors: true }});
+                if (ok) renderCompareInsights();
+            }});
+        }}
     }}
 
     function getGroupDEExportState(groupA, groupB, quickResult = null) {{
@@ -14275,6 +14471,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     }}
                     Showing top ${{topNLabel}} genes. Positive scores indicate enrichment in Group A.
                 </div>
+                ${{buildGroupVolcanoPlot(quickResult.results || [])}}
                 <div class="comparison-stack">${{renderCards(quickResult)}}</div>
             `
             : '';
@@ -14293,6 +14490,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         across ${{Number(fullCached.totalGeneCount || 0).toLocaleString()}} genes.
                         Showing top ${{topNLabel}} genes. Positive scores indicate enrichment in Group A.
                     </div>
+                    ${{buildGroupVolcanoPlot(fullCached.results || [])}}
                     <div class="comparison-stack">${{renderCards(fullCached)}}</div>
                 `
                 : `
@@ -14485,6 +14683,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 exportGroupDECsv(groupA, groupB, exportState);
             }});
         }}
+        bindVolcanoGroupInteraction(container, renderGroupDE);
         bindGeneActivateButtons(container, renderCompareInsights);
         bindGeneGoogleSearchButtons(container);
     }}

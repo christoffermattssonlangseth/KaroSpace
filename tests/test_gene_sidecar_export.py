@@ -328,6 +328,11 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert "function fetchGeneAuxShardForAnalysis(shardUrl)" in html_text
     assert "function decodeDenseSidecarSection(sectionEntry)" in html_text
     assert "function base64ToUint8Array(b64)" in html_text
+    assert "function buildVolcanoPlot(genes, logfc, pvalsAdj)" in html_text
+    assert "function buildGroupVolcanoPlot(entries)" in html_text
+    assert "function bindVolcanoGroupInteraction(container, rerenderFn)" in html_text
+    assert 'class="volcano-container"' in html_text
+    assert 'class="volcano-tooltip"' in html_text
     assert "if (window.__karospacePackageMode) {" in html_text
     assert "function runFullRegionAnnotationDE(annotationA, annotationB)" in html_text
     assert "function exportAnnotationDEReport(annotationA, annotationB, exportState)" in html_text
