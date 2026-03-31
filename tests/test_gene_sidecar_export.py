@@ -272,10 +272,19 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert "function renderNeighborChordDiagram(viewState)" in html_text
     assert "function renderNeighborStatsTableView(viewState)" in html_text
     assert "function renderNeighborVisualizationToolbar(viewKey, label)" in html_text
+    assert "function renderNeighborVisualizationControlPanel(viewKey, viewState)" in html_text
+    assert "function bindNeighborVisualizationSettingControls(container, viewKey)" in html_text
+    assert "function getNeighborFocusedIndices(viewState, metric, controls)" in html_text
     assert "function applyNeighborVisualizationViewport(container, viewKey, options = {})" in html_text
     assert "function bindNeighborVisualizationControls(container, viewKey)" in html_text
     assert "function renderNeighborFocusDetail(focus, viewState)" in html_text
     assert "function bindNeighborVisualizationInteractions(container, viewState)" in html_text
+    assert 'id="neighbor-focus-mode"' in html_text
+    assert 'id="neighbor-metric-mode"' in html_text
+    assert 'id="neighbor-threshold-range"' in html_text
+    assert 'id="neighbor-max-categories"' in html_text
+    assert 'id="neighbor-label-mode"' in html_text
+    assert 'id="neighbor-chord-order"' in html_text
     assert 'data-neighbor-detail' in html_text
     assert 'data-neighbor-auto-sync="1"' in html_text
     assert 'data-neighbor-scroll' in html_text

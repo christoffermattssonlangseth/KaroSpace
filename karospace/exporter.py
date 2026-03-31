@@ -1787,6 +1787,38 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             flex: 0 0 auto;
             min-width: 70px;
         }}
+        .neighbor-control-panel {{
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: color-mix(in srgb, var(--bg-color) 18%, var(--input-bg));
+            padding: 8px 10px;
+            margin-bottom: 8px;
+        }}
+        .neighbor-control-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 8px 10px;
+            align-items: end;
+        }}
+        .neighbor-control-group {{
+            min-width: 0;
+        }}
+        .neighbor-control-group label {{
+            display: block;
+            font-size: 10px;
+            color: var(--muted-color);
+            margin-bottom: 4px;
+        }}
+        .neighbor-control-group select,
+        .neighbor-control-group input[type="range"] {{
+            width: 100%;
+        }}
+        .neighbor-control-hint {{
+            margin-top: 4px;
+            font-size: 9px;
+            color: var(--muted-color);
+            line-height: 1.3;
+        }}
         .neighbor-visualization {{
             border: 1px solid var(--border-color);
             border-radius: 8px;
@@ -1897,7 +1929,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             transition: opacity 120ms ease, filter 120ms ease, transform 120ms ease;
         }}
         .neighbor-interactive.is-dimmed {{
-            opacity: 0.18;
+            opacity: 0.08;
         }}
         .neighbor-interactive.is-hovered,
         .neighbor-interactive.is-selected {{
@@ -1923,26 +1955,53 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             fill: none;
             stroke-linecap: round;
         }}
+        .neighbor-network-edge.is-dimmed {{
+            stroke-opacity: 0.06;
+        }}
+        .neighbor-network-edge.is-related {{
+            stroke-opacity: 0.82;
+        }}
         .neighbor-network-edge.is-hovered,
         .neighbor-network-edge.is-selected {{
-            stroke-opacity: 0.95;
+            stroke-opacity: 0.98;
+            filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.22));
         }}
         .neighbor-network-node circle {{
             stroke: rgba(255, 255, 255, 0.72);
             stroke-width: 1.4;
         }}
+        .neighbor-network-node.is-dimmed circle {{
+            opacity: 0.22;
+            filter: saturate(0.2);
+        }}
+        .neighbor-network-node.is-related circle {{
+            stroke: color-mix(in srgb, var(--text-color) 42%, white);
+            stroke-width: 3.4;
+            filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.38));
+        }}
         .neighbor-network-node.is-hovered circle,
         .neighbor-network-node.is-selected circle {{
-            stroke-width: 2.8;
-            filter: brightness(1.05);
+            stroke-width: 4.2;
+            filter: brightness(1.06) drop-shadow(0 0 10px rgba(255, 255, 255, 0.5));
         }}
         .neighbor-network-label {{
             font-size: 10px;
             fill: var(--text-color);
         }}
+        .neighbor-network-node.is-dimmed .neighbor-network-label {{
+            opacity: 0.06;
+        }}
+        .neighbor-network-node.is-related .neighbor-network-label {{
+            font-weight: 700;
+            fill: color-mix(in srgb, var(--text-color) 92%, white);
+            opacity: 1;
+        }}
         .neighbor-network-label.meta {{
             font-size: 9px;
             fill: var(--muted-color);
+        }}
+        .neighbor-network-node.is-related .neighbor-network-label.meta {{
+            fill: var(--text-color);
         }}
         .neighbor-axis-label {{
             font-size: 10px;
@@ -4116,6 +4175,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         bubble: {{ zoom: 1.0, expanded: false }},
         chord: {{ zoom: 1.0, expanded: false }},
     }};
+    let neighborFocusMode = 'all';
+    let neighborMaxCategories = 12;
+    let neighborLabelMode = 'short';
+    let neighborNetworkMetric = 'zscore';
+    let neighborNetworkThresholdPercent = 22;
+    let neighborChordMetric = 'count';
+    let neighborChordThresholdPercent = 0;
+    let neighborChordOrder = 'strength';
     let hoveredNeighborFocus = null;
     let selectedNeighborFocus = null;
     const comparisonCountsCache = new Map();
@@ -14744,6 +14811,326 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }};
     }}
 
+    function getNeighborMetricOptions(viewKey) {{
+        if (viewKey === 'bubble') {{
+            return ['zscore', 'count', 'share'];
+        }}
+        return ['count', 'share'];
+    }}
+
+    function getNeighborMetric(viewKey) {{
+        if (viewKey === 'bubble') {{
+            if (!getNeighborMetricOptions('bubble').includes(neighborNetworkMetric)) {{
+                neighborNetworkMetric = 'zscore';
+            }}
+            return neighborNetworkMetric;
+        }}
+        if (!getNeighborMetricOptions('chord').includes(neighborChordMetric)) {{
+            neighborChordMetric = 'count';
+        }}
+        return neighborChordMetric;
+    }}
+
+    function setNeighborMetric(viewKey, value) {{
+        const options = getNeighborMetricOptions(viewKey);
+        const nextValue = options.includes(value) ? value : options[0];
+        if (viewKey === 'bubble') {{
+            neighborNetworkMetric = nextValue;
+        }} else {{
+            neighborChordMetric = nextValue;
+        }}
+    }}
+
+    function getNeighborThresholdPercent(viewKey) {{
+        return viewKey === 'bubble'
+            ? Math.min(95, Math.max(0, Number(neighborNetworkThresholdPercent) || 0))
+            : Math.min(95, Math.max(0, Number(neighborChordThresholdPercent) || 0));
+    }}
+
+    function setNeighborThresholdPercent(viewKey, value) {{
+        const nextValue = Math.min(95, Math.max(0, Number(value) || 0));
+        if (viewKey === 'bubble') {{
+            neighborNetworkThresholdPercent = nextValue;
+        }} else {{
+            neighborChordThresholdPercent = nextValue;
+        }}
+    }}
+
+    function getNeighborViewControlState(viewKey) {{
+        return {{
+            focusMode: ['all', 'selected', 'ego'].includes(neighborFocusMode) ? neighborFocusMode : 'all',
+            maxCategories: [8, 12, 16, 24].includes(Number(neighborMaxCategories)) ? Number(neighborMaxCategories) : 12,
+            labelMode: ['full', 'short', 'hover'].includes(neighborLabelMode) ? neighborLabelMode : 'short',
+            metric: getNeighborMetric(viewKey),
+            thresholdPercent: getNeighborThresholdPercent(viewKey),
+            chordOrder: ['strength', 'cells', 'alphabetical'].includes(neighborChordOrder) ? neighborChordOrder : 'strength',
+        }};
+    }}
+
+    function formatNeighborMetricLabel(metric) {{
+        if (metric === 'zscore') return '|z|';
+        if (metric === 'share') return 'share';
+        return 'edge count';
+    }}
+
+    function formatNeighborMetricValue(metric, value) {{
+        if (!Number.isFinite(value)) return 'n/a';
+        if (metric === 'share') return `${{(value * 100).toFixed(1)}}%`;
+        if (metric === 'zscore') return value.toFixed(2);
+        return formatNeighborCount(value);
+    }}
+
+    function renderNeighborVisualizationControlPanel(viewKey, viewState) {{
+        const controls = getNeighborViewControlState(viewKey);
+        const metricOptions = getNeighborMetricOptions(viewKey)
+            .map((metric) => {{
+                const selected = metric === controls.metric ? ' selected' : '';
+                return `<option value="${{metric}}"${{selected}}>${{escapeHtml(formatNeighborMetricLabel(metric))}}</option>`;
+            }})
+            .join('');
+        const maxCategoryOptions = [8, 12, 16, 24]
+            .map((value) => {{
+                const selected = value === controls.maxCategories ? ' selected' : '';
+                return `<option value="${{value}}"${{selected}}>${{value}}</option>`;
+            }})
+            .join('');
+        const labelOptions = [
+            ['full', 'Full'],
+            ['short', 'Short'],
+            ['hover', 'Hover only'],
+        ].map(([value, label]) => {{
+            const selected = value === controls.labelMode ? ' selected' : '';
+            return `<option value="${{value}}"${{selected}}>${{label}}</option>`;
+        }}).join('');
+        const focusOptions = [
+            ['all', 'All'],
+            ['selected', 'Selected only'],
+            ['ego', 'Selected + neighbors'],
+        ].map(([value, label]) => {{
+            const selected = value === controls.focusMode ? ' selected' : '';
+            return `<option value="${{value}}"${{selected}}>${{label}}</option>`;
+        }}).join('');
+        const orderOptions = viewKey === 'chord'
+            ? `
+                <div class="neighbor-control-group">
+                    <label>Order</label>
+                    <select id="neighbor-chord-order">
+                        <option value="strength"${{controls.chordOrder === 'strength' ? ' selected' : ''}}>Strength</option>
+                        <option value="cells"${{controls.chordOrder === 'cells' ? ' selected' : ''}}>Cell count</option>
+                        <option value="alphabetical"${{controls.chordOrder === 'alphabetical' ? ' selected' : ''}}>Alphabetical</option>
+                    </select>
+                </div>
+            `
+            : '';
+        const thresholdHint = `Hides connections below ${{controls.thresholdPercent}}% of the strongest visible ${{formatNeighborMetricLabel(controls.metric)}}.`;
+        const focusHint = controls.focusMode === 'all'
+            ? 'Show all matching categories.'
+            : 'Uses the pinned node, edge, arc, or ribbon as the focus seed.';
+        return `
+            <div class="neighbor-control-panel">
+                <div class="neighbor-control-grid">
+                    <div class="neighbor-control-group">
+                        <label>Focus</label>
+                        <select id="neighbor-focus-mode">${{focusOptions}}</select>
+                        <div class="neighbor-control-hint">${{focusHint}}</div>
+                    </div>
+                    <div class="neighbor-control-group">
+                        <label>Metric</label>
+                        <select id="neighbor-metric-mode">${{metricOptions}}</select>
+                    </div>
+                    <div class="neighbor-control-group">
+                        <label>Min strength</label>
+                        <input id="neighbor-threshold-range" type="range" min="0" max="95" step="5" value="${{controls.thresholdPercent}}">
+                        <div class="neighbor-control-hint" id="neighbor-threshold-label">${{thresholdHint}}</div>
+                    </div>
+                    <div class="neighbor-control-group">
+                        <label>Max categories</label>
+                        <select id="neighbor-max-categories">${{maxCategoryOptions}}</select>
+                    </div>
+                    <div class="neighbor-control-group">
+                        <label>Labels</label>
+                        <select id="neighbor-label-mode">${{labelOptions}}</select>
+                    </div>
+                    ${{orderOptions}}
+                </div>
+            </div>
+        `;
+    }}
+
+    function bindNeighborVisualizationSettingControls(container, viewKey) {{
+        const focusSelect = container.querySelector('#neighbor-focus-mode');
+        const metricSelect = container.querySelector('#neighbor-metric-mode');
+        const thresholdInput = container.querySelector('#neighbor-threshold-range');
+        const thresholdLabel = container.querySelector('#neighbor-threshold-label');
+        const maxCategoriesSelect = container.querySelector('#neighbor-max-categories');
+        const labelModeSelect = container.querySelector('#neighbor-label-mode');
+        const chordOrderSelect = container.querySelector('#neighbor-chord-order');
+        focusSelect?.addEventListener('change', () => {{
+            neighborFocusMode = focusSelect.value || 'all';
+            renderNeighborStats();
+        }});
+        metricSelect?.addEventListener('change', () => {{
+            setNeighborMetric(viewKey, metricSelect.value || '');
+            renderNeighborStats();
+        }});
+        thresholdInput?.addEventListener('input', () => {{
+            const metric = getNeighborMetric(viewKey);
+            if (thresholdLabel) {{
+                thresholdLabel.textContent = `Hides connections below ${{Number(thresholdInput.value || 0)}}% of the strongest visible ${{formatNeighborMetricLabel(metric)}}.`;
+            }}
+        }});
+        thresholdInput?.addEventListener('change', () => {{
+            setNeighborThresholdPercent(viewKey, thresholdInput.value);
+            renderNeighborStats();
+        }});
+        maxCategoriesSelect?.addEventListener('change', () => {{
+            neighborMaxCategories = Number(maxCategoriesSelect.value) || 12;
+            renderNeighborStats();
+        }});
+        labelModeSelect?.addEventListener('change', () => {{
+            neighborLabelMode = labelModeSelect.value || 'short';
+            renderNeighborStats();
+        }});
+        chordOrderSelect?.addEventListener('change', () => {{
+            neighborChordOrder = chordOrderSelect.value || 'strength';
+            renderNeighborStats();
+        }});
+    }}
+
+    function getNeighborSelectedSeedIndices(viewState) {{
+        const focus = normalizeNeighborFocus(selectedNeighborFocus, viewState);
+        if (!focus) return {{ focus: null, seedIndices: [] }};
+        const seedIndices = focus.kind === 'category'
+            ? [focus.sourceIdx]
+            : Array.from(new Set([focus.sourceIdx, focus.targetIdx]));
+        return {{ focus, seedIndices }};
+    }}
+
+    function getNeighborPairMetrics(viewState, sourceIdx, targetIdx) {{
+        const forwardCount = Math.max(0, Number(viewState.counts[sourceIdx]?.[targetIdx] ?? 0));
+        const reverseCount = sourceIdx === targetIdx
+            ? forwardCount
+            : Math.max(0, Number(viewState.counts[targetIdx]?.[sourceIdx] ?? 0));
+        const forwardZ = Number(viewState.zscores?.[sourceIdx]?.[targetIdx]);
+        const reverseZ = sourceIdx === targetIdx ? forwardZ : Number(viewState.zscores?.[targetIdx]?.[sourceIdx]);
+        const meanZ = Number.isFinite(forwardZ) && Number.isFinite(reverseZ)
+            ? (forwardZ + reverseZ) / 2
+            : Number.isFinite(forwardZ)
+                ? forwardZ
+                : reverseZ;
+        const maxAbsZ = Math.max(
+            Number.isFinite(forwardZ) ? Math.abs(forwardZ) : 0,
+            Number.isFinite(reverseZ) ? Math.abs(reverseZ) : 0,
+        );
+        return {{
+            sourceIdx,
+            targetIdx,
+            forwardCount,
+            reverseCount,
+            symmetricCount: sourceIdx === targetIdx ? forwardCount : forwardCount + reverseCount,
+            forwardZ,
+            reverseZ,
+            meanZ,
+            maxAbsZ,
+        }};
+    }}
+
+    function getNeighborPairMetricValue(pairMetrics, metric, totalSymmetricCount = 0) {{
+        if (!pairMetrics) return 0;
+        if (metric === 'zscore') return Number(pairMetrics.maxAbsZ || 0);
+        if (metric === 'share') {{
+            return totalSymmetricCount > 0 ? (Number(pairMetrics.symmetricCount || 0) / totalSymmetricCount) : 0;
+        }}
+        return Number(pairMetrics.symmetricCount || 0);
+    }}
+
+    function getNeighborFocusStrength(viewState, sourceIdx, targetIdx, metric) {{
+        const pairMetrics = getNeighborPairMetrics(viewState, sourceIdx, targetIdx);
+        if (metric === 'zscore') return pairMetrics.maxAbsZ;
+        return pairMetrics.symmetricCount;
+    }}
+
+    function getNeighborFocusedIndices(viewState, metric, controls) {{
+        if (controls.focusMode === 'all') {{
+            const limited = limitNeighborViewIndices(viewState.matches, viewState.nCells, controls.maxCategories);
+            return {{
+                indices: limited.indices,
+                trimmedCount: limited.trimmedCount,
+                focus: null,
+                seedIndices: [],
+            }};
+        }}
+
+        const {{ focus, seedIndices }} = getNeighborSelectedSeedIndices(viewState);
+        const matchSet = new Set(viewState.matches);
+        const filteredSeeds = seedIndices.filter((idx) => matchSet.has(idx));
+        if (!focus || !filteredSeeds.length) {{
+            return {{
+                error: 'Pin a node, edge, arc, or ribbon first to focus the view.',
+                indices: [],
+                trimmedCount: 0,
+                focus: null,
+                seedIndices: [],
+            }};
+        }}
+
+        const rankedNeighbors = viewState.matches
+            .filter((idx) => !filteredSeeds.includes(idx))
+            .map((idx) => {{
+                const score = filteredSeeds.reduce((maxScore, seedIdx) => {{
+                    return Math.max(maxScore, getNeighborFocusStrength(viewState, seedIdx, idx, metric));
+                }}, 0);
+                return {{ idx, score, nCells: Number(viewState.nCells[idx] ?? 0), label: String(viewState.categories[idx] ?? '') }};
+            }})
+            .filter((entry) => entry.score > 0)
+            .sort((a, b) => {{
+                if (b.score !== a.score) return b.score - a.score;
+                if (b.nCells !== a.nCells) return b.nCells - a.nCells;
+                return a.label.localeCompare(b.label);
+            }});
+
+        const extrasAllowed = controls.focusMode === 'selected' && focus.kind === 'pair'
+            ? 0
+            : Math.max(0, controls.maxCategories - filteredSeeds.length);
+        const extraIndices = rankedNeighbors.slice(0, extrasAllowed).map((entry) => entry.idx);
+        const indices = Array.from(new Set([...filteredSeeds, ...extraIndices]));
+        return {{
+            indices,
+            trimmedCount: Math.max(0, viewState.matches.length - indices.length),
+            focus,
+            seedIndices: filteredSeeds,
+        }};
+    }}
+
+    function getNeighborRenderedLabel(text, maxLength) {{
+        if (neighborLabelMode === 'hover') return '';
+        if (neighborLabelMode === 'full') return String(text || '');
+        return truncateNeighborStatLabel(text, maxLength);
+    }}
+
+    function sortNeighborIndicesForChord(indices, viewState, order) {{
+        const next = indices.slice();
+        if (order === 'alphabetical') {{
+            next.sort((a, b) => String(viewState.categories[a] || '').localeCompare(String(viewState.categories[b] || '')));
+            return next;
+        }}
+        if (order === 'cells') {{
+            next.sort((a, b) => {{
+                const diff = Number(viewState.nCells[b] ?? 0) - Number(viewState.nCells[a] ?? 0);
+                if (diff !== 0) return diff;
+                return String(viewState.categories[a] || '').localeCompare(String(viewState.categories[b] || ''));
+            }});
+            return next;
+        }}
+        next.sort((a, b) => {{
+            const aTotal = getNeighborSymmetricTotal(viewState.counts, a);
+            const bTotal = getNeighborSymmetricTotal(viewState.counts, b);
+            if (bTotal !== aTotal) return bTotal - aTotal;
+            return String(viewState.categories[a] || '').localeCompare(String(viewState.categories[b] || ''));
+        }});
+        return next;
+    }}
+
     function getNeighborRowTotal(counts, sourceIdx) {{
         const row = counts[sourceIdx] || [];
         return row.reduce((sum, value) => sum + (Number.isFinite(value) ? value : 0), 0);
@@ -14998,11 +15385,22 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return focus.kind === 'pair' && sourceIdx === focus.sourceIdx && targetIdx === focus.targetIdx;
     }}
 
-    function neighborElementRelatesToFocus(element, focus) {{
+    function neighborElementRelatesToFocus(element, focus, viewState = null) {{
         const kind = element.getAttribute('data-neighbor-kind');
         const sourceIdx = Number(element.getAttribute('data-neighbor-source-idx'));
         if (focus.kind === 'category') {{
-            if (kind === 'category') return sourceIdx === focus.sourceIdx;
+            if (kind === 'category') {{
+                if (sourceIdx === focus.sourceIdx) return true;
+                if (!viewState) return false;
+                const forward = Math.max(0, Number(viewState.counts?.[focus.sourceIdx]?.[sourceIdx] ?? 0));
+                const reverse = Math.max(0, Number(viewState.counts?.[sourceIdx]?.[focus.sourceIdx] ?? 0));
+                const forwardZ = Number(viewState.zscores?.[focus.sourceIdx]?.[sourceIdx]);
+                const reverseZ = Number(viewState.zscores?.[sourceIdx]?.[focus.sourceIdx]);
+                return forward > 0
+                    || reverse > 0
+                    || (Number.isFinite(forwardZ) && Math.abs(forwardZ) > 0)
+                    || (Number.isFinite(reverseZ) && Math.abs(reverseZ) > 0);
+            }}
             const targetIdx = Number(element.getAttribute('data-neighbor-target-idx'));
             return sourceIdx === focus.sourceIdx || targetIdx === focus.sourceIdx;
         }}
@@ -15143,7 +15541,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             interactiveElements.forEach((element) => {{
                 const isHovered = hoveredNeighborFocus && neighborElementMatchesFocus(element, hoveredNeighborFocus);
                 const isSelected = selectedNeighborFocus && neighborElementMatchesFocus(element, selectedNeighborFocus);
-                const isRelated = !activeFocus || neighborElementRelatesToFocus(element, activeFocus);
+                const isRelated = !activeFocus || neighborElementRelatesToFocus(element, activeFocus, viewState);
                 element.classList.toggle('is-hovered', !!isHovered);
                 element.classList.toggle('is-selected', !!isSelected);
                 element.classList.toggle('is-related', !!activeFocus && !!isRelated);
@@ -15284,93 +15682,87 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function renderNeighborNetworkView(viewState) {{
-        const {{ categories, counts, nCells, zscores, matches, permN }} = viewState;
-        const {{ indices, trimmedCount }} = limitNeighborViewIndices(matches, nCells, 16);
+        const {{ categories, nCells, zscores, permN }} = viewState;
+        const controls = getNeighborViewControlState('bubble');
+        const controlPanel = renderNeighborVisualizationControlPanel('bubble', viewState);
         const vizState = getNeighborVisualizationState('bubble');
-        if (!zscores) {{
-            return '<div class="agg-group-meta">Network view needs permutation-based neighbor z-scores for this annotation.</div>';
-        }}
-        if (!indices.length) {{
-            return '<div class="agg-group-meta">No matching cell types.</div>';
+        if (controls.metric === 'zscore' && !zscores) {{
+            return controlPanel + '<div class="agg-group-meta">This viewer has no neighbor z-scores for the current annotation. Switch the metric to edge count or share.</div>';
         }}
 
-        const edgeCandidates = [];
-        let maxAbsZ = 0;
+        const focusState = getNeighborFocusedIndices(viewState, controls.metric, controls);
+        if (focusState.error) {{
+            return controlPanel + `<div class="agg-group-meta">${{escapeHtml(focusState.error)}}</div>`;
+        }}
+        const {{ indices, trimmedCount, focus, seedIndices }} = focusState;
+        if (!indices.length) {{
+            return controlPanel + '<div class="agg-group-meta">No matching cell types.</div>';
+        }}
+
+        const pairCandidates = [];
+        let totalSymmetricCount = 0;
+        let maxZMagnitude = 0;
         for (let i = 0; i < indices.length; i++) {{
             for (let j = i + 1; j < indices.length; j++) {{
-                const sourceIdx = indices[i];
-                const targetIdx = indices[j];
-                const forward = Number(zscores?.[sourceIdx]?.[targetIdx]);
-                const reverse = Number(zscores?.[targetIdx]?.[sourceIdx]);
-                const magnitude = Math.max(
-                    Number.isFinite(forward) ? Math.abs(forward) : 0,
-                    Number.isFinite(reverse) ? Math.abs(reverse) : 0,
-                );
-                if (!(magnitude > 0)) continue;
-                const score = Number.isFinite(forward) && Number.isFinite(reverse)
-                    ? (forward + reverse) / 2
-                    : Number.isFinite(forward)
-                        ? forward
-                        : reverse;
-                edgeCandidates.push({{
-                    sourceIdx,
-                    targetIdx,
-                    score,
-                    forward,
-                    reverse,
-                    magnitude,
-                }});
-                maxAbsZ = Math.max(maxAbsZ, magnitude);
+                const pairMetrics = getNeighborPairMetrics(viewState, indices[i], indices[j]);
+                totalSymmetricCount += pairMetrics.symmetricCount;
+                maxZMagnitude = Math.max(maxZMagnitude, pairMetrics.maxAbsZ);
+                if (pairMetrics.symmetricCount > 0 || pairMetrics.maxAbsZ > 0) {{
+                    pairCandidates.push(pairMetrics);
+                }}
             }}
         }}
-        if (!(maxAbsZ > 0) || !edgeCandidates.length) {{
-            return '<div class="agg-group-meta">Network view needs inter-category z-scores for the current annotation.</div>';
-        }}
 
-        edgeCandidates.sort((a, b) => b.magnitude - a.magnitude);
-        const baseThreshold = Math.max(0.75, maxAbsZ * 0.22);
-        let edgeEntries = edgeCandidates.filter((entry) => entry.magnitude >= baseThreshold);
-        if (edgeEntries.length < Math.min(8, edgeCandidates.length)) {{
-            edgeEntries = edgeCandidates.slice(0, Math.min(edgeCandidates.length, Math.max(8, indices.length * 2)));
-        }} else if (edgeEntries.length > 28) {{
-            edgeEntries = edgeEntries.slice(0, 28);
-        }}
-
-        edgeEntries = edgeEntries.map((entry) => ({{
+        let edgeEntries = pairCandidates.map((entry) => ({{
             ...entry,
-            weightNormalized: maxAbsZ > 0 ? clamp01(entry.magnitude / maxAbsZ) : 0,
+            metricValue: getNeighborPairMetricValue(entry, controls.metric, totalSymmetricCount),
         }}));
+        const maxMetric = edgeEntries.reduce((maxValue, entry) => Math.max(maxValue, Number(entry.metricValue) || 0), 0);
+        const thresholdRaw = maxMetric > 0 ? maxMetric * (controls.thresholdPercent / 100) : 0;
+        edgeEntries = edgeEntries.filter((entry) => entry.metricValue > 0 && entry.metricValue >= thresholdRaw);
 
-        const width = 540;
-        const height = 430;
-        const positions = computeNeighborSpringLayout(
-            indices.map((idx) => ({{ idx }})),
-            edgeEntries,
-            width,
-            height,
-            60,
-        );
-        const maxN = indices.reduce((maxValue, idx) => Math.max(maxValue, Number(nCells[idx] ?? 0)), 0);
+        if (controls.focusMode === 'selected' && seedIndices.length) {{
+            edgeEntries = edgeEntries.filter((entry) => seedIndices.includes(entry.sourceIdx) || seedIndices.includes(entry.targetIdx));
+        }}
+
+        const visibleNodeIndices = Array.from(new Set(
+            edgeEntries.length
+                ? [
+                    ...indices.filter((idx) => seedIndices.includes(idx)),
+                    ...edgeEntries.flatMap((entry) => [entry.sourceIdx, entry.targetIdx]),
+                ]
+                : indices.filter((idx) => seedIndices.includes(idx) || controls.focusMode === 'all')
+        ));
+        const fallbackNodeIndices = visibleNodeIndices.length ? visibleNodeIndices : indices.slice(0, Math.max(1, Math.min(indices.length, controls.maxCategories)));
+        const nodeEntries = fallbackNodeIndices.map((idx) => ({{ idx }}));
+        const positions = computeNeighborSpringLayout(nodeEntries, edgeEntries.map((entry) => ({{
+            sourceIdx: entry.sourceIdx,
+            targetIdx: entry.targetIdx,
+            weightNormalized: maxMetric > 0 ? clamp01(entry.metricValue / maxMetric) : 0,
+        }})), 540, 430, 60);
+        const maxN = fallbackNodeIndices.reduce((maxValue, idx) => Math.max(maxValue, Number(nCells[idx] ?? 0)), 0);
 
         const edgesSvg = edgeEntries
             .slice()
-            .sort((a, b) => a.magnitude - b.magnitude)
+            .sort((a, b) => a.metricValue - b.metricValue)
             .map((entry) => {{
                 const sourcePos = positions.get(entry.sourceIdx);
                 const targetPos = positions.get(entry.targetIdx);
                 if (!sourcePos || !targetPos) return '';
                 const path = `M ${{sourcePos.x.toFixed(2)}} ${{sourcePos.y.toFixed(2)}} L ${{targetPos.x.toFixed(2)}} ${{targetPos.y.toFixed(2)}}`;
-                const strokeWidth = 1.4 + 7.4 * Math.sqrt(entry.weightNormalized || 0);
+                const weightNormalized = maxMetric > 0 ? clamp01(entry.metricValue / maxMetric) : 0;
+                const strokeWidth = 1.4 + 7.4 * Math.sqrt(weightNormalized || 0);
                 const sourceLabel = categories[entry.sourceIdx];
                 const targetLabel = categories[entry.targetIdx];
-                const scoreLabel = Number.isFinite(entry.score) ? entry.score.toFixed(2) : 'n/a';
-                const forwardCount = Number(counts[entry.sourceIdx]?.[entry.targetIdx] ?? 0);
-                const reverseCount = Number(counts[entry.targetIdx]?.[entry.sourceIdx] ?? 0);
+                const metricLabel = formatNeighborMetricValue(controls.metric, entry.metricValue);
+                const stroke = controls.metric === 'zscore'
+                    ? getNeighborEdgeStrokeColor(entry.meanZ, maxZMagnitude)
+                    : rgbToRgba([96, 103, 112], 0.24 + 0.48 * Math.sqrt(weightNormalized || 0));
                 return `
                     <path
                         class="neighbor-network-edge neighbor-interactive"
                         d="${{path}}"
-                        stroke="${{getNeighborEdgeStrokeColor(entry.score, maxAbsZ)}}"
+                        stroke="${{stroke}}"
                         stroke-width="${{strokeWidth.toFixed(2)}}"
                         data-neighbor-kind="pair"
                         data-neighbor-source-idx="${{entry.sourceIdx}}"
@@ -15379,23 +15771,29 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         role="button"
                         tabindex="0"
                     >
-                        <title>${{escapeHtml(sourceLabel)}} ↔ ${{escapeHtml(targetLabel)}} | mean z=${{scoreLabel}} | max |z|=${{entry.magnitude.toFixed(2)}} | ${{escapeHtml(sourceLabel)}}→${{escapeHtml(targetLabel)}}=${{formatNeighborCount(forwardCount)}} | ${{escapeHtml(targetLabel)}}→${{escapeHtml(sourceLabel)}}=${{formatNeighborCount(reverseCount)}}</title>
+                        <title>${{escapeHtml(sourceLabel)}} ↔ ${{escapeHtml(targetLabel)}} | ${{formatNeighborMetricLabel(controls.metric)}}=${{metricLabel}} | ${{escapeHtml(sourceLabel)}}→${{escapeHtml(targetLabel)}}=${{formatNeighborCount(entry.forwardCount)}} | ${{escapeHtml(targetLabel)}}→${{escapeHtml(sourceLabel)}}=${{formatNeighborCount(entry.reverseCount)}}${{Number.isFinite(entry.meanZ) ? ` | mean z=${{entry.meanZ.toFixed(2)}}` : ''}}</title>
                     </path>
                 `;
             }})
             .join('');
 
-        const nodesSvg = indices.map((categoryIdx) => {{
+        const nodesSvg = fallbackNodeIndices.map((categoryIdx) => {{
             const pos = positions.get(categoryIdx);
             if (!pos) return '';
             const label = categories[categoryIdx];
-            const short = truncateNeighborStatLabel(label, 18);
+            const renderedLabel = getNeighborRenderedLabel(label, 18);
             const nodeN = Number(nCells[categoryIdx] ?? 0);
             const radius = 9 + 14 * Math.sqrt(maxN > 0 ? clamp01(nodeN / maxN) : 0);
             const labelOffset = radius + 8;
-            const anchor = pos.x >= width / 2 ? 'start' : 'end';
+            const anchor = pos.x >= 270 ? 'start' : 'end';
             const labelX = pos.x + (anchor === 'start' ? labelOffset : -labelOffset);
             const subLabelY = pos.y + 13;
+            const labelText = renderedLabel
+                ? `<text class="neighbor-network-label" x="${{labelX.toFixed(2)}}" y="${{(pos.y + 3).toFixed(2)}}" text-anchor="${{anchor}}" pointer-events="none">${{escapeHtml(renderedLabel)}}</text>`
+                : '';
+            const metaText = neighborLabelMode === 'hover'
+                ? ''
+                : `<text class="neighbor-network-label meta" x="${{labelX.toFixed(2)}}" y="${{subLabelY.toFixed(2)}}" text-anchor="${{anchor}}" pointer-events="none">n=${{nodeN.toLocaleString()}}</text>`;
             return `
                 <g
                     class="neighbor-network-node neighbor-interactive"
@@ -15405,77 +15803,137 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     role="button"
                     tabindex="0"
                 >
-                    <title>${{escapeHtml(label)}} | n=${{nodeN.toLocaleString()}} | outgoing edges=${{formatNeighborCount(getNeighborRowTotal(counts, categoryIdx))}}</title>
+                    <title>${{escapeHtml(label)}} | n=${{nodeN.toLocaleString()}} | outgoing edges=${{formatNeighborCount(getNeighborRowTotal(viewState.counts, categoryIdx))}}</title>
                     <circle cx="${{pos.x.toFixed(2)}}" cy="${{pos.y.toFixed(2)}}" r="${{radius.toFixed(2)}}" fill="${{getCategoryColor(categoryIdx)}}"></circle>
-                    <text class="neighbor-network-label" x="${{labelX.toFixed(2)}}" y="${{(pos.y + 3).toFixed(2)}}" text-anchor="${{anchor}}" pointer-events="none">${{escapeHtml(short)}}</text>
-                    <text class="neighbor-network-label meta" x="${{labelX.toFixed(2)}}" y="${{subLabelY.toFixed(2)}}" text-anchor="${{anchor}}" pointer-events="none">n=${{nodeN.toLocaleString()}}</text>
+                    ${{labelText}}
+                    ${{metaText}}
                 </g>
             `;
         }}).join('');
 
         const trimNote = trimmedCount > 0
-            ? `<div class="neighbor-view-note">Showing the ${{indices.length}} largest matching categories by cell count. Filter to narrow the network further.</div>`
+            ? `<div class="neighbor-view-note">Showing ${{fallbackNodeIndices.length}} categories after focus and category limits. Broaden the search or raise Max categories to include more.</div>`
             : '';
-        const permNote = permN > 0
-            ? `Permutation z-scores from ${{permN.toLocaleString()}} shuffle${{permN === 1 ? '' : 's'}}.`
-            : 'Node size shows cell count. Edge width shows z-score magnitude and edge color shows the average enrichment sign.';
-        const svgWidth = (width * vizState.zoom).toFixed(1);
-        const svgHeight = (height * vizState.zoom).toFixed(1);
+        const focusLabel = focus
+            ? (focus.kind === 'category' ? focus.sourceLabel : `${{focus.sourceLabel}} ↔ ${{focus.targetLabel}}`)
+            : '';
+        const focusNote = controls.focusMode === 'all'
+            ? ''
+            : `<div class="neighbor-view-note">${{focus ? `Focused on ${{escapeHtml(focusLabel)}}. Selected only keeps edges touching the pinned selection, while Selected + neighbors keeps the whole local subgraph.` : 'Pin a node or edge first to focus the view.'}}</div>`;
+        const metricNote = controls.metric === 'zscore'
+            ? (permN > 0
+                ? `Edge width shows z-score magnitude from ${{permN.toLocaleString()}} shuffle${{permN === 1 ? '' : 's'}}, and edge color shows enrichment sign.`
+                : 'Edge width shows z-score magnitude and edge color shows enrichment sign.')
+            : `Edge width shows ${{formatNeighborMetricLabel(controls.metric)}}. Hover still shows raw counts${{zscores ? ' and z-scores' : ''}}.`;
+        const emptyNote = !edgeEntries.length
+            ? '<div class="neighbor-view-note">No inter-category edges pass the current focus and threshold settings.</div>'
+            : '';
+        const svgWidth = (540 * vizState.zoom).toFixed(1);
+        const svgHeight = (430 * vizState.zoom).toFixed(1);
         const scrollClass = vizState.expanded ? 'neighbor-visualization-scroll expanded' : 'neighbor-visualization-scroll';
+        const legendHtml = controls.metric === 'zscore'
+            ? `
+                <div class="neighbor-zscore-legend">
+                    <span>Depleted</span>
+                    <div class="neighbor-zscore-gradient"></div>
+                    <span>Enriched</span>
+                </div>
+            `
+            : '';
 
         return `
+            ${{controlPanel}}
             ${{trimNote}}
+            ${{focusNote}}
+            ${{emptyNote}}
             <div class="neighbor-visualization">
-                ${{renderNeighborVisualizationToolbar('bubble', 'Zoom to inspect dense subgraphs, or expand the viewport for larger networks.')}}
+                ${{renderNeighborVisualizationToolbar('bubble', 'Use focus mode and thresholding to simplify dense local neighborhood structure.')}}
                 <div data-neighbor-detail></div>
                 <div class="${{scrollClass}}" data-neighbor-scroll>
-                    <svg class="neighbor-svg" data-neighbor-svg data-neighbor-base-width="${{width}}" data-neighbor-base-height="${{height}}" data-neighbor-current-zoom="${{vizState.zoom}}" style="width:${{svgWidth}}px;height:${{svgHeight}}px;" viewBox="0 0 ${{width}} ${{height}}" role="img" aria-label="Neighbor enrichment network">
+                    <svg class="neighbor-svg" data-neighbor-svg data-neighbor-base-width="540" data-neighbor-base-height="430" data-neighbor-current-zoom="${{vizState.zoom}}" style="width:${{svgWidth}}px;height:${{svgHeight}}px;" viewBox="0 0 540 430" role="img" aria-label="Neighbor enrichment network">
                         ${{edgesSvg}}
                         ${{nodesSvg}}
                     </svg>
                 </div>
             </div>
-            <div class="neighbor-view-note">${{permNote}} Self-links are omitted here for clarity; use the table or chord view for those. Hover a node or edge for counts, z-scores, and cell totals.</div>
-            <div class="neighbor-zscore-legend">
-                <span>Depleted</span>
-                <div class="neighbor-zscore-gradient"></div>
-                <span>Enriched</span>
-            </div>
+            <div class="neighbor-view-note">${{metricNote}} Self-links stay in the table and chord view for readability.</div>
+            ${{legendHtml}}
         `;
     }}
 
     function renderNeighborChordDiagram(viewState) {{
-        const {{ categories, counts, nCells, matches }} = viewState;
-        const {{ indices, trimmedCount }} = limitNeighborViewIndices(matches, nCells, 12);
+        const {{ categories, nCells }} = viewState;
+        const controls = getNeighborViewControlState('chord');
+        const controlPanel = renderNeighborVisualizationControlPanel('chord', viewState);
         const vizState = getNeighborVisualizationState('chord');
-        if (indices.length < 2) {{
-            return '<div class="agg-group-meta">Chord view needs at least two matching cell types.</div>';
+        const focusState = getNeighborFocusedIndices(viewState, controls.metric, controls);
+        if (focusState.error) {{
+            return controlPanel + `<div class="agg-group-meta">${{escapeHtml(focusState.error)}}</div>`;
         }}
 
-        const matrix = indices.map(() => indices.map(() => 0));
-        for (let i = 0; i < indices.length; i++) {{
-            for (let j = i; j < indices.length; j++) {{
-                const sourceIdx = indices[i];
-                const targetIdx = indices[j];
-                if (i === j) {{
-                    matrix[i][j] = Math.max(0, Number(counts[sourceIdx]?.[targetIdx] ?? 0));
-                }} else {{
-                    const forward = Math.max(0, Number(counts[sourceIdx]?.[targetIdx] ?? 0));
-                    const reverse = Math.max(0, Number(counts[targetIdx]?.[sourceIdx] ?? 0));
-                    const value = forward + reverse;
-                    matrix[i][j] = value;
-                    matrix[j][i] = value;
+        const orderedIndices = sortNeighborIndicesForChord(focusState.indices, viewState, controls.chordOrder);
+        if (orderedIndices.length < 2) {{
+            return controlPanel + '<div class="agg-group-meta">Chord view needs at least two visible cell types after the current focus and category settings.</div>';
+        }}
+
+        const pairCandidates = [];
+        let totalSymmetricCount = 0;
+        for (let i = 0; i < orderedIndices.length; i++) {{
+            for (let j = i; j < orderedIndices.length; j++) {{
+                const pairMetrics = getNeighborPairMetrics(viewState, orderedIndices[i], orderedIndices[j]);
+                totalSymmetricCount += pairMetrics.symmetricCount;
+                if (pairMetrics.symmetricCount > 0) {{
+                    pairCandidates.push(pairMetrics);
                 }}
             }}
         }}
-
-        const totals = matrix.map((row) => row.reduce((sum, value) => sum + (Number.isFinite(value) ? value : 0), 0));
-        const grandTotal = totals.reduce((sum, value) => sum + value, 0);
-        if (!(grandTotal > 0)) {{
-            return '<div class="agg-group-meta">No neighbor connections are available for the current annotation.</div>';
+        if (!(totalSymmetricCount > 0)) {{
+            return controlPanel + '<div class="agg-group-meta">No neighbor connections are available for the current annotation.</div>';
         }}
 
-        const maxLinkValue = matrix.reduce((maxValue, row) => Math.max(maxValue, ...row), 0);
+        let linkEntries = pairCandidates.map((entry) => ({{
+            ...entry,
+            metricValue: getNeighborPairMetricValue(entry, controls.metric, totalSymmetricCount),
+        }}));
+        const maxMetric = linkEntries.reduce((maxValue, entry) => Math.max(maxValue, Number(entry.metricValue) || 0), 0);
+        const thresholdRaw = maxMetric > 0 ? maxMetric * (controls.thresholdPercent / 100) : 0;
+        linkEntries = linkEntries.filter((entry) => entry.metricValue > 0 && entry.metricValue >= thresholdRaw);
+
+        if (controls.focusMode === 'selected' && focusState.seedIndices.length) {{
+            linkEntries = linkEntries.filter((entry) => focusState.seedIndices.includes(entry.sourceIdx) || focusState.seedIndices.includes(entry.targetIdx));
+        }}
+        if (!linkEntries.length) {{
+            return controlPanel + '<div class="agg-group-meta">No chord ribbons pass the current focus and threshold settings.</div>';
+        }}
+
+        const visibleIndices = Array.from(new Set(linkEntries.flatMap((entry) => [entry.sourceIdx, entry.targetIdx])));
+        if (visibleIndices.length < 2) {{
+            return controlPanel + '<div class="agg-group-meta">Chord view needs at least two connected cell types after the current focus and threshold settings.</div>';
+        }}
+
+        const indices = sortNeighborIndicesForChord(visibleIndices, viewState, controls.chordOrder);
+        const matrix = indices.map(() => indices.map(() => 0));
+        const totalsByIndex = new Map(indices.map((idx) => [idx, 0]));
+        linkEntries.forEach((entry) => {{
+            const i = indices.indexOf(entry.sourceIdx);
+            const j = indices.indexOf(entry.targetIdx);
+            if (i < 0 || j < 0) return;
+            matrix[i][j] = entry.metricValue;
+            if (i !== j) {{
+                matrix[j][i] = entry.metricValue;
+            }}
+            totalsByIndex.set(entry.sourceIdx, Number(totalsByIndex.get(entry.sourceIdx) || 0) + entry.metricValue);
+            if (entry.sourceIdx !== entry.targetIdx) {{
+                totalsByIndex.set(entry.targetIdx, Number(totalsByIndex.get(entry.targetIdx) || 0) + entry.metricValue);
+            }}
+        }});
+
+        const totals = indices.map((idx) => Number(totalsByIndex.get(idx) || 0));
+        const grandTotal = totals.reduce((sum, value) => sum + value, 0);
+        if (!(grandTotal > 0)) {{
+            return controlPanel + '<div class="agg-group-meta">No chord ribbons pass the current focus and threshold settings.</div>';
+        }}
+
         const gap = 0.045;
         const availableAngle = Math.max(0.5, (Math.PI * 2) - gap * indices.length);
         let angleCursor = -Math.PI / 2;
@@ -15487,7 +15945,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             return {{ start, end, mid: (start + end) / 2, span }};
         }});
 
-        // Sub-allocate angles within each arc proportionally to each outgoing connection
         const subLayout = indices.map((_, i) => {{
             const total = totals[i];
             let cursor = layout[i].start;
@@ -15510,7 +15967,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         const arcs = indices.map((categoryIdx, pos) => {{
             const label = categories[categoryIdx];
-            const totalLabel = formatNeighborCount(totals[pos]);
+            const totalLabel = formatNeighborMetricValue(controls.metric, totals[pos]);
             return `
                 <path
                     class="neighbor-chord-arc neighbor-interactive"
@@ -15523,63 +15980,52 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     role="button"
                     tabindex="0"
                 >
-                    <title>${{escapeHtml(label)}} | n=${{Number(nCells[categoryIdx] ?? 0).toLocaleString()}} | symmetric edges=${{totalLabel}}</title>
+                    <title>${{escapeHtml(label)}} | n=${{Number(nCells[categoryIdx] ?? 0).toLocaleString()}} | total ${{formatNeighborMetricLabel(controls.metric)}}=${{totalLabel}}</title>
                 </path>
             `;
         }}).join('');
 
-        // Arc labels — horizontal text positioned outside each arc
-        const arcLabels = indices.map((categoryIdx, pos) => {{
-            const short = truncateNeighborStatLabel(categories[categoryIdx], 13);
-            const pt = polarToCartesian(cx, cy, labelRadius, layout[pos].mid);
-            const anchor = pt.x >= cx ? 'start' : 'end';
-            return `<text class="neighbor-chord-arc-label" x="${{pt.x.toFixed(2)}}" y="${{pt.y.toFixed(2)}}" text-anchor="${{anchor}}" dominant-baseline="middle" pointer-events="none">${{escapeHtml(short)}}</text>`;
-        }}).join('');
+        const arcLabels = neighborLabelMode === 'hover'
+            ? ''
+            : indices.map((categoryIdx, pos) => {{
+                const renderedLabel = getNeighborRenderedLabel(categories[categoryIdx], 13);
+                const pt = polarToCartesian(cx, cy, labelRadius, layout[pos].mid);
+                const anchor = pt.x >= cx ? 'start' : 'end';
+                return `<text class="neighbor-chord-arc-label" x="${{pt.x.toFixed(2)}}" y="${{pt.y.toFixed(2)}}" text-anchor="${{anchor}}" dominant-baseline="middle" pointer-events="none">${{escapeHtml(renderedLabel)}}</text>`;
+            }}).join('');
 
-        const linkEntries = [];
-        for (let i = 0; i < indices.length; i++) {{
-            for (let j = i; j < indices.length; j++) {{
-                const value = Number(matrix[i][j] ?? 0);
-                if (!(value > 0)) continue;
-                linkEntries.push({{ i, j, value }});
-            }}
-        }}
-
-        // Render thicker ribbons first so strong connections sit on top
         const links = linkEntries
-            .sort((a, b) => a.value - b.value)
+            .slice()
+            .sort((a, b) => a.metricValue - b.metricValue)
             .map((entry) => {{
-                const sourceIdx = indices[entry.i];
-                const targetIdx = indices[entry.j];
-                const sourceLabel = categories[sourceIdx];
-                const targetLabel = categories[targetIdx];
-                const sourceColor = cssColorToRgb(getCategoryColor(sourceIdx));
-                const targetColor = cssColorToRgb(getCategoryColor(targetIdx));
-                const alpha = entry.i === entry.j
+                const i = indices.indexOf(entry.sourceIdx);
+                const j = indices.indexOf(entry.targetIdx);
+                if (i < 0 || j < 0) return '';
+                const sourceLabel = categories[entry.sourceIdx];
+                const targetLabel = categories[entry.targetIdx];
+                const sourceColor = cssColorToRgb(getCategoryColor(entry.sourceIdx));
+                const targetColor = cssColorToRgb(getCategoryColor(entry.targetIdx));
+                const alpha = entry.sourceIdx === entry.targetIdx
                     ? 0.40
-                    : 0.18 + 0.22 * Math.sqrt(clamp01(entry.value / maxLinkValue));
-                const fillColor = entry.i === entry.j
+                    : 0.18 + 0.22 * Math.sqrt(maxMetric > 0 ? clamp01(entry.metricValue / maxMetric) : 0);
+                const fillColor = entry.sourceIdx === entry.targetIdx
                     ? rgbToRgba(sourceColor, alpha)
                     : rgbToRgba(mixRgb(sourceColor, targetColor, 0.5), alpha);
-                let path = '';
-                let title = '';
-                if (entry.i === entry.j) {{
-                    path = describeChordSelfRibbon(cx, cy, innerRadius, subLayout[entry.i][entry.j]);
-                    title = `${{escapeHtml(sourceLabel)}} self-links | edges=${{formatNeighborCount(entry.value)}}`;
-                }} else {{
-                    path = describeChordRibbon(cx, cy, innerRadius, subLayout[entry.i][entry.j], subLayout[entry.j][entry.i]);
-                    const forward = Math.max(0, Number(counts[sourceIdx]?.[targetIdx] ?? 0));
-                    const reverse = Math.max(0, Number(counts[targetIdx]?.[sourceIdx] ?? 0));
-                    title = `${{escapeHtml(sourceLabel)}} ↔ ${{escapeHtml(targetLabel)}} | symmetric edges=${{formatNeighborCount(entry.value)}} | ${{escapeHtml(sourceLabel)}}→${{escapeHtml(targetLabel)}}=${{formatNeighborCount(forward)}} | ${{escapeHtml(targetLabel)}}→${{escapeHtml(sourceLabel)}}=${{formatNeighborCount(reverse)}}`;
-                }}
+                const metricLabel = formatNeighborMetricValue(controls.metric, entry.metricValue);
+                const path = entry.sourceIdx === entry.targetIdx
+                    ? describeChordSelfRibbon(cx, cy, innerRadius, subLayout[i][j])
+                    : describeChordRibbon(cx, cy, innerRadius, subLayout[i][j], subLayout[j][i]);
+                const title = entry.sourceIdx === entry.targetIdx
+                    ? `${{escapeHtml(sourceLabel)}} self-links | ${{formatNeighborMetricLabel(controls.metric)}}=${{metricLabel}} | edges=${{formatNeighborCount(entry.symmetricCount)}}`
+                    : `${{escapeHtml(sourceLabel)}} ↔ ${{escapeHtml(targetLabel)}} | ${{formatNeighborMetricLabel(controls.metric)}}=${{metricLabel}} | ${{escapeHtml(sourceLabel)}}→${{escapeHtml(targetLabel)}}=${{formatNeighborCount(entry.forwardCount)}} | ${{escapeHtml(targetLabel)}}→${{escapeHtml(sourceLabel)}}=${{formatNeighborCount(entry.reverseCount)}}`;
                 return `
                     <path
                         class="neighbor-chord-link neighbor-interactive"
                         d="${{path}}"
                         fill="${{fillColor}}"
                         data-neighbor-kind="pair"
-                        data-neighbor-source-idx="${{sourceIdx}}"
-                        data-neighbor-target-idx="${{targetIdx}}"
+                        data-neighbor-source-idx="${{entry.sourceIdx}}"
+                        data-neighbor-target-idx="${{entry.targetIdx}}"
                         data-neighbor-directional="0"
                         role="button"
                         tabindex="0"
@@ -15594,22 +16040,35 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             return `
                 <div class="neighbor-chord-legend-item neighbor-interactive" data-neighbor-kind="category" data-neighbor-source-idx="${{categoryIdx}}" role="button" tabindex="0">
                     <span class="agg-dot" style="background:${{getCategoryColor(categoryIdx)}}"></span>
-                    <span>${{escapeHtml(categories[categoryIdx])}} · n=${{Number(nCells[categoryIdx] ?? 0).toLocaleString()}} · edges=${{formatNeighborCount(totals[pos])}}</span>
+                    <span>${{escapeHtml(categories[categoryIdx])}} · n=${{Number(nCells[categoryIdx] ?? 0).toLocaleString()}} · ${{formatNeighborMetricLabel(controls.metric)}}=${{formatNeighborMetricValue(controls.metric, totals[pos])}}</span>
                 </div>
             `;
         }}).join('');
 
-        const trimNote = trimmedCount > 0
-            ? `<div class="neighbor-view-note">Showing the ${{indices.length}} largest matching categories by cell count. Filter to narrow the chord further.</div>`
+        const trimNote = focusState.trimmedCount > 0
+            ? `<div class="neighbor-view-note">Showing ${{indices.length}} categories after focus, ordering, and category limits.</div>`
             : '';
+        const focusLabel = focusState.focus
+            ? (focusState.focus.kind === 'category'
+                ? focusState.focus.sourceLabel
+                : `${{focusState.focus.sourceLabel}} ↔ ${{focusState.focus.targetLabel}}`)
+            : '';
+        const focusNote = controls.focusMode === 'all'
+            ? ''
+            : `<div class="neighbor-view-note">Focused on ${{escapeHtml(focusLabel)}}. Selected only keeps ribbons touching the pinned selection, while Selected + neighbors keeps the full local chord.</div>`;
+        const metricNote = controls.metric === 'share'
+            ? 'Ribbon area shows share of visible connection volume after the current filters.'
+            : 'Ribbon area shows symmetric connection volume after the current filters.';
         const svgWidth = (width * vizState.zoom).toFixed(1);
         const svgHeight = (height * vizState.zoom).toFixed(1);
         const scrollClass = vizState.expanded ? 'neighbor-visualization-scroll expanded' : 'neighbor-visualization-scroll';
 
         return `
+            ${{controlPanel}}
             ${{trimNote}}
+            ${{focusNote}}
             <div class="neighbor-visualization">
-                ${{renderNeighborVisualizationToolbar('chord', 'Zoom to inspect ribbons and arcs, or expand the viewport for larger chord layouts.')}}
+                ${{renderNeighborVisualizationToolbar('chord', 'Use ordering, thresholding, and focus mode to simplify ribbon-heavy views.')}}
                 <div data-neighbor-detail></div>
                 <div class="${{scrollClass}}" data-neighbor-scroll>
                     <svg class="neighbor-svg" data-neighbor-svg data-neighbor-base-width="${{width}}" data-neighbor-base-height="${{height}}" data-neighbor-current-zoom="${{vizState.zoom}}" style="width:${{svgWidth}}px;height:${{svgHeight}}px;" viewBox="0 0 ${{width}} ${{height}}" role="img" aria-label="Neighbor connection chord diagram">
@@ -15620,7 +16079,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 </div>
                 <div class="neighbor-chord-legend">${{legend}}</div>
             </div>
-            <div class="neighbor-view-note">Ribbon area shows symmetric connection volume. Arc width per category is proportional to total neighbor edges. Self-links are shown as inner loops.</div>
+            <div class="neighbor-view-note">${{metricNote}} Self-links remain visible as inner loops when they pass the current threshold.</div>
         `;
     }}
 
@@ -15640,12 +16099,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         if (neighborStatsView === 'bubble') {{
             container.innerHTML = renderNeighborNetworkView(viewState);
+            bindNeighborVisualizationSettingControls(container, 'bubble');
             bindNeighborVisualizationControls(container, 'bubble');
             bindNeighborVisualizationInteractions(container, viewState);
             return;
         }}
         if (neighborStatsView === 'chord') {{
             container.innerHTML = renderNeighborChordDiagram(viewState);
+            bindNeighborVisualizationSettingControls(container, 'chord');
             bindNeighborVisualizationControls(container, 'chord');
             bindNeighborVisualizationInteractions(container, viewState);
             return;
