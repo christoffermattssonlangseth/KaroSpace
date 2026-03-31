@@ -1265,7 +1265,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             border-left: none;
         }}
         .color-panel {{
-            width: 280px;
+            width: 300px;
             padding: 12px;
             background: var(--panel-bg);
             border-left: 1px solid var(--border-color);
@@ -1956,15 +1956,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             stroke-linecap: round;
         }}
         .neighbor-network-edge.is-dimmed {{
-            stroke-opacity: 0.02;
+            stroke-opacity: 0.07;
         }}
         .neighbor-network-edge.is-related {{
-            stroke-opacity: 0.82;
+            stroke-opacity: 0.88;
         }}
         .neighbor-network-edge.is-hovered,
         .neighbor-network-edge.is-selected {{
-            stroke-opacity: 0.98;
-            filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.22));
+            stroke-opacity: 1;
+            filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.28));
         }}
         .neighbor-network-node circle {{
             stroke: rgba(255, 255, 255, 0.72);
@@ -1987,9 +1987,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .neighbor-network-label {{
             font-size: 10px;
             fill: var(--text-color);
+            paint-order: stroke fill;
+            stroke: var(--input-bg);
+            stroke-width: 3.5px;
+            stroke-linejoin: round;
         }}
         .neighbor-network-node.is-dimmed .neighbor-network-label {{
-            opacity: 0.02;
+            opacity: 0.05;
         }}
         .neighbor-network-node.is-related .neighbor-network-label {{
             font-weight: 700;
@@ -2021,17 +2025,30 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .neighbor-chord-link {{
             stroke: none;
         }}
+        .neighbor-chord-link.is-dimmed {{
+            opacity: 0.08;
+        }}
+        .neighbor-chord-link.is-related {{
+            opacity: 0.9;
+            filter: brightness(1.14);
+        }}
         .neighbor-chord-link.is-hovered,
         .neighbor-chord-link.is-selected {{
-            filter: brightness(1.1);
+            filter: brightness(1.22);
         }}
         .neighbor-chord-arc {{
             fill: none;
             stroke-linecap: butt;
         }}
+        .neighbor-chord-arc.is-dimmed {{
+            opacity: 0.24;
+        }}
+        .neighbor-chord-arc.is-related {{
+            filter: brightness(1.06);
+        }}
         .neighbor-chord-arc.is-hovered,
         .neighbor-chord-arc.is-selected {{
-            filter: brightness(1.04);
+            filter: brightness(1.14) drop-shadow(0 0 6px rgba(255,255,255,0.35));
         }}
         .neighbor-chord-legend {{
             display: grid;
@@ -2054,6 +2071,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .neighbor-chord-arc-label {{
             font-size: 10px;
             fill: var(--text-color);
+            paint-order: stroke fill;
+            stroke: var(--input-bg);
+            stroke-width: 3px;
+            stroke-linejoin: round;
         }}
         .neighbor-zscore-legend {{
             display: flex;
@@ -15753,7 +15774,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const sourcePos = positions.get(entry.sourceIdx);
                 const targetPos = positions.get(entry.targetIdx);
                 if (!sourcePos || !targetPos) return '';
-                const path = `M ${{sourcePos.x.toFixed(2)}} ${{sourcePos.y.toFixed(2)}} L ${{targetPos.x.toFixed(2)}} ${{targetPos.y.toFixed(2)}}`;
+                const edgeDx = targetPos.x - sourcePos.x;
+                const edgeDy = targetPos.y - sourcePos.y;
+                const edgeDist = Math.hypot(edgeDx, edgeDy);
+                const edgeNx = edgeDist > 0 ? -edgeDy / edgeDist : 0;
+                const edgeNy = edgeDist > 0 ? edgeDx / edgeDist : 0;
+                const edgeCurve = edgeDist * 0.13;
+                const edgeMx = (sourcePos.x + targetPos.x) / 2 + edgeNx * edgeCurve;
+                const edgeMy = (sourcePos.y + targetPos.y) / 2 + edgeNy * edgeCurve;
+                const path = `M ${{sourcePos.x.toFixed(2)}} ${{sourcePos.y.toFixed(2)}} Q ${{edgeMx.toFixed(2)}} ${{edgeMy.toFixed(2)}} ${{targetPos.x.toFixed(2)}} ${{targetPos.y.toFixed(2)}}`;
                 const weightNormalized = maxMetric > 0 ? clamp01(entry.metricValue / maxMetric) : 0;
                 const strokeWidth = 1.4 + 7.4 * Math.sqrt(weightNormalized || 0);
                 const sourceLabel = categories[entry.sourceIdx];
@@ -15995,7 +16024,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const renderedLabel = getNeighborRenderedLabel(categories[categoryIdx], 13);
                 const pt = polarToCartesian(cx, cy, labelRadius, layout[pos].mid);
                 const anchor = pt.x >= cx ? 'start' : 'end';
-                return `<text class="neighbor-chord-arc-label" x="${{pt.x.toFixed(2)}}" y="${{pt.y.toFixed(2)}}" text-anchor="${{anchor}}" dominant-baseline="middle" pointer-events="none">${{escapeHtml(renderedLabel)}}</text>`;
+                return `<text class="neighbor-chord-arc-label" x="${{pt.x.toFixed(2)}}" y="${{pt.y.toFixed(2)}}" text-anchor="${{anchor}}" dy="0.35em" pointer-events="none">${{escapeHtml(renderedLabel)}}</text>`;
             }}).join('');
 
         const links = linkEntries
