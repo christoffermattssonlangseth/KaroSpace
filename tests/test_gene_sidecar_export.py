@@ -199,10 +199,23 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert "id=\"selection-show-genes-btn\"" in html_text
     assert "Genes in selection" in html_text
     assert 'id="genes-tab-spatial"' in html_text
-    assert "Spatially variable" in html_text
     assert 'id="genes-tab-dotplot"' not in html_text
+    assert 'id="genes-tab-cell-de"' in html_text
+    assert 'id="dotplot-groupby"' not in html_text
+    assert 'id="dotplot-genes"' not in html_text
+    assert 'id="dotplot-grid"' not in html_text
+    assert ">Dotplot<" not in html_text
+    assert ">Spatial<" in html_text
+    assert ">Cell DE<" in html_text
     assert "function renderSpatialVariableGenes()" in html_text
     assert "Global Moran&apos;s I ranking precomputed at export." in html_text
+    assert "Neighborhood Follow-up" not in html_text
+    assert 'data-cluster-de-open="neighbors-enrichment"' not in html_text
+    assert 'data-cluster-de-open="neighbors-interactions"' not in html_text
+    assert "function renderComparisonCountSummary(" not in html_text
+    assert "renderComparisonNeighborSummary(clusterDeGroupby, clusterDeSourceCategory, clusterDeReferenceCategory)" not in html_text
+    assert "renderComparisonInteractionSummary(clusterDeGroupby, clusterDeSourceCategory, clusterDeReferenceCategory)" not in html_text
+    assert "Pairwise DE for <strong>" not in html_text
     assert "let modalSpacePanActive = false;" in html_text
     assert "Pan inside the modal even while Select or Annotate is active." in html_text
     assert 'id="shortcuts-overlay"' in html_text
@@ -243,9 +256,16 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert 'id="modal-blend-loading"' in html_text
     assert 'id="gene-discovery-panel"' in html_text
     assert 'id="gene-panel-new"' in html_text
+    assert 'id="color-tab-overview"' in html_text
+    assert 'id="color-tab-genes"' in html_text
     assert 'id="color-tab-compare"' in html_text
+    assert 'id="color-tab-neighbors"' in html_text
+    assert ">Overview<" in html_text
     assert ">Summary<" in html_text
-    assert ">Neighborhood<" in html_text
+    assert ">Sections<" in html_text
+    assert ">Neighbors<" in html_text
+    assert ">Enrichment<" in html_text
+    assert ">Interactions<" in html_text
     assert "function getGeneSearchResults(query, limit = GENE_DISCOVERY_MAX_RESULTS)" in html_text
     assert "function renderGeneDiscoveryPanel()" in html_text
     assert "function renderClusterDE()" in html_text
@@ -257,7 +277,7 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert "function ensureSectionSpatialIndex(section)" in html_text
     assert "function querySectionSpatialIndex(section, bbox)" in html_text
     assert "function getAvailableComparisonColors()" in html_text
-    assert "function renderComparisonCountSummary(colorCol, sourceCategory, referenceCategory)" in html_text
+    assert "function renderComparisonCountSummary(colorCol, sourceCategory, referenceCategory)" not in html_text
     assert "function renderComparisonNeighborSummary(colorCol, sourceCategory, referenceCategory)" in html_text
     assert "function renderComparisonInteractionSummary(colorCol, sourceCategory, referenceCategory)" in html_text
     assert "function renderClusterDEResultSection(colorCol, sourceCategory, referenceCategory)" in html_text
@@ -341,11 +361,12 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert "function runFullGroupDE(groupA, groupB)" in html_text
     assert "function renderGroupDE()" in html_text
     assert "function renderCompareInsights()" in html_text
-    assert 'class="insight-subsection"' in html_text
     assert 'id="cluster-de-summary"' in html_text
     assert 'id="group-de-summary"' in html_text
-    assert "Group-to-Group DE" in html_text
     assert 'id="group-de-panel"' in html_text
+    assert 'id="compare-tab-groups"' in html_text
+    assert 'id="compare-tab-regions"' in html_text
+    assert 'id="annotation-comparison"' in html_text
     assert 'id="group-de-source-spec"' in html_text
     assert 'id="group-de-source-value"' in html_text
     assert 'id="group-de-reference-value"' in html_text

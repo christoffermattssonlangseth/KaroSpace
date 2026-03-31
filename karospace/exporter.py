@@ -1308,6 +1308,27 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             gap: 6px;
             flex-wrap: wrap;
         }}
+        .insights-top-tabs {{
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 4px;
+        }}
+        .insights-top-tabs .color-tab {{
+            flex: 0 0 auto;
+            padding: 5px 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            overflow-wrap: normal;
+        }}
+        .insights-subtabs {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(62px, 1fr));
+            gap: 4px;
+        }}
+        .insights-subtabs .color-tab {{
+            flex: 0 0 auto;
+        }}
         .color-tab {{
             flex: 1 1 96px;
             min-width: 0;
@@ -2092,56 +2113,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             background: linear-gradient(to right, rgba(17,138,178,0.85), rgba(145,151,161,0.4), rgba(193,18,31,0.85));
         }}
 
-        /* Dotplot */
-        .dotplot-controls {{
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }}
-        .dotplot-grid {{
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            background: var(--input-bg);
-            overflow: auto;
-            max-height: 420px;
-        }}
-        .dotplot-row {{
-            display: grid;
-            grid-template-columns: 180px repeat(var(--dotplot-cols, 1), 24px);
-            align-items: center;
-            gap: 6px;
-            padding: 6px 8px;
-            border-bottom: 1px solid var(--border-color);
-        }}
-        .dotplot-row:last-child {{ border-bottom: none; }}
-        .dotplot-row.dotplot-header {{
-            position: sticky;
-            top: 0;
-            background: var(--panel-bg);
-            z-index: 1;
-        }}
-        .dotplot-label {{
-            font-size: 10px;
-            color: var(--text-color);
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }}
-        .dotplot-gene {{
-            font-size: 9px;
-            color: var(--muted-color);
-            text-align: center;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }}
-        .dotplot-dot {{
-            width: 20px;
-            height: 20px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }}
         .cluster-de-controls {{
             display: flex;
             flex-direction: column;
@@ -2224,6 +2195,27 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         .volcano-axis-label {{ font-size: 9px; fill: var(--muted-color); font-family: inherit; }}
         .volcano-threshold-line {{ stroke: var(--border-color); stroke-width: 1; stroke-dasharray: 3 3; }}
+        .samples-controls {{ display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }}
+        .samples-view-toggle {{ display: flex; gap: 4px; }}
+        .samples-chart-container {{ position: relative; overflow: auto; max-height: 440px; }}
+        .samples-svg {{ display: block; }}
+        .samples-tooltip {{
+            position: absolute;
+            background: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 4px 7px;
+            font-size: 10px;
+            pointer-events: none;
+            white-space: nowrap;
+            z-index: 10;
+            display: none;
+            color: var(--text-color);
+            box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+        }}
+        .samples-legend {{ display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 8px; }}
+        .samples-legend-item {{ display: flex; align-items: center; gap: 3px; font-size: 10px; color: var(--text-color); }}
+        .samples-legend-swatch {{ width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }}
         .legend-title {{
             font-size: 13px;
             font-weight: 600;
@@ -3674,7 +3666,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             <button class="legend-toggle active" id="legend-toggle" title="Toggle legend panel" data-help="Show or hide the legend panel with color keys, category toggles, and spotlight controls.">
                 Legend
             </button>
-            <button class="color-toggle" id="color-toggle" title="Toggle insights panel" data-help="Insights opens analysis tools for the current view: summary, comparison, gene panels, neighborhood patterns, and regions.">
+            <button class="color-toggle" id="color-toggle" title="Toggle insights panel" data-help="Insights opens Overview, Genes, Compare, and Neighbors views for the current dataset and selection state.">
                 Insights
             </button>
             <button class="export-btn" id="screenshot-btn" title="Download screenshot" data-help="Download a PNG screenshot of the current main viewer layout.">
@@ -4234,7 +4226,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     const comparisonCountsCache = new Map();
     let celltypeTrendTarget = null;
     let interactionSourceCategory = null;
-    let dotplotRenderToken = 0;
     let clusterDeGroupby = null;
     let clusterDeSourceCategory = null;
     let clusterDeReferenceCategory = null;
@@ -4248,6 +4239,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let groupDeFullRunToken = 0;
     let groupDeFullRun = null;
     const groupDeFullCache = new Map();
+    let samplesView = 'bars';
+    let samplesColorCol = '';
+    let samplesMetaSortBy = '';
+    let insightsTopLevelTab = 'overview';
+    let insightsOverviewTab = 'summary';
+    let insightsGenesTab = 'markers';
+    let insightsCompareTab = 'groups';
+    let insightsNeighborsTab = 'enrichment';
     let geneAuxManifest = null;
     let geneAuxManifestPromise = null;
     const geneAuxShardCache = new Map();
@@ -4563,20 +4562,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         colorPanel.classList.toggle('collapsed');
         colorToggle.classList.toggle('active');
         if (!colorPanel.classList.contains('collapsed')) {{
-            if (document.getElementById('color-tab-compare')?.classList.contains('active')) {{
-                renderCompareInsights();
-            }} else if (document.getElementById('color-tab-neighbors')?.classList.contains('active')) {{
-                renderNeighborStats();
-                renderInteractionBrowser();
-            }} else if (document.getElementById('color-tab-genes')?.classList.contains('active')) {{
-                if (document.getElementById('genes-tab-markers')?.classList.contains('active')) renderMarkerGenes();
-                if (document.getElementById('genes-tab-spatial')?.classList.contains('active')) renderSpatialVariableGenes();
-            }} else if (document.getElementById('color-tab-regions')?.classList.contains('active')) {{
-                renderAnnotationComparison();
-            }} else {{
-                renderColorAggregation();
-                renderCellTypeTrend();
-            }}
+            renderActiveInsightsPanel();
         }}
         requestAnimationFrame(renderAllSections);
     }}
@@ -6623,28 +6609,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return genes;
     }}
 
-    function autocompleteDotplotGeneToken(inputEl) {{
-        if (!inputEl) return false;
-        const value = inputEl.value || '';
-        const cursor = Number.isFinite(inputEl.selectionStart) ? inputEl.selectionStart : value.length;
-        const left = value.slice(0, cursor);
-        const right = value.slice(cursor);
-        const tokenMatch = left.match(/^(.*?)([^,\s]*)$/);
-        if (!tokenMatch) return false;
-        const prefix = tokenMatch[1] || '';
-        const token = tokenMatch[2] || '';
-        if (!token) return false;
-
-        const lower = token.toLowerCase();
-        const match = (DATA.available_genes || []).find(g => g.toLowerCase().startsWith(lower));
-        if (!match || match === token) return false;
-
-        inputEl.value = `${{prefix}}${{match}}${{right}}`;
-        const nextCursor = (prefix + match).length;
-        inputEl.setSelectionRange(nextCursor, nextCursor);
-        return true;
-    }}
-
     function getCategoricalColorColumns() {{
         const cols = (DATA.available_colors || []).filter(col => {{
             const meta = DATA.colors_meta?.[col];
@@ -6876,218 +6840,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!Number.isFinite(raw)) return [140, 140, 140];
         const t = clamp01((raw - runtime.vmin) / (runtime.vmax - runtime.vmin));
         return magmaRgb(t);
-    }}
-
-    function updateDotplotAggregateValueOptions() {{
-        const aggSelect = document.getElementById('dotplot-aggregate-by');
-        const valueWrap = document.getElementById('dotplot-aggregate-value-wrap');
-        const valueSelect = document.getElementById('dotplot-aggregate-value');
-        if (!aggSelect || !valueWrap || !valueSelect) return;
-        const key = aggSelect.value;
-        if (!key) {{
-            valueWrap.style.display = 'none';
-            valueSelect.innerHTML = '';
-            return;
-        }}
-        const values = (DATA.metadata_filters && DATA.metadata_filters[key]) ? DATA.metadata_filters[key] : [];
-        valueWrap.style.display = 'block';
-        const opts = ['<option value="__ALL__">All</option>']
-            .concat(values.map(v => `<option value="${{v}}">${{v}}</option>`));
-        valueSelect.innerHTML = opts.join('');
-    }}
-
-    async function renderDotplot() {{
-        const status = document.getElementById('dotplot-status');
-        const grid = document.getElementById('dotplot-grid');
-        const groupbySelect = document.getElementById('dotplot-groupby');
-        const genesInput = document.getElementById('dotplot-genes');
-        const aggSelect = document.getElementById('dotplot-aggregate-by');
-        const aggValueSelect = document.getElementById('dotplot-aggregate-value');
-        if (!status || !grid || !groupbySelect || !genesInput || !aggSelect) return;
-
-        const groupbyColor = groupbySelect.value;
-        if (!groupbyColor) {{
-            status.textContent = 'Pick a categorical color to group by.';
-            grid.innerHTML = '';
-            return;
-        }}
-        const meta = DATA.colors_meta?.[groupbyColor];
-        if (!meta || meta.is_continuous || !Array.isArray(meta.categories)) {{
-            status.textContent = 'Dotplot requires a categorical color column.';
-            grid.innerHTML = '';
-            return;
-        }}
-
-        const genes = parseGeneList(genesInput.value);
-        if (genes.length === 0) {{
-            status.textContent = 'Enter one or more genes (comma-separated).';
-            grid.innerHTML = '';
-            return;
-        }}
-
-        const aggKey = aggSelect.value || '';
-        const aggValue = (aggKey && aggValueSelect) ? (aggValueSelect.value || '__ALL__') : '__ALL__';
-        const aggLabel = aggKey ? `${{formatMetadataLabel(aggKey)}}=${{aggValue}}` : 'All sections';
-
-        dotplotRenderToken += 1;
-        const token = dotplotRenderToken;
-        status.textContent = `Loading genes for dotplot (${{genes.length}})…`;
-        grid.innerHTML = '';
-
-        const missing = [];
-        for (const gene of genes) {{
-            if (token !== dotplotRenderToken) return;
-            const ok = await ensureGeneAvailable(gene, {{ showErrors: false }});
-            if (!ok) missing.push(gene);
-        }}
-        if (token !== dotplotRenderToken) return;
-        if (missing.length) {{
-            status.textContent = `Gene data unavailable: ${{missing.join(', ')}}`;
-            return;
-        }}
-
-        status.textContent = `Computing dotplot (${{groupbyColor}}, genes=${{genes.length}}, ${{aggLabel}})…`;
-
-        setTimeout(() => {{
-            if (token !== dotplotRenderToken) return;
-
-            const categories = meta.categories;
-            const k = categories.length;
-
-            // Eligible sections + pre-count totals per category once.
-            const eligible = [];
-            const totals = new Uint32Array(k);
-            for (let s = 0; s < DATA.sections.length; s++) {{
-                if (token !== dotplotRenderToken) return;
-                const section = DATA.sections[s];
-                if (!sectionPassesFilter(section)) continue;
-                if (aggKey) {{
-                    const val = section.metadata?.[aggKey] || 'unknown';
-                    if (aggValue !== '__ALL__' && val !== aggValue) continue;
-                }}
-                const groupVals = getSectionColorValues(section, groupbyColor);
-                if (!groupVals || !groupVals.length) continue;
-                eligible.push({{ section, groupVals }});
-                for (let i = 0; i < groupVals.length; i++) {{
-                    const gv = groupVals[i];
-                    if (gv === null || gv === undefined || Number.isNaN(gv)) continue;
-                    const ci = Math.round(gv);
-                    if (ci >= 0 && ci < k) totals[ci] += 1;
-                }}
-            }}
-
-            if (eligible.length === 0) {{
-                status.textContent = 'No sections match the current filters.';
-                return;
-            }}
-
-            const sums = genes.map(() => new Float64Array(k));
-            const nnz = genes.map(() => new Uint32Array(k));
-            let usedDenseFallback = false;
-
-            for (let g = 0; g < genes.length; g++) {{
-                if (token !== dotplotRenderToken) return;
-                const gene = genes[g];
-                for (let e = 0; e < eligible.length; e++) {{
-                    const {{ section, groupVals }} = eligible[e];
-                    const sparse = section.genes_sparse?.[gene];
-                    if (sparse) {{
-                        if (typeof sparse.ib64 === 'string' && typeof sparse.vb64 === 'string') {{
-                            const idxs = base64ToUint32Array(sparse.ib64);
-                            const vals = base64ToFloat32Array(sparse.vb64);
-                            const m = Math.min(idxs.length, vals.length);
-                            for (let j = 0; j < m; j++) {{
-                                const idx = idxs[j];
-                                if (idx >= groupVals.length) continue;
-                                const gv = groupVals[idx];
-                                if (!Number.isFinite(gv)) continue;
-                                const ci = Math.round(gv);
-                                if (ci < 0 || ci >= k) continue;
-                                const v = vals[j];
-                                if (!Number.isFinite(v) || v === 0) continue;
-                                sums[g][ci] += v;
-                                nnz[g][ci] += 1;
-                            }}
-                            continue;
-                        }}
-                        if (Array.isArray(sparse.i) && Array.isArray(sparse.v)) {{
-                            const m = Math.min(sparse.i.length, sparse.v.length);
-                            for (let j = 0; j < m; j++) {{
-                                const idx = sparse.i[j];
-                                if (idx === null || idx === undefined) continue;
-                                if (idx < 0 || idx >= groupVals.length) continue;
-                                const gv = groupVals[idx];
-                                if (!Number.isFinite(gv)) continue;
-                                const ci = Math.round(gv);
-                                if (ci < 0 || ci >= k) continue;
-                                const v = sparse.v[j];
-                                if (!Number.isFinite(v) || v === 0) continue;
-                                sums[g][ci] += v;
-                                nnz[g][ci] += 1;
-                            }}
-                            continue;
-                        }}
-                    }}
-
-                    const dense = section.genes?.[gene];
-                    if (dense && dense.length) {{
-                        usedDenseFallback = true;
-                        const n = Math.min(dense.length, groupVals.length);
-                        for (let i = 0; i < n; i++) {{
-                            const v = dense[i];
-                            if (!Number.isFinite(v) || v === 0) continue;
-                            const gv = groupVals[i];
-                            if (!Number.isFinite(gv)) continue;
-                            const ci = Math.round(gv);
-                            if (ci < 0 || ci >= k) continue;
-                            sums[g][ci] += v;
-                            nnz[g][ci] += 1;
-                        }}
-                    }}
-                }}
-            }}
-
-            if (token !== dotplotRenderToken) return;
-            grid.style.setProperty('--dotplot-cols', String(genes.length));
-            const header = `
-                <div class="dotplot-row dotplot-header">
-                    <div class="dotplot-label">Cell type</div>
-                    ${{genes.map(g => `<div class="dotplot-gene" title="${{g}}">${{g}}</div>`).join('')}}
-                </div>
-            `;
-
-            const rows = categories.map((cat, ci) => {{
-                const total = totals[ci];
-                const cells = genes.map((gene, gi) => {{
-                    if (!total) return `<div class="dotplot-dot" title="No cells"></div>`;
-                    const mean = sums[gi][ci] / total;
-                    const frac = nnz[gi][ci] / total;
-                    const vmax = (DATA.genes_meta?.[gene]?.vmax ?? 0) || 0;
-                    const tRaw = vmax > 0 ? (mean / vmax) : 0;
-                    const t = Math.max(0, Math.min(1, tRaw));
-                    const color = magma(0.1 + 0.9 * t);
-                    const r = Math.max(0.5, Math.min(8, 8 * Math.sqrt(frac)));
-                    const title = `${{gene}} · mean=${{mean.toFixed(3)}} · %expr=${{(frac*100).toFixed(1)}} · n=${{total.toLocaleString()}}`;
-                    return `
-                        <div class="dotplot-dot" title="${{title}}">
-                            <svg width="20" height="20" viewBox="0 0 20 20">
-                                <circle cx="10" cy="10" r="${{r}}" fill="${{color}}" stroke="rgba(0,0,0,0.10)" stroke-width="1"></circle>
-                            </svg>
-                        </div>
-                    `;
-                }}).join('');
-                return `
-                    <div class="dotplot-row">
-                        <div class="dotplot-label" title="${{cat}}">${{cat}}</div>
-                        ${{cells}}
-                    </div>
-                `;
-            }}).join('');
-
-            grid.innerHTML = header + rows;
-            const denseNote = usedDenseFallback ? ' (some genes were dense; may be slower)' : '';
-            status.textContent = `Dotplot ready (${{eligible.length}} sections, ${{aggLabel}})${{denseNote}}.`;
-        }}, 0);
     }}
 
     // Get values for a section
@@ -10511,7 +10263,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         modalAnnotations.push(annotation);
         renderModalAnnotationPanel();
         updateAnnotationComparisonTabVisibility();
-        if (document.getElementById('color-tab-regions')?.classList.contains('active')) renderAnnotationComparison();
+        if (insightsTopLevelTab === 'compare' && insightsCompareTab === 'regions') renderAnnotationComparison();
         return true;
     }}
 
@@ -10522,7 +10274,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         modalAnnotations = modalAnnotations.filter(annotation => annotation.id !== target);
         renderModalAnnotationPanel();
         updateAnnotationComparisonTabVisibility();
-        if (document.getElementById('color-tab-regions')?.classList.contains('active')) renderAnnotationComparison();
+        if (insightsTopLevelTab === 'compare' && insightsCompareTab === 'regions') renderAnnotationComparison();
         if (modalSection) renderModalSection();
     }}
 
@@ -10531,7 +10283,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         modalAnnotations = modalAnnotations.filter(annotation => annotation.sectionId !== sectionId);
         renderModalAnnotationPanel();
         updateAnnotationComparisonTabVisibility();
-        if (document.getElementById('color-tab-regions')?.classList.contains('active')) renderAnnotationComparison();
+        if (insightsTopLevelTab === 'compare' && insightsCompareTab === 'regions') renderAnnotationComparison();
         if (modalSection) renderModalSection();
     }}
 
@@ -10540,7 +10292,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         modalAnnotations = [];
         renderModalAnnotationPanel();
         updateAnnotationComparisonTabVisibility();
-        if (document.getElementById('color-tab-regions')?.classList.contains('active')) renderAnnotationComparison();
+        if (insightsTopLevelTab === 'compare' && insightsCompareTab === 'regions') renderAnnotationComparison();
         if (modalSection) renderModalSection();
     }}
 
@@ -12273,17 +12025,119 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function updateAnnotationComparisonTabVisibility() {{
-        const tab = document.getElementById('color-tab-regions');
-        if (!tab) return;
-        const hasAnnotations = modalAnnotations.length > 0;
-        tab.style.display = hasAnnotations ? '' : 'none';
-        // If tab was active but no annotations remain, switch to Stats
-        if (!hasAnnotations && tab.classList.contains('active')) {{
-            tab.classList.remove('active');
-            document.getElementById('color-tab-regions-content')?.classList.remove('active');
-            document.getElementById('color-tab-aggregate')?.classList.add('active');
-            document.getElementById('color-tab-aggregate-content')?.classList.add('active');
+        if (insightsTopLevelTab === 'compare' && insightsCompareTab === 'regions') {{
+            renderAnnotationComparison();
         }}
+    }}
+
+    const INSIGHTS_TOP_LEVEL_TABS = ['overview', 'genes', 'compare', 'neighbors'];
+    const INSIGHTS_SUBTABS = {{
+        overview: ['summary', 'sections'],
+        genes: ['markers', 'spatial', 'cell-de'],
+        compare: ['groups', 'regions'],
+        neighbors: ['enrichment', 'interactions'],
+    }};
+
+    function normalizeInsightsTabsState() {{
+        if (!INSIGHTS_TOP_LEVEL_TABS.includes(insightsTopLevelTab)) insightsTopLevelTab = 'overview';
+        if (!INSIGHTS_SUBTABS.overview.includes(insightsOverviewTab)) insightsOverviewTab = 'summary';
+        if (!INSIGHTS_SUBTABS.genes.includes(insightsGenesTab)) insightsGenesTab = 'markers';
+        if (!INSIGHTS_SUBTABS.compare.includes(insightsCompareTab)) insightsCompareTab = 'groups';
+        if (!INSIGHTS_SUBTABS.neighbors.includes(insightsNeighborsTab)) insightsNeighborsTab = 'enrichment';
+    }}
+
+    function getActiveInsightsSubtab(topLevel) {{
+        normalizeInsightsTabsState();
+        if (topLevel === 'genes') return insightsGenesTab;
+        if (topLevel === 'compare') return insightsCompareTab;
+        if (topLevel === 'neighbors') return insightsNeighborsTab;
+        return insightsOverviewTab;
+    }}
+
+    function setActiveInsightsSubtab(topLevel, value) {{
+        if (topLevel === 'genes') {{
+            insightsGenesTab = value;
+            return;
+        }}
+        if (topLevel === 'compare') {{
+            insightsCompareTab = value;
+            return;
+        }}
+        if (topLevel === 'neighbors') {{
+            insightsNeighborsTab = value;
+            return;
+        }}
+        insightsOverviewTab = value;
+    }}
+
+    function syncInsightsTabClasses() {{
+        normalizeInsightsTabsState();
+        INSIGHTS_TOP_LEVEL_TABS.forEach((topLevel) => {{
+            document.getElementById(`color-tab-${{topLevel}}`)?.classList.toggle('active', insightsTopLevelTab === topLevel);
+            document.getElementById(`color-tab-${{topLevel}}-content`)?.classList.toggle('active', insightsTopLevelTab === topLevel);
+            (INSIGHTS_SUBTABS[topLevel] || []).forEach((subtab) => {{
+                const isActive = getActiveInsightsSubtab(topLevel) === subtab;
+                document.getElementById(`${{topLevel}}-tab-${{subtab}}`)?.classList.toggle('active', isActive);
+                document.getElementById(`${{topLevel}}-tab-${{subtab}}-content`)?.classList.toggle('active', isActive);
+            }});
+        }});
+    }}
+
+    function renderActiveInsightsPanel() {{
+        normalizeInsightsTabsState();
+        syncInsightsTabClasses();
+
+        if (insightsTopLevelTab === 'overview') {{
+            if (insightsOverviewTab === 'sections') {{
+                renderSamplesInsights();
+            }} else {{
+                renderColorAggregation();
+                renderCellTypeTrend();
+            }}
+            return;
+        }}
+
+        if (insightsTopLevelTab === 'genes') {{
+            if (insightsGenesTab === 'spatial') {{
+                renderSpatialVariableGenes();
+            }} else if (insightsGenesTab === 'cell-de') {{
+                renderClusterDE();
+            }} else {{
+                renderMarkerGenes();
+            }}
+            return;
+        }}
+
+        if (insightsTopLevelTab === 'compare') {{
+            if (insightsCompareTab === 'regions') {{
+                renderAnnotationComparison();
+            }} else {{
+                renderGroupDE();
+            }}
+            return;
+        }}
+
+        if (insightsNeighborsTab === 'interactions') {{
+            renderInteractionBrowser();
+        }} else {{
+            renderNeighborStats();
+        }}
+    }}
+
+    function activateInsightsTopLevelTab(topLevel, focusSubtab = null) {{
+        if (!INSIGHTS_TOP_LEVEL_TABS.includes(topLevel)) return;
+        insightsTopLevelTab = topLevel;
+        if (focusSubtab && INSIGHTS_SUBTABS[topLevel]?.includes(focusSubtab)) {{
+            setActiveInsightsSubtab(topLevel, focusSubtab);
+        }}
+        renderActiveInsightsPanel();
+    }}
+
+    function activateInsightsSubtab(topLevel, subtab) {{
+        if (!INSIGHTS_SUBTABS[topLevel]?.includes(subtab)) return;
+        insightsTopLevelTab = topLevel;
+        setActiveInsightsSubtab(topLevel, subtab);
+        renderActiveInsightsPanel();
     }}
 
     function renderAnnotationRegionDESection(annotations) {{
@@ -12724,114 +12578,49 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             </div>
             <div class="color-panel-section">
                 <label>Details</label>
-                <div class="color-tabs">
-                    <button class="color-tab active" id="color-tab-aggregate" type="button">Summary</button>
-                    <button class="color-tab" id="color-tab-compare" type="button">Compare</button>
-                    <button class="color-tab" id="color-tab-genes" type="button">Genes</button>
-                    <button class="color-tab" id="color-tab-neighbors" type="button">Neighborhood</button>
-                    <button class="color-tab" id="color-tab-regions" type="button" style="display:none">Regions</button>
+                <div class="color-tabs insights-top-tabs">
+                    <button class="color-tab active" id="color-tab-overview" data-insights-top="overview" type="button">Overview</button>
+                    <button class="color-tab" id="color-tab-genes" data-insights-top="genes" type="button">Genes</button>
+                    <button class="color-tab" id="color-tab-compare" data-insights-top="compare" type="button">Compare</button>
+                    <button class="color-tab" id="color-tab-neighbors" data-insights-top="neighbors" type="button">Neighbors</button>
                 </div>
-                <div class="color-tab-content active" id="color-tab-aggregate-content">
-                    <div>
-                        <label>Aggregate By</label>
-                        <select id="color-groupby" ${{!hasMetadata ? 'disabled' : ''}}>
-                            ${{options}}
-                        </select>
+                <div class="color-tab-content active" id="color-tab-overview-content">
+                    <div class="color-tabs insights-subtabs">
+                        <button class="color-tab active" id="overview-tab-summary" data-insights-parent="overview" data-insights-subtab="summary" type="button">Summary</button>
+                        <button class="color-tab" id="overview-tab-sections" data-insights-parent="overview" data-insights-subtab="sections" type="button">Sections</button>
                     </div>
-                    <div style="display: flex; justify-content: flex-end;">
-                        <button class="legend-btn" id="color-aggregation-toggle" type="button">Collapse Stats</button>
-                    </div>
-                    <div class="color-aggregation" id="color-aggregation">
-                        <div class="agg-group-meta">${{hasMetadata ? 'Pick a metadata column to summarize.' : 'No metadata columns available for aggregation.'}}</div>
-                    </div>
-                    <div>
-                        <label>Cell Type Trend</label>
-                        <input class="color-search" id="celltype-search" type="text" placeholder="Search Cell Type...">
-                    </div>
-                    <div class="color-aggregation" id="celltype-trend">
-                        <div class="agg-group-meta">${{hasMetadata ? 'Search for a category to see counts across the selected metadata.' : 'No metadata columns available.'}}</div>
-                    </div>
-                </div>
-                <div class="color-tab-content" id="color-tab-compare-content">
-                    <details class="insight-subsection" id="compare-category-card" open>
-                        <summary class="insight-subsection-header">
-                            <span class="insight-subsection-title">Category Compare</span>
-                            <span class="insight-subsection-summary" id="cluster-de-summary">Choose two categories to compare.</span>
-                        </summary>
-                        <div class="insight-subsection-body">
-                            <div class="cluster-de-controls">
-                                <div>
-                                    <label>Annotation</label>
-                                    <select id="cluster-de-groupby"></select>
-                                </div>
-                                <div class="cluster-de-select-row">
-                                    <div>
-                                        <label>Category A</label>
-                                        <select id="cluster-de-source"></select>
-                                    </div>
-                                    <div>
-                                        <label>Category B</label>
-                                        <select id="cluster-de-reference"></select>
-                                    </div>
-                                </div>
-                                <div style="display: flex; justify-content: flex-end;">
-                                    <button class="legend-btn" id="cluster-de-swap" type="button">Swap A/B</button>
-                                </div>
-                            </div>
-                            <div class="color-aggregation" id="cluster-de-results">
-                                <div class="agg-group-meta">Choose two categories to compare.</div>
-                            </div>
-                        </div>
-                    </details>
-                    <details class="insight-subsection" id="compare-group-card">
-                        <summary class="insight-subsection-header">
-                            <span class="insight-subsection-title">Group-to-Group DE</span>
-                            <span class="insight-subsection-summary" id="group-de-summary">Compare samples, metadata groups, or annotations.</span>
-                        </summary>
-                        <div class="insight-subsection-body">
-                            <div class="color-aggregation" id="group-de-panel">
-                                <div class="agg-group-meta">Configure two samples, metadata groups, or annotation groups for exploratory group DE.</div>
-                            </div>
-                        </div>
-                    </details>
-                </div>
-                <div class="color-tab-content" id="color-tab-neighbors-content">
-                    <div>
-                        <label>Search Cell Type</label>
-                        <input class="color-search" id="neighbor-search" type="text" placeholder="Search Cell Type...">
-                    </div>
-                    <div class="neighbor-view-controls">
+                    <div class="color-tab-content active" id="overview-tab-summary-content">
                         <div>
-                            <label>View</label>
+                            <label>Aggregate By</label>
+                            <select id="color-groupby" ${{!hasMetadata ? 'disabled' : ''}}>
+                                ${{options}}
+                            </select>
                         </div>
-                        <div class="neighbor-view-buttons">
-                            <button class="legend-btn active" data-neighbor-view="table" type="button">Table</button>
-                            <button class="legend-btn" data-neighbor-view="bubble" type="button">Network</button>
-                            <button class="legend-btn" data-neighbor-view="chord" type="button">Chord</button>
+                        <div style="display: flex; justify-content: flex-end;">
+                            <button class="legend-btn" id="color-aggregation-toggle" type="button">Collapse Stats</button>
+                        </div>
+                        <div class="color-aggregation" id="color-aggregation">
+                            <div class="agg-group-meta">${{hasMetadata ? 'Pick a metadata column to summarize.' : 'No metadata columns available for aggregation.'}}</div>
+                        </div>
+                        <div>
+                            <label>Cell Type Trend</label>
+                            <input class="color-search" id="celltype-search" type="text" placeholder="Search Cell Type...">
+                        </div>
+                        <div class="color-aggregation" id="celltype-trend">
+                            <div class="agg-group-meta">${{hasMetadata ? 'Search for a category to see counts across the selected metadata.' : 'No metadata columns available.'}}</div>
                         </div>
                     </div>
-                    <div style="display: flex; justify-content: flex-end;">
-                        <button class="legend-btn" id="neighbor-stats-toggle" type="button">Collapse Neighbor Stats</button>
-                    </div>
-                    <div class="color-aggregation" id="neighbor-stats">
-                        <div class="agg-group-meta">Select a categorical color to view neighbor stats.</div>
-                    </div>
-                    <div>
-                        <label>Interaction Source</label>
-                        <select id="interaction-source"></select>
-                    </div>
-                    <div>
-                        <label>Target Filter</label>
-                        <input class="color-search" id="interaction-search" type="text" placeholder="Filter Target Cell Types...">
-                    </div>
-                    <div class="color-aggregation" id="interaction-browser">
-                        <div class="agg-group-meta">Select a source cell type to browse interactions.</div>
+                    <div class="color-tab-content" id="overview-tab-sections-content">
+                        <div class="color-aggregation" id="samples-panel">
+                            <div class="agg-group-meta">Open Sections to view per-section composition as stacked bars or a heatmap.</div>
+                        </div>
                     </div>
                 </div>
                 <div class="color-tab-content" id="color-tab-genes-content">
-                    <div class="color-tabs">
-                        <button class="color-tab active" id="genes-tab-markers" type="button">Markers</button>
-                        <button class="color-tab" id="genes-tab-spatial" type="button">Spatially variable</button>
+                    <div class="color-tabs insights-subtabs">
+                        <button class="color-tab active" id="genes-tab-markers" data-insights-parent="genes" data-insights-subtab="markers" type="button">Markers</button>
+                        <button class="color-tab" id="genes-tab-spatial" data-insights-parent="genes" data-insights-subtab="spatial" type="button">Spatial</button>
+                        <button class="color-tab" id="genes-tab-cell-de" data-insights-parent="genes" data-insights-subtab="cell-de" type="button">Cell DE</button>
                     </div>
                     <div class="color-tab-content active" id="genes-tab-markers-content">
                         <input class="marker-search" id="marker-gene-search" type="text" placeholder="Search marker genes...">
@@ -12841,10 +12630,88 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         <input class="marker-search" id="spatial-gene-search" type="text" placeholder="Search spatially variable genes...">
                         <div class="marker-genes" id="spatially-variable-genes"></div>
                     </div>
+                    <div class="color-tab-content" id="genes-tab-cell-de-content">
+                        <div class="cluster-de-controls">
+                            <div>
+                                <label>Annotation</label>
+                                <select id="cluster-de-groupby"></select>
+                            </div>
+                            <div class="cluster-de-select-row">
+                                <div>
+                                    <label>Category A</label>
+                                    <select id="cluster-de-source"></select>
+                                </div>
+                                <div>
+                                    <label>Category B</label>
+                                    <select id="cluster-de-reference"></select>
+                                </div>
+                            </div>
+                            <div style="display: flex; justify-content: flex-end;">
+                                <button class="legend-btn" id="cluster-de-swap" type="button">Swap A/B</button>
+                            </div>
+                        </div>
+                        <div class="agg-group-meta" id="cluster-de-summary">Choose two categories to compare.</div>
+                        <div class="color-aggregation" id="cluster-de-results">
+                            <div class="agg-group-meta">Choose two categories to compare.</div>
+                        </div>
+                    </div>
                 </div>
-                <div class="color-tab-content" id="color-tab-regions-content">
-                    <div class="color-aggregation" id="annotation-comparison">
-                        <div class="agg-group-meta">Open a section, draw annotations, then switch to this tab to compare them.</div>
+                <div class="color-tab-content" id="color-tab-compare-content">
+                    <div class="color-tabs insights-subtabs">
+                        <button class="color-tab active" id="compare-tab-groups" data-insights-parent="compare" data-insights-subtab="groups" type="button">Groups</button>
+                        <button class="color-tab" id="compare-tab-regions" data-insights-parent="compare" data-insights-subtab="regions" type="button">Regions</button>
+                    </div>
+                    <div class="color-tab-content active" id="compare-tab-groups-content">
+                        <div class="agg-group-meta" id="group-de-summary">Compare samples, metadata groups, or annotations.</div>
+                        <div class="color-aggregation" id="group-de-panel">
+                            <div class="agg-group-meta">Configure two samples, metadata groups, or annotation groups for exploratory group DE.</div>
+                        </div>
+                    </div>
+                    <div class="color-tab-content" id="compare-tab-regions-content">
+                        <div class="color-aggregation" id="annotation-comparison">
+                            <div class="agg-group-meta">Open a section, draw annotations, then use Regions to compare those cell sets.</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="color-tab-content" id="color-tab-neighbors-content">
+                    <div class="color-tabs insights-subtabs">
+                        <button class="color-tab active" id="neighbors-tab-enrichment" data-insights-parent="neighbors" data-insights-subtab="enrichment" type="button">Enrichment</button>
+                        <button class="color-tab" id="neighbors-tab-interactions" data-insights-parent="neighbors" data-insights-subtab="interactions" type="button">Interactions</button>
+                    </div>
+                    <div class="color-tab-content active" id="neighbors-tab-enrichment-content">
+                        <div>
+                            <label>Search Cell Type</label>
+                            <input class="color-search" id="neighbor-search" type="text" placeholder="Search Cell Type...">
+                        </div>
+                        <div class="neighbor-view-controls">
+                            <div>
+                                <label>View</label>
+                            </div>
+                            <div class="neighbor-view-buttons">
+                                <button class="legend-btn active" data-neighbor-view="table" type="button">Table</button>
+                                <button class="legend-btn" data-neighbor-view="bubble" type="button">Network</button>
+                                <button class="legend-btn" data-neighbor-view="chord" type="button">Chord</button>
+                            </div>
+                        </div>
+                        <div style="display: flex; justify-content: flex-end;">
+                            <button class="legend-btn" id="neighbor-stats-toggle" type="button">Collapse Neighbor Stats</button>
+                        </div>
+                        <div class="color-aggregation" id="neighbor-stats">
+                            <div class="agg-group-meta">Select a categorical color to view neighbor stats.</div>
+                        </div>
+                    </div>
+                    <div class="color-tab-content" id="neighbors-tab-interactions-content">
+                        <div>
+                            <label>Interaction Source</label>
+                            <select id="interaction-source"></select>
+                        </div>
+                        <div>
+                            <label>Target Filter</label>
+                            <input class="color-search" id="interaction-search" type="text" placeholder="Filter Target Cell Types...">
+                        </div>
+                        <div class="color-aggregation" id="interaction-browser">
+                            <div class="agg-group-meta">Select a source cell type to browse interactions.</div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -12859,9 +12726,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         groupBy.addEventListener('change', () => {{
             renderColorAggregation();
             renderCellTypeTrend();
-            const dpAgg = document.getElementById('dotplot-aggregate-by');
-            if (dpAgg) dpAgg.value = groupBy.value;
-            updateDotplotAggregateValueOptions();
         }});
 
         const aggregationToggle = document.getElementById('color-aggregation-toggle');
@@ -12871,89 +12735,28 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             aggregationToggle.textContent = isCollapsed ? 'Show stats' : 'Collapse stats';
         }});
 
-        const aggregateTab = document.getElementById('color-tab-aggregate');
-        const compareTab = document.getElementById('color-tab-compare');
-        const genesTab = document.getElementById('color-tab-genes');
-        const neighborTab = document.getElementById('color-tab-neighbors');
-        const regionsTab = document.getElementById('color-tab-regions');
-        const aggregateContent = document.getElementById('color-tab-aggregate-content');
-        const compareContent = document.getElementById('color-tab-compare-content');
-        const genesContent = document.getElementById('color-tab-genes-content');
-        const neighborContent = document.getElementById('color-tab-neighbors-content');
-        const regionsContent = document.getElementById('color-tab-regions-content');
-
-        const genesMarkersTab = document.getElementById('genes-tab-markers');
-        const genesSpatialTab = document.getElementById('genes-tab-spatial');
-        const genesMarkersContent = document.getElementById('genes-tab-markers-content');
-        const genesSpatialContent = document.getElementById('genes-tab-spatial-content');
-        const topLevelTabs = [
-            [aggregateTab, aggregateContent],
-            [compareTab, compareContent],
-            [genesTab, genesContent],
-            [neighborTab, neighborContent],
-            [regionsTab, regionsContent],
-        ];
-        const activateTopLevelInsightsTab = (activeTab, activeContent) => {{
-            topLevelTabs.forEach(([tab, content]) => {{
-                tab?.classList.toggle('active', tab === activeTab);
-                content?.classList.toggle('active', content === activeContent);
+        panel.querySelectorAll('[data-insights-top]').forEach((btn) => {{
+            btn.addEventListener('click', () => {{
+                activateInsightsTopLevelTab(btn.getAttribute('data-insights-top') || 'overview');
             }});
-        }};
-
-        aggregateTab.addEventListener('click', () => {{
-            activateTopLevelInsightsTab(aggregateTab, aggregateContent);
-            renderColorAggregation();
-            renderCellTypeTrend();
         }});
-        compareTab.addEventListener('click', () => {{
-            activateTopLevelInsightsTab(compareTab, compareContent);
-            renderCompareInsights();
-        }});
-        genesTab.addEventListener('click', () => {{
-            activateTopLevelInsightsTab(genesTab, genesContent);
-            if (!(genesMarkersTab?.classList.contains('active')) && !(genesSpatialTab?.classList.contains('active'))) {{
-                genesSpatialTab.classList.remove('active');
-                genesMarkersTab.classList.add('active');
-                genesSpatialContent.classList.remove('active');
-                genesMarkersContent.classList.add('active');
-            }}
-            if (genesMarkersTab.classList.contains('active')) renderMarkerGenes();
-            else renderSpatialVariableGenes();
-        }});
-        neighborTab.addEventListener('click', () => {{
-            activateTopLevelInsightsTab(neighborTab, neighborContent);
-            renderNeighborStats();
-            renderInteractionBrowser();
-        }});
-
-        genesMarkersTab.addEventListener('click', () => {{
-            genesMarkersTab.classList.add('active');
-            genesSpatialTab.classList.remove('active');
-            genesMarkersContent.classList.add('active');
-            genesSpatialContent.classList.remove('active');
-            renderMarkerGenes();
-        }});
-        genesSpatialTab.addEventListener('click', () => {{
-            genesSpatialTab.classList.add('active');
-            genesMarkersTab.classList.remove('active');
-            genesSpatialContent.classList.add('active');
-            genesMarkersContent.classList.remove('active');
-            renderSpatialVariableGenes();
-        }});
-        regionsTab?.addEventListener('click', () => {{
-            activateTopLevelInsightsTab(regionsTab, regionsContent);
-            renderAnnotationComparison();
+        panel.querySelectorAll('[data-insights-subtab]').forEach((btn) => {{
+            btn.addEventListener('click', () => {{
+                const topLevel = btn.getAttribute('data-insights-parent') || 'overview';
+                const subtab = btn.getAttribute('data-insights-subtab') || '';
+                activateInsightsSubtab(topLevel, subtab);
+            }});
         }});
 
         const markerSearch = document.getElementById('marker-gene-search');
         markerSearch.addEventListener('input', () => {{
-            if (genesTab.classList.contains('active') && genesMarkersTab.classList.contains('active')) {{
+            if (insightsTopLevelTab === 'genes' && insightsGenesTab === 'markers') {{
                 renderMarkerGenes();
             }}
         }});
         const spatialGeneSearch = document.getElementById('spatial-gene-search');
         spatialGeneSearch?.addEventListener('input', () => {{
-            if (genesTab.classList.contains('active') && genesSpatialTab.classList.contains('active')) {{
+            if (insightsTopLevelTab === 'genes' && insightsGenesTab === 'spatial') {{
                 renderSpatialVariableGenes();
             }}
         }});
@@ -12997,73 +12800,38 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             renderInteractionBrowser();
         }});
 
-        // Dotplot setup
-        const dotplotGroupby = document.getElementById('dotplot-groupby');
-        const dotplotGenes = document.getElementById('dotplot-genes');
-        const dotplotRun = document.getElementById('dotplot-run');
-        const dotplotUseHvgs = document.getElementById('dotplot-use-hvgs');
-        const dotplotAgg = document.getElementById('dotplot-aggregate-by');
-        const dotplotAggValue = document.getElementById('dotplot-aggregate-value');
         const clusterDeGroupbySelect = document.getElementById('cluster-de-groupby');
         const clusterDeSourceSelect = document.getElementById('cluster-de-source');
         const clusterDeReferenceSelect = document.getElementById('cluster-de-reference');
         const clusterDeSwap = document.getElementById('cluster-de-swap');
 
         const catCols = getCategoricalColorColumns();
-        if (dotplotGroupby) {{
-            dotplotGroupby.innerHTML = catCols.map(c => `<option value="${{c}}">${{c}}</option>`).join('');
-            if (catCols.includes(currentColor)) dotplotGroupby.value = currentColor;
-            dotplotGroupby.addEventListener('change', () => renderDotplot());
-        }}
-        if (dotplotAgg) {{
-            dotplotAgg.value = groupBy.value;
-            dotplotAgg.addEventListener('change', () => {{
-                groupBy.value = dotplotAgg.value;
-                renderColorAggregation();
-                renderCellTypeTrend();
-                updateDotplotAggregateValueOptions();
-                renderDotplot();
-            }});
-        }}
-        updateDotplotAggregateValueOptions();
-        dotplotAggValue?.addEventListener('change', () => renderDotplot());
-        dotplotRun?.addEventListener('click', () => renderDotplot());
-        dotplotGenes?.addEventListener('keydown', (e) => {{
-            if (e.key !== 'Tab') return;
-            if (e.altKey || e.ctrlKey || e.metaKey) return;
-            if (autocompleteDotplotGeneToken(dotplotGenes)) e.preventDefault();
-        }});
-        dotplotGenes?.addEventListener('change', () => renderDotplot());
-        dotplotUseHvgs?.addEventListener('click', () => {{
-            const hvgs = (DATA.available_genes || []).slice(0, 8);
-            if (dotplotGenes) dotplotGenes.value = hvgs.join(', ');
-            renderDotplot();
-        }});
         syncClusterDEControls();
         clusterDeGroupbySelect?.addEventListener('change', () => {{
             clusterDeGroupby = clusterDeGroupbySelect.value || null;
             clusterDeSourceCategory = null;
             clusterDeReferenceCategory = null;
-            renderCompareInsights();
+            renderClusterDE();
         }});
         clusterDeSourceSelect?.addEventListener('change', () => {{
             clusterDeSourceCategory = clusterDeSourceSelect.value || null;
-            renderCompareInsights();
+            renderClusterDE();
         }});
         clusterDeReferenceSelect?.addEventListener('change', () => {{
             clusterDeReferenceCategory = clusterDeReferenceSelect.value || null;
-            renderCompareInsights();
+            renderClusterDE();
         }});
         clusterDeSwap?.addEventListener('click', () => {{
             const source = clusterDeSourceCategory;
             clusterDeSourceCategory = clusterDeReferenceCategory;
             clusterDeReferenceCategory = source;
-            renderCompareInsights();
+            renderClusterDE();
         }});
 
         // Keep initial load fast: only render the list. Other Insights content is computed on-demand
         // when the panel/tab is opened.
         renderColorList('');
+        syncInsightsTabClasses();
         updateExpressionScaleUI();
 
         const exprVmin = document.getElementById('expr-vmin');
@@ -13123,38 +12891,252 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             item.addEventListener('click', () => {{
                 const col = item.dataset.color;
                 if (!col) return;
-                currentColor = col;
-                currentGene = null;
-                invalidateGeneDensityCaches();
-                modalSelectedCategory = null;
-                modalTypeSelectEnabled = false;
-                hoveredNeighborFocus = null;
-                selectedNeighborFocus = null;
-                document.getElementById('color-select').value = col;
-                document.getElementById('gene-input').value = '';
-                hiddenCategories.clear();
-                if (DATA.colors_meta?.[col] && !DATA.colors_meta[col].is_continuous) {{
-                    selectionSummaryColor = col;
-                }}
-                updateExpressionScaleUI();
-                renderLegend('legend');
-                renderLegend('modal-legend');
-                renderAllSections();
-                if (modalSection) renderModalSection();
-                if (umapVisible) renderUMAP();
-                updateSelectionInfo();
-                renderGeneDiscoveryPanel();
-                renderColorList(document.getElementById('color-search').value);
-                renderColorAggregation();
-                renderCellTypeTrend();
-                renderNeighborStats();
-                renderInteractionBrowser();
-                renderMarkerGenes();
-                if (document.getElementById('color-tab-compare')?.classList.contains('active')) {{
-                    renderCompareInsights();
-                }}
+                setViewerColorColumn(col);
             }});
         }});
+    }}
+
+    function setViewerColorColumn(col) {{
+        if (!col || !(DATA.available_colors || []).includes(col)) return;
+        currentColor = col;
+        currentGene = null;
+        invalidateGeneDensityCaches();
+        celltypeTrendTarget = null;
+        modalSelectedCategory = null;
+        modalTypeSelectEnabled = false;
+        hoveredNeighborFocus = null;
+        selectedNeighborFocus = null;
+        const colorSelect = document.getElementById('color-select');
+        if (colorSelect) colorSelect.value = col;
+        const geneInput = document.getElementById('gene-input');
+        if (geneInput) geneInput.value = '';
+        (DATA.sections || []).forEach(s => {{ if (s && s._colorCache) s._colorCache = {{}}; }});
+        hiddenCategories.clear();
+        if (DATA.colors_meta?.[currentColor] && !DATA.colors_meta[currentColor].is_continuous) {{
+            selectionSummaryColor = currentColor;
+        }}
+        updateExpressionScaleUI();
+        renderLegend('legend');
+        renderLegend('modal-legend');
+        renderAllSections();
+        if (modalSection) renderModalSection();
+        if (umapVisible) renderUMAP();
+        updateSelectionInfo();
+        renderGeneDiscoveryPanel();
+        renderColorList(document.getElementById('color-search')?.value || '');
+        renderActiveInsightsPanel();
+    }}
+
+    function computeSectionComposition(colorCol) {{
+        const config = DATA.colors_meta?.[colorCol];
+        if (!config || config.is_continuous) return null;
+        const categories = config.categories || [];
+        if (!categories.length) return null;
+        const rows = [];
+        (DATA.sections || []).forEach(function(section) {{
+            const vals = getSectionColorValues(section, colorCol);
+            if (!vals || !vals.length) return;
+            const counts = new Array(categories.length).fill(0);
+            let total = 0;
+            for (let i = 0; i < vals.length; i++) {{
+                const v = Math.round(vals[i]);
+                if (v >= 0 && v < categories.length) {{ counts[v]++; total++; }}
+            }}
+            const fractions = total > 0 ? counts.map(function(c) {{ return c / total; }}) : counts.map(function() {{ return 0; }});
+            rows.push({{ id: section.id, metadata: section.metadata || {{}}, fractions, total, counts }});
+        }});
+        return {{ categories, rows }};
+    }}
+
+    function buildSamplesBarsSvg(rows, categories) {{
+        const ROW_H = 18, STRIP_W = 8, LABEL_W = 88, BAR_W = 194, PL = 4, PT = 2, PR = 4;
+        const W = PL + STRIP_W + 3 + LABEL_W + 3 + BAR_W + PR;
+        const H = PT + rows.length * ROW_H + PT;
+        const parts = ['<svg class="samples-svg" viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '">'];
+        rows.forEach(function(row, ri) {{
+            const y = PT + ri * ROW_H;
+            const midY = (y + ROW_H / 2).toFixed(1);
+            const sid = row.id;
+            const esc = escapeHtml(sid);
+            const outlineCol = OUTLINE_BY ? getOutlineColor(row.metadata[OUTLINE_BY]) : null;
+            if (outlineCol) {{
+                parts.push('<rect x="' + PL + '" y="' + (y+2) + '" width="' + STRIP_W + '" height="' + (ROW_H-4) + '" fill="' + outlineCol + '" rx="2" data-section-id="' + esc + '" style="cursor:pointer"/>');
+            }}
+            const labelX = PL + STRIP_W + 3;
+            const shortId = sid.length > 13 ? sid.slice(0, 12) + '\u2026' : sid;
+            const headerTip = escapeHtml(sid + ' \u00b7 ' + row.total.toLocaleString() + ' cells');
+            parts.push('<text x="' + labelX + '" y="' + midY + '" dy="0.35em" font-size="9" fill="var(--text-color)" font-family="inherit" text-anchor="start" data-section-id="' + esc + '" data-tooltip="' + headerTip + '" style="cursor:pointer">' + escapeHtml(shortId) + '</text>');
+            const barX = PL + STRIP_W + 3 + LABEL_W + 3;
+            let ox = 0;
+            categories.forEach(function(cat, ci) {{
+                const frac = row.fractions[ci] || 0;
+                if (frac <= 0) return;
+                const w = Math.max(1, frac * BAR_W);
+                const col = getCategoryColor(ci);
+                const tip = escapeHtml(sid + ' \u00b7 ' + cat + ': ' + Math.round(frac * 100) + '% (' + row.counts[ci].toLocaleString() + ' cells)');
+                parts.push('<rect x="' + (barX + ox).toFixed(1) + '" y="' + (y+2) + '" width="' + w.toFixed(1) + '" height="' + (ROW_H-4) + '" fill="' + col + '" data-section-id="' + esc + '" data-tooltip="' + tip + '" style="cursor:pointer"/>');
+                ox += w;
+            }});
+        }});
+        parts.push('</svg>');
+        return parts.join('');
+    }}
+
+    function buildSamplesHeatmapSvg(rows, categories) {{
+        const cats = categories.slice(0, 30);
+        const CELL_W = 14, CELL_H = 14, LABEL_W = 88, HEADER_H = 54, PL = 4, PR = 4, PT = 2;
+        const W = PL + LABEL_W + cats.length * CELL_W + PR;
+        const H = PT + HEADER_H + rows.length * CELL_H + PT;
+        const parts = ['<svg class="samples-svg" viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '">'];
+        cats.forEach(function(cat, ci) {{
+            const cx = (PL + LABEL_W + ci * CELL_W + CELL_W / 2).toFixed(1);
+            const cy = PT + HEADER_H - 4;
+            const shortCat = cat.length > 12 ? cat.slice(0, 11) + '\u2026' : cat;
+            parts.push('<text x="' + cx + '" y="' + cy + '" font-size="8" fill="var(--muted-color)" font-family="inherit" text-anchor="start" transform="rotate(-45,' + cx + ',' + cy + ')">' + escapeHtml(shortCat) + '</text>');
+        }});
+        rows.forEach(function(row, ri) {{
+            const y = PT + HEADER_H + ri * CELL_H;
+            const sid = row.id;
+            const esc = escapeHtml(sid);
+            const shortId = sid.length > 12 ? sid.slice(0, 11) + '\u2026' : sid;
+            parts.push('<text x="' + (PL + LABEL_W - 3) + '" y="' + (y + CELL_H / 2).toFixed(1) + '" dy="0.35em" font-size="8" fill="var(--text-color)" font-family="inherit" text-anchor="end" data-section-id="' + esc + '" style="cursor:pointer">' + escapeHtml(shortId) + '</text>');
+            cats.forEach(function(cat, ci) {{
+                const frac = row.fractions[ci] || 0;
+                const alpha = Math.min(1, frac * 3.5).toFixed(3);
+                const col = getCategoryColor(ci);
+                const cellX = PL + LABEL_W + ci * CELL_W;
+                const tip = escapeHtml(sid + ' \u00b7 ' + cat + ': ' + Math.round(frac * 100) + '% (' + row.counts[ci].toLocaleString() + ' cells)');
+                parts.push('<rect x="' + cellX + '" y="' + y + '" width="' + CELL_W + '" height="' + CELL_H + '" fill="' + col + '" fill-opacity="' + alpha + '" stroke="var(--input-bg)" stroke-width="0.5" data-section-id="' + esc + '" data-tooltip="' + tip + '" style="cursor:pointer"/>');
+            }});
+        }});
+        parts.push('</svg>');
+        return parts.join('');
+    }}
+
+    function renderSamplesInsights() {{
+        const container = document.getElementById('samples-panel');
+        if (!container) return;
+
+        const availableCols = (DATA.available_colors || []).filter(function(c) {{
+            const meta = DATA.colors_meta?.[c];
+            return meta && !meta.is_continuous && (meta.categories || []).length > 0;
+        }});
+        if (!availableCols.length) {{
+            container.innerHTML = '<div class="agg-group-meta">No categorical color columns available.</div>';
+            return;
+        }}
+
+        if (!samplesColorCol || !availableCols.includes(samplesColorCol)) {{
+            const curMeta = DATA.colors_meta?.[currentColor];
+            samplesColorCol = (!currentGene && curMeta && !curMeta.is_continuous) ? currentColor : availableCols[0];
+        }}
+
+        const comp = computeSectionComposition(samplesColorCol);
+        if (!comp || !comp.rows.length) {{
+            container.innerHTML = '<div class="agg-group-meta">No composition data available.</div>';
+            return;
+        }}
+
+        let rows = comp.rows.slice();
+        if (samplesMetaSortBy) {{
+            rows.sort(function(a, b) {{
+                const va = String(a.metadata[samplesMetaSortBy] ?? '');
+                const vb = String(b.metadata[samplesMetaSortBy] ?? '');
+                return va.localeCompare(vb) || a.id.localeCompare(b.id);
+            }});
+        }}
+
+        const categories = comp.categories;
+        const svgHtml = samplesView === 'heatmap'
+            ? buildSamplesHeatmapSvg(rows, categories)
+            : buildSamplesBarsSvg(rows, categories);
+
+        const metaKeys = new Set();
+        comp.rows.forEach(function(r) {{ Object.keys(r.metadata).forEach(function(k) {{ metaKeys.add(k); }}); }});
+        const sortOptions = ['<option value="">— original order —</option>'].concat(
+            Array.from(metaKeys).map(function(k) {{
+                const sel = samplesMetaSortBy === k ? ' selected' : '';
+                return '<option value="' + escapeHtml(k) + '"' + sel + '>' + escapeHtml(formatMetadataLabel(k)) + '</option>';
+            }})
+        ).join('');
+        const colorOptions = availableCols.map(function(c) {{
+            const sel = c === samplesColorCol ? ' selected' : '';
+            return '<option value="' + escapeHtml(c) + '"' + sel + '>' + escapeHtml(formatMetadataLabel(c)) + '</option>';
+        }}).join('');
+
+        const maxLeg = Math.min(categories.length, 16);
+        const legendHtml = categories.slice(0, maxLeg).map(function(cat, idx) {{
+            return '<span class="samples-legend-item"><span class="samples-legend-swatch" style="background:' + getCategoryColor(idx) + '"></span>' + escapeHtml(cat) + '</span>';
+        }}).join('') + (categories.length > maxLeg ? '<span class="samples-legend-item agg-group-meta">+' + (categories.length - maxLeg) + ' more</span>' : '');
+
+        container.innerHTML = `
+            <div class="samples-controls">
+                <div class="cluster-de-select-row">
+                    <div>
+                        <label>Color column</label>
+                        <select id="samples-color-col">${{colorOptions}}</select>
+                    </div>
+                    <div>
+                        <label>Sort sections by</label>
+                        <select id="samples-sort-by">${{sortOptions}}</select>
+                    </div>
+                </div>
+                <div class="samples-view-toggle">
+                    <button class="legend-btn ${{samplesView === 'bars' ? 'active' : ''}}" data-samples-view="bars" type="button">Bars</button>
+                    <button class="legend-btn ${{samplesView === 'heatmap' ? 'active' : ''}}" data-samples-view="heatmap" type="button">Heatmap</button>
+                </div>
+            </div>
+            <div class="samples-chart-container">
+                ${{svgHtml}}
+                <div class="samples-tooltip"></div>
+            </div>
+            <div class="samples-legend">${{legendHtml}}</div>
+        `;
+
+        const colorColSel = container.querySelector('#samples-color-col');
+        colorColSel?.addEventListener('change', function() {{
+            samplesColorCol = colorColSel.value;
+            renderSamplesInsights();
+        }});
+        const sortBySel = container.querySelector('#samples-sort-by');
+        sortBySel?.addEventListener('change', function() {{
+            samplesMetaSortBy = sortBySel.value;
+            renderSamplesInsights();
+        }});
+        container.querySelectorAll('[data-samples-view]').forEach(function(btn) {{
+            btn.addEventListener('click', function() {{
+                samplesView = btn.getAttribute('data-samples-view') || 'bars';
+                renderSamplesInsights();
+            }});
+        }});
+
+        const svgEl = container.querySelector('.samples-svg');
+        const tooltip = container.querySelector('.samples-tooltip');
+        if (svgEl && tooltip) {{
+            svgEl.addEventListener('click', function(e) {{
+                const el = e.target.closest('[data-section-id]');
+                if (!el) return;
+                const sectionId = el.getAttribute('data-section-id');
+                if (sectionId) openModal(sectionId);
+            }});
+            svgEl.addEventListener('mouseover', function(e) {{
+                const el = e.target.closest('[data-tooltip]');
+                if (!el) {{ tooltip.style.display = 'none'; return; }}
+                tooltip.textContent = el.getAttribute('data-tooltip') || '';
+                tooltip.style.display = 'block';
+                const cRect = svgEl.parentElement.getBoundingClientRect();
+                const eRect = el.getBoundingClientRect();
+                let left = eRect.left - cRect.left + 8;
+                let top = eRect.top - cRect.top - 28;
+                if (left + tooltip.offsetWidth > cRect.width - 4) left -= tooltip.offsetWidth + 14;
+                if (top < 0) top = eRect.bottom - cRect.top + 4;
+                tooltip.style.left = left + 'px';
+                tooltip.style.top = top + 'px';
+            }});
+            svgEl.parentElement.addEventListener('mouseleave', function() {{
+                tooltip.style.display = 'none';
+            }});
+        }}
     }}
 
     function renderColorAggregation() {{
@@ -13424,68 +13406,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         ? activateTitle
                         : 'Gene name only; this gene was not embedded in the viewer',
                 }})).join('')}}
-            </div>
-        `;
-    }}
-
-    function renderComparisonCountSummary(colorCol, sourceCategory, referenceCategory) {{
-        const countData = getCategoryCountsForColor(colorCol);
-        if (!countData) {{
-            return `
-                <div class="agg-group">
-                    <div class="agg-group-title">Cell Counts</div>
-                    <div class="agg-group-meta">No categorical counts are available for this annotation.</div>
-                </div>
-            `;
-        }}
-
-        const total = Number(countData.total || 0);
-        const sourceCount = Number(countData.counts?.[sourceCategory] || 0);
-        const referenceCount = Number(countData.counts?.[referenceCategory] || 0);
-        const sourcePct = total > 0 ? (sourceCount / total) * 100 : 0;
-        const referencePct = total > 0 ? (referenceCount / total) * 100 : 0;
-        const sourceColor = getCategoryColorForValue(colorCol, sourceCategory);
-        const referenceColor = getCategoryColorForValue(colorCol, referenceCategory);
-
-        return `
-            <div class="agg-group">
-                <div class="agg-group-title">Cell Counts</div>
-                <div class="agg-group-meta">Cells assigned in ${{formatMetadataLabel(colorCol)}}.</div>
-                <div class="comparison-stack">
-                    <div class="comparison-card">
-                        <div class="comparison-card-title">
-                            <span class="agg-dot" style="background: ${{sourceColor}}"></span>
-                            <span>${{escapeHtml(sourceCategory)}}</span>
-                        </div>
-                        <div class="comparison-metric-grid">
-                            <div class="comparison-metric">
-                                <span class="comparison-metric-label">Cells</span>
-                                <span class="comparison-metric-value">${{sourceCount.toLocaleString()}}</span>
-                            </div>
-                            <div class="comparison-metric">
-                                <span class="comparison-metric-label">Share</span>
-                                <span class="comparison-metric-value">${{sourcePct.toFixed(1)}}%</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="comparison-card">
-                        <div class="comparison-card-title">
-                            <span class="agg-dot" style="background: ${{referenceColor}}"></span>
-                            <span>${{escapeHtml(referenceCategory)}}</span>
-                        </div>
-                        <div class="comparison-metric-grid">
-                            <div class="comparison-metric">
-                                <span class="comparison-metric-label">Cells</span>
-                                <span class="comparison-metric-value">${{referenceCount.toLocaleString()}}</span>
-                            </div>
-                            <div class="comparison-metric">
-                                <span class="comparison-metric-label">Share</span>
-                                <span class="comparison-metric-value">${{referencePct.toFixed(1)}}%</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <div class="agg-group-meta">Total Labeled Cells: ${{total.toLocaleString()}}</div>
             </div>
         `;
     }}
@@ -13843,10 +13763,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         return `
             <div class="cluster-de-result">
-                <div class="cluster-de-meta">
-                    Pairwise DE for <strong>${{escapeHtml(sourceCategory)}}</strong> vs <strong>${{escapeHtml(referenceCategory)}}</strong>.
-                    Click a gene to load it in the viewer.
-                </div>
                 ${{buildVolcanoPlot(genes, logfc, pvalsAdj)}}
                 <table class="cluster-de-table">
                     <thead>
@@ -13961,10 +13877,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 Comparing <strong>${{escapeHtml(clusterDeSourceCategory)}}</strong> vs <strong>${{escapeHtml(clusterDeReferenceCategory)}}</strong>
                 in <strong>${{escapeHtml(formatMetadataLabel(clusterDeGroupby))}}</strong>.
             </div>
-            ${{renderComparisonCountSummary(clusterDeGroupby, clusterDeSourceCategory, clusterDeReferenceCategory)}}
-            ${{renderComparisonNeighborSummary(clusterDeGroupby, clusterDeSourceCategory, clusterDeReferenceCategory)}}
             ${{renderComparisonMarkerSummary(clusterDeGroupby, clusterDeSourceCategory, clusterDeReferenceCategory)}}
-            ${{renderComparisonInteractionSummary(clusterDeGroupby, clusterDeSourceCategory, clusterDeReferenceCategory)}}
             ${{renderClusterDEResultSection(clusterDeGroupby, clusterDeSourceCategory, clusterDeReferenceCategory)}}
         `;
 
@@ -13974,7 +13887,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const gene = btn.getAttribute('data-cluster-de-gene') || '';
                 if (!gene) return;
                 const ok = await activateViewerGene(gene, {{ showErrors: true }});
-                if (ok) renderCompareInsights();
+                if (ok) renderClusterDE();
             }});
         }});
 
@@ -14008,7 +13921,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const gene = dot.getAttribute('data-volcano-gene') || '';
                 if (!gene) return;
                 const ok = await activateViewerGene(gene, {{ showErrors: true }});
-                if (ok) renderCompareInsights();
+                if (ok) renderClusterDE();
             }});
         }}
     }}
@@ -14684,13 +14597,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }});
         }}
         bindVolcanoGroupInteraction(container, renderGroupDE);
-        bindGeneActivateButtons(container, renderCompareInsights);
+        bindGeneActivateButtons(container, renderGroupDE);
         bindGeneGoogleSearchButtons(container);
     }}
 
     function renderCompareInsights() {{
-        renderClusterDE();
-        renderGroupDE();
+        if (insightsCompareTab === 'regions') {{
+            renderAnnotationComparison();
+        }} else {{
+            renderGroupDE();
+        }}
     }}
 
     function renderCellTypeTrend() {{
@@ -16891,53 +16807,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const refreshInsights = () => {{
             if (!isInsightsVisible()) return;
             renderColorList(document.getElementById('color-search')?.value || '');
-            const isSummary = document.getElementById('color-tab-aggregate')?.classList.contains('active');
-            const isCompare = document.getElementById('color-tab-compare')?.classList.contains('active');
-            const isGenes = document.getElementById('color-tab-genes')?.classList.contains('active');
-            const isNeighborhood = document.getElementById('color-tab-neighbors')?.classList.contains('active');
-            const isRegions = document.getElementById('color-tab-regions')?.classList.contains('active');
-            if (isSummary) {{
-                renderColorAggregation();
-                renderCellTypeTrend();
-            }} else if (isCompare) {{
-                renderCompareInsights();
-            }} else if (isNeighborhood) {{
-                renderNeighborStats();
-                renderInteractionBrowser();
-            }} else if (isGenes) {{
-                const isMarkers = document.getElementById('genes-tab-markers')?.classList.contains('active');
-                const isSpatial = document.getElementById('genes-tab-spatial')?.classList.contains('active');
-                if (isMarkers) renderMarkerGenes();
-                if (isSpatial) renderSpatialVariableGenes();
-            }} else if (isRegions) {{
-                renderAnnotationComparison();
-            }}
+            renderActiveInsightsPanel();
         }};
 
         colorSelect.addEventListener('change', (e) => {{
-            currentColor = e.target.value;
-            currentGene = null;
-            invalidateGeneDensityCaches();
-            celltypeTrendTarget = null;
-            modalSelectedCategory = null;
-            modalTypeSelectEnabled = false;
-            hoveredNeighborFocus = null;
-            selectedNeighborFocus = null;
-            document.getElementById('gene-input').value = '';
-            (DATA.sections || []).forEach(s => {{ if (s && s._colorCache) s._colorCache = {{}}; }});
-            hiddenCategories.clear();
-            if (DATA.colors_meta?.[currentColor] && !DATA.colors_meta[currentColor].is_continuous) {{
-                selectionSummaryColor = currentColor;
-            }}
-            updateExpressionScaleUI();
-            renderLegend('legend');
-            renderLegend('modal-legend');
-            renderAllSections();
-            if (modalSection) renderModalSection();
-            if (umapVisible) renderUMAP();
-            updateSelectionInfo();
-            renderGeneDiscoveryPanel();
-            refreshInsights();
+            setViewerColorColumn(e.target.value);
         }});
 
         const geneList = document.getElementById('gene-list');
