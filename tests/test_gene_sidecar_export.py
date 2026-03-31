@@ -1,4 +1,5 @@
 import json
+import py_compile
 import re
 import shutil
 import struct
@@ -14,7 +15,7 @@ import pytest
 from anndata import AnnData
 
 import karospace.cli as cli_module
-from karospace.data_loader import SectionData, SpatialDataset, load_spatial_data
+from karospace.data_loader import SectionData, SpatialDataset, _read_h5ad_with_fallback, load_spatial_data
 from karospace.exporter import export_to_html, package_sidecar_viewer
 
 
@@ -104,6 +105,28 @@ def _attach_companion_analytics(dataset: SpatialDataset, **payloads) -> None:
     for key, value in payloads.items():
         companion_uns[f"{key}_json"] = json.dumps(value).encode("utf-8")
     dataset.adata.uns["karospace_companion"] = companion_uns
+
+
+def _write_h5ad_with_nested_null_uns_entry(path: Path) -> None:
+    obs = pd.DataFrame(
+        {"sample_id": pd.Categorical(["S1", "S1"])},
+        index=["cell_0", "cell_1"],
+    )
+    var = pd.DataFrame(index=["G1", "G2"])
+    adata = AnnData(X=np.array([[1.0, 0.0], [0.0, 1.0]], dtype=float), obs=obs, var=var)
+    adata.obsm["spatial"] = np.array([[0.0, 0.0], [1.0, 1.0]], dtype=float)
+    adata.uns["dataset_source"] = {
+        "chunksize": 256,
+        "expression_path": "expr.h5",
+        "metadata_path": "meta.csv",
+    }
+    adata.write_h5ad(path)
+
+    with h5py.File(path, "r+") as handle:
+        dataset_source = handle["uns"]["dataset_source"]
+        null_ds = dataset_source.create_dataset("selected_fovs", data=np.float32(0))
+        null_ds.attrs["encoding-type"] = "null"
+        null_ds.attrs["encoding-version"] = "0.1.0"
 
 
 def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
@@ -274,7 +297,10 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert "function renderNeighborVisualizationToolbar(viewKey, label)" in html_text
     assert "function renderNeighborVisualizationControlPanel(viewKey, viewState)" in html_text
     assert "function bindNeighborVisualizationSettingControls(container, viewKey)" in html_text
+    assert "function getNeighborMetricOptions(viewKey)" in html_text
+    assert "function setNeighborMetric(viewKey, value)" in html_text
     assert "function getNeighborFocusedIndices(viewState, metric, controls)" in html_text
+    assert "function sortNeighborIndicesForChord(indices, viewState, order)" in html_text
     assert "function applyNeighborVisualizationViewport(container, viewKey, options = {})" in html_text
     assert "function bindNeighborVisualizationControls(container, viewKey)" in html_text
     assert "function renderNeighborFocusDetail(focus, viewState)" in html_text
@@ -293,6 +319,11 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert 'data-neighbor-zoom-action="expand"' in html_text
     assert "Neighbor enrichment network" in html_text
     assert "Neighbor connection chord diagram" in html_text
+    assert "Selected + neighbors" in html_text
+    assert ">Min strength<" in html_text
+    assert ">Max categories<" in html_text
+    assert ">Labels<" in html_text
+    assert ">Order<" in html_text
     assert "function computeRegionAnnotationDE(annotationA, annotationB, options = {})" in html_text
     assert "function fetchGeneAuxShardForAnalysis(shardUrl)" in html_text
     assert "function decodeDenseSidecarSection(sectionEntry)" in html_text
@@ -1363,25 +1394,67 @@ def test_export_recomputes_only_missing_companion_analytics(monkeypatch, tmp_pat
 
 
 def test_load_spatial_data_handles_null_encoded_uns_entries(tmp_path):
-    obs = pd.DataFrame(
-        {"sample_id": pd.Categorical(["S1", "S1"])},
-        index=["cell_0", "cell_1"],
-    )
-    var = pd.DataFrame(index=["G1", "G2"])
-    adata = AnnData(X=np.array([[1.0, 0.0], [0.0, 1.0]], dtype=float), obs=obs, var=var)
-    adata.obsm["spatial"] = np.array([[0.0, 0.0], [1.0, 1.0]], dtype=float)
-    adata.uns["dummy"] = {"ok": 1}
-
     path = tmp_path / "broken.h5ad"
-    adata.write_h5ad(path)
-
-    with h5py.File(path, "r+") as handle:
-        null_ds = handle["uns"].create_dataset("null_entry", data=np.float32(0))
-        null_ds.attrs["encoding-type"] = "null"
-        null_ds.attrs["encoding-version"] = "0.1.0"
+    _write_h5ad_with_nested_null_uns_entry(path)
 
     dataset = load_spatial_data(str(path), groupby="sample_id")
 
     assert dataset.n_sections == 1
     assert dataset.n_cells == 2
     assert dataset.var_names == ["G1", "G2"]
+    assert dataset.adata.uns["dataset_source"]["chunksize"] == 256
+    assert dataset.adata.uns["dataset_source"]["expression_path"] == "expr.h5"
+    assert "selected_fovs" not in dataset.adata.uns["dataset_source"]
+
+
+def test_read_h5ad_with_fallback_uses_sanitized_copy_and_cleans_it_up(tmp_path, monkeypatch):
+    path = tmp_path / "broken.h5ad"
+    _write_h5ad_with_nested_null_uns_entry(path)
+
+    expected = AnnData(
+        X=np.array([[1.0]], dtype=float),
+        obs=pd.DataFrame(index=["cell_0"]),
+        var=pd.DataFrame(index=["G1"]),
+    )
+    read_calls = []
+
+    def fake_read_h5ad(target_path):
+        read_calls.append(Path(target_path))
+        if len(read_calls) == 1:
+            raise RuntimeError(
+                "No read method registered for IOSpec(encoding_type='null', encoding_version='0.1.0')"
+            )
+        assert Path(target_path) != path
+        assert Path(target_path).exists()
+        with h5py.File(target_path, "r") as handle:
+            assert "selected_fovs" not in handle["uns"]["dataset_source"]
+            expression_path = handle["uns"]["dataset_source"]["expression_path"][()]
+            if isinstance(expression_path, bytes):
+                expression_path = expression_path.decode("utf-8")
+            assert expression_path == "expr.h5"
+        return expected
+
+    monkeypatch.setattr("karospace.data_loader.sc.read_h5ad", fake_read_h5ad)
+
+    loaded = _read_h5ad_with_fallback(str(path))
+
+    assert loaded is expected
+    assert read_calls[0] == path
+    assert len(read_calls) == 2
+    assert not read_calls[1].exists()
+
+
+def test_all_example_scripts_compile():
+    examples_dir = Path(__file__).resolve().parents[1] / "examples"
+    example_paths = sorted(examples_dir.glob("*.py"))
+
+    assert example_paths, "expected at least one example script"
+
+    failures = []
+    for path in example_paths:
+        try:
+            py_compile.compile(str(path), doraise=True)
+        except Exception as exc:  # pragma: no cover - exercised only on failure
+            failures.append((path.name, str(exc)))
+
+    assert failures == []
