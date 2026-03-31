@@ -1929,7 +1929,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             transition: opacity 120ms ease, filter 120ms ease, transform 120ms ease;
         }}
         .neighbor-interactive.is-dimmed {{
-            opacity: 0.08;
+            opacity: 0.04;
         }}
         .neighbor-interactive.is-hovered,
         .neighbor-interactive.is-selected {{
@@ -1956,7 +1956,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             stroke-linecap: round;
         }}
         .neighbor-network-edge.is-dimmed {{
-            stroke-opacity: 0.06;
+            stroke-opacity: 0.02;
         }}
         .neighbor-network-edge.is-related {{
             stroke-opacity: 0.82;
@@ -1971,7 +1971,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             stroke-width: 1.4;
         }}
         .neighbor-network-node.is-dimmed circle {{
-            opacity: 0.22;
+            opacity: 0.08;
             filter: saturate(0.2);
         }}
         .neighbor-network-node.is-related circle {{
@@ -1989,7 +1989,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             fill: var(--text-color);
         }}
         .neighbor-network-node.is-dimmed .neighbor-network-label {{
-            opacity: 0.06;
+            opacity: 0.02;
         }}
         .neighbor-network-node.is-related .neighbor-network-label {{
             font-weight: 700;
@@ -15385,21 +15385,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return focus.kind === 'pair' && sourceIdx === focus.sourceIdx && targetIdx === focus.targetIdx;
     }}
 
-    function neighborElementRelatesToFocus(element, focus, viewState = null) {{
+    function neighborElementRelatesToFocus(element, focus, visibleNeighborMap = null) {{
         const kind = element.getAttribute('data-neighbor-kind');
         const sourceIdx = Number(element.getAttribute('data-neighbor-source-idx'));
         if (focus.kind === 'category') {{
             if (kind === 'category') {{
                 if (sourceIdx === focus.sourceIdx) return true;
-                if (!viewState) return false;
-                const forward = Math.max(0, Number(viewState.counts?.[focus.sourceIdx]?.[sourceIdx] ?? 0));
-                const reverse = Math.max(0, Number(viewState.counts?.[sourceIdx]?.[focus.sourceIdx] ?? 0));
-                const forwardZ = Number(viewState.zscores?.[focus.sourceIdx]?.[sourceIdx]);
-                const reverseZ = Number(viewState.zscores?.[sourceIdx]?.[focus.sourceIdx]);
-                return forward > 0
-                    || reverse > 0
-                    || (Number.isFinite(forwardZ) && Math.abs(forwardZ) > 0)
-                    || (Number.isFinite(reverseZ) && Math.abs(reverseZ) > 0);
+                const neighbors = visibleNeighborMap?.get(focus.sourceIdx);
+                return !!neighbors && neighbors.has(sourceIdx);
             }}
             const targetIdx = Number(element.getAttribute('data-neighbor-target-idx'));
             return sourceIdx === focus.sourceIdx || targetIdx === focus.sourceIdx;
@@ -15528,6 +15521,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const detail = container.querySelector('[data-neighbor-detail]');
         const interactiveElements = Array.from(container.querySelectorAll('[data-neighbor-kind]'));
         if (!detail || !interactiveElements.length) return;
+        const visibleNeighborMap = new Map();
+        interactiveElements.forEach((element) => {{
+            if (element.getAttribute('data-neighbor-kind') !== 'pair') return;
+            const sourceIdx = Number(element.getAttribute('data-neighbor-source-idx'));
+            const targetIdx = Number(element.getAttribute('data-neighbor-target-idx'));
+            if (!Number.isInteger(sourceIdx) || !Number.isInteger(targetIdx)) return;
+            if (!visibleNeighborMap.has(sourceIdx)) visibleNeighborMap.set(sourceIdx, new Set());
+            if (!visibleNeighborMap.has(targetIdx)) visibleNeighborMap.set(targetIdx, new Set());
+            visibleNeighborMap.get(sourceIdx).add(targetIdx);
+            visibleNeighborMap.get(targetIdx).add(sourceIdx);
+        }});
 
         const applyState = () => {{
             hoveredNeighborFocus = normalizeNeighborFocus(hoveredNeighborFocus, viewState);
@@ -15541,7 +15545,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             interactiveElements.forEach((element) => {{
                 const isHovered = hoveredNeighborFocus && neighborElementMatchesFocus(element, hoveredNeighborFocus);
                 const isSelected = selectedNeighborFocus && neighborElementMatchesFocus(element, selectedNeighborFocus);
-                const isRelated = !activeFocus || neighborElementRelatesToFocus(element, activeFocus, viewState);
+                const isRelated = !activeFocus || neighborElementRelatesToFocus(element, activeFocus, visibleNeighborMap);
                 element.classList.toggle('is-hovered', !!isHovered);
                 element.classList.toggle('is-selected', !!isSelected);
                 element.classList.toggle('is-related', !!activeFocus && !!isRelated);
