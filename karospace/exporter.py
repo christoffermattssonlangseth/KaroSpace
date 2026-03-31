@@ -12424,7 +12424,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         const cnt = typeMap.get(type) || 0;
                         const pct = Math.round(100 * cnt / total);
                         if (pct <= 0) return;
-                        const bgColor = getBarColor(ti);
+                        const bgColor = getCategoryColorForValue(typeColumn, type);
                         html += `<div class="annot-comp-segment" title="${{escapeHtml(type)}}: ${{cnt}} (${{pct}}%)" style="width:${{pct}}%;background:${{bgColor}}"></div>`;
                     }});
                     html += `</div>`;
@@ -12435,8 +12435,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             // Legend
             if (typeList.length) {{
                 html += `<div class="annot-comp-legend">`;
-                typeList.slice(0, 8).forEach((type, ti) => {{
-                    html += `<span class="annot-comp-legend-item"><span class="annot-comp-dot" style="background:${{getBarColor(ti)}}"></span>${{escapeHtml(type)}}</span>`;
+                typeList.slice(0, 8).forEach((type) => {{
+                    const typeColor = getCategoryColorForValue(typeColumn, type);
+                    html += `<span class="annot-comp-legend-item"><span class="annot-comp-dot" style="background:${{typeColor}}"></span>${{escapeHtml(type)}}</span>`;
                 }});
                 if (typeList.length > 8) {{
                     html += `<span class="annot-comp-legend-item agg-group-meta">+${{typeList.length - 8}} more</span>`;
@@ -12547,11 +12548,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         bindVolcanoGroupInteraction(container, renderAnnotationComparison);
         bindGeneActivateButtons(container, renderAnnotationComparison);
         bindGeneGoogleSearchButtons(container);
-    }}
-
-    function getBarColor(index) {{
-        const palette = ['#4cc9f0','#f4a261','#2a9d8f','#e63946','#06d6a0','#ffd166','#118ab2','#ef476f','#43aa8b','#ff7f50'];
-        return palette[index % palette.length];
     }}
 
     function buildColorPanel() {{
@@ -13285,6 +13281,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const categories = colorMeta.categories || Object.keys(groupMarkers);
         const rows = categories.map(cat => {{
             const key = String(cat);
+            const categoryColor = getCategoryColorForValue(currentColor, key);
             const genes = getMarkerGenesForColorCategory(currentColor, key)
                 .map((gene) => {{
                     const raw = String(gene || '').trim();
@@ -13317,7 +13314,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 : '<div class="agg-group-meta">No marker genes found.</div>';
             return `
                 <div class="marker-group">
-                    <div class="marker-group-title">${{key}}</div>
+                    <div class="marker-group-title"><span class="agg-dot" style="background: ${{categoryColor}}"></span>${{key}}</div>
                     <div class="gene-token-grid">${{geneButtons}}</div>
                 </div>
             `;
@@ -13487,6 +13484,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const sourceMarkers = getMarkerGeneEntries(colorCol, sourceCategory, 6);
         const referenceMarkers = getMarkerGeneEntries(colorCol, referenceCategory, 6);
         const overlap = getMarkerOverlapEntries(colorCol, sourceCategory, referenceCategory, 6);
+        const sourceColor = getCategoryColorForValue(colorCol, sourceCategory);
+        const referenceColor = getCategoryColorForValue(colorCol, referenceCategory);
 
         if (!sourceMarkers.length && !referenceMarkers.length) {{
             return `
@@ -13503,11 +13502,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 <div class="agg-group-meta">Top markers for each category. Click a gene to load it when available.</div>
             </div>
             <div class="agg-group">
-                <div class="agg-group-title">${{escapeHtml(sourceCategory)}} markers</div>
+                <div class="agg-group-title"><span class="agg-dot" style="background: ${{sourceColor}}"></span>${{escapeHtml(sourceCategory)}} markers</div>
                 ${{renderComparisonGeneTokenGrid(sourceMarkers, 'No marker genes available for Category A.', 'Load Category A marker gene into the viewer')}}
             </div>
             <div class="agg-group">
-                <div class="agg-group-title">${{escapeHtml(referenceCategory)}} markers</div>
+                <div class="agg-group-title"><span class="agg-dot" style="background: ${{referenceColor}}"></span>${{escapeHtml(referenceCategory)}} markers</div>
                 ${{renderComparisonGeneTokenGrid(referenceMarkers, 'No marker genes available for Category B.', 'Load Category B marker gene into the viewer')}}
             </div>
             <div class="agg-group">
@@ -14682,9 +14681,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const matchBadges = matches.length > 1
             ? `<div class="agg-group-meta" style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;">
                 Matches:
-                ${{matches.map(cat => `<button type="button" class="legend-btn${{cat === target ? ' active' : ''}}" data-trend-target="${{escapeHtml(cat)}}">${{escapeHtml(cat)}}</button>`).join('')}}
+                ${{matches.map(cat => `<button type="button" class="legend-btn${{cat === target ? ' active' : ''}}" data-trend-target="${{escapeHtml(cat)}}"><span class="agg-dot" style="background: ${{getCategoryColorForValue(currentColor, cat)}}"></span>${{escapeHtml(cat)}}</button>`).join('')}}
                </div>`
-            : `<div class="agg-group-meta">Showing: <strong>${{escapeHtml(target)}}</strong></div>`;
+            : `<div class="agg-group-meta">Showing: <span class="agg-dot" style="background: ${{getCategoryColorForValue(currentColor, target)}}"></span><strong>${{escapeHtml(target)}}</strong></div>`;
 
         container.innerHTML = `
             ${{matchBadges}}
@@ -16385,6 +16384,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const sourceN = (nCells[sourceIdx] ?? 0).toLocaleString();
         const degreeLabel = Number.isFinite(meanDegree[sourceIdx]) ? meanDegree[sourceIdx].toFixed(2) : '0.00';
         const withContactMarkers = topEntries.filter(entry => !!entry.contact).length;
+        const sourceColor = getCategoryColor(sourceIdx);
         const rows = topEntries.map(entry => {{
             const color = getCategoryColor(entry.targetIdx);
             const zLabel = entry.z === null ? 'n/a' : entry.z.toFixed(2);
@@ -16420,7 +16420,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         container.innerHTML = `
             <div class="agg-group">
-                <div class="agg-group-title">${{source}} → targets</div>
+                <div class="agg-group-title"><span class="agg-dot" style="background: ${{sourceColor}}"></span>${{source}} → targets</div>
                 <div class="agg-group-meta">n=${{sourceN}} | mean degree=${{degreeLabel}} | neighbor edges=${{formatNeighborCount(total)}}</div>
                 <div class="agg-group-meta">Source markers: ${{sourceMarkerLabel}}</div>
                 <div class="agg-group-meta">Contact-conditioned markers available for ${{withContactMarkers}}/${{topEntries.length}} shown targets.</div>
