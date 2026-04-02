@@ -1472,6 +1472,20 @@ def test_read_h5ad_with_fallback_uses_sanitized_copy_and_cleans_it_up(tmp_path, 
     assert not read_calls[1].exists()
 
 
+def test_read_h5ad_with_fallback_raises_external_volume_guidance(monkeypatch):
+    blocked_path = "/Volumes/processing2/example.companion.ready.h5ad"
+
+    def fake_read_h5ad(_target_path):
+        raise PermissionError(
+            "[Errno 1] Unable to synchronously open file (error message = 'Operation not permitted')"
+        )
+
+    monkeypatch.setattr("karospace.data_loader.sc.read_h5ad", fake_read_h5ad)
+
+    with pytest.raises(PermissionError, match="mounted volume"):
+        _read_h5ad_with_fallback(blocked_path)
+
+
 def test_all_example_scripts_compile():
     examples_dir = Path(__file__).resolve().parents[1] / "examples"
     example_paths = sorted(examples_dir.glob("*.py"))

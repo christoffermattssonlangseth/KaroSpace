@@ -120,6 +120,20 @@ def _read_h5ad_with_fallback(path: str) -> sc.AnnData:
     """Read h5ad, retrying with null-encoded uns entries stripped if needed."""
     try:
         return sc.read_h5ad(path)
+    except PermissionError as exc:
+        message = f"Unable to read h5ad file: {path}."
+        if str(path).startswith("/Volumes/"):
+            message += (
+                " macOS denied access to the mounted volume. Grant your terminal or IDE access "
+                "to external/removable volumes or Full Disk Access, or copy the file to a local "
+                "path such as ~/Downloads and retry."
+            )
+        else:
+            message += (
+                " The OS denied access. Check file permissions for the current process or copy "
+                "the file to a readable local path and retry."
+            )
+        raise PermissionError(message) from exc
     except Exception as exc:
         if "encoding_type='null'" not in str(exc):
             raise
