@@ -1634,6 +1634,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             gap: 6px;
             margin: 2px 0;
         }}
+        .agg-row[data-target-cat] {{ cursor: pointer; border-radius: 3px; padding: 1px 3px; margin: 2px -3px; }}
+        .agg-row[data-target-cat]:hover {{ background: var(--hover-bg); }}
+        .agg-row[data-target-cat].is-active {{ background: color-mix(in srgb, var(--accent-color, #4a9eff) 15%, transparent); }}
         .agg-dot {{
             width: 8px;
             height: 8px;
@@ -15865,7 +15868,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     zLabel = ` z=${{zscores[idx][j].toFixed(2)}}`;
                 }}
                 return `
-                    <div class="agg-row">
+                    <div class="agg-row" data-target-cat="${{escapeHtml(target)}}">
                         <span class="agg-dot" style="background: ${{color}}"></span>
                         <span class="agg-label">${{target}}</span>
                         <span class="agg-value">${{pct.toFixed(1)}}% (${{formatCount(val)}})${{zLabel}}</span>
@@ -15897,8 +15900,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
 
             return `
-                <div class="agg-group">
-                    <div class="agg-group-title">${{source}}</div>
+                <div class="agg-group" data-source-cat="${{escapeHtml(source)}}">
+                    <div class="agg-group-title">${{escapeHtml(source)}}</div>
                     <div class="agg-group-meta">n=${{nLabel}} | mean degree=${{degreeLabel}} | neighbor edges=${{totalLabel}}${{permLabel}}</div>
                     <button class="legend-btn" data-neighbor-toggle="${{idx}}">${{toggleLabel}}</button>
                     ${{rowsHtml}}
@@ -16356,6 +16359,28 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 if (expandedNeighborGroups.has(key)) expandedNeighborGroups.delete(key);
                 else expandedNeighborGroups.add(key);
                 renderNeighborStats();
+            }});
+        }});
+
+        container.querySelectorAll('[data-target-cat]').forEach((row) => {{
+            row.addEventListener('click', () => {{
+                const targetCat = row.getAttribute('data-target-cat');
+                const sourceCat = row.closest('[data-source-cat]')?.getAttribute('data-source-cat');
+                if (!targetCat || !sourceCat) return;
+                const focusSet = new Set([sourceCat, targetCat]);
+                const isActive = neighborNetworkFocusCategories &&
+                    neighborNetworkFocusCategories.size === focusSet.size &&
+                    [...focusSet].every(c => neighborNetworkFocusCategories.has(c));
+                neighborNetworkFocusCategories = isActive ? null : focusSet;
+                spotlightPinnedCategory = null;
+                container.querySelectorAll('[data-target-cat]').forEach(r => {{
+                    const rTarget = r.getAttribute('data-target-cat');
+                    const rSource = r.closest('[data-source-cat]')?.getAttribute('data-source-cat');
+                    r.classList.toggle('is-active', !isActive && rTarget === targetCat && rSource === sourceCat);
+                }});
+                updateNeighborFocusResetButton();
+                updateAllLegendSpotlightClasses();
+                rerenderForSpotlightChange();
             }});
         }});
     }}
