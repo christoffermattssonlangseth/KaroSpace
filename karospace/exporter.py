@@ -15739,19 +15739,28 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             focusNeighborInteractionPair(sourceLabel, targetLabel);
         }});
 
+        // Delegate mouse hover to the scroll container so overlapping SVG paths
+        // don't fire competing mouseenter/mouseleave events (eliminates jitter).
+        const hoverContainer = container.querySelector('[data-neighbor-scroll]') || container;
+        let hoverDelegateTarget = null;
+        hoverContainer.addEventListener('mousemove', (event) => {{
+            const el = event.target.closest('[data-neighbor-kind]');
+            if (el === hoverDelegateTarget) return;
+            hoverDelegateTarget = el;
+            hoveredNeighborFocus = el ? readNeighborFocusFromElement(el, viewState) : null;
+            applyState();
+        }});
+        hoverContainer.addEventListener('mouseleave', () => {{
+            if (hoverDelegateTarget === null && hoveredNeighborFocus === null) return;
+            hoverDelegateTarget = null;
+            hoveredNeighborFocus = null;
+            applyState();
+        }});
+
         interactiveElements.forEach((element) => {{
-            const updateHover = () => {{
+            element.addEventListener('focus', () => {{
                 hoveredNeighborFocus = readNeighborFocusFromElement(element, viewState);
                 applyState();
-            }};
-            element.addEventListener('mouseenter', updateHover);
-            element.addEventListener('focus', updateHover);
-            element.addEventListener('mouseleave', () => {{
-                const focus = readNeighborFocusFromElement(element, viewState);
-                if (getNeighborFocusKey(hoveredNeighborFocus) === getNeighborFocusKey(focus)) {{
-                    hoveredNeighborFocus = null;
-                    applyState();
-                }}
             }});
             element.addEventListener('blur', () => {{
                 const focus = readNeighborFocusFromElement(element, viewState);
@@ -15786,6 +15795,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                                 focusSet.add(String(viewState.categories[j]));
                         }});
                     }}
+                    neighborNetworkFocusCategories = focusSet;
+                    spotlightPinnedCategory = null;
+                }} else if (selectedNeighborFocus && selectedNeighborFocus.kind === 'pair') {{
+                    const focusSet = new Set([selectedNeighborFocus.sourceLabel]);
+                    if (selectedNeighborFocus.targetLabel)
+                        focusSet.add(selectedNeighborFocus.targetLabel);
                     neighborNetworkFocusCategories = focusSet;
                     spotlightPinnedCategory = null;
                 }} else {{
@@ -16051,13 +16066,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ${{emptyNote}}
             <div class="neighbor-visualization">
                 ${{renderNeighborVisualizationToolbar('bubble', 'Use focus mode and thresholding to simplify dense local neighborhood structure.')}}
-                <div data-neighbor-detail></div>
                 <div class="${{scrollClass}}" data-neighbor-scroll>
                     <svg class="neighbor-svg" data-neighbor-svg data-neighbor-base-width="540" data-neighbor-base-height="430" data-neighbor-current-zoom="${{vizState.zoom}}" style="width:${{svgWidth}}px;height:${{svgHeight}}px;" viewBox="0 0 540 430" role="img" aria-label="Neighbor enrichment network">
                         ${{edgesSvg}}
                         ${{nodesSvg}}
                     </svg>
                 </div>
+                <div data-neighbor-detail></div>
             </div>
             <div class="neighbor-view-note">${{metricNote}} Self-links stay in the table and chord view for readability.</div>
             ${{legendHtml}}
@@ -16272,7 +16287,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ${{focusNote}}
             <div class="neighbor-visualization">
                 ${{renderNeighborVisualizationToolbar('chord', 'Use ordering, thresholding, and focus mode to simplify ribbon-heavy views.')}}
-                <div data-neighbor-detail></div>
                 <div class="${{scrollClass}}" data-neighbor-scroll>
                     <svg class="neighbor-svg" data-neighbor-svg data-neighbor-base-width="${{width}}" data-neighbor-base-height="${{height}}" data-neighbor-current-zoom="${{vizState.zoom}}" style="width:${{svgWidth}}px;height:${{svgHeight}}px;" viewBox="0 0 ${{width}} ${{height}}" role="img" aria-label="Neighbor connection chord diagram">
                         ${{links}}
@@ -16281,6 +16295,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     </svg>
                 </div>
                 <div class="neighbor-chord-legend">${{legend}}</div>
+                <div data-neighbor-detail></div>
             </div>
             <div class="neighbor-view-note">${{metricNote}} Self-links remain visible as inner loops when they pass the current threshold.</div>
         `;
