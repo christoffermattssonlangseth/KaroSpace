@@ -209,7 +209,8 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert ">Cell DE<" in html_text
     assert "function renderSpatialVariableGenes()" in html_text
     assert "function getBarColor(" not in html_text
-    assert '<div class="marker-group-title"><span class="agg-dot" style="background: ${categoryColor}"></span>${key}</div>' in html_text
+    assert 'data-marker-category="${escapeHtml(key)}"' in html_text
+    assert 'title="Click to highlight this annotation in the viewer"' in html_text
     assert "Global Moran&apos;s I ranking precomputed at export." in html_text
     assert "Neighborhood Follow-up" not in html_text
     assert 'data-cluster-de-open="neighbors-enrichment"' not in html_text

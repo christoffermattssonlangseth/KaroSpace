@@ -1576,7 +1576,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             color: var(--text-color);
             font-size: 11px;
         }}
-        .marker-group-title {{ font-size: 11px; font-weight: 600; }}
+        .marker-group-title {{ font-size: 11px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; border-radius: 3px; padding: 1px 3px; margin: -1px -3px; }}
+        .marker-group-title:hover {{ background: var(--hover-bg); }}
+        .marker-group-title.is-spotlit {{ background: color-mix(in srgb, var(--accent-color, #4a9eff) 15%, transparent); }}
         .marker-genes .gene-token-grid {{ gap: 4px; }}
         .marker-genes .gene-token-btn {{
             gap: 4px;
@@ -13349,9 +13351,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         : 'Marker gene name only; this gene was not embedded in the viewer',
                 }})).join('')
                 : '<div class="agg-group-meta">No marker genes found.</div>';
+            const isSpotlit = linkedSpotlightEnabled && spotlightPinnedCategory === key;
             return `
                 <div class="marker-group">
-                    <div class="marker-group-title"><span class="agg-dot" style="background: ${{categoryColor}}"></span>${{key}}</div>
+                    <div class="marker-group-title${{isSpotlit ? ' is-spotlit' : ''}}" data-marker-category="${{escapeHtml(key)}}" title="Click to highlight this annotation in the viewer"><span class="agg-dot" style="background: ${{categoryColor}}"></span>${{escapeHtml(key)}}</div>
                     <div class="gene-token-grid">${{geneButtons}}</div>
                 </div>
             `;
@@ -13368,6 +13371,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         container.innerHTML = loadedGeneNote + rows.join('');
         bindGeneActivateButtons(container, renderMarkerGenes);
+
+        container.querySelectorAll('[data-marker-category]').forEach(title => {{
+            title.addEventListener('click', () => {{
+                const cat = title.getAttribute('data-marker-category');
+                if (!cat) return;
+                linkedSpotlightEnabled = true;
+                neighborNetworkFocusCategories = null;
+                spotlightPinnedCategory = spotlightPinnedCategory === cat ? null : cat;
+                spotlightHoverCategory = null;
+                updateAllLegendSpotlightClasses();
+                rerenderForSpotlightChange();
+                renderMarkerGenes();
+            }});
+        }});
     }}
 
     function renderSpatialVariableGenes() {{
