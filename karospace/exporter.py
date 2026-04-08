@@ -13207,6 +13207,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const container = document.getElementById('color-aggregation');
         const groupBy = document.getElementById('color-groupby');
         if (!container || !groupBy) return;
+        if (!groupBy.value) {{
+            const firstOption = groupBy.querySelector('option[value]:not([value=""])');
+            if (firstOption) groupBy.value = firstOption.value;
+        }}
         const groupKey = groupBy.value;
         if (!groupKey) {{
             container.innerHTML = '<div class="agg-group-meta">Pick a metadata column to summarize.</div>';
