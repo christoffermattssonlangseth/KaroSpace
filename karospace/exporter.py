@@ -1634,9 +1634,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             gap: 6px;
             margin: 2px 0;
         }}
-        .agg-row[data-target-cat] {{ cursor: pointer; border-radius: 3px; padding: 1px 3px; margin: 2px -3px; }}
-        .agg-row[data-target-cat]:hover {{ background: var(--hover-bg); }}
-        .agg-row[data-target-cat].is-active {{ background: color-mix(in srgb, var(--accent-color, #4a9eff) 15%, transparent); }}
+        .agg-row[data-target-cat], .agg-row[data-agg-cat] {{ cursor: pointer; border-radius: 3px; padding: 1px 3px; margin: 2px -3px; }}
+        .agg-row[data-target-cat]:hover, .agg-row[data-agg-cat]:hover {{ background: var(--hover-bg); }}
+        .agg-row[data-target-cat].is-active, .agg-row[data-agg-cat].is-active {{ background: color-mix(in srgb, var(--accent-color, #4a9eff) 15%, transparent); }}
         .agg-dot {{
             width: 8px;
             height: 8px;
@@ -4661,6 +4661,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 if (geneDiscoveryOpen) {{
                     event.preventDefault();
                     setGeneDiscoveryOpen(false);
+                    return;
+                }}
+                const hasActiveHighlight = (neighborNetworkFocusCategories && neighborNetworkFocusCategories.size > 0) ||
+                    (linkedSpotlightEnabled && spotlightPinnedCategory);
+                if (hasActiveHighlight) {{
+                    event.preventDefault();
+                    neighborNetworkFocusCategories = null;
+                    spotlightPinnedCategory = null;
+                    spotlightHoverCategory = null;
+                    linkedSpotlightEnabled = false;
+                    updateNeighborFocusResetButton();
+                    updateAllLegendSpotlightClasses();
+                    rerenderForSpotlightChange();
                     return;
                 }}
                 return;
@@ -13012,7 +13025,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const w = Math.max(1, frac * BAR_W);
                 const col = getCategoryColor(ci);
                 const tip = escapeHtml(sid + ' \u00b7 ' + cat + ': ' + Math.round(frac * 100) + '% (' + row.counts[ci].toLocaleString() + ' cells)');
-                parts.push('<rect x="' + (barX + ox).toFixed(1) + '" y="' + (y+2) + '" width="' + w.toFixed(1) + '" height="' + (ROW_H-4) + '" fill="' + col + '" data-section-id="' + esc + '" data-tooltip="' + tip + '" style="cursor:pointer"/>');
+                parts.push('<rect x="' + (barX + ox).toFixed(1) + '" y="' + (y+2) + '" width="' + w.toFixed(1) + '" height="' + (ROW_H-4) + '" fill="' + col + '" data-bar-cat="' + escapeHtml(cat) + '" data-tooltip="' + tip + '" style="cursor:pointer"/>');
                 ox += w;
             }});
         }});
@@ -13044,7 +13057,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const col = getCategoryColor(ci);
                 const cellX = PL + LABEL_W + ci * CELL_W;
                 const tip = escapeHtml(sid + ' \u00b7 ' + cat + ': ' + Math.round(frac * 100) + '% (' + row.counts[ci].toLocaleString() + ' cells)');
-                parts.push('<rect x="' + cellX + '" y="' + y + '" width="' + CELL_W + '" height="' + CELL_H + '" fill="' + col + '" fill-opacity="' + alpha + '" stroke="var(--input-bg)" stroke-width="0.5" data-section-id="' + esc + '" data-tooltip="' + tip + '" style="cursor:pointer"/>');
+                parts.push('<rect x="' + cellX + '" y="' + y + '" width="' + CELL_W + '" height="' + CELL_H + '" fill="' + col + '" fill-opacity="' + alpha + '" stroke="var(--input-bg)" stroke-width="0.5" data-bar-cat="' + escapeHtml(cat) + '" data-tooltip="' + tip + '" style="cursor:pointer"/>');
             }});
         }});
         parts.push('</svg>');
@@ -13152,6 +13165,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const tooltip = container.querySelector('.samples-tooltip');
         if (svgEl && tooltip) {{
             svgEl.addEventListener('click', function(e) {{
+                const barEl = e.target.closest('[data-bar-cat]');
+                if (barEl) {{
+                    const cat = barEl.getAttribute('data-bar-cat');
+                    if (cat) {{
+                        linkedSpotlightEnabled = true;
+                        neighborNetworkFocusCategories = null;
+                        spotlightPinnedCategory = spotlightPinnedCategory === cat ? null : cat;
+                        spotlightHoverCategory = null;
+                        updateAllLegendSpotlightClasses();
+                        rerenderForSpotlightChange();
+                    }}
+                    return;
+                }}
                 const el = e.target.closest('[data-section-id]');
                 if (!el) return;
                 const sectionId = el.getAttribute('data-section-id');
@@ -13258,10 +13284,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const pct = total > 0 ? Math.round((count / total) * 100) : 0;
                 const catIdx = config.categories?.indexOf(cat) ?? -1;
                 const color = catIdx >= 0 ? getCategoryColor(catIdx) : '#999';
+                const isActive = linkedSpotlightEnabled && spotlightPinnedCategory === cat;
                 return `
-                    <div class="agg-row">
+                    <div class="agg-row${{isActive ? ' is-active' : ''}}" data-agg-cat="${{escapeHtml(cat)}}">
                         <span class="agg-dot" style="background: ${{color}}"></span>
-                        <span class="agg-label">${{cat}}</span>
+                        <span class="agg-label">${{escapeHtml(cat)}}</span>
                         <span class="agg-value">${{pct}}% (${{count}})</span>
                     </div>
                 `;
@@ -13292,6 +13319,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 if (!key) return;
                 if (expandedAggGroups.has(key)) expandedAggGroups.delete(key);
                 else expandedAggGroups.add(key);
+                renderColorAggregation();
+            }});
+        }});
+
+        container.querySelectorAll('[data-agg-cat]').forEach(row => {{
+            row.addEventListener('click', () => {{
+                const cat = row.getAttribute('data-agg-cat');
+                if (!cat) return;
+                linkedSpotlightEnabled = true;
+                neighborNetworkFocusCategories = null;
+                spotlightPinnedCategory = spotlightPinnedCategory === cat ? null : cat;
+                spotlightHoverCategory = null;
+                updateAllLegendSpotlightClasses();
+                rerenderForSpotlightChange();
                 renderColorAggregation();
             }});
         }});
