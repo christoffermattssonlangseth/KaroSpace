@@ -4193,6 +4193,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let linkedSpotlightEnabled = false;
     let spotlightPinnedCategory = null;
     let spotlightHoverCategory = null;
+    let neighborNetworkFocusCategories = null;
     let spotSize = {spot_size};
     let activeFilters = {{}};  // e.g. {{ course: new Set(['peak_I', 'peak_III']) }}
     let currentTheme = '{initial_theme}';
@@ -5319,15 +5320,35 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!legend) return;
         const config = getColorConfig();
         const activeSpotlight = getLinkedSpotlightCategory(config);
+        const hasNeighborFocus = neighborNetworkFocusCategories && neighborNetworkFocusCategories.size > 0;
         legend.querySelectorAll('.legend-item').forEach(item => {{
             const cat = item.dataset.category;
-            const isSpotlight = !!activeSpotlight && cat === activeSpotlight;
-            const isDimmed = !!activeSpotlight && cat !== activeSpotlight;
+            let isSpotlight, isDimmed;
+            if (hasNeighborFocus) {{
+                isSpotlight = neighborNetworkFocusCategories.has(cat);
+                isDimmed = !neighborNetworkFocusCategories.has(cat);
+            }} else {{
+                isSpotlight = !!activeSpotlight && cat === activeSpotlight;
+                isDimmed = !!activeSpotlight && cat !== activeSpotlight;
+            }}
             item.classList.toggle('spotlight', isSpotlight);
             item.classList.toggle('dimmed', isDimmed);
         }});
         const toggleBtn = document.getElementById(`${{targetId}}-spotlight-toggle`);
         if (toggleBtn) toggleBtn.classList.toggle('active', linkedSpotlightEnabled);
+    }}
+
+    function updateNeighborFocusResetButton() {{
+        const btn = document.getElementById('neighbor-focus-reset');
+        if (btn) btn.style.display = (neighborNetworkFocusCategories && neighborNetworkFocusCategories.size > 0) ? '' : 'none';
+    }}
+
+    function clearNeighborNetworkFocus() {{
+        neighborNetworkFocusCategories = null;
+        selectedNeighborFocus = null;
+        updateNeighborFocusResetButton();
+        updateAllLegendSpotlightClasses();
+        rerenderForSpotlightChange();
     }}
 
     function updateAllLegendSpotlightClasses() {{
@@ -8943,7 +8964,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const config = getColorConfig();
         const adjustedSpotSize = Math.max(0.25, umapSpotSize * umapZoom * 0.5);
         const activeSpotlight = getLinkedSpotlightCategory(config);
-        const hasSpotlight = !!activeSpotlight;
+        const hasNeighborFocusUMAP = neighborNetworkFocusCategories && neighborNetworkFocusCategories.size > 0;
+        const hasSpotlight = !!activeSpotlight || hasNeighborFocusUMAP;
         const filteredSections = getFilteredSections();
 
         // Check if any categories are hidden
@@ -9010,7 +9032,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     const t = (val - config.vmin) / (config.vmax - config.vmin);
                     color = magma(Math.max(0, Math.min(1, t)));
                 }} else {{
-                    isSpotlightCategory = hasSpotlight && catInfo.catName === activeSpotlight;
+                    isSpotlightCategory = (hasSpotlight && catInfo.catName === activeSpotlight) ||
+                                          (hasNeighborFocusUMAP && neighborNetworkFocusCategories.has(catInfo.catName));
                     color = getCategoryColor(catInfo.catIdx);
                 }}
 
@@ -10844,7 +10867,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         // Second pass: draw visible categories on top (with optional selected-category focus)
         const activeSpotlight = getLinkedSpotlightCategory(config);
         const focusCategory = activeSpotlight || modalSelectedCategory;
-        const hasTypeFocus = !config.is_continuous && focusCategory;
+        const hasNeighborFocus = neighborNetworkFocusCategories && neighborNetworkFocusCategories.size > 0;
+        const hasTypeFocus = !config.is_continuous && (focusCategory || hasNeighborFocus);
         if (showGeneCells) {{
             for (let i = 0; i < section.x.length; i++) {{
                 const val = values[i];
@@ -10858,7 +10882,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 }} else {{
                     const catInfo = getCategoricalValueInfo(config, val);
                     if (!catInfo || hiddenCategories.has(catInfo.catName)) continue;  // Skip hidden, already drawn as grey
-                    isSelectedCat = focusCategory && catInfo.catName === focusCategory;
+                    isSelectedCat = (focusCategory && catInfo.catName === focusCategory) ||
+                                    (hasNeighborFocus && neighborNetworkFocusCategories.has(catInfo.catName));
                     color = getCategoryColor(catInfo.catIdx);
                 }}
 
@@ -11751,7 +11776,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }} else if (showGeneCells) {{
             const activeSpotlight = getLinkedSpotlightCategory(config);
             const focusCategory = activeSpotlight || modalSelectedCategory;
-            const hasTypeFocus = !config.is_continuous && focusCategory;
+            const hasNeighborFocusModal = neighborNetworkFocusCategories && neighborNetworkFocusCategories.size > 0;
+            const hasTypeFocus = !config.is_continuous && (focusCategory || hasNeighborFocusModal);
             for (let k = 0; k < nCandidates; k++) {{
                 const i = candidateIndices ? candidateIndices[k] : k;
                 const val = values[i];
@@ -11765,7 +11791,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 }} else {{
                     const catInfo = getCategoricalValueInfo(config, val);
                     if (!catInfo || hiddenCategories.has(catInfo.catName)) continue;
-                    isSelectedCat = focusCategory && catInfo.catName === focusCategory;
+                    isSelectedCat = (focusCategory && catInfo.catName === focusCategory) ||
+                                    (hasNeighborFocusModal && neighborNetworkFocusCategories.has(catInfo.catName));
                     color = getCategoryColor(catInfo.catIdx);
                 }}
 
@@ -11978,6 +12005,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     spotlightPinnedCategory = null;
                     spotlightHoverCategory = null;
                 }}
+                neighborNetworkFocusCategories = null;
                 updateAllLegendSpotlightClasses();
                 rerenderForSpotlightChange();
             }});
@@ -12002,6 +12030,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 item.addEventListener('click', () => {{
                     const cat = item.dataset.category;
                     if (linkedSpotlightEnabled) {{
+                        neighborNetworkFocusCategories = null;
                         if (hiddenCategories.has(cat)) hiddenCategories.delete(cat);
                         if (spotlightPinnedCategory === cat) spotlightPinnedCategory = null;
                         else spotlightPinnedCategory = cat;
@@ -12689,7 +12718,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                                 <button class="legend-btn" data-neighbor-view="chord" type="button">Chord</button>
                             </div>
                         </div>
-                        <div style="display: flex; justify-content: flex-end;">
+                        <div style="display: flex; justify-content: flex-end; gap: 6px;">
+                            <button class="legend-btn" id="neighbor-focus-reset" type="button" style="display:none">Reset highlight</button>
                             <button class="legend-btn" id="neighbor-stats-toggle" type="button">Collapse Neighbor Stats</button>
                         </div>
                         <div class="color-aggregation" id="neighbor-stats">
@@ -12773,13 +12803,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 if (nextView === neighborStatsView) return;
                 neighborStatsView = nextView;
                 hoveredNeighborFocus = null;
-                selectedNeighborFocus = null;
+                clearNeighborNetworkFocus();
                 panel.querySelectorAll('[data-neighbor-view]').forEach((other) => {{
                     other.classList.toggle('active', other.getAttribute('data-neighbor-view') === neighborStatsView);
                 }});
                 renderNeighborStats();
             }});
         }});
+        const neighborFocusReset = document.getElementById('neighbor-focus-reset');
+        if (neighborFocusReset) {{
+            neighborFocusReset.addEventListener('click', () => {{
+                clearNeighborNetworkFocus();
+                renderNeighborStats();
+            }});
+        }}
         const neighborStatsToggle = document.getElementById('neighbor-stats-toggle');
         const neighborStatsContainer = document.getElementById('neighbor-stats');
         neighborStatsToggle.addEventListener('click', () => {{
@@ -15739,6 +15776,25 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 if (selectedNeighborFocus && element.getAttribute('data-neighbor-auto-sync') === '1') {{
                     syncNeighborFocusToInteractionBrowser(selectedNeighborFocus, 'primary');
                 }}
+                if (selectedNeighborFocus && selectedNeighborFocus.kind === 'category') {{
+                    const srcIdx = selectedNeighborFocus.sourceIdx;
+                    const focusSet = new Set([selectedNeighborFocus.sourceLabel]);
+                    const visibleNeighbors = visibleNeighborMap.get(srcIdx);
+                    if (visibleNeighbors) {{
+                        visibleNeighbors.forEach((j) => {{
+                            if (viewState.categories?.[j] != null)
+                                focusSet.add(String(viewState.categories[j]));
+                        }});
+                    }}
+                    neighborNetworkFocusCategories = focusSet;
+                    spotlightPinnedCategory = null;
+                }} else {{
+                    neighborNetworkFocusCategories = null;
+                    spotlightPinnedCategory = null;
+                }}
+                updateNeighborFocusResetButton();
+                updateAllLegendSpotlightClasses();
+                rerenderForSpotlightChange();
                 applyState();
             }});
         }});
