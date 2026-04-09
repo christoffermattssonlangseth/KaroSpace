@@ -15,6 +15,7 @@ import pytest
 from anndata import AnnData
 
 import karospace.cli as cli_module
+from karospace.annotations import integrate_polygon_annotations
 from karospace.data_loader import SectionData, SpatialDataset, _read_h5ad_with_fallback, load_spatial_data
 from karospace.exporter import export_to_html, package_sidecar_viewer
 
@@ -1485,6 +1486,49 @@ def test_read_h5ad_with_fallback_raises_external_volume_guidance(monkeypatch):
 
     with pytest.raises(PermissionError, match="mounted volume"):
         _read_h5ad_with_fallback(blocked_path)
+
+
+def test_integrate_polygon_annotations_produces_writeable_uns(tmp_path):
+    adata = AnnData(
+        X=np.array([[1.0], [2.0], [3.0]], dtype=float),
+        obs=pd.DataFrame(
+            {"sample_id": pd.Categorical(["S1", "S1", "S2"])},
+            index=["cell_0", "cell_1", "cell_2"],
+        ),
+        var=pd.DataFrame(index=["G1"]),
+    )
+    adata.obsm["spatial"] = np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]], dtype=float)
+
+    payload = {
+        "format": "karospace-polygon-annotations-v1",
+        "created_at": "2026-04-08T19:51:08.859Z",
+        "groupby": "sample_id",
+        "polygons": [
+            {
+                "id": 1,
+                "label": "Region A",
+                "section_id": "S1",
+                "cell_local_indices": [0, 1],
+                "vertices": [{"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 0.0}, {"x": 1.0, "y": 1.0}],
+                "color": "#ff7f50",
+            }
+        ],
+    }
+
+    adata = integrate_polygon_annotations(adata, payload)
+
+    assert adata.obs["karospace_polygon_labels"].tolist() == ["Region A", "Region A", None]
+    assert adata.obs["karospace_polygon_count"].tolist() == [1, 1, 0]
+    assert adata.uns["karospace_polygon_annotations"]["polygons_storage"] == "columnar-json-v1"
+    poly_table = adata.uns["karospace_polygon_annotations"]["polygons"]
+    assert poly_table["label"] == ["Region A"]
+    assert poly_table["section_id"] == ["S1"]
+    assert json.loads(poly_table["cell_global_indices"][0]) == [0, 1]
+    assert json.loads(poly_table["vertices"][0])[0] == {"x": 0.0, "y": 0.0}
+
+    output_path = tmp_path / "with_polygons.h5ad"
+    adata.write_h5ad(output_path)
+    assert output_path.exists()
 
 
 def test_all_example_scripts_compile():
