@@ -1810,6 +1810,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             color: var(--muted-color);
             line-height: 1.35;
         }}
+        .interaction-gene-link {{
+            cursor: pointer;
+            border-radius: 3px;
+            padding: 0 2px;
+        }}
+        .interaction-gene-link:hover {{
+            background: var(--hover-bg);
+            text-decoration: underline;
+            color: var(--text-color);
+        }}
         .neighbor-view-controls {{
             display: flex;
             align-items: center;
@@ -2955,6 +2965,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             line-height: 1.3;
         }}
         .selection-summary-row + .selection-summary-row {{ margin-top: 2px; }}
+        .selection-summary-row[data-spotlight-cat] {{ cursor: pointer; border-radius: 3px; padding: 1px 3px; margin: 0 -3px; }}
+        .selection-summary-row[data-spotlight-cat]:hover {{ background: var(--hover-bg); }}
+        .selection-summary-row[data-spotlight-cat].is-active {{ background: color-mix(in srgb, var(--accent-color, #4a9eff) 15%, transparent); }}
         .selection-summary-label {{
             white-space: nowrap;
             overflow: hidden;
@@ -3003,6 +3016,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             overflow: hidden;
             text-overflow: ellipsis;
             font-size: 10px;
+        }}
+        .selection-summary-expr-gene[data-gene-activate] {{
+            cursor: pointer;
+            border-radius: 3px;
+            padding: 0 2px;
+            margin: -1px -2px;
+        }}
+        .selection-summary-expr-gene[data-gene-activate]:hover {{
+            background: var(--hover-bg);
+            text-decoration: underline;
         }}
         .selection-summary-expr-bars {{
             flex: 1;
@@ -3070,6 +3093,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             font-size: 11px;
             padding: 1px 0;
         }}
+        .selection-summary-compare-row[data-spotlight-cat] {{ cursor: pointer; border-radius: 3px; padding: 1px 3px; margin: 0 -3px; }}
+        .selection-summary-compare-row[data-spotlight-cat]:hover {{ background: var(--hover-bg); }}
+        .selection-summary-compare-row[data-spotlight-cat].is-active {{ background: color-mix(in srgb, var(--accent-color, #4a9eff) 15%, transparent); }}
         .selection-summary-compare-type {{ color: var(--text-color); font-weight: 500; }}
         .selection-summary-compare-a {{ color: var(--accent-strong); font-variant-numeric: tabular-nums; }}
         .selection-summary-compare-b {{ color: #4cc9f0; font-variant-numeric: tabular-nums; }}
@@ -8705,7 +8731,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const cB = mapB.get(label) || 0;
                 const pA = summaryA.total > 0 ? Math.round(100 * cA / summaryA.total) : 0;
                 const pB = summaryB.total > 0 ? Math.round(100 * cB / summaryB.total) : 0;
-                html += `<div class="selection-summary-compare-row">
+                const isActive = linkedSpotlightEnabled && spotlightPinnedCategory === label;
+                html += `<div class="selection-summary-compare-row${{isActive ? ' is-active' : ''}}" data-spotlight-cat="${{escapeHtml(label)}}" title="Click to spotlight ${{escapeHtml(label)}} in the viewer">
                     <span class="selection-summary-compare-type">${{escapeHtml(label)}}</span>
                     <span class="selection-summary-compare-a">${{cA.toLocaleString()}} (${{pA}}%)</span>
                     <span class="selection-summary-compare-sep">|</span>
@@ -8729,7 +8756,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const pB = Math.round(100 * meanB / vmax);
                 const fc = meanB > 0 ? (meanSel / meanB).toFixed(1) + 'x' : '—';
                 html += `<div class="selection-summary-expr-row">
-                    <span class="selection-summary-expr-gene" title="${{escapeHtml(gene)}}">${{escapeHtml(gene)}}</span>
+                    <span class="selection-summary-expr-gene" data-gene-activate="${{escapeHtml(gene)}}" title="Load ${{escapeHtml(gene)}} into the viewer">${{escapeHtml(gene)}}</span>
                     <div class="selection-summary-expr-bars">
                         <div class="selection-summary-expr-bar sel" style="width:${{pA}}%"></div>
                         <div class="selection-summary-expr-bar region-b" style="width:${{pB}}%"></div>
@@ -8767,7 +8794,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const topTypes = selectionSummaryExpanded ? summary.types : summary.types.slice(0, visibleLimit);
             html += `<div class="selection-summary-title">Counts by ${{formatMetadataLabel(summary.typeColumn)}}</div>`;
             topTypes.forEach(([label, count]) => {{
-                html += `<div class="selection-summary-row"><span class="selection-summary-label">${{label}}</span><span class="selection-summary-count">${{count.toLocaleString()}}</span></div>`;
+                const isActive = linkedSpotlightEnabled && spotlightPinnedCategory === label;
+                html += `<div class="selection-summary-row${{isActive ? ' is-active' : ''}}" data-spotlight-cat="${{escapeHtml(label)}}" title="Click to spotlight ${{escapeHtml(label)}} in the viewer"><span class="selection-summary-label">${{label}}</span><span class="selection-summary-count">${{count.toLocaleString()}}</span></div>`;
             }});
             if (summary.types.length > visibleLimit) {{
                 if (!selectionSummaryExpanded) {{
@@ -8794,7 +8822,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const pctRest = Math.round(100 * meanRest / vmax);
                 const fc = meanRest > 0 ? (meanSel / meanRest).toFixed(1) + 'x' : '—';
                 html += `<div class="selection-summary-expr-row">
-                    <span class="selection-summary-expr-gene" title="${{escapeHtml(gene)}}">${{escapeHtml(gene)}}</span>
+                    <span class="selection-summary-expr-gene" data-gene-activate="${{escapeHtml(gene)}}" title="Load ${{escapeHtml(gene)}} into the viewer">${{escapeHtml(gene)}}</span>
                     <div class="selection-summary-expr-bars">
                         <div class="selection-summary-expr-bar sel" style="width:${{pctSel}}%"></div>
                         <div class="selection-summary-expr-bar rest" style="width:${{pctRest}}%"></div>
@@ -8837,6 +8865,22 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function bindSelectionSummaryInteractions(container) {{
         if (!container) return;
+        bindGeneActivateButtons(container, updateSelectionInfo);
+        container.querySelectorAll('[data-spotlight-cat]').forEach(row => {{
+            row.addEventListener('click', (e) => {{
+                e.preventDefault();
+                e.stopPropagation();
+                const cat = row.getAttribute('data-spotlight-cat');
+                if (!cat) return;
+                linkedSpotlightEnabled = true;
+                neighborNetworkFocusCategories = null;
+                spotlightPinnedCategory = spotlightPinnedCategory === cat ? null : cat;
+                spotlightHoverCategory = null;
+                updateAllLegendSpotlightClasses();
+                rerenderForSpotlightChange();
+                updateSelectionInfo();
+            }});
+        }});
         if (!container.dataset.scrollBound) {{
             // Prevent wheel/touch events from bubbling to canvas zoom handlers.
             container.addEventListener('wheel', (e) => {{
@@ -12531,7 +12575,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
             html += `<div class="selection-summary-title" style="margin-top:10px">Gene Expression by Annotation</div>`;
             topGenes.forEach((gene) => {{
-                html += `<div class="annot-expr-row"><span class="selection-summary-expr-gene">${{escapeHtml(gene)}}</span>`;
+                html += `<div class="annot-expr-row"><span class="selection-summary-expr-gene" data-gene-activate="${{escapeHtml(gene)}}" title="Load ${{escapeHtml(gene)}} into the viewer">${{escapeHtml(gene)}}</span>`;
                 html += `<div class="annot-expr-bars">`;
                 exprArrays.forEach((arr, ai) => {{
                     const val = arr.find(e => e.gene === gene)?.meanSel || 0;
@@ -16565,7 +16609,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
 
         const topEntries = sortedEntries.slice(0, 12);
-        const sourceMarkerLabel = sourceMarkers.length ? sourceMarkers.join(', ') : 'No marker genes available.';
+        const renderInlineGeneLinks = (genes) => genes.map(g =>
+            `<span class="interaction-gene-link" data-gene-activate="${{escapeHtml(g)}}" title="Load ${{escapeHtml(g)}} into the viewer">${{escapeHtml(g)}}</span>`
+        ).join(', ');
+        const sourceMarkerLabel = sourceMarkers.length ? renderInlineGeneLinks(sourceMarkers) : 'No marker genes available.';
         const sourceN = (nCells[sourceIdx] ?? 0).toLocaleString();
         const degreeLabel = Number.isFinite(meanDegree[sourceIdx]) ? meanDegree[sourceIdx].toFixed(2) : '0.00';
         const withContactMarkers = topEntries.filter(entry => !!entry.contact).length;
@@ -16573,8 +16620,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const rows = topEntries.map(entry => {{
             const color = getCategoryColor(entry.targetIdx);
             const zLabel = entry.z === null ? 'n/a' : entry.z.toFixed(2);
-            const markerLabel = entry.targetMarkers.length ? entry.targetMarkers.join(', ') : '—';
-            const contactLabel = entry.contactMarkers.length ? entry.contactMarkers.join(', ') : '—';
+            const markerLabel = entry.targetMarkers.length ? renderInlineGeneLinks(entry.targetMarkers) : '—';
+            const contactLabel = entry.contactMarkers.length ? renderInlineGeneLinks(entry.contactMarkers) : '—';
             let contactMeta = 'not precomputed';
             if (entry.contact) {{
                 const nPos = Number(entry.contact.n_contact ?? 0);
@@ -16627,6 +16674,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 </tbody>
             </table>
         `;
+        bindGeneActivateButtons(container, renderInteractionBrowser);
     }}
 
     function stepRange(rangeEl, delta) {{
