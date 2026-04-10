@@ -935,13 +935,19 @@ class SpatialDataset:
         umap_bounds = None
         if self.has_umap:
             umap_coords = np.asarray(self.adata.obsm["X_umap"])[:, :2]
-            # Compute global UMAP bounds for consistent scaling across all sections
-            umap_bounds = {
-                "xmin": float(umap_coords[:, 0].min()),
-                "xmax": float(umap_coords[:, 0].max()),
-                "ymin": float(umap_coords[:, 1].min()),
-                "ymax": float(umap_coords[:, 1].max()),
-            }
+            finite_umap_mask = np.isfinite(umap_coords).all(axis=1)
+            if finite_umap_mask.any():
+                finite_umap = umap_coords[finite_umap_mask]
+                # Compute global UMAP bounds from finite rows only so a few bad
+                # embedding values do not poison the entire exported viewer.
+                umap_bounds = {
+                    "xmin": float(finite_umap[:, 0].min()),
+                    "xmax": float(finite_umap[:, 0].max()),
+                    "ymin": float(finite_umap[:, 1].min()),
+                    "ymax": float(finite_umap[:, 1].max()),
+                }
+            else:
+                umap_coords = None
 
         # Get neighborhood graph if available
         neighbor_graph = None
@@ -1858,8 +1864,15 @@ class SpatialDataset:
                 section_entry["y"] = section_coords[:, 1].tolist()
                 section_entry["obs_idx"] = np.asarray(idx, dtype=int).tolist()
                 if section_umap is not None:
-                    section_entry["umap_x"] = section_umap[:, 0].tolist()
-                    section_entry["umap_y"] = section_umap[:, 1].tolist()
+                    valid_umap_mask = np.isfinite(section_umap).all(axis=1)
+                    section_entry["umap_x"] = [
+                        float(v) if is_valid else None
+                        for v, is_valid in zip(section_umap[:, 0], valid_umap_mask)
+                    ]
+                    section_entry["umap_y"] = [
+                        float(v) if is_valid else None
+                        for v, is_valid in zip(section_umap[:, 1], valid_umap_mask)
+                    ]
 
             if neighbor_graph is not None:
                 subgraph = neighbor_graph[idx][:, idx]

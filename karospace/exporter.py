@@ -713,6 +713,19 @@ def _normalize_section_rotation(value: Union[int, float]) -> float:
     return float(normalized)
 
 
+def _json_sanitize_nonfinite(value):
+    """Recursively replace NaN/Inf values with None for strict JSON output."""
+    if isinstance(value, float):
+        return value if np.isfinite(value) else None
+    if isinstance(value, dict):
+        return {k: _json_sanitize_nonfinite(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_sanitize_nonfinite(v) for v in value]
+    if isinstance(value, tuple):
+        return [_json_sanitize_nonfinite(v) for v in value]
+    return value
+
+
 def _resolve_section_rotations(
     dataset: SpatialDataset,
     section_rotations: Optional[Mapping[str, Union[int, float]]],
@@ -5726,6 +5739,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return true;
     }}
 
+    function getSectionUMAPPoint(section, index) {{
+        if (!section || !section.umap_x || !section.umap_y) return null;
+        const x = Number(section.umap_x[index]);
+        const y = Number(section.umap_y[index]);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+        return {{ x, y }};
+    }}
+
     function ensureSectionObsIndices(section) {{
         if (!section) return false;
         if ((section.obs_idx === null || section.obs_idx === undefined) && typeof section.obs_idxb64 === 'string') {{
@@ -9005,8 +9026,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     const catInfo = getCategoricalValueInfo(config, val);
                     if (!catInfo || !hiddenCategories.has(catInfo.catName)) continue; // Only draw hidden cells in first pass
 
-                    const x = centerX + (section.umap_x[i] - dataCenterX) * scale;
-                    const y = centerY - (section.umap_y[i] - dataCenterY) * scale;
+                    const point = getSectionUMAPPoint(section, i);
+                    if (!point) continue;
+                    const x = centerX + (point.x - dataCenterX) * scale;
+                    const y = centerY - (point.y - dataCenterY) * scale;
 
                     if (x < -adjustedSpotSize || x > width + adjustedSpotSize ||
                         y < -adjustedSpotSize || y > height + adjustedSpotSize) continue;
@@ -9037,8 +9060,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     if (!catInfo || hiddenCategories.has(catInfo.catName)) continue;
                 }}
 
-                const x = centerX + (section.umap_x[i] - dataCenterX) * scale;
-                const y = centerY - (section.umap_y[i] - dataCenterY) * scale;
+                const point = getSectionUMAPPoint(section, i);
+                if (!point) continue;
+                const x = centerX + (point.x - dataCenterX) * scale;
+                const y = centerY - (point.y - dataCenterY) * scale;
 
                 // Skip if outside canvas
                 if (x < -adjustedSpotSize || x > width + adjustedSpotSize ||
@@ -9137,8 +9162,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     if (!catInfo || hiddenCategories.has(catInfo.catName)) continue;
                 }}
 
-                const x = centerX + (section.umap_x[i] - dataCenterX) * scale;
-                const y = centerY - (section.umap_y[i] - dataCenterY) * scale;
+                const point = getSectionUMAPPoint(section, i);
+                if (!point) continue;
+                const x = centerX + (point.x - dataCenterX) * scale;
+                const y = centerY - (point.y - dataCenterY) * scale;
 
                 if (pointInPolygon(x, y, lassoPath)) {{
                     newCells.add(`${{section.id}}:${{i}}`);
@@ -18336,7 +18363,11 @@ def export_to_html(
     }
     max_panel_size = int(min_panel_size * 2)
 
-    data_json_safe = json.dumps(data, separators=(',', ':')).replace("</", "<\\/")
+    data_json_safe = json.dumps(
+        _json_sanitize_nonfinite(data),
+        separators=(',', ':'),
+        allow_nan=False,
+    ).replace("</", "<\\/")
 
     html = HTML_TEMPLATE.format(
         title=title,
