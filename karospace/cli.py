@@ -204,6 +204,12 @@ def _run_export_cli(argv=None):
         default=200,
         help="Number of top variable genes to score with Moran's I spatial autocorrelation. Requires spatial graph in obsp. Use 0 to disable. (default: 200)"
     )
+    parser.add_argument(
+        "--scalebar-unit",
+        type=str,
+        default="μm",
+        help="Unit label for the scalebar (default: μm). Assumes spatial coordinates are in this unit."
+    )
 
     args = parser.parse_args(argv)
 
@@ -295,6 +301,7 @@ def _run_export_cli(argv=None):
         section_rotations=section_rotations,
         gene_correlation_top_n=args.gene_correlation_top_n,
         spatial_variable_genes_n=args.spatial_variable_genes_n,
+        scalebar_unit=args.scalebar_unit,
     )
 
     print(f"Done! Open {output_path} in a browser to view.")

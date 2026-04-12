@@ -1258,6 +1258,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .section-rotate-btn:hover {{
             background: var(--hover-bg);
         }}
+        .section-panel[draggable="true"] .section-header {{ cursor: grab; }}
+        .section-panel[draggable="true"] .section-header:active {{ cursor: grabbing; }}
+        .section-panel.drag-over {{ box-shadow: 0 0 0 2px var(--accent-color, #4a9eff); transform: translateY(-2px); }}
+        .section-panel.dragging {{ opacity: 0.4; }}
+        .section-hide-btn {{
+            background: none;
+            border: none;
+            color: var(--muted-color);
+            cursor: pointer;
+            font-size: 11px;
+            padding: 0 2px;
+            line-height: 1;
+            opacity: 0;
+            transition: opacity 0.15s, color 0.15s;
+        }}
+        .section-panel:hover .section-hide-btn {{ opacity: 0.6; }}
+        .section-hide-btn:hover {{ opacity: 1 !important; color: var(--text-color); }}
         .section-header .expand-icon {{ font-size: 10px; opacity: 0.5; }}
         .section-meta {{ font-size: 8px; color: var(--muted-color); margin-top: 1px; }}
         .section-canvas {{ display: block; width: 100%; aspect-ratio: 1; }}
@@ -3704,6 +3721,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <button class="size-step" id="spot-size-inc" type="button">+</button>
                 </div>
             </div>
+            <div class="control-group">
+                <label>Order:</label>
+                <select id="cell-draw-order" title="Control which cells are drawn on top">
+                    <option value="default">Default</option>
+                    <option value="rare-on-top">Rare on top</option>
+                    <option value="expression">Expr. on top</option>
+                </select>
+            </div>
+            <button class="graph-toggle" id="show-hidden-sections-btn" title="Show all hidden sections" style="display: none;">
+                Show hidden
+            </button>
+            <button class="graph-toggle" id="annotations-overview-toggle" title="Show polygon annotations in the overview" style="display: none;">
+                Annotations
+            </button>
             <button class="umap-toggle" id="umap-toggle" title="Toggle UMAP view" data-help="Show or hide the UMAP panel for a global embedding view with shared selection tools." style="display: none;">
                 UMAP
             </button>
@@ -3716,6 +3747,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             <button class="export-btn" id="screenshot-btn" title="Download screenshot" data-help="Download a PNG screenshot of the current main viewer layout.">
                 Screenshot
             </button>
+            <select id="screenshot-res" title="Screenshot resolution multiplier" style="font-size:11px; padding:3px 2px; border:1px solid var(--border-color); border-radius:4px; background:var(--input-bg); color:var(--text-color);">
+                <option value="1">1x</option>
+                <option value="2" selected>2x</option>
+                <option value="4">4x</option>
+            </select>
             <button class="theme-toggle" id="theme-toggle" title="Toggle dark/light mode" data-help="Switch between light and dark themes.">
                 <span id="theme-icon">{theme_icon}</span>
             </button>
@@ -3750,10 +3786,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         </div>
                         <span id="umap-spot-size-label" style="font-size: 11px; min-width: 20px;">2</span>
                     </div>
-                    <div class="umap-selection-info" id="umap-selection-info">No cells selected</div>
-                    <div class="selection-summary umap-selection-summary" id="umap-selection-summary">
-                        <div class="selection-summary-meta">Draw a region with Magic Wand to inspect selected cells.</div>
-                    </div>
+                    <div class="umap-selection-info" id="umap-selection-info" style="display: none;">No cells selected</div>
+                    <div class="selection-summary umap-selection-summary" id="umap-selection-summary" style="display: none;"></div>
                 </div>
             </div>
         </div>
@@ -4051,7 +4085,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         !/Chrome|Chromium|Edg|OPR|CriOS|FxiOS|Android/i.test(USER_AGENT);
     const SAFARI_DPR_CAP = 1.0;
 
+    let screenshotDprOverride = null;
     function getRenderDpr() {{
+        if (screenshotDprOverride) return screenshotDprOverride;
         const dpr = window.devicePixelRatio || 1;
         if (IS_SAFARI) return Math.max(1, Math.min(dpr, SAFARI_DPR_CAP));
         return dpr;
@@ -4190,6 +4226,68 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return transform;
     }}
 
+    function drawScalebar(ctx, transform, options = {{}}) {{
+        if (!showScalebar) return;
+        const unit = DATA.scalebar_unit || 'μm';
+        // transform.scale = screen pixels per data unit
+        const pxPerUnit = transform.scale;
+        if (!pxPerUnit || pxPerUnit <= 0) return;
+
+        const width = transform.width;
+        const height = transform.height;
+        const isCompact = !options.isModal;
+
+        // Pick a nice round scalebar length (target ~15-25% of canvas width)
+        const targetPx = width * (isCompact ? 0.2 : 0.15);
+        const targetUnits = targetPx / pxPerUnit;
+        const niceSteps = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000];
+        let barUnits = niceSteps[0];
+        for (const step of niceSteps) {{
+            if (step <= targetUnits * 2) barUnits = step;
+            if (step >= targetUnits) break;
+        }}
+        const barPx = barUnits * pxPerUnit;
+        if (barPx < 8 || barPx > width * 0.8) return;
+
+        const margin = isCompact ? 6 : 10;
+        const barHeight = isCompact ? 2.5 : 3;
+        const fontSize = isCompact ? 8 : 11;
+        const x = width - margin - barPx;
+        const y = height - margin - fontSize - 4;
+
+        ctx.save();
+        // Background pill
+        const bgPad = 4;
+        const label = `${{barUnits}} ${{unit}}`;
+        ctx.font = `${{fontSize}}px sans-serif`;
+        const textWidth = ctx.measureText(label).width;
+        const bgWidth = Math.max(barPx, textWidth) + bgPad * 2;
+        const bgX = width - margin - bgWidth;
+        const bgY = y - bgPad;
+        const bgH = fontSize + barHeight + 6 + bgPad * 2;
+        ctx.fillStyle = options.darkBg ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.7)';
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(bgX, bgY, bgWidth, bgH, 3);
+        else ctx.rect(bgX, bgY, bgWidth, bgH);
+        ctx.fill();
+
+        // Bar
+        ctx.fillStyle = options.darkBg ? '#ffffff' : '#000000';
+        ctx.globalAlpha = 0.85;
+        ctx.fillRect(x, y, barPx, barHeight);
+        // End caps
+        const capH = isCompact ? 4 : 6;
+        ctx.fillRect(x, y - (capH - barHeight) / 2, 1, capH);
+        ctx.fillRect(x + barPx - 1, y - (capH - barHeight) / 2, 1, capH);
+
+        // Label
+        ctx.globalAlpha = 0.9;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillText(label, x + barPx / 2, y + barHeight + 2);
+        ctx.restore();
+    }}
+
     // Outline color overrides (used for course by default)
     const OUTLINE_COLOR_OVERRIDES = {{
         'peak_I': 'rgba(228, 26, 28, 0.5)',
@@ -4240,8 +4338,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let neighborNetworkFocusCategories = null;
     let spotSize = {spot_size};
     let activeFilters = {{}};  // e.g. {{ course: new Set(['peak_I', 'peak_III']) }}
+    const hiddenSections = new Set();
     let currentTheme = '{initial_theme}';
     let showGraph = false;
+    let showOverviewAnnotations = false;
+    let showScalebar = true;
+    let cellDrawOrder = 'default';
     let hoverNeighbors = null;
     let neighborHoverEnabled = false;
     let neighborHopMode = 'all';
@@ -5204,20 +5306,85 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }});
     }}
 
+    function getScreenshotResolution() {{
+        const el = document.getElementById('screenshot-res');
+        return Math.max(1, parseInt(el?.value || '2', 10));
+    }}
+
     function screenshotFullPage() {{
-        const name = `spatial-viewer-${{getScreenshotTimestamp()}}.png`;
-        ensureHtml2CanvasLoaded()
-            .then(() => html2canvas(document.body, {{
-                backgroundColor: null,
-                scale: getRenderDpr(),
-                useCORS: true
-            }}))
-            .then(canvas => {{
-                downloadCanvasImage(canvas, name);
-            }})
-            .catch(() => {{
-                alert('Screenshot failed (offline? blocked CDN?).');
-            }});
+        const multiplier = getScreenshotResolution();
+        const name = `spatial-viewer-${{getScreenshotTimestamp()}}${{multiplier > 1 ? `-${{multiplier}}x` : ''}}.png`;
+        const grid = document.getElementById('grid');
+        const panels = Array.from(grid.querySelectorAll('.section-panel')).filter(
+            p => !p.classList.contains('filtered-out')
+        );
+        if (panels.length === 0) {{
+            alert('No visible sections to screenshot.');
+            return;
+        }}
+
+        // Re-render sections at higher resolution in-place, then composite
+        screenshotDprOverride = (window.devicePixelRatio || 1) * multiplier;
+        panels.forEach(panel => {{
+            const sectionId = panel.dataset.sectionId || '';
+            const section = sectionById.get(sectionId);
+            const sectionCanvas = panel.querySelector('canvas');
+            if (section && sectionCanvas) renderSection(section, sectionCanvas);
+        }});
+
+        // Compute grid layout from CSS
+        const gridStyle = getComputedStyle(grid);
+        const colWidths = gridStyle.gridTemplateColumns.split(/\s+/).filter(Boolean);
+        const cols = colWidths.length || 1;
+        const rows = Math.ceil(panels.length / cols);
+        const gap = parseInt(gridStyle.gap || gridStyle.gridGap || '8', 10) || 8;
+        const firstCanvas = panels[0].querySelector('canvas');
+        const cellW = firstCanvas?.getBoundingClientRect().width || 200;
+        const cellH = firstCanvas?.getBoundingClientRect().height || 200;
+        const headerH = 18 * multiplier;
+        const gapScaled = gap * multiplier;
+        const cellWScaled = cellW * multiplier;
+        const cellHScaled = cellH * multiplier;
+        const totalW = cols * cellWScaled + (cols - 1) * gapScaled;
+        const totalH = rows * (cellHScaled + headerH) + (rows - 1) * gapScaled;
+
+        const composite = document.createElement('canvas');
+        composite.width = Math.round(totalW);
+        composite.height = Math.round(totalH);
+        const cctx = composite.getContext('2d');
+        cctx.fillStyle = getPanelBg();
+        cctx.fillRect(0, 0, totalW, totalH);
+
+        panels.forEach((panel, idx) => {{
+            const col = idx % cols;
+            const row = Math.floor(idx / cols);
+            const ox = col * (cellWScaled + gapScaled);
+            const oy = row * (cellHScaled + headerH + gapScaled);
+
+            // Draw section title
+            const sectionId = panel.dataset.sectionId || '';
+            cctx.fillStyle = currentTheme === 'dark' ? '#e0e0e0' : '#333333';
+            cctx.font = `${{10 * multiplier}}px sans-serif`;
+            cctx.textBaseline = 'top';
+            cctx.fillText(sectionId, ox, oy);
+
+            // Draw the high-res section canvas
+            const sectionCanvas = panel.querySelector('canvas');
+            if (sectionCanvas) {{
+                cctx.drawImage(sectionCanvas, ox, oy + headerH, cellWScaled, cellHScaled);
+            }}
+        }});
+
+        // Restore normal rendering
+        screenshotDprOverride = null;
+        panels.forEach(panel => {{
+            const sectionId = panel.dataset.sectionId || '';
+            const section = sectionById.get(sectionId);
+            const sectionCanvas = panel.querySelector('canvas');
+            if (section && sectionCanvas) renderSection(section, sectionCanvas);
+        }});
+
+        downloadCanvasImage(composite, name);
     }}
 
     function sanitizeFilenamePart(value) {{
@@ -5236,9 +5403,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             alert('Sample canvas not available.');
             return;
         }}
+        const multiplier = getScreenshotResolution();
         const sectionName = sanitizeFilenamePart(modalSection.id);
-        const name = `spatial-viewer-${{sectionName}}-${{getScreenshotTimestamp()}}.png`;
-        downloadCanvasImage(canvas, name);
+        const name = `spatial-viewer-${{sectionName}}-${{getScreenshotTimestamp()}}${{multiplier > 1 ? `-${{multiplier}}x` : ''}}.png`;
+        if (multiplier > 1) {{
+            // Temporarily override DPR for high-res render
+            screenshotDprOverride = getRenderDpr() * multiplier;
+            renderModalSectionExact();
+            downloadCanvasImage(canvas, name);
+            screenshotDprOverride = null;
+            renderModalSectionExact();
+        }} else {{
+            downloadCanvasImage(canvas, name);
+        }}
     }}
 
     // Color utilities
@@ -6954,6 +7131,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     // Check if section passes filters
     function sectionPassesFilter(section) {{
+        if (hiddenSections.has(section.id)) return false;
         for (const [key, values] of Object.entries(activeFilters)) {{
             if (values.size === 0) continue;
             const sectionVal = section.metadata[key];
@@ -6964,6 +7142,29 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function getFilteredSections() {{
         return (DATA.sections || []).filter((section) => sectionPassesFilter(section));
+    }}
+
+    function hideSection(sectionId) {{
+        hiddenSections.add(sectionId);
+        updateHiddenSectionsUI();
+        applyMetadataFilters();
+    }}
+
+    function showAllSections() {{
+        hiddenSections.clear();
+        updateHiddenSectionsUI();
+        applyMetadataFilters();
+    }}
+
+    function updateHiddenSectionsUI() {{
+        const btn = document.getElementById('show-hidden-sections-btn');
+        if (!btn) return;
+        if (hiddenSections.size > 0) {{
+            btn.style.display = '';
+            btn.textContent = `Show hidden (${{hiddenSections.size}})`;
+        }} else {{
+            btn.style.display = 'none';
+        }}
     }}
 
     function cellKeyPassesCurrentFilters(key) {{
@@ -10375,8 +10576,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         modalAnnotations.push(annotation);
         renderModalAnnotationPanel();
         updateAnnotationComparisonTabVisibility();
+        updateOverviewAnnotationsToggle();
+        if (showOverviewAnnotations) renderAllSections();
         if (insightsTopLevelTab === 'compare' && insightsCompareTab === 'regions') renderAnnotationComparison();
         return true;
+    }}
+
+    function updateOverviewAnnotationsToggle() {{
+        const btn = document.getElementById('annotations-overview-toggle');
+        if (!btn) return;
+        btn.style.display = modalAnnotations.length > 0 ? '' : 'none';
+        btn.classList.toggle('active', showOverviewAnnotations);
+        if (modalAnnotations.length === 0 && showOverviewAnnotations) {{
+            showOverviewAnnotations = false;
+        }}
     }}
 
     function removeModalAnnotation(annotationId) {{
@@ -10386,6 +10599,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         modalAnnotations = modalAnnotations.filter(annotation => annotation.id !== target);
         renderModalAnnotationPanel();
         updateAnnotationComparisonTabVisibility();
+        updateOverviewAnnotationsToggle();
+        if (showOverviewAnnotations) renderAllSections();
         if (insightsTopLevelTab === 'compare' && insightsCompareTab === 'regions') renderAnnotationComparison();
         if (modalSection) renderModalSection();
     }}
@@ -10395,6 +10610,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         modalAnnotations = modalAnnotations.filter(annotation => annotation.sectionId !== sectionId);
         renderModalAnnotationPanel();
         updateAnnotationComparisonTabVisibility();
+        updateOverviewAnnotationsToggle();
+        if (showOverviewAnnotations) renderAllSections();
         if (insightsTopLevelTab === 'compare' && insightsCompareTab === 'regions') renderAnnotationComparison();
         if (modalSection) renderModalSection();
     }}
@@ -10404,6 +10621,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         modalAnnotations = [];
         renderModalAnnotationPanel();
         updateAnnotationComparisonTabVisibility();
+        updateOverviewAnnotationsToggle();
+        if (showOverviewAnnotations) renderAllSections();
         if (insightsTopLevelTab === 'compare' && insightsCompareTab === 'regions') renderAnnotationComparison();
         if (modalSection) renderModalSection();
     }}
@@ -10590,16 +10809,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             : `${{selectedCells.size.toLocaleString()}} cells selected`;
 
         const umapInfo = document.getElementById('umap-selection-info');
-        if (umapInfo) umapInfo.textContent = countText;
+        if (umapInfo) {{
+            umapInfo.textContent = countText;
+            umapInfo.style.display = selectedCells.size > 0 ? '' : 'none';
+        }}
         const modalInfo = document.getElementById('modal-selection-info');
         if (modalInfo) modalInfo.textContent = countText;
 
         const summary = computeSelectionSummary();
         const umapSummary = document.getElementById('umap-selection-summary');
         if (umapSummary) {{
-            umapSummary.classList.toggle('expanded', selectionSummaryExpanded);
-            umapSummary.innerHTML = renderSelectionSummaryHtml(summary);
-            bindSelectionSummaryInteractions(umapSummary);
+            const hasSelection = selectedCells.size > 0;
+            umapSummary.style.display = hasSelection ? '' : 'none';
+            if (hasSelection) {{
+                umapSummary.classList.toggle('expanded', selectionSummaryExpanded);
+                umapSummary.innerHTML = renderSelectionSummaryHtml(summary);
+                bindSelectionSummaryInteractions(umapSummary);
+            }}
         }}
         const modalSummary = document.getElementById('modal-selection-summary');
         if (modalSummary) {{
@@ -10855,6 +11081,46 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
     }}
 
+    function getSortedCellDrawOrder(section, values, config) {{
+        const n = section.x.length;
+        if (cellDrawOrder === 'default' || n === 0) return null;
+        const indices = new Uint32Array(n);
+        for (let i = 0; i < n; i++) indices[i] = i;
+
+        if (cellDrawOrder === 'rare-on-top' && !config.is_continuous) {{
+            // Count cells per category, draw largest groups first (rare on top)
+            const catCounts = new Map();
+            for (let i = 0; i < n; i++) {{
+                const val = values[i];
+                if (isMissingDisplayValue(val)) continue;
+                const catInfo = getCategoricalValueInfo(config, val);
+                if (!catInfo) continue;
+                catCounts.set(catInfo.catName, (catCounts.get(catInfo.catName) || 0) + 1);
+            }}
+            indices.sort((a, b) => {{
+                const valA = values[a], valB = values[b];
+                const catA = getCategoricalValueInfo(config, valA);
+                const catB = getCategoricalValueInfo(config, valB);
+                const countA = catA ? (catCounts.get(catA.catName) || 0) : 0;
+                const countB = catB ? (catCounts.get(catB.catName) || 0) : 0;
+                return countB - countA;  // Large groups first → rare cells drawn last (on top)
+            }});
+            return indices;
+        }}
+
+        if (cellDrawOrder === 'expression' && config.is_continuous) {{
+            // Sort by expression ascending: low expression drawn first, high on top
+            indices.sort((a, b) => {{
+                const va = Number(values[a]) || 0;
+                const vb = Number(values[b]) || 0;
+                return va - vb;
+            }});
+            return indices;
+        }}
+
+        return null;
+    }}
+
     function renderSection(section, canvas) {{
         ensureSectionXY(section);
         const ctx = canvas.getContext('2d');
@@ -10932,22 +11198,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ctx.stroke();
         }}
 
+        const drawOrder = getSortedCellDrawOrder(section, values, config);
+
         // First pass: draw grey background for hidden categories (if any are hidden)
         const hasHidden = showGeneCells && hiddenCategories.size > 0 && !config.is_continuous;
         if (hasHidden) {{
             ctx.fillStyle = '#cccccc';
             ctx.globalAlpha = 0.2;
-            for (let i = 0; i < section.x.length; i++) {{
+            for (let di = 0; di < section.x.length; di++) {{
+                const i = drawOrder ? drawOrder[di] : di;
                 const val = values[i];
                 if (isMissingDisplayValue(val)) continue;
                 const catInfo = getCategoricalValueInfo(config, val);
-                if (!catInfo || !hiddenCategories.has(catInfo.catName)) continue;  // Only draw hidden ones
+                if (!catInfo || !hiddenCategories.has(catInfo.catName)) continue;
 
                 const point = transform.dataToScreen(section.x[i], section.y[i]);
-                const x = point.x;
-                const y = point.y;
                 ctx.beginPath();
-                ctx.arc(x, y, spotSize, 0, Math.PI * 2);
+                ctx.arc(point.x, point.y, spotSize, 0, Math.PI * 2);
                 ctx.fill();
             }}
             ctx.globalAlpha = 1;
@@ -10959,7 +11226,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const hasNeighborFocus = neighborNetworkFocusCategories && neighborNetworkFocusCategories.size > 0;
         const hasTypeFocus = !config.is_continuous && (focusCategory || hasNeighborFocus);
         if (showGeneCells) {{
-            for (let i = 0; i < section.x.length; i++) {{
+            for (let di = 0; di < section.x.length; di++) {{
+                const i = drawOrder ? drawOrder[di] : di;
                 const val = values[i];
                 if (isMissingDisplayValue(val)) continue;
 
@@ -10970,15 +11238,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     color = magma(Math.max(0, Math.min(1, t)));
                 }} else {{
                     const catInfo = getCategoricalValueInfo(config, val);
-                    if (!catInfo || hiddenCategories.has(catInfo.catName)) continue;  // Skip hidden, already drawn as grey
+                    if (!catInfo || hiddenCategories.has(catInfo.catName)) continue;
                     isSelectedCat = (focusCategory && catInfo.catName === focusCategory) ||
                                     (hasNeighborFocus && neighborNetworkFocusCategories.has(catInfo.catName));
                     color = getCategoryColor(catInfo.catIdx);
                 }}
 
                 const point = transform.dataToScreen(section.x[i], section.y[i]);
-                const x = point.x;
-                const y = point.y;
                 if (hasTypeFocus && !isSelectedCat) {{
                     ctx.fillStyle = '#bbbbbb';
                     ctx.globalAlpha = 0.15;
@@ -10987,7 +11253,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     ctx.globalAlpha = 1;
                 }}
                 ctx.beginPath();
-                ctx.arc(x, y, spotSize, 0, Math.PI * 2);
+                ctx.arc(point.x, point.y, spotSize, 0, Math.PI * 2);
                 ctx.fill();
             }}
         }}
@@ -11017,14 +11283,43 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 ctx.stroke();
             }}
         }}
+
+        // Draw polygon annotations in overview
+        if (showOverviewAnnotations) {{
+            const sectionAnnotations = getSectionAnnotations(section.id);
+            sectionAnnotations.forEach((annotation) => {{
+                const vertices = annotation.vertices || [];
+                if (vertices.length < 2) return;
+                ctx.save();
+                ctx.lineWidth = 1.5;
+                ctx.strokeStyle = annotation.color || getAnnotationColorById(annotation.id);
+                ctx.fillStyle = annotation.color || getAnnotationColorById(annotation.id);
+                ctx.globalAlpha = 0.12;
+                const first = transform.dataToScreen(vertices[0].x, vertices[0].y);
+                ctx.beginPath();
+                ctx.moveTo(first.x, first.y);
+                for (let i = 1; i < vertices.length; i++) {{
+                    const point = transform.dataToScreen(vertices[i].x, vertices[i].y);
+                    ctx.lineTo(point.x, point.y);
+                }}
+                ctx.closePath();
+                ctx.fill();
+                ctx.globalAlpha = 0.8;
+                ctx.stroke();
+                ctx.restore();
+            }});
+        }}
+
+        drawScalebar(ctx, transform, {{ darkBg: currentTheme === 'dark' }});
     }}
 
     function renderAllSections() {{
         renderAllJobId += 1;
         const jobId = renderAllJobId;
-        const panels = document.querySelectorAll('.section-panel');
         const grid = document.getElementById('grid');
         const gridRect = grid ? grid.getBoundingClientRect() : null;
+        const panelMap = new Map();
+        grid.querySelectorAll('.section-panel').forEach(p => panelMap.set(p.dataset.sectionId, p));
         const isInView = (panel) => {{
             if (!gridRect) return true;
             const r = panel.getBoundingClientRect();
@@ -11040,8 +11335,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         let totalCells = 0;
         const drawList = [];
 
-        DATA.sections.forEach((section, idx) => {{
-            const panel = panels[idx];
+        DATA.sections.forEach((section) => {{
+            const panel = panelMap.get(section.id);
             if (!panel) return;
 
             const passes = sectionPassesFilter(section);
@@ -11962,6 +12257,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ctx.stroke();
             ctx.setLineDash([]);
         }}
+
+        drawScalebar(ctx, transform, {{ isModal: true, darkBg: currentTheme === 'dark' }});
 
         cacheModalRenderedView(rect, transform);
         updateModalViewportInfo(transform);
@@ -16994,6 +17291,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                             <button class="section-rotate-btn" type="button" data-rotate-step="45" title="Rotate section +45 degrees">+45</button>
                             <button class="section-rotate-btn" type="button" data-rotate-reset title="Reset section rotation">0</button>
                         </div>
+                        <button class="section-hide-btn" type="button" data-hide-section="${{section.id}}" title="Hide this section">&#x2715;</button>
                         <span class="expand-icon">&#x26F6;</span>
                     </div>
                 </div>
@@ -17011,9 +17309,74 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 }});
                 btn.addEventListener('mousedown', (event) => event.stopPropagation());
             }});
+            const hideBtn = panel.querySelector('[data-hide-section]');
+            if (hideBtn) {{
+                hideBtn.addEventListener('click', (event) => {{
+                    event.preventDefault();
+                    event.stopPropagation();
+                    hideSection(section.id);
+                }});
+                hideBtn.addEventListener('mousedown', (event) => event.stopPropagation());
+            }}
             panel.addEventListener('click', () => openModal(section.id));
             grid.appendChild(panel);
         }});
+
+        // Drag-and-drop reordering
+        if ((DATA.n_sections || 0) > 1) {{
+            let dragSrcId = null;
+            let dragAllowed = false;
+            grid.querySelectorAll('.section-panel').forEach(panel => {{
+                panel.setAttribute('draggable', 'true');
+                // Only allow drag when initiated from the header
+                const header = panel.querySelector('.section-header-main');
+                if (header) {{
+                    header.addEventListener('mousedown', () => {{ dragAllowed = true; }});
+                    header.addEventListener('mouseup', () => {{ dragAllowed = false; }});
+                }}
+                panel.addEventListener('dragstart', (e) => {{
+                    if (!dragAllowed) {{ e.preventDefault(); return; }}
+                    dragSrcId = panel.dataset.sectionId;
+                    panel.classList.add('dragging');
+                    e.dataTransfer.effectAllowed = 'move';
+                    e.dataTransfer.setData('text/plain', dragSrcId);
+                }});
+                panel.addEventListener('dragend', () => {{
+                    panel.classList.remove('dragging');
+                    grid.querySelectorAll('.section-panel').forEach(p => p.classList.remove('drag-over'));
+                    dragSrcId = null;
+                    dragAllowed = false;
+                }});
+                panel.addEventListener('dragover', (e) => {{
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    if (panel.dataset.sectionId !== dragSrcId) {{
+                        panel.classList.add('drag-over');
+                    }}
+                }});
+                panel.addEventListener('dragleave', () => {{
+                    panel.classList.remove('drag-over');
+                }});
+                panel.addEventListener('drop', (e) => {{
+                    e.preventDefault();
+                    e.stopPropagation();
+                    panel.classList.remove('drag-over');
+                    const srcId = e.dataTransfer.getData('text/plain');
+                    const targetId = panel.dataset.sectionId;
+                    if (!srcId || srcId === targetId) return;
+                    const srcPanel = grid.querySelector(`.section-panel[data-section-id="${{srcId}}"]`);
+                    if (!srcPanel) return;
+                    const targetRect = panel.getBoundingClientRect();
+                    const dropY = e.clientY - targetRect.top;
+                    if (dropY < targetRect.height / 2) {{
+                        grid.insertBefore(srcPanel, panel);
+                    }} else {{
+                        grid.insertBefore(srcPanel, panel.nextSibling);
+                    }}
+                    renderAllSections();
+                }});
+            }});
+        }}
 
         // Lazy render thumbnails while scrolling (skip offscreen panels).
         grid.addEventListener('scroll', () => {{
@@ -17179,6 +17542,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         updateOverviewGeneViewState();
 
+        const drawOrderSelect = document.getElementById('cell-draw-order');
+        if (drawOrderSelect) {{
+            drawOrderSelect.addEventListener('change', () => {{
+                cellDrawOrder = drawOrderSelect.value || 'default';
+                renderAllSections();
+            }});
+        }}
+
         const spotRange = document.getElementById('spot-size');
         if (spotRange) {{
             const min = parseFloat(spotRange.min || '0');
@@ -17204,6 +17575,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         document.getElementById('umap-spot-size-dec')?.addEventListener('click', () => stepRange(umapRange, -1));
         document.getElementById('umap-spot-size-inc')?.addEventListener('click', () => stepRange(umapRange, 1));
+
+        document.getElementById('show-hidden-sections-btn').addEventListener('click', showAllSections);
+
+        const annotOverviewToggle = document.getElementById('annotations-overview-toggle');
+        annotOverviewToggle.addEventListener('click', () => {{
+            showOverviewAnnotations = !showOverviewAnnotations;
+            annotOverviewToggle.classList.toggle('active', showOverviewAnnotations);
+            renderAllSections();
+        }});
 
         document.getElementById('screenshot-btn').addEventListener('click', screenshotFullPage);
 
@@ -18035,6 +18415,7 @@ def export_to_html(
     gene_correlation_top_n: int = 10,
     cluster_means_n_genes: int = 500,
     spatial_variable_genes_n: int = 200,
+    scalebar_unit: str = "μm",
 ) -> str:
     """
     Export spatial dataset to a standalone HTML file.
@@ -18324,6 +18705,8 @@ def export_to_html(
         interaction_markers_layer=interaction_markers_layer,
         section_rotations=resolved_section_rotations,
     )
+    data["scalebar_unit"] = str(scalebar_unit or "μm")
+
     if gene_storage == "sidecar":
         assert resolved_gene_aux_path is not None
         data["available_genes"] = list(dataset.var_names)
