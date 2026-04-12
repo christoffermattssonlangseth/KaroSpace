@@ -1124,6 +1124,25 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             transition: background 0.3s, border-color 0.3s;
         }}
         .filter-bar:empty {{ display: none; }}
+        .overview-blend-panel {{
+            display: none;
+            padding: 6px 16px;
+            background: var(--header-bg);
+            border-bottom: 1px solid var(--border-color);
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            font-size: 11px;
+            transition: background 0.3s, border-color 0.3s;
+        }}
+        .overview-blend-panel.visible {{ display: flex; }}
+        .overview-blend-row {{ display: flex; align-items: center; gap: 4px; }}
+        .overview-blend-side {{
+            font-weight: 600;
+            min-width: 16px;
+            text-align: center;
+            color: var(--muted-color);
+        }}
         .filter-group {{ display: flex; align-items: center; gap: 4px; }}
         .filter-group label {{ font-size: 10px; color: var(--muted-color); text-transform: capitalize; }}
         .filter-chips {{ display: flex; gap: 3px; flex-wrap: wrap; }}
@@ -3721,14 +3740,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <button class="size-step" id="spot-size-inc" type="button">+</button>
                 </div>
             </div>
-            <div class="control-group">
-                <label>Order:</label>
-                <select id="cell-draw-order" title="Control which cells are drawn on top">
-                    <option value="default">Default</option>
-                    <option value="rare-on-top">Rare on top</option>
-                    <option value="expression">Expr. on top</option>
-                </select>
-            </div>
             <button class="graph-toggle" id="show-hidden-sections-btn" title="Show all hidden sections" style="display: none;">
                 Show hidden
             </button>
@@ -3743,6 +3754,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             </button>
             <button class="color-toggle" id="color-toggle" title="Toggle insights panel" data-help="Insights opens Overview, Genes, Compare, and Neighbors views for the current dataset and selection state.">
                 Insights
+            </button>
+            <button class="graph-toggle" id="overview-blend-toggle" title="Compare two variables side by side across all sections">
+                Split
             </button>
             <button class="export-btn" id="screenshot-btn" title="Download screenshot" data-help="Download a PNG screenshot of the current main viewer layout.">
                 Screenshot
@@ -3760,6 +3774,27 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     </div>
 
     <div class="filter-bar" id="filter-bar"></div>
+    <div class="overview-blend-panel" id="overview-blend-panel">
+        <div class="overview-blend-row">
+            <span class="overview-blend-side">A</span>
+            <select id="overview-blend-a-kind"><option value="cell">Cell type</option><option value="gene">Gene</option></select>
+            <select id="overview-blend-a-color"></select>
+            <select id="overview-blend-a-category"></select>
+            <input type="text" id="overview-blend-a-gene" list="gene-list" placeholder="Gene symbol" style="display:none;">
+        </div>
+        <div class="overview-blend-row">
+            <span class="overview-blend-side">B</span>
+            <select id="overview-blend-b-kind"><option value="cell">Cell type</option><option value="gene">Gene</option></select>
+            <select id="overview-blend-b-color"></select>
+            <select id="overview-blend-b-category"></select>
+            <input type="text" id="overview-blend-b-gene" list="gene-list" placeholder="Gene symbol" style="display:none;">
+        </div>
+        <div class="overview-blend-row">
+            <span class="overview-blend-side">Split</span>
+            <span id="overview-blend-mix-label" style="font-size:10px;color:var(--muted-color);">A left 50% / B right 50%</span>
+            <input type="range" id="overview-blend-mix" min="0" max="100" step="1" value="50" style="width:100px;">
+        </div>
+    </div>
 
     <div class="main-container">
         <div class="content-column" id="content-column">
@@ -4455,6 +4490,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         a: {{ kind: 'cell', color: null, category: null, gene: '' }},
         b: {{ kind: 'cell', color: null, category: null, gene: '' }},
     }};
+    let overviewBlendEnabled = false;
+    let overviewBlendMix = 0.5;
+    let overviewBlendSpec = {{
+        a: {{ kind: 'cell', color: null, category: null, gene: '' }},
+        b: {{ kind: 'cell', color: null, category: null, gene: '' }},
+    }};
+
     const MODAL_ANNOTATION_COLORS = [
         '#ff7f50', '#2a9d8f', '#ffd166', '#ef476f', '#06d6a0',
         '#118ab2', '#f4a261', '#4cc9f0', '#e63946', '#43aa8b'
@@ -6881,6 +6923,22 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return cols;
     }}
 
+    function setSelectOptions(selectEl, values, selectedValue) {{
+        if (!selectEl) return;
+        selectEl.innerHTML = '';
+        values.forEach((entry) => {{
+            const value = (entry && typeof entry === 'object') ? entry.value : entry;
+            const label = (entry && typeof entry === 'object') ? (entry.label ?? entry.value) : entry;
+            const opt = document.createElement('option');
+            opt.value = value;
+            opt.textContent = label;
+            selectEl.appendChild(opt);
+        }});
+        if (selectedValue !== undefined && selectedValue !== null) {{
+            selectEl.value = selectedValue;
+        }}
+    }}
+
     function getCategoriesForColorColumn(colorCol) {{
         const meta = DATA.colors_meta?.[colorCol];
         if (!meta || meta.is_continuous || !Array.isArray(meta.categories)) return [];
@@ -7086,6 +7144,29 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const b = getModalBlendRuntime(section, modalBlendSpec.b);
         if (!a || !b) return null;
         return {{ a, b }};
+    }}
+
+    function getOverviewBlendRuntimes(section) {{
+        if (!overviewBlendEnabled || !section) return null;
+        const a = getModalBlendRuntime(section, overviewBlendSpec.a);
+        const b = getModalBlendRuntime(section, overviewBlendSpec.b);
+        if (!a || !b) return null;
+        return {{ a, b }};
+    }}
+
+    function requestOverviewBlendGene(gene) {{
+        const token = String(gene || '').trim();
+        if (!token || DATA.genes_meta?.[token] || modalBlendGeneLoads.has(token)) return;
+        modalBlendGeneLoads.add(token);
+        runAsyncUIAction(`Overview split gene load (${{token}})`, async () => {{
+            const ok = await ensureGeneAvailable(token, {{ showErrors: false }});
+            if (ok) {{
+                ensureGeneAutoScale(token);
+                renderAllSections();
+            }}
+        }}).finally(() => {{
+            modalBlendGeneLoads.delete(token);
+        }});
     }}
 
     function getModalBlendCellRgb(runtime, idx) {{
@@ -10585,9 +10666,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function updateOverviewAnnotationsToggle() {{
         const btn = document.getElementById('annotations-overview-toggle');
         if (!btn) return;
-        btn.style.display = modalAnnotations.length > 0 ? '' : 'none';
+        const n = modalAnnotations.length;
+        btn.style.display = n > 0 ? '' : 'none';
+        btn.textContent = `Annotations (${{n}})`;
         btn.classList.toggle('active', showOverviewAnnotations);
-        if (modalAnnotations.length === 0 && showOverviewAnnotations) {{
+        if (n === 0 && showOverviewAnnotations) {{
             showOverviewAnnotations = false;
         }}
     }}
@@ -11145,8 +11228,65 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         const config = getColorConfig();
         const values = getSectionValues(section);
-        const showGeneDensity = !!currentGene && (overviewGeneRenderMode === 'density' || overviewGeneRenderMode === 'both');
-        const showGeneCells = !currentGene || overviewGeneRenderMode !== 'density';
+
+        // Overview split rendering path
+        const ovBlend = getOverviewBlendRuntimes(section);
+        if (ovBlend) {{
+            const splitX = width * overviewBlendMix;
+            // Pre-compute CSS color cache for categorical runtimes to avoid per-cell rgbToCss
+            const colorCacheA = ovBlend.a.kind === 'cell-all' && ovBlend.a.paletteRgb
+                ? ovBlend.a.paletteRgb.map(rgb => rgbToCss(rgb)) : null;
+            const colorCacheB = ovBlend.b.kind === 'cell-all' && ovBlend.b.paletteRgb
+                ? ovBlend.b.paletteRgb.map(rgb => rgbToCss(rgb)) : null;
+            const cellCssA = ovBlend.a.kind === 'cell' ? rgbToCss(ovBlend.a.activeRgb) : null;
+            const cellInactiveCssA = ovBlend.a.kind === 'cell' ? rgbToCss(ovBlend.a.inactiveRgb) : null;
+            const cellCssB = ovBlend.b.kind === 'cell' ? rgbToCss(ovBlend.b.activeRgb) : null;
+            const cellInactiveCssB = ovBlend.b.kind === 'cell' ? rgbToCss(ovBlend.b.inactiveRgb) : null;
+
+            function fastBlendColor(runtime, idx, colorCache, cellCss, cellInactiveCss) {{
+                const raw = runtime.values?.[idx];
+                if (runtime.kind === 'cell-all') {{
+                    if (!Number.isFinite(raw)) return 'rgb(160,160,160)';
+                    return colorCache?.[Math.round(raw)] || 'rgb(160,160,160)';
+                }}
+                if (runtime.kind === 'cell') {{
+                    if (!Number.isFinite(raw)) return cellInactiveCss;
+                    return Math.round(raw) === runtime.catIdx ? cellCss : cellInactiveCss;
+                }}
+                // Gene: must compute per cell (magma colormap)
+                if (!Number.isFinite(raw)) return 'rgb(140,140,140)';
+                const t = clamp01((raw - runtime.vmin) / (runtime.vmax - runtime.vmin));
+                return magma(t);
+            }}
+
+            const drawOrder = getSortedCellDrawOrder(section, values, config);
+            let lastFill = '';
+            for (let di = 0; di < section.x.length; di++) {{
+                const i = drawOrder ? drawOrder[di] : di;
+                const point = transform.dataToScreen(section.x[i], section.y[i]);
+                if (!transform.isPointVisible(point.x, point.y, spotSize)) continue;
+                const isA = point.x <= splitX;
+                const color = isA
+                    ? fastBlendColor(ovBlend.a, i, colorCacheA, cellCssA, cellInactiveCssA)
+                    : fastBlendColor(ovBlend.b, i, colorCacheB, cellCssB, cellInactiveCssB);
+                if (color !== lastFill) {{ ctx.fillStyle = color; lastFill = color; }}
+                ctx.beginPath();
+                ctx.arc(point.x, point.y, spotSize, 0, Math.PI * 2);
+                ctx.fill();
+            }}
+            // Split line
+            ctx.strokeStyle = currentTheme === 'dark' ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.3)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([3, 2]);
+            ctx.beginPath();
+            ctx.moveTo(splitX, 0);
+            ctx.lineTo(splitX, height);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }}
+
+        const showGeneDensity = !ovBlend && !!currentGene && (overviewGeneRenderMode === 'density' || overviewGeneRenderMode === 'both');
+        const showGeneCells = !ovBlend && (!currentGene || overviewGeneRenderMode !== 'density');
 
         if (showGeneDensity) {{
             const densityCache = ensureSectionGeneDensityCache(
@@ -17550,6 +17690,139 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }});
         }}
 
+        // Overview split controls
+        {{
+            const ovBlendToggle = document.getElementById('overview-blend-toggle');
+            const ovBlendPanel = document.getElementById('overview-blend-panel');
+            const ovBlendMixRange = document.getElementById('overview-blend-mix');
+            const ovBlendMixLabel = document.getElementById('overview-blend-mix-label');
+            const ovBlendControls = {{
+                a: {{
+                    kind: document.getElementById('overview-blend-a-kind'),
+                    color: document.getElementById('overview-blend-a-color'),
+                    category: document.getElementById('overview-blend-a-category'),
+                    gene: document.getElementById('overview-blend-a-gene'),
+                }},
+                b: {{
+                    kind: document.getElementById('overview-blend-b-kind'),
+                    color: document.getElementById('overview-blend-b-color'),
+                    category: document.getElementById('overview-blend-b-category'),
+                    gene: document.getElementById('overview-blend-b-gene'),
+                }},
+            }};
+
+            function ensureOverviewBlendDefaults() {{
+                const catCols = getCategoricalColorColumns();
+                const preferredCol = catCols.includes(currentColor) ? currentColor : (catCols[0] || null);
+                const normalize = (entry, preferSecond) => {{
+                    if (!entry.kind) entry.kind = catCols.length ? 'cell' : 'gene';
+                    if (entry.kind === 'cell') {{
+                        if (!catCols.length) {{ entry.kind = 'gene'; }}
+                        else {{
+                            if (!entry.color || !catCols.includes(entry.color)) entry.color = preferredCol;
+                            const cats = getCategoriesForColorColumn(entry.color);
+                            const valid = entry.category === BLEND_ALL_CATEGORIES || cats.includes(entry.category);
+                            if (!entry.category || !valid) {{
+                                entry.category = preferSecond && cats.length > 1 ? cats[1] : BLEND_ALL_CATEGORIES;
+                            }}
+                        }}
+                    }}
+                    if (entry.kind === 'gene' && !entry.gene) {{
+                        entry.gene = (DATA.available_genes || [])[0] || '';
+                    }}
+                }};
+                normalize(overviewBlendSpec.a, false);
+                normalize(overviewBlendSpec.b, true);
+            }}
+
+            function syncOverviewBlendSide(side) {{
+                const controls = ovBlendControls[side];
+                const spec = overviewBlendSpec[side];
+                if (!controls || !spec) return;
+                controls.kind.value = spec.kind;
+                const isCell = spec.kind === 'cell';
+                controls.color.style.display = isCell ? '' : 'none';
+                controls.category.style.display = isCell ? '' : 'none';
+                controls.gene.style.display = isCell ? 'none' : '';
+                if (isCell) {{
+                    const cols = getCategoricalColorColumns();
+                    setSelectOptions(controls.color, cols, spec.color);
+                    const cats = getCategoriesForColorColumn(spec.color);
+                    const catOpts = [{{ value: BLEND_ALL_CATEGORIES, label: 'All categories' }}]
+                        .concat(cats.map(cat => ({{ value: cat, label: cat }})));
+                    setSelectOptions(controls.category, catOpts, spec.category);
+                }} else {{
+                    controls.gene.value = spec.gene || '';
+                }}
+            }}
+
+            function syncOverviewBlendUI() {{
+                ensureOverviewBlendDefaults();
+                syncOverviewBlendSide('a');
+                syncOverviewBlendSide('b');
+                if (ovBlendPanel) ovBlendPanel.classList.toggle('visible', overviewBlendEnabled);
+                if (ovBlendToggle) ovBlendToggle.classList.toggle('active', overviewBlendEnabled);
+                if (ovBlendMixRange) ovBlendMixRange.value = String(Math.round(overviewBlendMix * 100));
+                const pctA = Math.round(overviewBlendMix * 100);
+                const pctB = 100 - pctA;
+                if (ovBlendMixLabel) ovBlendMixLabel.textContent = `A left ${{pctA}}% / B right ${{pctB}}%`;
+            }}
+
+            function applyOverviewBlendChange() {{
+                syncOverviewBlendUI();
+                renderAllSections();
+            }}
+
+            ovBlendToggle?.addEventListener('click', () => {{
+                overviewBlendEnabled = !overviewBlendEnabled;
+                syncOverviewBlendUI();
+                renderAllSections();
+            }});
+            ovBlendMixRange?.addEventListener('input', (e) => {{
+                overviewBlendMix = clamp01(parseFloat(e.target.value) / 100);
+                const pctA = Math.round(overviewBlendMix * 100);
+                const pctB = 100 - pctA;
+                if (ovBlendMixLabel) ovBlendMixLabel.textContent = `A left ${{pctA}}% / B right ${{pctB}}%`;
+                renderAllSections();
+            }});
+            ['a', 'b'].forEach((side) => {{
+                const controls = ovBlendControls[side];
+                if (!controls) return;
+                controls.kind?.addEventListener('change', () => {{
+                    overviewBlendSpec[side].kind = controls.kind.value === 'gene' ? 'gene' : 'cell';
+                    applyOverviewBlendChange();
+                }});
+                controls.color?.addEventListener('change', () => {{
+                    overviewBlendSpec[side].color = controls.color.value;
+                    overviewBlendSpec[side].category = BLEND_ALL_CATEGORIES;
+                    applyOverviewBlendChange();
+                }});
+                controls.category?.addEventListener('change', () => {{
+                    overviewBlendSpec[side].category = controls.category.value;
+                    applyOverviewBlendChange();
+                }});
+                controls.gene?.addEventListener('change', async () => {{
+                    await runAsyncUIAction(`Overview split gene (${{side.toUpperCase()}})`, async () => {{
+                        const gene = controls.gene.value.trim();
+                        if (!gene) {{
+                            overviewBlendSpec[side].gene = '';
+                            applyOverviewBlendChange();
+                            return;
+                        }}
+                        if (!await ensureGeneAvailable(gene)) {{
+                            controls.gene.value = overviewBlendSpec[side].gene || '';
+                            return;
+                        }}
+                        overviewBlendSpec[side].gene = gene;
+                        ensureGeneAutoScale(gene);
+                        applyOverviewBlendChange();
+                    }});
+                }});
+            }});
+            ovBlendPanel?.addEventListener('wheel', (e) => e.stopPropagation());
+            syncOverviewBlendUI();
+        }}
+
         const spotRange = document.getElementById('spot-size');
         if (spotRange) {{
             const min = parseFloat(spotRange.min || '0');
@@ -17765,22 +18038,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 canvas.style.cursor = 'crosshair';
             }} else {{
                 canvas.style.cursor = 'grab';
-            }}
-        }}
-
-        function setSelectOptions(selectEl, values, selectedValue) {{
-            if (!selectEl) return;
-            selectEl.innerHTML = '';
-            values.forEach((entry) => {{
-                const value = (entry && typeof entry === 'object') ? entry.value : entry;
-                const label = (entry && typeof entry === 'object') ? (entry.label ?? entry.value) : entry;
-                const opt = document.createElement('option');
-                opt.value = value;
-                opt.textContent = label;
-                selectEl.appendChild(opt);
-            }});
-            if (selectedValue !== undefined && selectedValue !== null) {{
-                selectEl.value = selectedValue;
             }}
         }}
 
