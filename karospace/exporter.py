@@ -12588,8 +12588,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     const INSIGHTS_TOP_LEVEL_TABS = ['overview', 'genes', 'compare', 'neighbors'];
     const INSIGHTS_SUBTABS = {{
         overview: ['summary', 'sections'],
-        genes: ['markers', 'spatial', 'cell-de'],
-        compare: ['groups', 'regions'],
+        genes: ['markers', 'spatial'],
+        compare: ['groups', 'regions', 'cell-de'],
         neighbors: ['enrichment', 'interactions'],
     }};
 
@@ -12655,8 +12655,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (insightsTopLevelTab === 'genes') {{
             if (insightsGenesTab === 'spatial') {{
                 renderSpatialVariableGenes();
-            }} else if (insightsGenesTab === 'cell-de') {{
-                renderClusterDE();
             }} else {{
                 renderMarkerGenes();
             }}
@@ -12666,6 +12664,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (insightsTopLevelTab === 'compare') {{
             if (insightsCompareTab === 'regions') {{
                 renderAnnotationComparison();
+            }} else if (insightsCompareTab === 'cell-de') {{
+                renderClusterDE();
             }} else {{
                 renderGroupDE();
             }}
@@ -13171,7 +13171,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <div class="color-tabs insights-subtabs">
                         <button class="color-tab active" id="genes-tab-markers" data-insights-parent="genes" data-insights-subtab="markers" type="button">Markers</button>
                         <button class="color-tab" id="genes-tab-spatial" data-insights-parent="genes" data-insights-subtab="spatial" type="button">Spatial</button>
-                        <button class="color-tab" id="genes-tab-cell-de" data-insights-parent="genes" data-insights-subtab="cell-de" type="button">Cell DE</button>
                     </div>
                     <div class="color-tab-content active" id="genes-tab-markers-content">
                         <input class="marker-search" id="marker-gene-search" type="text" placeholder="Search marker genes...">
@@ -13181,7 +13180,25 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         <input class="marker-search" id="spatial-gene-search" type="text" placeholder="Search spatially variable genes...">
                         <div class="marker-genes" id="spatially-variable-genes"></div>
                     </div>
-                    <div class="color-tab-content" id="genes-tab-cell-de-content">
+                </div>
+                <div class="color-tab-content" id="color-tab-compare-content">
+                    <div class="color-tabs insights-subtabs">
+                        <button class="color-tab active" id="compare-tab-groups" data-insights-parent="compare" data-insights-subtab="groups" type="button">Groups</button>
+                        <button class="color-tab" id="compare-tab-regions" data-insights-parent="compare" data-insights-subtab="regions" type="button">Regions</button>
+                        <button class="color-tab" id="compare-tab-cell-de" data-insights-parent="compare" data-insights-subtab="cell-de" type="button">Cell DE</button>
+                    </div>
+                    <div class="color-tab-content active" id="compare-tab-groups-content">
+                        <div class="agg-group-meta" id="group-de-summary">Compare samples, metadata groups, or annotations.</div>
+                        <div class="color-aggregation" id="group-de-panel">
+                            <div class="agg-group-meta">Configure two samples, metadata groups, or annotation groups for exploratory group DE.</div>
+                        </div>
+                    </div>
+                    <div class="color-tab-content" id="compare-tab-regions-content">
+                        <div class="color-aggregation" id="annotation-comparison">
+                            <div class="agg-group-meta">Open a section, draw annotations, then use Regions to compare those cell sets.</div>
+                        </div>
+                    </div>
+                    <div class="color-tab-content" id="compare-tab-cell-de-content">
                         <div class="cluster-de-controls">
                             <div>
                                 <label>Annotation</label>
@@ -13204,23 +13221,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         <div class="agg-group-meta" id="cluster-de-summary">Choose two categories to compare.</div>
                         <div class="color-aggregation" id="cluster-de-results">
                             <div class="agg-group-meta">Choose two categories to compare.</div>
-                        </div>
-                    </div>
-                </div>
-                <div class="color-tab-content" id="color-tab-compare-content">
-                    <div class="color-tabs insights-subtabs">
-                        <button class="color-tab active" id="compare-tab-groups" data-insights-parent="compare" data-insights-subtab="groups" type="button">Groups</button>
-                        <button class="color-tab" id="compare-tab-regions" data-insights-parent="compare" data-insights-subtab="regions" type="button">Regions</button>
-                    </div>
-                    <div class="color-tab-content active" id="compare-tab-groups-content">
-                        <div class="agg-group-meta" id="group-de-summary">Compare samples, metadata groups, or annotations.</div>
-                        <div class="color-aggregation" id="group-de-panel">
-                            <div class="agg-group-meta">Configure two samples, metadata groups, or annotation groups for exploratory group DE.</div>
-                        </div>
-                    </div>
-                    <div class="color-tab-content" id="compare-tab-regions-content">
-                        <div class="color-aggregation" id="annotation-comparison">
-                            <div class="agg-group-meta">Open a section, draw annotations, then use Regions to compare those cell sets.</div>
                         </div>
                     </div>
                 </div>
