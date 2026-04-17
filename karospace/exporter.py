@@ -2329,7 +2329,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             border-radius: 50%;
             flex-shrink: 0;
             border: 2px solid transparent;
+            cursor: pointer;
+            position: relative;
         }}
+        .legend-color.is-overridden {{ box-shadow: 0 0 0 1px var(--accent-strong); }}
+        .samples-legend-swatch {{ cursor: pointer; }}
+        .samples-legend-item {{ cursor: pointer; }}
+        .samples-legend-item.is-overridden .samples-legend-swatch {{ box-shadow: 0 0 0 1px var(--accent-strong); }}
         .legend-item.hidden .legend-color {{ border-color: var(--muted-color); background: transparent !important; }}
         .legend-item.selected {{
             border-color: var(--accent-strong);
@@ -3987,6 +3993,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                                 </select>
                             </div>
                         </div>
+                        <div class="modal-control-group" data-modal-group="color">
+                            <div class="modal-control-group-title">Color by</div>
+                            <div class="modal-control-group-body">
+                                <select id="modal-color-select" title="Change the active color column (updates the whole viewer)"></select>
+                                <input type="text" id="modal-gene-input" list="gene-list" placeholder="Gene..." autocomplete="off" spellcheck="false" title="Type a gene name and press Enter to color by expression (updates the whole viewer)" style="max-width: 110px;">
+                                <button class="graph-toggle" id="modal-gene-clear" type="button" title="Clear active gene">Clear gene</button>
+                            </div>
+                        </div>
                         <div class="modal-control-group" data-modal-group="actions">
                             <div class="modal-control-group-title">Actions</div>
                             <div class="modal-control-group-body">
@@ -4107,6 +4121,117 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     DATA.gene_encodings = DATA.gene_encodings || {{}};
     DATA.gene_value_encodings = DATA.gene_value_encodings || {{}};
     const PALETTE = {palette_json};
+    const CATEGORY_COLOR_OVERRIDE_STORAGE_KEY = 'karospace-category-color-overrides-v1:' + (location.pathname || '');
+    let CATEGORY_COLOR_OVERRIDES = {{}};
+    try {{
+        const rawOverrides = localStorage.getItem(CATEGORY_COLOR_OVERRIDE_STORAGE_KEY);
+        if (rawOverrides) {{
+            const parsed = JSON.parse(rawOverrides);
+            if (parsed && typeof parsed === 'object') CATEGORY_COLOR_OVERRIDES = parsed;
+        }}
+    }} catch (e) {{ CATEGORY_COLOR_OVERRIDES = {{}}; }}
+    function persistCategoryColorOverrides() {{
+        try {{ localStorage.setItem(CATEGORY_COLOR_OVERRIDE_STORAGE_KEY, JSON.stringify(CATEGORY_COLOR_OVERRIDES)); }} catch (e) {{}}
+    }}
+    function getCategoryColorOverride(colorCol, catName) {{
+        if (!colorCol || catName == null) return null;
+        const map = CATEGORY_COLOR_OVERRIDES[colorCol];
+        if (!map) return null;
+        const key = String(catName);
+        return Object.prototype.hasOwnProperty.call(map, key) ? map[key] : null;
+    }}
+    function setCategoryColorOverride(colorCol, catName, hex) {{
+        if (!colorCol || catName == null || !hex) return;
+        if (!CATEGORY_COLOR_OVERRIDES[colorCol]) CATEGORY_COLOR_OVERRIDES[colorCol] = {{}};
+        CATEGORY_COLOR_OVERRIDES[colorCol][String(catName)] = hex;
+        persistCategoryColorOverrides();
+    }}
+    function clearCategoryColorOverride(colorCol, catName) {{
+        if (!colorCol) return;
+        if (catName == null) {{
+            delete CATEGORY_COLOR_OVERRIDES[colorCol];
+        }} else if (CATEGORY_COLOR_OVERRIDES[colorCol]) {{
+            delete CATEGORY_COLOR_OVERRIDES[colorCol][String(catName)];
+            if (Object.keys(CATEGORY_COLOR_OVERRIDES[colorCol]).length === 0) delete CATEGORY_COLOR_OVERRIDES[colorCol];
+        }}
+        persistCategoryColorOverrides();
+    }}
+    function hasCategoryColorOverrides(colorCol) {{
+        const map = colorCol ? CATEGORY_COLOR_OVERRIDES[colorCol] : null;
+        return !!(map && Object.keys(map).length > 0);
+    }}
+    let _categoryColorInput = null;
+    function getCategoryColorInput() {{
+        if (_categoryColorInput) return _categoryColorInput;
+        const input = document.createElement('input');
+        input.type = 'color';
+        input.style.position = 'fixed';
+        input.style.left = '-9999px';
+        input.style.top = '-9999px';
+        input.style.opacity = '0';
+        input.style.pointerEvents = 'none';
+        document.body.appendChild(input);
+        _categoryColorInput = input;
+        return input;
+    }}
+    function rgbStringToHex(value) {{
+        if (!value) return '#000000';
+        const s = String(value).trim();
+        if (/^#[0-9a-fA-F]{{6}}$/.test(s)) return s.toLowerCase();
+        if (/^#[0-9a-fA-F]{{3}}$/.test(s)) {{
+            return '#' + s[1] + s[1] + s[2] + s[2] + s[3] + s[3];
+        }}
+        const m = s.match(/^rgb\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*\)$/i);
+        if (m) {{
+            const r = Math.max(0, Math.min(255, Math.round(parseFloat(m[1]))));
+            const g = Math.max(0, Math.min(255, Math.round(parseFloat(m[2]))));
+            const b = Math.max(0, Math.min(255, Math.round(parseFloat(m[3]))));
+            return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
+        }}
+        return '#000000';
+    }}
+    function rerenderAfterCategoryColorChange() {{
+        if (typeof renderLegend === 'function') {{
+            renderLegend('legend');
+            renderLegend('modal-legend');
+        }}
+        if (typeof renderAllSections === 'function') renderAllSections();
+        if (typeof modalSection !== 'undefined' && modalSection && typeof renderModalSection === 'function') {{
+            renderModalSection();
+        }}
+        if (typeof umapVisible !== 'undefined' && umapVisible && typeof renderUMAP === 'function') {{
+            renderUMAP();
+        }}
+        if (typeof renderSamplesInsights === 'function') renderSamplesInsights();
+        if (typeof renderActiveInsightsPanel === 'function') renderActiveInsightsPanel();
+    }}
+    let _categoryColorInputHandlers = null;
+    function openCategoryColorPicker(colorCol, catName) {{
+        if (!colorCol || catName == null) return;
+        const input = getCategoryColorInput();
+        if (_categoryColorInputHandlers) {{
+            input.removeEventListener('input', _categoryColorInputHandlers.onInput);
+            input.removeEventListener('change', _categoryColorInputHandlers.onChange);
+        }}
+        const cats = getCategoriesForColorColumn(colorCol) || [];
+        const idx = cats.indexOf(catName);
+        const currentHex = rgbStringToHex(getCategoryColor(idx, colorCol));
+        input.value = currentHex;
+        const onInput = () => {{
+            setCategoryColorOverride(colorCol, catName, input.value);
+            rerenderAfterCategoryColorChange();
+        }};
+        const onChange = () => {{
+            setCategoryColorOverride(colorCol, catName, input.value);
+            rerenderAfterCategoryColorChange();
+        }};
+        _categoryColorInputHandlers = {{ onInput, onChange }};
+        input.addEventListener('input', onInput);
+        input.addEventListener('change', onChange);
+        input.style.pointerEvents = 'auto';
+        input.click();
+        setTimeout(() => {{ input.style.pointerEvents = 'none'; }}, 100);
+    }}
     const METADATA_LABELS = {metadata_labels_json};
     const OUTLINE_BY = {outline_by_json};
     const VIEWER_INFO_HTML = {viewer_info_html_json};
@@ -5484,7 +5609,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return `rgb(${{rgb[0]}}, ${{rgb[1]}}, ${{rgb[2]}})`;
     }}
 
-    function getCategoryColor(idx) {{ return PALETTE[idx % PALETTE.length]; }}
+    function getCategoryColor(idx, colorCol) {{
+        const col = colorCol != null ? colorCol : (typeof currentColor !== 'undefined' ? currentColor : null);
+        if (col) {{
+            const map = CATEGORY_COLOR_OVERRIDES[col];
+            if (map) {{
+                const cats = getCategoriesForColorColumn(col);
+                const name = cats ? cats[idx] : null;
+                if (name != null && Object.prototype.hasOwnProperty.call(map, String(name))) {{
+                    return map[String(name)];
+                }}
+            }}
+        }}
+        return PALETTE[idx % PALETTE.length];
+    }}
 
     const cssColorRgbCache = new Map();
     function cssColorToRgb(color) {{
@@ -6829,6 +6967,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             invalidateGeneDensityCaches();
             hiddenCategories.clear();
             if (geneInput) geneInput.value = '';
+            const modalGeneInputEl = document.getElementById('modal-gene-input');
+            if (modalGeneInputEl) modalGeneInputEl.value = '';
             updateExpressionScaleUI();
             renderLegend('legend');
             renderLegend('modal-legend');
@@ -6851,6 +6991,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
 
         if (geneInput) geneInput.value = token;
+        const modalGeneInputEl = document.getElementById('modal-gene-input');
+        if (modalGeneInputEl) modalGeneInputEl.value = token;
         const ok = await runAsyncUIAction('Gene selection', async () => {{
             if (!(await ensureGeneAvailable(token, {{ showErrors }}))) {{
                 return false;
@@ -7086,7 +7228,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const colLabel = colorCol ? formatMetadataLabel(colorCol) : 'Cell type';
         const categoryEntries = categories.map((cat, idx) => ({{
             label: cat,
-            color: getCategoryColor(idx),
+            color: getCategoryColor(idx, colorCol),
         }}));
         if (spec.category && spec.category !== BLEND_ALL_CATEGORIES) {{
             const catIdx = categories.indexOf(spec.category);
@@ -7097,7 +7239,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     label: `${{colLabel}}: ${{spec.category}}`,
                     detail: 'Selected category',
                     swatchClass: 'split-legend-swatch-dot',
-                    swatchBackground: getCategoryColor(catIdx),
+                    swatchBackground: getCategoryColor(catIdx, colorCol),
                     categories: [categoryEntries[catIdx]],
                 }};
             }}
@@ -7105,7 +7247,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         const gradientStops = categories
             .slice(0, 5)
-            .map((_, idx) => getCategoryColor(idx));
+            .map((_, idx) => getCategoryColor(idx, colorCol));
         return {{
             side,
             sideLabel,
@@ -7143,7 +7285,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             return {{
                 kind: 'cell-all',
                 values,
-                paletteRgb: categories.map((_, idx) => cssColorToRgb(getCategoryColor(idx))),
+                paletteRgb: categories.map((_, idx) => cssColorToRgb(getCategoryColor(idx, colorCol))),
             }};
         }}
         const catIdx = categories.indexOf(spec.category);
@@ -7152,7 +7294,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             kind: 'cell',
             values,
             catIdx,
-            activeRgb: cssColorToRgb(getCategoryColor(catIdx)),
+            activeRgb: cssColorToRgb(getCategoryColor(catIdx, colorCol)),
             inactiveRgb: [176, 176, 176],
         }};
     }}
@@ -10379,7 +10521,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function getCategoryColorForValue(colorCol, category) {{
         const categories = getCategoriesForColorColumn(colorCol).map(value => String(value));
         const idx = categories.indexOf(String(category));
-        return idx >= 0 ? getCategoryColor(idx) : '#999';
+        return idx >= 0 ? getCategoryColor(idx, colorCol) : '#999';
     }}
 
     function getNeighborPairSummary(colorCol, sourceCategory, targetCategory) {{
@@ -12520,12 +12662,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
         }} else {{
             const activeSpotlight = getLinkedSpotlightCategory(config);
+            const legendColorCol = currentColor;
+            const resetBtnHtml = hasCategoryColorOverrides(legendColorCol)
+                ? `<button class="legend-btn" id="${{targetId}}-reset-colors" title="Reset all category colors for this column">Reset colors</button>`
+                : '';
             let html = `
                 <div class="legend-title">${{colorLabel}}</div>
                 <div class="legend-actions">
                     <button class="legend-btn" id="${{targetId}}-show-all">Show All</button>
                     <button class="legend-btn" id="${{targetId}}-hide-all">Hide All</button>
                     <button class="legend-btn ${{linkedSpotlightEnabled ? 'active' : ''}}" id="${{targetId}}-spotlight-toggle" title="Hover or click a category to spotlight">Spotlight</button>
+                    ${{resetBtnHtml}}
                 </div>
             `;
             (config.categories || []).forEach((cat, idx) => {{
@@ -12533,8 +12680,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const selectedClass = modalSelectedCategory && cat === modalSelectedCategory ? 'selected' : '';
                 const spotlightClass = activeSpotlight && cat === activeSpotlight ? 'spotlight' : '';
                 const dimmedClass = activeSpotlight && cat !== activeSpotlight ? 'dimmed' : '';
-                html += `<div class="legend-item ${{hiddenClass}} ${{selectedClass}} ${{spotlightClass}} ${{dimmedClass}}" data-category="${{cat}}">
-                    <div class="legend-color" style="background: ${{getCategoryColor(idx)}}"></div>
+                const isOverridden = getCategoryColorOverride(legendColorCol, cat) != null;
+                const overrideClass = isOverridden ? ' is-overridden' : '';
+                html += `<div class="legend-item ${{hiddenClass}} ${{selectedClass}} ${{spotlightClass}} ${{dimmedClass}}" data-category="${{cat}}" data-cat-idx="${{idx}}">
+                    <div class="legend-color${{overrideClass}}" data-color-swatch="1" title="Click to change color \u00b7 shift-click to reset" style="background: ${{getCategoryColor(idx, legendColorCol)}}"></div>
                     <span>${{cat}}</span>
                 </div>`;
             }});
@@ -12574,6 +12723,28 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 neighborNetworkFocusCategories = null;
                 updateAllLegendSpotlightClasses();
                 rerenderForSpotlightChange();
+            }});
+
+            document.getElementById(`${{targetId}}-reset-colors`)?.addEventListener('click', (ev) => {{
+                ev.stopPropagation();
+                clearCategoryColorOverride(legendColorCol);
+                rerenderAfterCategoryColorChange();
+            }});
+
+            legend.querySelectorAll('[data-color-swatch]').forEach(swatch => {{
+                swatch.addEventListener('click', (ev) => {{
+                    ev.stopPropagation();
+                    const parent = swatch.closest('.legend-item');
+                    if (!parent) return;
+                    const cat = parent.dataset.category;
+                    if (!cat) return;
+                    if (ev.shiftKey) {{
+                        clearCategoryColorOverride(legendColorCol, cat);
+                        rerenderAfterCategoryColorChange();
+                        return;
+                    }}
+                    openCategoryColorPicker(legendColorCol, cat);
+                }});
             }});
 
             legend.querySelectorAll('.legend-item').forEach(item => {{
@@ -13500,8 +13671,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         selectedNeighborFocus = null;
         const colorSelect = document.getElementById('color-select');
         if (colorSelect) colorSelect.value = col;
+        const modalColorSelect = document.getElementById('modal-color-select');
+        if (modalColorSelect) modalColorSelect.value = col;
         const geneInput = document.getElementById('gene-input');
         if (geneInput) geneInput.value = '';
+        const modalGeneInput = document.getElementById('modal-gene-input');
+        if (modalGeneInput) modalGeneInput.value = '';
         (DATA.sections || []).forEach(s => {{ if (s && s._colorCache) s._colorCache = {{}}; }});
         hiddenCategories.clear();
         if (DATA.colors_meta?.[currentColor] && !DATA.colors_meta[currentColor].is_continuous) {{
@@ -13540,7 +13715,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return {{ categories, rows }};
     }}
 
-    function buildSamplesBarsSvg(rows, categories) {{
+    function buildSamplesBarsSvg(rows, categories, colorCol) {{
         const ROW_H = 18, STRIP_W = 8, LABEL_W = 88, BAR_W = 194, PL = 4, PT = 2, PR = 4;
         const W = PL + STRIP_W + 3 + LABEL_W + 3 + BAR_W + PR;
         const H = PT + rows.length * ROW_H + PT;
@@ -13564,7 +13739,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const frac = row.fractions[ci] || 0;
                 if (frac <= 0) return;
                 const w = Math.max(1, frac * BAR_W);
-                const col = getCategoryColor(ci);
+                const col = getCategoryColor(ci, colorCol);
                 const tip = escapeHtml(sid + ' \u00b7 ' + cat + ': ' + Math.round(frac * 100) + '% (' + row.counts[ci].toLocaleString() + ' cells)');
                 parts.push('<rect x="' + (barX + ox).toFixed(1) + '" y="' + (y+2) + '" width="' + w.toFixed(1) + '" height="' + (ROW_H-4) + '" fill="' + col + '" data-bar-cat="' + escapeHtml(cat) + '" data-tooltip="' + tip + '" style="cursor:pointer"/>');
                 ox += w;
@@ -13574,7 +13749,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return parts.join('');
     }}
 
-    function buildSamplesHeatmapSvg(rows, categories) {{
+    function buildSamplesHeatmapSvg(rows, categories, colorCol) {{
         const cats = categories.slice(0, 30);
         const CELL_W = 14, CELL_H = 14, LABEL_W = 88, HEADER_H = 54, PL = 4, PR = 4, PT = 2;
         const W = PL + LABEL_W + cats.length * CELL_W + PR;
@@ -13595,7 +13770,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             cats.forEach(function(cat, ci) {{
                 const frac = row.fractions[ci] || 0;
                 const alpha = Math.min(1, frac * 3.5).toFixed(3);
-                const col = getCategoryColor(ci);
+                const col = getCategoryColor(ci, colorCol);
                 const cellX = PL + LABEL_W + ci * CELL_W;
                 const tip = escapeHtml(sid + ' \u00b7 ' + cat + ': ' + Math.round(frac * 100) + '% (' + row.counts[ci].toLocaleString() + ' cells)');
                 parts.push('<rect x="' + cellX + '" y="' + y + '" width="' + CELL_W + '" height="' + CELL_H + '" fill="' + col + '" fill-opacity="' + alpha + '" stroke="var(--input-bg)" stroke-width="0.5" data-bar-cat="' + escapeHtml(cat) + '" data-tooltip="' + tip + '" style="cursor:pointer"/>');
@@ -13640,8 +13815,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         const categories = comp.categories;
         const svgHtml = samplesView === 'heatmap'
-            ? buildSamplesHeatmapSvg(rows, categories)
-            : buildSamplesBarsSvg(rows, categories);
+            ? buildSamplesHeatmapSvg(rows, categories, samplesColorCol)
+            : buildSamplesBarsSvg(rows, categories, samplesColorCol);
 
         const metaKeys = new Set();
         comp.rows.forEach(function(r) {{ Object.keys(r.metadata).forEach(function(k) {{ metaKeys.add(k); }}); }});
@@ -13658,8 +13833,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         const maxLeg = Math.min(categories.length, 16);
         const legendHtml = categories.slice(0, maxLeg).map(function(cat, idx) {{
-            return '<span class="samples-legend-item"><span class="samples-legend-swatch" style="background:' + getCategoryColor(idx) + '"></span>' + escapeHtml(cat) + '</span>';
+            const over = getCategoryColorOverride(samplesColorCol, cat) != null ? ' is-overridden' : '';
+            return '<span class="samples-legend-item' + over + '" data-samples-legend-cat="' + escapeHtml(cat) + '" data-samples-legend-idx="' + idx + '" title="Click to change color \u00b7 shift-click to reset"><span class="samples-legend-swatch" style="background:' + getCategoryColor(idx, samplesColorCol) + '"></span>' + escapeHtml(cat) + '</span>';
         }}).join('') + (categories.length > maxLeg ? '<span class="samples-legend-item agg-group-meta">+' + (categories.length - maxLeg) + ' more</span>' : '');
+        const samplesResetBtn = hasCategoryColorOverrides(samplesColorCol)
+            ? '<button class="legend-btn" id="samples-reset-colors" type="button" title="Reset category colors for this column" style="flex:0 0 auto;">Reset colors</button>'
+            : '';
 
         container.innerHTML = `
             <div class="samples-controls">
@@ -13676,6 +13855,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 <div class="samples-view-toggle">
                     <button class="legend-btn ${{samplesView === 'bars' ? 'active' : ''}}" data-samples-view="bars" type="button">Bars</button>
                     <button class="legend-btn ${{samplesView === 'heatmap' ? 'active' : ''}}" data-samples-view="heatmap" type="button">Heatmap</button>
+                    ${{samplesResetBtn}}
                 </div>
             </div>
             <div class="samples-chart-container">
@@ -13699,6 +13879,25 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             btn.addEventListener('click', function() {{
                 samplesView = btn.getAttribute('data-samples-view') || 'bars';
                 renderSamplesInsights();
+            }});
+        }});
+
+        container.querySelector('#samples-reset-colors')?.addEventListener('click', function(ev) {{
+            ev.stopPropagation();
+            clearCategoryColorOverride(samplesColorCol);
+            rerenderAfterCategoryColorChange();
+        }});
+
+        container.querySelectorAll('.samples-legend-item[data-samples-legend-cat]').forEach(function(el) {{
+            el.addEventListener('click', function(ev) {{
+                const cat = el.getAttribute('data-samples-legend-cat');
+                if (!cat) return;
+                if (ev.shiftKey) {{
+                    clearCategoryColorOverride(samplesColorCol, cat);
+                    rerenderAfterCategoryColorChange();
+                    return;
+                }}
+                openCategoryColorPicker(samplesColorCol, cat);
             }});
         }});
 
@@ -17753,6 +17952,39 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         colorSelect.addEventListener('change', (e) => {{
             setViewerColorColumn(e.target.value);
+        }});
+
+        const modalColorSelect = document.getElementById('modal-color-select');
+        if (modalColorSelect) {{
+            DATA.available_colors.forEach(col => {{
+                const opt = document.createElement('option');
+                opt.value = col;
+                opt.textContent = formatMetadataLabel(col);
+                opt.selected = col === currentColor;
+                modalColorSelect.appendChild(opt);
+            }});
+            modalColorSelect.addEventListener('change', (e) => {{
+                setViewerColorColumn(e.target.value);
+            }});
+        }}
+
+        const modalGeneInput = document.getElementById('modal-gene-input');
+        const modalGeneClearBtn = document.getElementById('modal-gene-clear');
+        if (modalGeneInput) {{
+            modalGeneInput.addEventListener('keydown', (e) => {{
+                if (e.key === 'Enter') {{
+                    e.preventDefault();
+                    const val = modalGeneInput.value.trim();
+                    if (val) activateViewerGene(val);
+                }}
+            }});
+            modalGeneInput.addEventListener('change', () => {{
+                const val = modalGeneInput.value.trim();
+                if (val) activateViewerGene(val);
+            }});
+        }}
+        modalGeneClearBtn?.addEventListener('click', () => {{
+            activateViewerGene('');
         }});
 
         const geneList = document.getElementById('gene-list');
