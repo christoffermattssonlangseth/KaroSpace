@@ -3774,6 +3774,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 <option value="2" selected>2x</option>
                 <option value="4">4x</option>
             </select>
+            <button class="export-btn" id="save-session-btn" title="Save current viewer state (rotations, annotations, color/gene, hidden categories, spotlight, samples view) to a JSON file">
+                Save session
+            </button>
+            <button class="export-btn" id="load-session-btn" title="Load a previously saved session JSON file">
+                Load session
+            </button>
+            <input type="file" id="load-session-input" accept="application/json,.json" style="display:none">
             <button class="theme-toggle" id="theme-toggle" title="Toggle dark/light mode" data-help="Switch between light and dark themes.">
                 <span id="theme-icon">{theme_icon}</span>
             </button>
@@ -10822,6 +10829,163 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             n_polygons: polygons.length,
             polygons,
         }};
+    }}
+
+    function buildSessionState() {{
+        const sectionRotations = {{}};
+        (DATA.sections || []).forEach((section) => {{
+            const deg = Number(section.rotation_deg) || 0;
+            if (deg !== 0) sectionRotations[section.id] = deg;
+        }});
+        return {{
+            format: 'karospace-session-v1',
+            created_at: new Date().toISOString(),
+            color_column: currentColor || null,
+            active_gene: currentGene || null,
+            hidden_categories: Array.from(hiddenCategories),
+            linked_spotlight_enabled: !!linkedSpotlightEnabled,
+            spotlight_pinned_category: spotlightPinnedCategory || null,
+            samples_view: samplesView || null,
+            samples_color_col: samplesColorCol || null,
+            samples_meta_sort_by: samplesMetaSortBy || null,
+            section_rotations: sectionRotations,
+            annotations: buildModalAnnotationExport(),
+        }};
+    }}
+
+    function downloadSessionState() {{
+        const state = buildSessionState();
+        const blob = new Blob([JSON.stringify(state, null, 2)], {{ type: 'application/json' }});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+        a.href = url;
+        a.download = `karospace-session-${{stamp}}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }}
+
+    function applyAnnotationsFromExport(payload) {{
+        if (!payload || !Array.isArray(payload.polygons)) return {{ restored: 0, skipped: 0 }};
+        let restored = 0, skipped = 0;
+        invalidateAnnotationDEState();
+        modalAnnotations = [];
+        let maxId = 0;
+        payload.polygons.forEach((poly) => {{
+            const sectionId = poly.section_id;
+            const section = sectionId != null ? sectionById.get(sectionId) : null;
+            if (!section) {{ skipped++; return; }}
+            const vertices = Array.isArray(poly.vertices)
+                ? poly.vertices
+                    .map(p => ({{ x: Number(p.x), y: Number(p.y) }}))
+                    .filter(p => Number.isFinite(p.x) && Number.isFinite(p.y))
+                : [];
+            if (vertices.length < 3) {{ skipped++; return; }}
+            const cells = computeCellsInsideDataPolygon(section, vertices);
+            const id = Number.isFinite(Number(poly.id)) ? Number(poly.id) : (maxId + 1);
+            if (id > maxId) maxId = id;
+            modalAnnotations.push({{
+                id,
+                sectionId,
+                label: poly.label || `Annotation ${{id}}`,
+                color: poly.color || getAnnotationColorById(id),
+                createdAt: poly.created_at || new Date().toISOString(),
+                vertices,
+                localCellIndices: cells.localIndices,
+                globalCellIndices: cells.globalIndices,
+            }});
+            restored++;
+        }});
+        modalNextAnnotationId = Math.max(modalNextAnnotationId, maxId + 1);
+        return {{ restored, skipped }};
+    }}
+
+    function applySessionState(state) {{
+        if (!state || typeof state !== 'object') {{
+            alert('Session file is empty or malformed.');
+            return false;
+        }}
+        if (state.format && state.format !== 'karospace-session-v1') {{
+            alert(`Unrecognised session format: ${{state.format}}`);
+            return false;
+        }}
+
+        let rotationsApplied = 0;
+        if (state.section_rotations && typeof state.section_rotations === 'object') {{
+            Object.entries(state.section_rotations).forEach(([sectionId, deg]) => {{
+                const section = sectionById.get(sectionId);
+                const value = Number(deg);
+                if (!section || !Number.isFinite(value)) return;
+                section.rotation_deg = normalizeRotationDeg(value);
+                updateSectionRotationIndicators(sectionId);
+                rotationsApplied++;
+            }});
+        }}
+
+        const annResult = state.annotations
+            ? applyAnnotationsFromExport(state.annotations)
+            : {{ restored: 0, skipped: 0 }};
+
+        if (Array.isArray(state.hidden_categories)) {{
+            hiddenCategories = new Set(state.hidden_categories.map(String));
+        }} else {{
+            hiddenCategories.clear();
+        }}
+
+        linkedSpotlightEnabled = !!state.linked_spotlight_enabled;
+        spotlightPinnedCategory = state.spotlight_pinned_category || null;
+        spotlightHoverCategory = null;
+
+        if (state.samples_view) samplesView = state.samples_view;
+        if (state.samples_color_col) samplesColorCol = state.samples_color_col;
+        if (typeof state.samples_meta_sort_by === 'string') samplesMetaSortBy = state.samples_meta_sort_by;
+
+        const targetColor = state.color_column;
+        const targetGene = state.active_gene;
+
+        const finalize = () => {{
+            renderModalAnnotationPanel();
+            updateAnnotationComparisonTabVisibility();
+            updateOverviewAnnotationsToggle();
+            renderLegend('legend');
+            renderLegend('modal-legend');
+            renderAllSections();
+            if (modalSection) renderModalSection();
+            if (typeof umapVisible !== 'undefined' && umapVisible) renderUMAP();
+            renderActiveInsightsPanel();
+            const summary = [];
+            if (rotationsApplied) summary.push(`${{rotationsApplied}} rotation${{rotationsApplied === 1 ? '' : 's'}}`);
+            if (annResult.restored) summary.push(`${{annResult.restored}} annotation${{annResult.restored === 1 ? '' : 's'}}`);
+            if (annResult.skipped) summary.push(`${{annResult.skipped}} skipped (missing section)`);
+            console.log('Session restored', summary.length ? '\u2014 ' + summary.join(', ') : '(no rotations / annotations)');
+        }};
+
+        if (targetGene) {{
+            activateViewerGene(targetGene).then(finalize).catch(finalize);
+        }} else if (targetColor && targetColor !== currentColor) {{
+            setViewerColorColumn(targetColor);
+            finalize();
+        }} else {{
+            finalize();
+        }}
+        return true;
+    }}
+
+    function loadSessionFromFile(file) {{
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {{
+            try {{
+                const obj = JSON.parse(String(reader.result || ''));
+                applySessionState(obj);
+            }} catch (e) {{
+                alert(`Could not parse session file: ${{e.message || e}}`);
+            }}
+        }};
+        reader.onerror = () => alert('Could not read the selected file.');
+        reader.readAsText(file);
     }}
 
     function exportModalAnnotations() {{
@@ -18322,6 +18486,21 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }});
 
         document.getElementById('screenshot-btn').addEventListener('click', screenshotFullPage);
+
+        document.getElementById('save-session-btn')?.addEventListener('click', () => {{
+            try {{ downloadSessionState(); }}
+            catch (e) {{ alert(`Could not save session: ${{e.message || e}}`); }}
+        }});
+        const loadSessionBtn = document.getElementById('load-session-btn');
+        const loadSessionInput = document.getElementById('load-session-input');
+        if (loadSessionBtn && loadSessionInput) {{
+            loadSessionBtn.addEventListener('click', () => loadSessionInput.click());
+            loadSessionInput.addEventListener('change', () => {{
+                const file = loadSessionInput.files && loadSessionInput.files[0];
+                if (file) loadSessionFromFile(file);
+                loadSessionInput.value = '';
+            }});
+        }}
 
         // Legend toggle
         document.getElementById('legend-toggle').addEventListener('click', toggleLegendPanel);
