@@ -4421,6 +4421,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let groupDeFullRunToken = 0;
     let groupDeFullRun = null;
     const groupDeFullCache = new Map();
+    let groupDeRenderToken = 0;
+    let groupDeRenderDepth = 0;
     let samplesView = 'bars';
     let samplesColorCol = '';
     let samplesMetaSortBy = '';
@@ -6294,14 +6296,31 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const resolvedIndex = indexInfo || await loadBinaryShardIndex(shardUrl);
         const entry = resolvedIndex?.entries?.[gene];
         if (!entry) return null;
+        if (resolvedIndex.buffer) {{
+            return resolvedIndex.buffer.slice(entry.payloadOffset, entry.payloadOffset + entry.payloadLength);
+        }}
         if (resolvedIndex.rangeCapable) {{
             const session = getPackageSession();
             if (session && typeof session.readRange === 'function') {{
                 return session.readRange(shardUrl, entry.payloadOffset, entry.payloadOffset + entry.payloadLength);
             }}
         }}
-        const buffer = resolvedIndex.buffer || await loadBinaryShardWholeBuffer(shardUrl);
+        const buffer = await loadBinaryShardWholeBuffer(shardUrl);
         return buffer.slice(entry.payloadOffset, entry.payloadOffset + entry.payloadLength);
+    }}
+
+    async function preloadBinaryShardBuffer(shardUrl, indexInfo) {{
+        if (!indexInfo || indexInfo.buffer) return;
+        const session = getPackageSession();
+        if (!session) return;
+        try {{
+            const stat = session.stat?.(shardUrl);
+            if (stat && stat.uncompressedSize > 0) {{
+                indexInfo.buffer = await session.readRange(shardUrl, 0, stat.uncompressedSize);
+            }}
+        }} catch (e) {{
+            // Fall back to per-gene range reads
+        }}
     }}
 
     function parseBinaryGenePayload(buffer, sectionOrder, geneMeta = null) {{
@@ -7896,14 +7915,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const count = Number(section.n_cells ?? section.x?.length ?? 0);
             return count > 0 ? {{ sectionId, indices: null, indexSet: null, count }} : null;
         }}
-        const deduped = Array.from(new Set((indices || []).filter((idx) => Number.isInteger(idx) && idx >= 0)));
-        if (!deduped.length) return null;
+        const filtered = (indices || []).filter((idx) => Number.isInteger(idx) && idx >= 0);
+        if (!filtered.length) return null;
+        // indexSet built lazily via ensureCellGroupIndexSet to avoid OOM on large groups
         return {{
             sectionId,
-            indices: deduped,
-            indexSet: new Set(deduped),
-            count: deduped.length,
+            indices: filtered,
+            indexSet: null,
+            count: filtered.length,
         }};
+    }}
+
+    function ensureCellGroupIndexSet(entry) {{
+        if (!entry) return null;
+        if (!entry.indexSet && entry.indices) {{
+            entry.indexSet = new Set(entry.indices);
+        }}
+        return entry.indexSet;
     }}
 
     function buildCellSetGroup(meta = {{}}, sectionEntries = []) {{
@@ -8163,7 +8191,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const stats = computeRegionStatsFromSectionEntry(
                 sectionEntry,
                 sectionGroup.indices,
-                sectionGroup.indexSet,
+                ensureCellGroupIndexSet(sectionGroup),
                 geneMeta
             );
             combined.sum += Number(stats.sum || 0);
@@ -8200,19 +8228,25 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             if (sidecarFormat === 'binary-v1') {{
                 const indexInfo = await loadBinaryShardIndex(shardUrl);
                 if (isCancelled()) return null;
+                await preloadBinaryShardBuffer(shardUrl, indexInfo);
+                if (isCancelled()) return null;
                 const genesInShard = Array.isArray(shardGenes) ? shardGenes : Object.keys(indexInfo?.entries || {{}});
                 for (let geneIdx = 0; geneIdx < genesInShard.length; geneIdx++) {{
                     if (isCancelled()) return null;
                     const gene = genesInShard[geneIdx];
-                    const payloadBuffer = await readBinaryGenePayload(shardUrl, gene, indexInfo);
-                    if (!payloadBuffer) continue;
-                    const geneEntry = parseBinaryGenePayload(
-                        payloadBuffer,
-                        manifest.section_order || [],
-                        manifest?.genes_meta?.[gene] || null
-                    );
-                    const entry = computeCellSetDEFromSidecarGeneEntry(gene, geneEntry, groupA, groupB);
-                    if (entry) results.push(entry);
+                    try {{
+                        const payloadBuffer = await readBinaryGenePayload(shardUrl, gene, indexInfo);
+                        if (!payloadBuffer) continue;
+                        const geneEntry = parseBinaryGenePayload(
+                            payloadBuffer,
+                            manifest.section_order || [],
+                            manifest?.genes_meta?.[gene] || null
+                        );
+                        const entry = computeCellSetDEFromSidecarGeneEntry(gene, geneEntry, groupA, groupB);
+                        if (entry) results.push(entry);
+                    }} catch (geneError) {{
+                        console.warn(`Group DE: skipping gene ${{gene}} due to error:`, geneError);
+                    }}
                 }}
                 completedGenes += genesInShard.length;
             }} else {{
@@ -8464,7 +8498,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             return result;
         }}
 
-        if (Array.isArray(sectionEntry.dense)) {{
+        if (Array.isArray(sectionEntry.dense) || ArrayBuffer.isView(sectionEntry.dense)) {{
             if (useAllCells) {{
                 for (let idx = 0; idx < sectionEntry.dense.length; idx++) {{
                     const value = Number(sectionEntry.dense[idx]);
@@ -8614,18 +8648,24 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 if (sidecarFormat === 'binary-v1') {{
                     const indexInfo = await loadBinaryShardIndex(shardUrl);
                     if (annotationDeFullRunToken !== token) return;
+                    await preloadBinaryShardBuffer(shardUrl, indexInfo);
+                    if (annotationDeFullRunToken !== token) return;
                     const genesInShard = Array.isArray(shardGenes) ? shardGenes : Object.keys(indexInfo?.entries || {{}});
                     for (let geneIdx = 0; geneIdx < genesInShard.length; geneIdx++) {{
                         const gene = genesInShard[geneIdx];
-                        const payloadBuffer = await readBinaryGenePayload(shardUrl, gene, indexInfo);
-                        if (!payloadBuffer) continue;
-                        const geneEntry = parseBinaryGenePayload(
-                            payloadBuffer,
-                            manifest.section_order || [],
-                            manifest?.genes_meta?.[gene] || null
-                        );
-                        const result = computeRegionAnnotationDEFromSidecarGeneEntry(gene, geneEntry, regionA, regionB);
-                        if (result) results.push(result);
+                        try {{
+                            const payloadBuffer = await readBinaryGenePayload(shardUrl, gene, indexInfo);
+                            if (!payloadBuffer) continue;
+                            const geneEntry = parseBinaryGenePayload(
+                                payloadBuffer,
+                                manifest.section_order || [],
+                                manifest?.genes_meta?.[gene] || null
+                            );
+                            const result = computeRegionAnnotationDEFromSidecarGeneEntry(gene, geneEntry, regionA, regionB);
+                            if (result) results.push(result);
+                        }} catch (geneError) {{
+                            console.warn(`Annotation DE: skipping gene ${{gene}} due to error:`, geneError);
+                        }}
                     }}
                 }} else {{
                     const shardPayload = await fetchGeneAuxShardForAnalysis(shardUrl);
@@ -12858,13 +12898,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <button class="legend-btn" id="annotation-de-cancel" type="button">Cancel Full DE</button>
                 </div>
             `;
-            if (cachedSummaryHtml) {{
-                resultHtml += '<div class="agg-group-meta">Showing the cached full result while the refresh runs:</div>';
-                resultHtml += cachedSummaryHtml;
-            }} else if (quickSummaryHtml) {{
-                resultHtml += '<div class="agg-group-meta">Preview from the genes already loaded in the viewer:</div>';
-                resultHtml += quickSummaryHtml;
-            }}
         }} else if (fullRun?.error) {{
             resultHtml = `
                 <div class="agg-group-meta">Full sidecar DE failed: ${{escapeHtml(fullRun.error)}}</div>
@@ -14233,6 +14266,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function buildGroupVolcanoPlot(entries) {{
         if (!entries || !entries.length) return '';
+        const VOLCANO_MAX_DOTS = 500;
+        if (entries.length > VOLCANO_MAX_DOTS) entries = entries.slice(0, VOLCANO_MAX_DOTS);
         const W = 310, H = 190, ml = 34, mr = 10, mt = 10, mb = 26;
         const iw = W - ml - mr, ih = H - mt - mb;
         const logfc = entries.map(function(e) {{ return Number(e.log2fc) || 0; }});
@@ -14807,7 +14842,139 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }};
     }}
 
+    async function buildGroupDECellSetAsync(spec, value, options = {{}}) {{
+        if (!spec || value === null || value === undefined || value === '') return null;
+        const restrictSpec = options.restrictSpec || null;
+        const hasRestriction = !!(restrictSpec && options.restrictValue !== null && options.restrictValue !== undefined && options.restrictValue !== '');
+        const restrictValue = hasRestriction ? String(options.restrictValue) : null;
+        const scope = options.scope === 'visible' ? 'visible' : 'all';
+        const isCancelled = typeof options.isCancelled === 'function' ? options.isCancelled : () => false;
+        const allSections = DATA.sections || [];
+        const sections = [];
+
+        for (let si = 0; si < allSections.length; si++) {{
+            if (isCancelled()) return null;
+            const section = allSections[si];
+            if (scope === 'visible' && !sectionPassesFilter(section)) continue;
+            if (spec.kind === 'metadata' && !matchGroupDESpec(section, -1, spec, value)) continue;
+            if (hasRestriction && restrictSpec.kind === 'metadata' && !matchGroupDESpec(section, -1, restrictSpec, restrictValue)) continue;
+
+            if (spec.kind === 'metadata' && (!hasRestriction || restrictSpec.kind === 'metadata')) {{
+                const entry = normalizeCellGroupSectionEntry(section.id, null);
+                if (entry) sections.push(entry);
+                continue;
+            }}
+
+            const sourceValues = spec.kind === 'annotation' ? getSectionColorValues(section, spec.column) : null;
+            const sourceMeta = spec.kind === 'annotation' ? DATA.colors_meta?.[spec.column] : null;
+            const restrictValues = hasRestriction && restrictSpec.kind === 'annotation'
+                ? getSectionColorValues(section, restrictSpec.column)
+                : null;
+            const restrictMeta = hasRestriction && restrictSpec.kind === 'annotation'
+                ? DATA.colors_meta?.[restrictSpec.column]
+                : null;
+            const nCells = Number(section.n_cells ?? sourceValues?.length ?? restrictValues?.length ?? section.x?.length ?? 0);
+            if (!(nCells > 0)) continue;
+            const matched = [];
+            for (let cellIdx = 0; cellIdx < nCells; cellIdx++) {{
+                let include = true;
+                if (spec.kind === 'annotation') {{
+                    include = getCategoricalValueNameFromRaw(sourceMeta, sourceValues?.[cellIdx]) === String(value);
+                }}
+                if (include && hasRestriction && restrictSpec.kind === 'annotation') {{
+                    include = getCategoricalValueNameFromRaw(restrictMeta, restrictValues?.[cellIdx]) === restrictValue;
+                }}
+                if (include) matched.push(cellIdx);
+            }}
+            const entry = normalizeCellGroupSectionEntry(section.id, matched);
+            if (entry) sections.push(entry);
+
+            // Yield every 5 sections to keep the browser responsive
+            if (si % 5 === 4) await new Promise((r) => setTimeout(r, 0));
+        }}
+        if (isCancelled()) return null;
+
+        return buildCellSetGroup({{
+            key: buildGroupDEKey(spec, value, restrictSpec, restrictValue, scope),
+            label: buildGroupDELabel(spec, value, restrictSpec, restrictValue, scope),
+            description: buildGroupDELabel(spec, value, restrictSpec, restrictValue, scope),
+            sourceSpec: spec,
+            sourceValue: String(value),
+            restrictSpec: restrictSpec || null,
+            restrictValue,
+            scope,
+        }}, sections);
+    }}
+
+    async function computeCellSetDEAsync(groupA, groupB, options = {{}}) {{
+        const topN = Math.max(1, Number(options.topN) || groupDeTopN || 12);
+        const isCancelled = typeof options.isCancelled === 'function' ? options.isCancelled : () => false;
+        if (!groupA || !groupB) {{
+            return {{ available: false, reason: 'missing_groups', results: [] }};
+        }}
+        if (groupA.key && groupA.key === groupB.key) {{
+            return {{ available: false, reason: 'same_group', nA: groupA.nCells || 0, nB: groupB.nCells || 0, results: [] }};
+        }}
+        if (!(groupA.nCells > 0) || !(groupB.nCells > 0)) {{
+            return {{
+                available: false,
+                reason: 'empty_group',
+                nA: Number(groupA.nCells || 0),
+                nB: Number(groupB.nCells || 0),
+                results: [],
+            }};
+        }}
+
+        const loadedGenes = Object.keys(DATA.genes_meta || {{}}).sort((a, b) => a.localeCompare(b));
+        const totalGenes = Array.isArray(DATA.available_genes) ? DATA.available_genes.length : loadedGenes.length;
+        if (!loadedGenes.length) {{
+            return {{
+                available: false,
+                reason: 'no_loaded_genes',
+                nA: Number(groupA.nCells || 0),
+                nB: Number(groupB.nCells || 0),
+                loadedGeneCount: 0,
+                totalGeneCount: totalGenes,
+                results: [],
+            }};
+        }}
+
+        const results = [];
+        const BATCH = 10;
+        for (let i = 0; i < loadedGenes.length; i += BATCH) {{
+            if (isCancelled()) return null;
+            const end = Math.min(i + BATCH, loadedGenes.length);
+            for (let j = i; j < end; j++) {{
+                const gene = loadedGenes[j];
+                const statsA = computeQuickStatsForGroupGene(groupA, gene);
+                const statsB = computeQuickStatsForGroupGene(groupB, gene);
+                const entry = buildDEEntryFromStats(gene, statsA, statsB, groupA.nCells, groupB.nCells);
+                if (entry) results.push(entry);
+            }}
+            if (end < loadedGenes.length) await new Promise((r) => setTimeout(r, 0));
+        }}
+        if (isCancelled()) return null;
+
+        sortCellSetDEResults(results);
+        return {{
+            available: true,
+            reason: null,
+            nA: Number(groupA.nCells || 0),
+            nB: Number(groupB.nCells || 0),
+            loadedGeneCount: loadedGenes.length,
+            totalGeneCount: totalGenes,
+            results: results.slice(0, topN),
+        }};
+    }}
+
     function renderGroupDE() {{
+        groupDeRenderDepth += 1;
+        if (groupDeRenderDepth > 3) {{
+            console.error('renderGroupDE re-entrant depth', groupDeRenderDepth);
+            groupDeRenderDepth -= 1;
+            return;
+        }}
+        try {{
         const container = document.getElementById('group-de-panel');
         if (!container) return;
 
@@ -14904,221 +15071,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             return;
         }}
 
-        const groupA = buildGroupDECellSet(sourceSpec, groupDeSourceValue, {{
-            restrictSpec,
-            restrictValue: groupDeRestrictValue,
-            scope: groupDeScope,
-        }});
-        const groupB = buildGroupDECellSet(sourceSpec, groupDeReferenceValue, {{
-            restrictSpec,
-            restrictValue: groupDeRestrictValue,
-            scope: groupDeScope,
-        }});
-        const quickResult = computeCellSetDE(groupA, groupB, {{ topN: groupDeTopN }});
-        const exportState = getGroupDEExportState(groupA, groupB, quickResult);
-        const pairKey = getGroupDECacheKey(groupA, groupB);
-        const fullCached = pairKey ? groupDeFullCache.get(pairKey) : null;
-        const fullRun = (groupDeFullRun && groupDeFullRun.key === pairKey) ? groupDeFullRun : null;
-        const sidecarAvailable = !!DATA.gene_aux_url;
-        const renderCards = (result) => {{
-            const topN = Math.max(1, Number(groupDeTopN) || ANNOTATION_DE_TOP_N);
-            return (result.results || []).slice(0, topN).map((entry) => {{
-                return `
-                    <div class="comparison-card">
-                        <div class="comparison-card-title">
-                            ${{renderGeneTokenButton(entry.gene, {{
-                                isActive: entry.gene === currentGene,
-                                showMeta: false,
-                                title: 'Load group DE gene into the viewer',
-                            }})}}
-                            ${{renderGeneGoogleSearchButton(entry.gene, {{
-                                title: 'Search Google for this gene',
-                            }})}}
-                        </div>
-                        <div class="comparison-metric-grid">
-                            <div class="comparison-metric">
-                                <span class="comparison-metric-label">log2FC A/B</span>
-                                <span class="comparison-metric-value">${{formatScaleNumber(entry.log2fc)}}</span>
-                            </div>
-                            <div class="comparison-metric">
-                                <span class="comparison-metric-label">Score</span>
-                                <span class="comparison-metric-value">${{formatScaleNumber(entry.score)}}</span>
-                            </div>
-                            <div class="comparison-metric">
-                                <span class="comparison-metric-label">% expr A</span>
-                                <span class="comparison-metric-value">${{formatClusterDEPct(entry.pctA)}}</span>
-                            </div>
-                            <div class="comparison-metric">
-                                <span class="comparison-metric-label">% expr B</span>
-                                <span class="comparison-metric-value">${{formatClusterDEPct(entry.pctB)}}</span>
-                            </div>
-                            <div class="comparison-metric">
-                                <span class="comparison-metric-label">Mean A</span>
-                                <span class="comparison-metric-value">${{formatScaleNumber(entry.meanA)}}</span>
-                            </div>
-                            <div class="comparison-metric">
-                                <span class="comparison-metric-label">Mean B</span>
-                                <span class="comparison-metric-value">${{formatScaleNumber(entry.meanB)}}</span>
-                            </div>
-                        </div>
-                    </div>
-                `;
-            }}).join('');
-        }};
-        const sourceLabel = groupA ? escapeHtml(groupA.description) : '';
-        const referenceLabel = groupB ? escapeHtml(groupB.description) : '';
+        // Render controls immediately, defer heavy DE computation
+        const token = ++groupDeRenderToken;
         const summaryLabel = formatGroupDESourceSpecLabel(sourceSpec);
         const restrictSummary = restrictSpec && groupDeRestrictValue
             ? ` · within ${{formatGroupDESourceSpecLabel(restrictSpec)}}=${{groupDeRestrictValue}}`
             : '';
-        const sizeSummary = (groupA && groupB)
-            ? ` · ${{Number(groupA.nCells || 0).toLocaleString()}} vs ${{Number(groupB.nCells || 0).toLocaleString()}} cells`
-            : '';
         setCompareSectionSummary(
             'group-de-summary',
-            `${{summaryLabel}}: ${{String(groupDeSourceValue ?? 'A')}} vs ${{String(groupDeReferenceValue ?? 'B')}}${{restrictSummary}}${{sizeSummary}}`,
+            `${{summaryLabel}}: ${{String(groupDeSourceValue ?? 'A')}} vs ${{String(groupDeReferenceValue ?? 'B')}}${{restrictSummary}}`,
         );
-        const topNLabel = Math.max(1, Number(groupDeTopN) || ANNOTATION_DE_TOP_N).toLocaleString();
-        const quickSummaryHtml = (quickResult.available && quickResult.results.length)
-            ? `
-                <div class="agg-group-meta">
-                    Group A: <strong>${{sourceLabel}}</strong> (${{Number(quickResult.nA || 0).toLocaleString()}} cells)
-                    vs Group B: <strong>${{referenceLabel}}</strong> (${{Number(quickResult.nB || 0).toLocaleString()}} cells).
-                </div>
-                <div class="agg-group-meta">
-                    ${{
-                        Number(quickResult.loadedGeneCount || 0) < Number(quickResult.totalGeneCount || 0)
-                            ? `Using ${{Number(quickResult.loadedGeneCount || 0).toLocaleString()}} of ${{Number(quickResult.totalGeneCount || 0).toLocaleString()}} genes currently loaded in the viewer.`
-                            : `Using ${{Number(quickResult.loadedGeneCount || 0).toLocaleString()}} loaded genes.`
-                    }}
-                    Showing top ${{topNLabel}} genes. Positive scores indicate enrichment in Group A.
-                </div>
-                ${{buildGroupVolcanoPlot(quickResult.results || [])}}
-                <div class="comparison-stack">${{renderCards(quickResult)}}</div>
-            `
-            : '';
-        const cachedTimestamp = fullCached?.completedAt
-            ? new Date(fullCached.completedAt).toLocaleTimeString([], {{ hour: '2-digit', minute: '2-digit', second: '2-digit' }})
-            : '';
-        const cachedSummaryHtml = fullCached?.available
-            ? (fullCached.results || []).length
-                ? `
-                    <div class="agg-group-meta">
-                        Group A: <strong>${{sourceLabel}}</strong> (${{Number(fullCached.nA || 0).toLocaleString()}} cells)
-                        vs Group B: <strong>${{referenceLabel}}</strong> (${{Number(fullCached.nB || 0).toLocaleString()}} cells).
-                    </div>
-                    <div class="agg-group-meta">
-                        Cached full sidecar DE${{cachedTimestamp ? ` from ${{cachedTimestamp}}` : ''}}
-                        across ${{Number(fullCached.totalGeneCount || 0).toLocaleString()}} genes.
-                        Showing top ${{topNLabel}} genes. Positive scores indicate enrichment in Group A.
-                    </div>
-                    ${{buildGroupVolcanoPlot(fullCached.results || [])}}
-                    <div class="comparison-stack">${{renderCards(fullCached)}}</div>
-                `
-                : `
-                    <div class="agg-group-meta">
-                        Group A: <strong>${{sourceLabel}}</strong> (${{Number(fullCached.nA || 0).toLocaleString()}} cells)
-                        vs Group B: <strong>${{referenceLabel}}</strong> (${{Number(fullCached.nB || 0).toLocaleString()}} cells).
-                    </div>
-                    <div class="agg-group-meta">
-                        Cached full sidecar DE${{cachedTimestamp ? ` from ${{cachedTimestamp}}` : ''}} found no enriched genes across ${{Number(fullCached.totalGeneCount || 0).toLocaleString()}} genes.
-                    </div>
-                `
-            : '';
-        let resultHtml = '';
-        if (!groupA || !groupB) {{
-            resultHtml = '<div class="agg-group-meta">Choose two different groups to compare.</div>';
-        }} else if (fullRun?.running) {{
-            const totalShards = Number(fullRun.totalShards || 0);
-            const completedShards = Number(fullRun.completedShards || 0);
-            const totalGenes = Number(fullRun.totalGenes || 0);
-            const completedGenes = Number(fullRun.completedGenes || 0);
-            const progressMax = Math.max(1, totalGenes || totalShards || 1);
-            const progressValue = Math.min(progressMax, totalGenes ? completedGenes : completedShards);
-            const progressPct = progressMax > 0 ? Math.round((progressValue / progressMax) * 100) : 0;
-            resultHtml = `
-                <div class="agg-group-meta">Scanning the full sidecar in the background. The viewer stays interactive while this runs.</div>
-                <progress value="${{progressValue}}" max="${{progressMax}}" style="width:100%; height:12px;"></progress>
-                <div class="agg-group-meta">
-                    ${{progressPct}}% complete
-                    · ${{completedGenes.toLocaleString()}} / ${{totalGenes.toLocaleString()}} genes
-                    · ${{completedShards.toLocaleString()}} / ${{totalShards.toLocaleString()}} shards
-                </div>
-                <div style="display:flex; justify-content:flex-end;">
-                    <button class="legend-btn" id="group-de-cancel" type="button">Cancel Full DE</button>
-                </div>
-            `;
-            if (cachedSummaryHtml) {{
-                resultHtml += '<div class="agg-group-meta">Showing the cached full result while the refresh runs:</div>';
-                resultHtml += cachedSummaryHtml;
-            }} else if (quickSummaryHtml) {{
-                resultHtml += '<div class="agg-group-meta">Preview from the genes already loaded in the viewer:</div>';
-                resultHtml += quickSummaryHtml;
-            }}
-        }} else if (fullRun?.error) {{
-            resultHtml = `
-                <div class="agg-group-meta">Full sidecar DE failed: ${{escapeHtml(fullRun.error)}}</div>
-                <div style="display:flex; justify-content:flex-end;">
-                    <button class="legend-btn" id="group-de-run-full" type="button">Retry Full DE</button>
-                </div>
-            `;
-            if (cachedSummaryHtml) {{
-                resultHtml += '<div class="agg-group-meta">Showing the previous cached full result:</div>';
-                resultHtml += cachedSummaryHtml;
-            }} else if (quickSummaryHtml) {{
-                resultHtml += '<div class="agg-group-meta">Quick DE preview from currently loaded genes:</div>';
-                resultHtml += quickSummaryHtml;
-            }}
-        }} else if (fullCached?.available) {{
-            resultHtml = cachedSummaryHtml;
-            resultHtml += '<div style="display:flex; justify-content:flex-end;"><button class="legend-btn" id="group-de-refresh-full" type="button">Refresh Full DE</button></div>';
-        }} else if (!quickResult.available && quickResult.reason === 'empty_group') {{
-            resultHtml = '<div class="agg-group-meta">One of the selected groups has no cells after applying the current restriction.</div>';
-        }} else if (!quickResult.available && quickResult.reason === 'no_loaded_genes' && sidecarAvailable) {{
-            const totalGenes = Number(quickResult.totalGeneCount || 0).toLocaleString();
-            resultHtml = `
-                <div class="agg-group-meta">
-                    No genes are currently loaded for quick group DE.
-                    ${{totalGenes !== '0' ? `This viewer knows about ${{totalGenes}} sidecar genes that can be scanned on demand.` : ''}}
-                </div>
-                <div style="display:flex; justify-content:flex-end;">
-                    <button class="legend-btn" id="group-de-run-full" type="button">Run Full DE</button>
-                </div>
-            `;
-        }} else if (!quickResult.available && quickResult.reason === 'no_loaded_genes') {{
-            resultHtml = '<div class="agg-group-meta">No genes are currently loaded for group DE. Load genes in the Genes tab or click marker genes first.</div>';
-        }} else if (!quickResult.available && quickResult.reason === 'same_group') {{
-            resultHtml = '<div class="agg-group-meta">Choose two different groups to compare.</div>';
-        }} else if (!quickResult.available) {{
-            resultHtml = '<div class="agg-group-meta">Choose two different groups to compare.</div>';
-        }} else if (!quickResult.results.length) {{
-            if (sidecarAvailable && Number(quickResult.loadedGeneCount || 0) < Number(quickResult.totalGeneCount || 0)) {{
-                resultHtml = `
-                    <div class="agg-group-meta">No enriched genes were found among the currently loaded genes.</div>
-                    <div style="display:flex; justify-content:flex-end;">
-                        <button class="legend-btn" id="group-de-run-full" type="button">Run Full DE</button>
-                    </div>
-                `;
-            }} else {{
-                resultHtml = '<div class="agg-group-meta">No enriched genes were found among the genes currently loaded in the viewer.</div>';
-            }}
-        }} else {{
-            resultHtml = quickSummaryHtml;
-            if (sidecarAvailable && Number(quickResult.loadedGeneCount || 0) < Number(quickResult.totalGeneCount || 0)) {{
-                resultHtml += '<div style="display:flex; justify-content:flex-end;"><button class="legend-btn" id="group-de-run-full" type="button">Run Full DE</button></div>';
-            }}
-        }}
-
-        if (exportState) {{
-            resultHtml += `
-                <div style="display:flex; justify-content:flex-end; gap:6px; margin-top:6px;">
-                    <button class="legend-btn" id="group-de-export-json" type="button">Export JSON</button>
-                    <button class="legend-btn" id="group-de-export-csv" type="button">Export CSV</button>
-                </div>
-            `;
-        }}
-
-        html += `<div id="group-de-results">${{resultHtml}}</div>`;
+        html += '<div id="group-de-results"><div class="agg-group-meta">Computing...</div></div>';
         container.innerHTML = html;
 
         const sourceSpecSelect = container.querySelector('#group-de-source-spec');
@@ -15129,42 +15092,45 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const scopeSelect = container.querySelector('#group-de-scope');
         const topNInput = container.querySelector('#group-de-topn');
         const swapBtn = container.querySelector('#group-de-swap');
+        // Defer re-renders via requestAnimationFrame so select elements finish
+        // their event lifecycle before innerHTML replaces them (Safari crash fix).
+        const deferRender = () => requestAnimationFrame(() => renderGroupDE());
         sourceSpecSelect?.addEventListener('change', () => {{
             cancelGroupDEFullRun();
             groupDeSourceSpecValue = sourceSpecSelect.value || '';
             groupDeSourceValue = null;
             groupDeReferenceValue = null;
-            renderGroupDE();
+            deferRender();
         }});
         sourceValueSelect?.addEventListener('change', () => {{
             cancelGroupDEFullRun();
             groupDeSourceValue = sourceValueSelect.value || null;
-            renderGroupDE();
+            deferRender();
         }});
         referenceValueSelect?.addEventListener('change', () => {{
             cancelGroupDEFullRun();
             groupDeReferenceValue = referenceValueSelect.value || null;
-            renderGroupDE();
+            deferRender();
         }});
         restrictSpecSelect?.addEventListener('change', () => {{
             cancelGroupDEFullRun();
             groupDeRestrictSpecValue = restrictSpecSelect.value || '';
             groupDeRestrictValue = null;
-            renderGroupDE();
+            deferRender();
         }});
         restrictValueSelect?.addEventListener('change', () => {{
             cancelGroupDEFullRun();
             groupDeRestrictValue = restrictValueSelect.value || null;
-            renderGroupDE();
+            deferRender();
         }});
         scopeSelect?.addEventListener('change', () => {{
             cancelGroupDEFullRun();
             groupDeScope = scopeSelect.value === 'visible' ? 'visible' : 'all';
-            renderGroupDE();
+            deferRender();
         }});
         topNInput?.addEventListener('change', () => {{
             groupDeTopN = Math.min(100, Math.max(3, Number(topNInput.value) || ANNOTATION_DE_TOP_N));
-            renderGroupDE();
+            deferRender();
         }});
         swapBtn?.addEventListener('click', () => {{
             cancelGroupDEFullRun();
@@ -15174,45 +15140,284 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             renderGroupDE();
         }});
 
-        const runFullBtn = container.querySelector('#group-de-run-full');
-        if (runFullBtn && groupA && groupB) {{
-            runFullBtn.addEventListener('click', () => {{
-                runFullGroupDE(groupA, groupB);
+        // Snapshot current state for the deferred computation
+        const deferredSourceSpec = sourceSpec;
+        const deferredRestrictSpec = restrictSpec;
+        const deferredSourceValue = groupDeSourceValue;
+        const deferredReferenceValue = groupDeReferenceValue;
+        const deferredRestrictValue = groupDeRestrictValue;
+        const deferredScope = groupDeScope;
+        const deferredTopN = groupDeTopN;
+
+        // Defer heavy cell-set building + DE computation so browser can breathe
+        (async () => {{
+            await new Promise((r) => setTimeout(r, 0));
+            if (groupDeRenderToken !== token) return;
+            const resultsDiv = document.getElementById('group-de-results');
+            if (!resultsDiv) return;
+
+            const groupA = await buildGroupDECellSetAsync(deferredSourceSpec, deferredSourceValue, {{
+                restrictSpec: deferredRestrictSpec,
+                restrictValue: deferredRestrictValue,
+                scope: deferredScope,
+                isCancelled: () => groupDeRenderToken !== token,
             }});
-        }}
-        const refreshFullBtn = container.querySelector('#group-de-refresh-full');
-        if (refreshFullBtn && groupA && groupB) {{
-            refreshFullBtn.addEventListener('click', () => {{
-                runFullGroupDE(groupA, groupB);
+            if (groupDeRenderToken !== token) return;
+            const groupB = await buildGroupDECellSetAsync(deferredSourceSpec, deferredReferenceValue, {{
+                restrictSpec: deferredRestrictSpec,
+                restrictValue: deferredRestrictValue,
+                scope: deferredScope,
+                isCancelled: () => groupDeRenderToken !== token,
             }});
-        }}
-        const cancelBtn = container.querySelector('#group-de-cancel');
-        if (cancelBtn) {{
-            cancelBtn.addEventListener('click', () => {{
-                cancelGroupDEFullRun();
-                renderGroupDE();
+            if (groupDeRenderToken !== token) return;
+
+            const quickResult = await computeCellSetDEAsync(groupA, groupB, {{
+                topN: deferredTopN,
+                isCancelled: () => groupDeRenderToken !== token,
             }});
+            if (groupDeRenderToken !== token || !quickResult) return;
+
+            const exportState = getGroupDEExportState(groupA, groupB, quickResult);
+            const pairKey = getGroupDECacheKey(groupA, groupB);
+            const fullCached = pairKey ? groupDeFullCache.get(pairKey) : null;
+            const fullRun = (groupDeFullRun && groupDeFullRun.key === pairKey) ? groupDeFullRun : null;
+            const sidecarAvailable = !!DATA.gene_aux_url;
+            const renderCards = (result) => {{
+                const topN = Math.max(1, Number(deferredTopN) || ANNOTATION_DE_TOP_N);
+                return (result.results || []).slice(0, topN).map((entry) => {{
+                    return `
+                        <div class="comparison-card">
+                            <div class="comparison-card-title">
+                                ${{renderGeneTokenButton(entry.gene, {{
+                                    isActive: entry.gene === currentGene,
+                                    showMeta: false,
+                                    title: 'Load group DE gene into the viewer',
+                                }})}}
+                                ${{renderGeneGoogleSearchButton(entry.gene, {{
+                                    title: 'Search Google for this gene',
+                                }})}}
+                            </div>
+                            <div class="comparison-metric-grid">
+                                <div class="comparison-metric">
+                                    <span class="comparison-metric-label">log2FC A/B</span>
+                                    <span class="comparison-metric-value">${{formatScaleNumber(entry.log2fc)}}</span>
+                                </div>
+                                <div class="comparison-metric">
+                                    <span class="comparison-metric-label">Score</span>
+                                    <span class="comparison-metric-value">${{formatScaleNumber(entry.score)}}</span>
+                                </div>
+                                <div class="comparison-metric">
+                                    <span class="comparison-metric-label">% expr A</span>
+                                    <span class="comparison-metric-value">${{formatClusterDEPct(entry.pctA)}}</span>
+                                </div>
+                                <div class="comparison-metric">
+                                    <span class="comparison-metric-label">% expr B</span>
+                                    <span class="comparison-metric-value">${{formatClusterDEPct(entry.pctB)}}</span>
+                                </div>
+                                <div class="comparison-metric">
+                                    <span class="comparison-metric-label">Mean A</span>
+                                    <span class="comparison-metric-value">${{formatScaleNumber(entry.meanA)}}</span>
+                                </div>
+                                <div class="comparison-metric">
+                                    <span class="comparison-metric-label">Mean B</span>
+                                    <span class="comparison-metric-value">${{formatScaleNumber(entry.meanB)}}</span>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }}).join('');
+            }};
+            const sourceLabel = groupA ? escapeHtml(groupA.description) : '';
+            const referenceLabel = groupB ? escapeHtml(groupB.description) : '';
+            const sizeSummary = (groupA && groupB)
+                ? ` · ${{Number(groupA.nCells || 0).toLocaleString()}} vs ${{Number(groupB.nCells || 0).toLocaleString()}} cells`
+                : '';
+            setCompareSectionSummary(
+                'group-de-summary',
+                `${{summaryLabel}}: ${{String(deferredSourceValue ?? 'A')}} vs ${{String(deferredReferenceValue ?? 'B')}}${{restrictSummary}}${{sizeSummary}}`,
+            );
+            const topNLabel = Math.max(1, Number(deferredTopN) || ANNOTATION_DE_TOP_N).toLocaleString();
+            const quickSummaryHtml = (quickResult.available && quickResult.results.length)
+                ? `
+                    <div class="agg-group-meta">
+                        Group A: <strong>${{sourceLabel}}</strong> (${{Number(quickResult.nA || 0).toLocaleString()}} cells)
+                        vs Group B: <strong>${{referenceLabel}}</strong> (${{Number(quickResult.nB || 0).toLocaleString()}} cells).
+                    </div>
+                    <div class="agg-group-meta">
+                        ${{
+                            Number(quickResult.loadedGeneCount || 0) < Number(quickResult.totalGeneCount || 0)
+                                ? `Using ${{Number(quickResult.loadedGeneCount || 0).toLocaleString()}} of ${{Number(quickResult.totalGeneCount || 0).toLocaleString()}} genes currently loaded in the viewer.`
+                                : `Using ${{Number(quickResult.loadedGeneCount || 0).toLocaleString()}} loaded genes.`
+                        }}
+                        Showing top ${{topNLabel}} genes. Positive scores indicate enrichment in Group A.
+                    </div>
+                    ${{buildGroupVolcanoPlot(quickResult.results || [])}}
+                    <div class="comparison-stack">${{renderCards(quickResult)}}</div>
+                `
+                : '';
+            const cachedTimestamp = fullCached?.completedAt
+                ? new Date(fullCached.completedAt).toLocaleTimeString([], {{ hour: '2-digit', minute: '2-digit', second: '2-digit' }})
+                : '';
+            const cachedSummaryHtml = fullCached?.available
+                ? (fullCached.results || []).length
+                    ? `
+                        <div class="agg-group-meta">
+                            Group A: <strong>${{sourceLabel}}</strong> (${{Number(fullCached.nA || 0).toLocaleString()}} cells)
+                            vs Group B: <strong>${{referenceLabel}}</strong> (${{Number(fullCached.nB || 0).toLocaleString()}} cells).
+                        </div>
+                        <div class="agg-group-meta">
+                            Cached full sidecar DE${{cachedTimestamp ? ` from ${{cachedTimestamp}}` : ''}}
+                            across ${{Number(fullCached.totalGeneCount || 0).toLocaleString()}} genes.
+                            Showing top ${{topNLabel}} genes. Positive scores indicate enrichment in Group A.
+                        </div>
+                        ${{buildGroupVolcanoPlot(fullCached.results || [])}}
+                        <div class="comparison-stack">${{renderCards(fullCached)}}</div>
+                    `
+                    : `
+                        <div class="agg-group-meta">
+                            Group A: <strong>${{sourceLabel}}</strong> (${{Number(fullCached.nA || 0).toLocaleString()}} cells)
+                            vs Group B: <strong>${{referenceLabel}}</strong> (${{Number(fullCached.nB || 0).toLocaleString()}} cells).
+                        </div>
+                        <div class="agg-group-meta">
+                            Cached full sidecar DE${{cachedTimestamp ? ` from ${{cachedTimestamp}}` : ''}} found no enriched genes across ${{Number(fullCached.totalGeneCount || 0).toLocaleString()}} genes.
+                        </div>
+                    `
+                : '';
+            let resultHtml = '';
+            if (!groupA || !groupB) {{
+                resultHtml = '<div class="agg-group-meta">Choose two different groups to compare.</div>';
+            }} else if (fullRun?.running) {{
+                const totalShards = Number(fullRun.totalShards || 0);
+                const completedShards = Number(fullRun.completedShards || 0);
+                const totalGenes = Number(fullRun.totalGenes || 0);
+                const completedGenes = Number(fullRun.completedGenes || 0);
+                const progressMax = Math.max(1, totalGenes || totalShards || 1);
+                const progressValue = Math.min(progressMax, totalGenes ? completedGenes : completedShards);
+                const progressPct = progressMax > 0 ? Math.round((progressValue / progressMax) * 100) : 0;
+                resultHtml = `
+                    <div class="agg-group-meta">Scanning the full sidecar in the background. The viewer stays interactive while this runs.</div>
+                    <progress value="${{progressValue}}" max="${{progressMax}}" style="width:100%; height:12px;"></progress>
+                    <div class="agg-group-meta">
+                        ${{progressPct}}% complete
+                        · ${{completedGenes.toLocaleString()}} / ${{totalGenes.toLocaleString()}} genes
+                        · ${{completedShards.toLocaleString()}} / ${{totalShards.toLocaleString()}} shards
+                    </div>
+                    <div style="display:flex; justify-content:flex-end;">
+                        <button class="legend-btn" id="group-de-cancel" type="button">Cancel Full DE</button>
+                    </div>
+                `;
+            }} else if (fullRun?.error) {{
+                resultHtml = `
+                    <div class="agg-group-meta">Full sidecar DE failed: ${{escapeHtml(fullRun.error)}}</div>
+                    <div style="display:flex; justify-content:flex-end;">
+                        <button class="legend-btn" id="group-de-run-full" type="button">Retry Full DE</button>
+                    </div>
+                `;
+                if (cachedSummaryHtml) {{
+                    resultHtml += '<div class="agg-group-meta">Showing the previous cached full result:</div>';
+                    resultHtml += cachedSummaryHtml;
+                }} else if (quickSummaryHtml) {{
+                    resultHtml += '<div class="agg-group-meta">Quick DE preview from currently loaded genes:</div>';
+                    resultHtml += quickSummaryHtml;
+                }}
+            }} else if (fullCached?.available) {{
+                resultHtml = cachedSummaryHtml;
+                resultHtml += '<div style="display:flex; justify-content:flex-end;"><button class="legend-btn" id="group-de-refresh-full" type="button">Refresh Full DE</button></div>';
+            }} else if (!quickResult.available && quickResult.reason === 'empty_group') {{
+                resultHtml = '<div class="agg-group-meta">One of the selected groups has no cells after applying the current restriction.</div>';
+            }} else if (!quickResult.available && quickResult.reason === 'no_loaded_genes' && sidecarAvailable) {{
+                const totalGenes = Number(quickResult.totalGeneCount || 0).toLocaleString();
+                resultHtml = `
+                    <div class="agg-group-meta">
+                        No genes are currently loaded for quick group DE.
+                        ${{totalGenes !== '0' ? `This viewer knows about ${{totalGenes}} sidecar genes that can be scanned on demand.` : ''}}
+                    </div>
+                    <div style="display:flex; justify-content:flex-end;">
+                        <button class="legend-btn" id="group-de-run-full" type="button">Run Full DE</button>
+                    </div>
+                `;
+            }} else if (!quickResult.available && quickResult.reason === 'no_loaded_genes') {{
+                resultHtml = '<div class="agg-group-meta">No genes are currently loaded for group DE. Load genes in the Genes tab or click marker genes first.</div>';
+            }} else if (!quickResult.available && quickResult.reason === 'same_group') {{
+                resultHtml = '<div class="agg-group-meta">Choose two different groups to compare.</div>';
+            }} else if (!quickResult.available) {{
+                resultHtml = '<div class="agg-group-meta">Choose two different groups to compare.</div>';
+            }} else if (!quickResult.results.length) {{
+                if (sidecarAvailable && Number(quickResult.loadedGeneCount || 0) < Number(quickResult.totalGeneCount || 0)) {{
+                    resultHtml = `
+                        <div class="agg-group-meta">No enriched genes were found among the currently loaded genes.</div>
+                        <div style="display:flex; justify-content:flex-end;">
+                            <button class="legend-btn" id="group-de-run-full" type="button">Run Full DE</button>
+                        </div>
+                    `;
+                }} else {{
+                    resultHtml = '<div class="agg-group-meta">No enriched genes were found among the genes currently loaded in the viewer.</div>';
+                }}
+            }} else {{
+                resultHtml = quickSummaryHtml;
+                if (sidecarAvailable && Number(quickResult.loadedGeneCount || 0) < Number(quickResult.totalGeneCount || 0)) {{
+                    resultHtml += '<div style="display:flex; justify-content:flex-end;"><button class="legend-btn" id="group-de-run-full" type="button">Run Full DE</button></div>';
+                }}
+            }}
+
+            if (exportState) {{
+                resultHtml += `
+                    <div style="display:flex; justify-content:flex-end; gap:6px; margin-top:6px;">
+                        <button class="legend-btn" id="group-de-export-json" type="button">Export JSON</button>
+                        <button class="legend-btn" id="group-de-export-csv" type="button">Export CSV</button>
+                    </div>
+                `;
+            }}
+
+            resultsDiv.innerHTML = resultHtml;
+
+            const runFullBtn = resultsDiv.querySelector('#group-de-run-full');
+            if (runFullBtn && groupA && groupB) {{
+                runFullBtn.addEventListener('click', () => {{
+                    runFullGroupDE(groupA, groupB);
+                }});
+            }}
+            const refreshFullBtn = resultsDiv.querySelector('#group-de-refresh-full');
+            if (refreshFullBtn && groupA && groupB) {{
+                refreshFullBtn.addEventListener('click', () => {{
+                    runFullGroupDE(groupA, groupB);
+                }});
+            }}
+            const cancelBtn = resultsDiv.querySelector('#group-de-cancel');
+            if (cancelBtn) {{
+                cancelBtn.addEventListener('click', () => {{
+                    cancelGroupDEFullRun();
+                    renderGroupDE();
+                }});
+            }}
+            const exportJsonBtn = resultsDiv.querySelector('#group-de-export-json');
+            if (exportJsonBtn && groupA && groupB) {{
+                exportJsonBtn.addEventListener('click', () => {{
+                    exportGroupDEReport(groupA, groupB, exportState);
+                }});
+            }}
+            const exportCsvBtn = resultsDiv.querySelector('#group-de-export-csv');
+            if (exportCsvBtn && groupA && groupB) {{
+                exportCsvBtn.addEventListener('click', () => {{
+                    exportGroupDECsv(groupA, groupB, exportState);
+                }});
+            }}
+            bindVolcanoGroupInteraction(resultsDiv, renderGroupDE);
+            bindGeneActivateButtons(resultsDiv, renderGroupDE);
+            bindGeneGoogleSearchButtons(resultsDiv);
+        }})();
+        }} catch (err) {{
+            console.error('renderGroupDE crashed:', err);
+        }} finally {{
+            groupDeRenderDepth -= 1;
         }}
-        const exportJsonBtn = container.querySelector('#group-de-export-json');
-        if (exportJsonBtn && groupA && groupB) {{
-            exportJsonBtn.addEventListener('click', () => {{
-                exportGroupDEReport(groupA, groupB, exportState);
-            }});
-        }}
-        const exportCsvBtn = container.querySelector('#group-de-export-csv');
-        if (exportCsvBtn && groupA && groupB) {{
-            exportCsvBtn.addEventListener('click', () => {{
-                exportGroupDECsv(groupA, groupB, exportState);
-            }});
-        }}
-        bindVolcanoGroupInteraction(container, renderGroupDE);
-        bindGeneActivateButtons(container, renderGroupDE);
-        bindGeneGoogleSearchButtons(container);
     }}
 
     function renderCompareInsights() {{
         if (insightsCompareTab === 'regions') {{
             renderAnnotationComparison();
+        }} else if (insightsCompareTab === 'cell-de') {{
+            renderClusterDE();
         }} else {{
             renderGroupDE();
         }}

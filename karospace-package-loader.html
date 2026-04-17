@@ -619,10 +619,15 @@
         if (!archive || archive.mode !== 'lazy') return false;
         if (!file || !Number.isFinite(file.size) || file.size > EAGER_ARCHIVE_COMPAT_MAX_BYTES) return false;
         const message = error && error.message ? String(error.message) : '';
-        return (
+        if (
           message.includes('ZIP local file header missing') ||
           message.includes('ZIP entry extends beyond archive bounds')
-        );
+        ) return true;
+        // Stale File reference (Safari: "could not be read", Chrome: "not allowed")
+        // or DataView out-of-bounds from truncated blob reads
+        if (error instanceof DOMException || error instanceof RangeError) return true;
+        if (message.includes('could not be read') || message.includes('not allowed')) return true;
+        return false;
       }
 
       async function prepareArchiveSession(file, archive) {
