@@ -2280,6 +2280,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .samples-legend {{ display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 8px; }}
         .samples-legend-item {{ display: flex; align-items: center; gap: 3px; font-size: 10px; color: var(--text-color); }}
         .samples-legend-swatch {{ width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }}
+        .gene-distribution-summary {{ font-size: 11px; color: var(--muted-color); margin: 8px 0 6px; }}
+        .gene-distribution-table {{ width: 100%; border-collapse: collapse; font-size: 11px; }}
+        .gene-distribution-table th, .gene-distribution-table td {{ padding: 4px 6px; text-align: right; border-bottom: 1px solid var(--border-color); }}
+        .gene-distribution-table th:first-child, .gene-distribution-table td:first-child {{ text-align: left; }}
+        .gene-distribution-table th {{ cursor: pointer; user-select: none; color: var(--muted-color); font-weight: 600; }}
+        .gene-distribution-table th:hover {{ color: var(--text-color); }}
+        .gene-distribution-table tbody tr {{ cursor: pointer; }}
+        .gene-distribution-table tbody tr:hover {{ background: var(--hover-bg); }}
         .legend-title {{
             font-size: 13px;
             font-weight: 600;
@@ -2329,13 +2337,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             border-radius: 50%;
             flex-shrink: 0;
             border: 2px solid transparent;
-            cursor: pointer;
-            position: relative;
         }}
-        .legend-color.is-overridden {{ box-shadow: 0 0 0 1px var(--accent-strong); }}
-        .samples-legend-swatch {{ cursor: pointer; }}
-        .samples-legend-item {{ cursor: pointer; }}
-        .samples-legend-item.is-overridden .samples-legend-swatch {{ box-shadow: 0 0 0 1px var(--accent-strong); }}
         .legend-item.hidden .legend-color {{ border-color: var(--muted-color); background: transparent !important; }}
         .legend-item.selected {{
             border-color: var(--accent-strong);
@@ -4121,117 +4123,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     DATA.gene_encodings = DATA.gene_encodings || {{}};
     DATA.gene_value_encodings = DATA.gene_value_encodings || {{}};
     const PALETTE = {palette_json};
-    const CATEGORY_COLOR_OVERRIDE_STORAGE_KEY = 'karospace-category-color-overrides-v1:' + (location.pathname || '');
-    let CATEGORY_COLOR_OVERRIDES = {{}};
-    try {{
-        const rawOverrides = localStorage.getItem(CATEGORY_COLOR_OVERRIDE_STORAGE_KEY);
-        if (rawOverrides) {{
-            const parsed = JSON.parse(rawOverrides);
-            if (parsed && typeof parsed === 'object') CATEGORY_COLOR_OVERRIDES = parsed;
-        }}
-    }} catch (e) {{ CATEGORY_COLOR_OVERRIDES = {{}}; }}
-    function persistCategoryColorOverrides() {{
-        try {{ localStorage.setItem(CATEGORY_COLOR_OVERRIDE_STORAGE_KEY, JSON.stringify(CATEGORY_COLOR_OVERRIDES)); }} catch (e) {{}}
-    }}
-    function getCategoryColorOverride(colorCol, catName) {{
-        if (!colorCol || catName == null) return null;
-        const map = CATEGORY_COLOR_OVERRIDES[colorCol];
-        if (!map) return null;
-        const key = String(catName);
-        return Object.prototype.hasOwnProperty.call(map, key) ? map[key] : null;
-    }}
-    function setCategoryColorOverride(colorCol, catName, hex) {{
-        if (!colorCol || catName == null || !hex) return;
-        if (!CATEGORY_COLOR_OVERRIDES[colorCol]) CATEGORY_COLOR_OVERRIDES[colorCol] = {{}};
-        CATEGORY_COLOR_OVERRIDES[colorCol][String(catName)] = hex;
-        persistCategoryColorOverrides();
-    }}
-    function clearCategoryColorOverride(colorCol, catName) {{
-        if (!colorCol) return;
-        if (catName == null) {{
-            delete CATEGORY_COLOR_OVERRIDES[colorCol];
-        }} else if (CATEGORY_COLOR_OVERRIDES[colorCol]) {{
-            delete CATEGORY_COLOR_OVERRIDES[colorCol][String(catName)];
-            if (Object.keys(CATEGORY_COLOR_OVERRIDES[colorCol]).length === 0) delete CATEGORY_COLOR_OVERRIDES[colorCol];
-        }}
-        persistCategoryColorOverrides();
-    }}
-    function hasCategoryColorOverrides(colorCol) {{
-        const map = colorCol ? CATEGORY_COLOR_OVERRIDES[colorCol] : null;
-        return !!(map && Object.keys(map).length > 0);
-    }}
-    let _categoryColorInput = null;
-    function getCategoryColorInput() {{
-        if (_categoryColorInput) return _categoryColorInput;
-        const input = document.createElement('input');
-        input.type = 'color';
-        input.style.position = 'fixed';
-        input.style.left = '-9999px';
-        input.style.top = '-9999px';
-        input.style.opacity = '0';
-        input.style.pointerEvents = 'none';
-        document.body.appendChild(input);
-        _categoryColorInput = input;
-        return input;
-    }}
-    function rgbStringToHex(value) {{
-        if (!value) return '#000000';
-        const s = String(value).trim();
-        if (/^#[0-9a-fA-F]{{6}}$/.test(s)) return s.toLowerCase();
-        if (/^#[0-9a-fA-F]{{3}}$/.test(s)) {{
-            return '#' + s[1] + s[1] + s[2] + s[2] + s[3] + s[3];
-        }}
-        const m = s.match(/^rgb\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*\)$/i);
-        if (m) {{
-            const r = Math.max(0, Math.min(255, Math.round(parseFloat(m[1]))));
-            const g = Math.max(0, Math.min(255, Math.round(parseFloat(m[2]))));
-            const b = Math.max(0, Math.min(255, Math.round(parseFloat(m[3]))));
-            return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
-        }}
-        return '#000000';
-    }}
-    function rerenderAfterCategoryColorChange() {{
-        if (typeof renderLegend === 'function') {{
-            renderLegend('legend');
-            renderLegend('modal-legend');
-        }}
-        if (typeof renderAllSections === 'function') renderAllSections();
-        if (typeof modalSection !== 'undefined' && modalSection && typeof renderModalSection === 'function') {{
-            renderModalSection();
-        }}
-        if (typeof umapVisible !== 'undefined' && umapVisible && typeof renderUMAP === 'function') {{
-            renderUMAP();
-        }}
-        if (typeof renderSamplesInsights === 'function') renderSamplesInsights();
-        if (typeof renderActiveInsightsPanel === 'function') renderActiveInsightsPanel();
-    }}
-    let _categoryColorInputHandlers = null;
-    function openCategoryColorPicker(colorCol, catName) {{
-        if (!colorCol || catName == null) return;
-        const input = getCategoryColorInput();
-        if (_categoryColorInputHandlers) {{
-            input.removeEventListener('input', _categoryColorInputHandlers.onInput);
-            input.removeEventListener('change', _categoryColorInputHandlers.onChange);
-        }}
-        const cats = getCategoriesForColorColumn(colorCol) || [];
-        const idx = cats.indexOf(catName);
-        const currentHex = rgbStringToHex(getCategoryColor(idx, colorCol));
-        input.value = currentHex;
-        const onInput = () => {{
-            setCategoryColorOverride(colorCol, catName, input.value);
-            rerenderAfterCategoryColorChange();
-        }};
-        const onChange = () => {{
-            setCategoryColorOverride(colorCol, catName, input.value);
-            rerenderAfterCategoryColorChange();
-        }};
-        _categoryColorInputHandlers = {{ onInput, onChange }};
-        input.addEventListener('input', onInput);
-        input.addEventListener('change', onChange);
-        input.style.pointerEvents = 'auto';
-        input.click();
-        setTimeout(() => {{ input.style.pointerEvents = 'none'; }}, 100);
-    }}
     const METADATA_LABELS = {metadata_labels_json};
     const OUTLINE_BY = {outline_by_json};
     const VIEWER_INFO_HTML = {viewer_info_html_json};
@@ -4556,6 +4447,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let insightsGenesTab = 'markers';
     let insightsCompareTab = 'groups';
     let insightsNeighborsTab = 'enrichment';
+    let geneDistributionGroupBy = '';
+    let geneDistributionSortKey = 'mean';
+    let geneDistributionSortDir = 'desc';
     let geneAuxManifest = null;
     let geneAuxManifestPromise = null;
     const geneAuxShardCache = new Map();
@@ -5609,20 +5503,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return `rgb(${{rgb[0]}}, ${{rgb[1]}}, ${{rgb[2]}})`;
     }}
 
-    function getCategoryColor(idx, colorCol) {{
-        const col = colorCol != null ? colorCol : (typeof currentColor !== 'undefined' ? currentColor : null);
-        if (col) {{
-            const map = CATEGORY_COLOR_OVERRIDES[col];
-            if (map) {{
-                const cats = getCategoriesForColorColumn(col);
-                const name = cats ? cats[idx] : null;
-                if (name != null && Object.prototype.hasOwnProperty.call(map, String(name))) {{
-                    return map[String(name)];
-                }}
-            }}
-        }}
-        return PALETTE[idx % PALETTE.length];
-    }}
+    function getCategoryColor(idx) {{ return PALETTE[idx % PALETTE.length]; }}
 
     const cssColorRgbCache = new Map();
     function cssColorToRgb(color) {{
@@ -6979,6 +6860,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             recentGenes = loadRecentGenes();
             savedGenePanels = loadSavedGenePanels();
             renderGeneDiscoveryPanel();
+            renderActiveInsightsPanel();
             return true;
         }}
 
@@ -7019,6 +6901,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             geneDiscoveryActiveIndex = -1;
             renderGeneDiscoveryPanel();
             setGeneDiscoveryOpen(false);
+            renderActiveInsightsPanel();
             return true;
         }}
         renderGeneDiscoveryPanel();
@@ -7228,7 +7111,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const colLabel = colorCol ? formatMetadataLabel(colorCol) : 'Cell type';
         const categoryEntries = categories.map((cat, idx) => ({{
             label: cat,
-            color: getCategoryColor(idx, colorCol),
+            color: getCategoryColor(idx),
         }}));
         if (spec.category && spec.category !== BLEND_ALL_CATEGORIES) {{
             const catIdx = categories.indexOf(spec.category);
@@ -7239,7 +7122,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     label: `${{colLabel}}: ${{spec.category}}`,
                     detail: 'Selected category',
                     swatchClass: 'split-legend-swatch-dot',
-                    swatchBackground: getCategoryColor(catIdx, colorCol),
+                    swatchBackground: getCategoryColor(catIdx),
                     categories: [categoryEntries[catIdx]],
                 }};
             }}
@@ -7247,7 +7130,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         const gradientStops = categories
             .slice(0, 5)
-            .map((_, idx) => getCategoryColor(idx, colorCol));
+            .map((_, idx) => getCategoryColor(idx));
         return {{
             side,
             sideLabel,
@@ -7285,7 +7168,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             return {{
                 kind: 'cell-all',
                 values,
-                paletteRgb: categories.map((_, idx) => cssColorToRgb(getCategoryColor(idx, colorCol))),
+                paletteRgb: categories.map((_, idx) => cssColorToRgb(getCategoryColor(idx))),
             }};
         }}
         const catIdx = categories.indexOf(spec.category);
@@ -7294,7 +7177,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             kind: 'cell',
             values,
             catIdx,
-            activeRgb: cssColorToRgb(getCategoryColor(catIdx, colorCol)),
+            activeRgb: cssColorToRgb(getCategoryColor(catIdx)),
             inactiveRgb: [176, 176, 176],
         }};
     }}
@@ -10521,7 +10404,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function getCategoryColorForValue(colorCol, category) {{
         const categories = getCategoriesForColorColumn(colorCol).map(value => String(value));
         const idx = categories.indexOf(String(category));
-        return idx >= 0 ? getCategoryColor(idx, colorCol) : '#999';
+        return idx >= 0 ? getCategoryColor(idx) : '#999';
     }}
 
     function getNeighborPairSummary(colorCol, sourceCategory, targetCategory) {{
@@ -12662,17 +12545,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
         }} else {{
             const activeSpotlight = getLinkedSpotlightCategory(config);
-            const legendColorCol = currentColor;
-            const resetBtnHtml = hasCategoryColorOverrides(legendColorCol)
-                ? `<button class="legend-btn" id="${{targetId}}-reset-colors" title="Reset all category colors for this column">Reset colors</button>`
-                : '';
             let html = `
                 <div class="legend-title">${{colorLabel}}</div>
                 <div class="legend-actions">
                     <button class="legend-btn" id="${{targetId}}-show-all">Show All</button>
                     <button class="legend-btn" id="${{targetId}}-hide-all">Hide All</button>
                     <button class="legend-btn ${{linkedSpotlightEnabled ? 'active' : ''}}" id="${{targetId}}-spotlight-toggle" title="Hover or click a category to spotlight">Spotlight</button>
-                    ${{resetBtnHtml}}
                 </div>
             `;
             (config.categories || []).forEach((cat, idx) => {{
@@ -12680,10 +12558,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const selectedClass = modalSelectedCategory && cat === modalSelectedCategory ? 'selected' : '';
                 const spotlightClass = activeSpotlight && cat === activeSpotlight ? 'spotlight' : '';
                 const dimmedClass = activeSpotlight && cat !== activeSpotlight ? 'dimmed' : '';
-                const isOverridden = getCategoryColorOverride(legendColorCol, cat) != null;
-                const overrideClass = isOverridden ? ' is-overridden' : '';
-                html += `<div class="legend-item ${{hiddenClass}} ${{selectedClass}} ${{spotlightClass}} ${{dimmedClass}}" data-category="${{cat}}" data-cat-idx="${{idx}}">
-                    <div class="legend-color${{overrideClass}}" data-color-swatch="1" title="Click to change color \u00b7 shift-click to reset" style="background: ${{getCategoryColor(idx, legendColorCol)}}"></div>
+                html += `<div class="legend-item ${{hiddenClass}} ${{selectedClass}} ${{spotlightClass}} ${{dimmedClass}}" data-category="${{cat}}">
+                    <div class="legend-color" style="background: ${{getCategoryColor(idx)}}"></div>
                     <span>${{cat}}</span>
                 </div>`;
             }});
@@ -12723,28 +12599,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 neighborNetworkFocusCategories = null;
                 updateAllLegendSpotlightClasses();
                 rerenderForSpotlightChange();
-            }});
-
-            document.getElementById(`${{targetId}}-reset-colors`)?.addEventListener('click', (ev) => {{
-                ev.stopPropagation();
-                clearCategoryColorOverride(legendColorCol);
-                rerenderAfterCategoryColorChange();
-            }});
-
-            legend.querySelectorAll('[data-color-swatch]').forEach(swatch => {{
-                swatch.addEventListener('click', (ev) => {{
-                    ev.stopPropagation();
-                    const parent = swatch.closest('.legend-item');
-                    if (!parent) return;
-                    const cat = parent.dataset.category;
-                    if (!cat) return;
-                    if (ev.shiftKey) {{
-                        clearCategoryColorOverride(legendColorCol, cat);
-                        rerenderAfterCategoryColorChange();
-                        return;
-                    }}
-                    openCategoryColorPicker(legendColorCol, cat);
-                }});
             }});
 
             legend.querySelectorAll('.legend-item').forEach(item => {{
@@ -12799,7 +12653,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     const INSIGHTS_TOP_LEVEL_TABS = ['overview', 'genes', 'compare', 'neighbors'];
     const INSIGHTS_SUBTABS = {{
         overview: ['summary', 'sections'],
-        genes: ['markers', 'spatial'],
+        genes: ['markers', 'spatial', 'distribution'],
         compare: ['groups', 'regions', 'cell-de'],
         neighbors: ['enrichment', 'interactions'],
     }};
@@ -12866,6 +12720,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (insightsTopLevelTab === 'genes') {{
             if (insightsGenesTab === 'spatial') {{
                 renderSpatialVariableGenes();
+            }} else if (insightsGenesTab === 'distribution') {{
+                renderGeneDistributionInsights();
             }} else {{
                 renderMarkerGenes();
             }}
@@ -13375,6 +13231,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <div class="color-tabs insights-subtabs">
                         <button class="color-tab active" id="genes-tab-markers" data-insights-parent="genes" data-insights-subtab="markers" type="button">Markers</button>
                         <button class="color-tab" id="genes-tab-spatial" data-insights-parent="genes" data-insights-subtab="spatial" type="button">Spatial</button>
+                        <button class="color-tab" id="genes-tab-distribution" data-insights-parent="genes" data-insights-subtab="distribution" type="button">Distribution</button>
                     </div>
                     <div class="color-tab-content active" id="genes-tab-markers-content">
                         <input class="marker-search" id="marker-gene-search" type="text" placeholder="Search marker genes...">
@@ -13383,6 +13240,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <div class="color-tab-content" id="genes-tab-spatial-content">
                         <input class="marker-search" id="spatial-gene-search" type="text" placeholder="Search spatially variable genes...">
                         <div class="marker-genes" id="spatially-variable-genes"></div>
+                    </div>
+                    <div class="color-tab-content" id="genes-tab-distribution-content">
+                        <div class="gene-distribution-panel" id="gene-distribution-panel"></div>
                     </div>
                 </div>
                 <div class="color-tab-content" id="color-tab-compare-content">
@@ -13715,7 +13575,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return {{ categories, rows }};
     }}
 
-    function buildSamplesBarsSvg(rows, categories, colorCol) {{
+    function buildSamplesBarsSvg(rows, categories) {{
         const ROW_H = 18, STRIP_W = 8, LABEL_W = 88, BAR_W = 194, PL = 4, PT = 2, PR = 4;
         const W = PL + STRIP_W + 3 + LABEL_W + 3 + BAR_W + PR;
         const H = PT + rows.length * ROW_H + PT;
@@ -13739,7 +13599,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const frac = row.fractions[ci] || 0;
                 if (frac <= 0) return;
                 const w = Math.max(1, frac * BAR_W);
-                const col = getCategoryColor(ci, colorCol);
+                const col = getCategoryColor(ci);
                 const tip = escapeHtml(sid + ' \u00b7 ' + cat + ': ' + Math.round(frac * 100) + '% (' + row.counts[ci].toLocaleString() + ' cells)');
                 parts.push('<rect x="' + (barX + ox).toFixed(1) + '" y="' + (y+2) + '" width="' + w.toFixed(1) + '" height="' + (ROW_H-4) + '" fill="' + col + '" data-bar-cat="' + escapeHtml(cat) + '" data-tooltip="' + tip + '" style="cursor:pointer"/>');
                 ox += w;
@@ -13749,7 +13609,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return parts.join('');
     }}
 
-    function buildSamplesHeatmapSvg(rows, categories, colorCol) {{
+    function buildSamplesHeatmapSvg(rows, categories) {{
         const cats = categories.slice(0, 30);
         const CELL_W = 14, CELL_H = 14, LABEL_W = 88, HEADER_H = 54, PL = 4, PR = 4, PT = 2;
         const W = PL + LABEL_W + cats.length * CELL_W + PR;
@@ -13770,7 +13630,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             cats.forEach(function(cat, ci) {{
                 const frac = row.fractions[ci] || 0;
                 const alpha = Math.min(1, frac * 3.5).toFixed(3);
-                const col = getCategoryColor(ci, colorCol);
+                const col = getCategoryColor(ci);
                 const cellX = PL + LABEL_W + ci * CELL_W;
                 const tip = escapeHtml(sid + ' \u00b7 ' + cat + ': ' + Math.round(frac * 100) + '% (' + row.counts[ci].toLocaleString() + ' cells)');
                 parts.push('<rect x="' + cellX + '" y="' + y + '" width="' + CELL_W + '" height="' + CELL_H + '" fill="' + col + '" fill-opacity="' + alpha + '" stroke="var(--input-bg)" stroke-width="0.5" data-bar-cat="' + escapeHtml(cat) + '" data-tooltip="' + tip + '" style="cursor:pointer"/>');
@@ -13815,8 +13675,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         const categories = comp.categories;
         const svgHtml = samplesView === 'heatmap'
-            ? buildSamplesHeatmapSvg(rows, categories, samplesColorCol)
-            : buildSamplesBarsSvg(rows, categories, samplesColorCol);
+            ? buildSamplesHeatmapSvg(rows, categories)
+            : buildSamplesBarsSvg(rows, categories);
 
         const metaKeys = new Set();
         comp.rows.forEach(function(r) {{ Object.keys(r.metadata).forEach(function(k) {{ metaKeys.add(k); }}); }});
@@ -13833,12 +13693,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         const maxLeg = Math.min(categories.length, 16);
         const legendHtml = categories.slice(0, maxLeg).map(function(cat, idx) {{
-            const over = getCategoryColorOverride(samplesColorCol, cat) != null ? ' is-overridden' : '';
-            return '<span class="samples-legend-item' + over + '" data-samples-legend-cat="' + escapeHtml(cat) + '" data-samples-legend-idx="' + idx + '" title="Click to change color \u00b7 shift-click to reset"><span class="samples-legend-swatch" style="background:' + getCategoryColor(idx, samplesColorCol) + '"></span>' + escapeHtml(cat) + '</span>';
+            return '<span class="samples-legend-item"><span class="samples-legend-swatch" style="background:' + getCategoryColor(idx) + '"></span>' + escapeHtml(cat) + '</span>';
         }}).join('') + (categories.length > maxLeg ? '<span class="samples-legend-item agg-group-meta">+' + (categories.length - maxLeg) + ' more</span>' : '');
-        const samplesResetBtn = hasCategoryColorOverrides(samplesColorCol)
-            ? '<button class="legend-btn" id="samples-reset-colors" type="button" title="Reset category colors for this column" style="flex:0 0 auto;">Reset colors</button>'
-            : '';
 
         container.innerHTML = `
             <div class="samples-controls">
@@ -13855,7 +13711,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 <div class="samples-view-toggle">
                     <button class="legend-btn ${{samplesView === 'bars' ? 'active' : ''}}" data-samples-view="bars" type="button">Bars</button>
                     <button class="legend-btn ${{samplesView === 'heatmap' ? 'active' : ''}}" data-samples-view="heatmap" type="button">Heatmap</button>
-                    ${{samplesResetBtn}}
                 </div>
             </div>
             <div class="samples-chart-container">
@@ -13879,25 +13734,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             btn.addEventListener('click', function() {{
                 samplesView = btn.getAttribute('data-samples-view') || 'bars';
                 renderSamplesInsights();
-            }});
-        }});
-
-        container.querySelector('#samples-reset-colors')?.addEventListener('click', function(ev) {{
-            ev.stopPropagation();
-            clearCategoryColorOverride(samplesColorCol);
-            rerenderAfterCategoryColorChange();
-        }});
-
-        container.querySelectorAll('.samples-legend-item[data-samples-legend-cat]').forEach(function(el) {{
-            el.addEventListener('click', function(ev) {{
-                const cat = el.getAttribute('data-samples-legend-cat');
-                if (!cat) return;
-                if (ev.shiftKey) {{
-                    clearCategoryColorOverride(samplesColorCol, cat);
-                    rerenderAfterCategoryColorChange();
-                    return;
-                }}
-                openCategoryColorPicker(samplesColorCol, cat);
             }});
         }});
 
@@ -14173,6 +14009,196 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 renderMarkerGenes();
             }});
         }});
+    }}
+
+    function computeGeneDistributionStats(gene, groupCol) {{
+        if (!gene || !groupCol) return null;
+        const cats = getCategoriesForColorColumn(groupCol);
+        if (!cats.length) return null;
+        const perGroup = cats.map(() => []);
+        (DATA.sections || []).forEach(section => {{
+            const vals = getSectionGeneValues(section, gene);
+            const colVals = getSectionColorValues(section, groupCol);
+            if (!vals || !colVals) return;
+            const n = Math.min(vals.length, colVals.length);
+            for (let i = 0; i < n; i++) {{
+                const v = vals[i];
+                if (isMissingDisplayValue(v)) continue;
+                const catIdx = Math.round(colVals[i]);
+                if (catIdx >= 0 && catIdx < cats.length) {{
+                    perGroup[catIdx].push(v);
+                }}
+            }}
+        }});
+        return cats.map((cat, idx) => {{
+            const arr = perGroup[idx];
+            const n = arr.length;
+            if (n === 0) return {{ cat, n: 0, mean: null, median: null, pctExpr: null, max: null }};
+            let sum = 0, nnz = 0, max = -Infinity;
+            for (let i = 0; i < n; i++) {{
+                const v = arr[i];
+                sum += v;
+                if (v > 0) nnz++;
+                if (v > max) max = v;
+            }}
+            const mean = sum / n;
+            const sorted = arr.slice().sort((a, b) => a - b);
+            const mid = Math.floor(n / 2);
+            const median = n % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+            return {{ cat, n, mean, median, pctExpr: (nnz / n) * 100, max }};
+        }});
+    }}
+
+    function wireGeneDistributionInputs(container) {{
+        const geneInput = container.querySelector('#gene-distribution-input');
+        if (geneInput) {{
+            const activate = () => {{
+                const val = geneInput.value.trim();
+                if (val !== (currentGene || '')) {{
+                    activateViewerGene(val);
+                }}
+            }};
+            geneInput.addEventListener('keydown', (e) => {{
+                if (e.key === 'Enter') {{ e.preventDefault(); activate(); }}
+            }});
+            geneInput.addEventListener('change', activate);
+        }}
+        const groupSel = container.querySelector('#gene-distribution-groupby');
+        if (groupSel) {{
+            groupSel.addEventListener('change', () => {{
+                geneDistributionGroupBy = groupSel.value;
+                renderGeneDistributionInsights();
+            }});
+        }}
+        container.querySelectorAll('[data-gene-dist-sort]').forEach(th => {{
+            th.addEventListener('click', () => {{
+                const key = th.getAttribute('data-gene-dist-sort');
+                if (!key) return;
+                if (geneDistributionSortKey === key) {{
+                    geneDistributionSortDir = geneDistributionSortDir === 'asc' ? 'desc' : 'asc';
+                }} else {{
+                    geneDistributionSortKey = key;
+                    geneDistributionSortDir = key === 'cat' ? 'asc' : 'desc';
+                }}
+                renderGeneDistributionInsights();
+            }});
+        }});
+        container.querySelectorAll('[data-gene-dist-cat]').forEach(tr => {{
+            tr.addEventListener('click', () => {{
+                const cat = tr.getAttribute('data-gene-dist-cat');
+                if (!cat) return;
+                if (currentColor !== geneDistributionGroupBy) {{
+                    setViewerColorColumn(geneDistributionGroupBy);
+                }}
+                linkedSpotlightEnabled = true;
+                spotlightPinnedCategory = spotlightPinnedCategory === cat ? null : cat;
+                spotlightHoverCategory = null;
+                updateAllLegendSpotlightClasses();
+                rerenderForSpotlightChange();
+            }});
+        }});
+    }}
+
+    function renderGeneDistributionInsights() {{
+        const container = document.getElementById('gene-distribution-panel');
+        if (!container) return;
+
+        const availableCols = (DATA.available_colors || []).filter(c => {{
+            const meta = DATA.colors_meta?.[c];
+            return meta && !meta.is_continuous && (meta.categories || []).length > 0;
+        }});
+        if (!availableCols.length) {{
+            container.innerHTML = '<div class="agg-group-meta">No categorical metadata columns available.</div>';
+            return;
+        }}
+
+        if (!geneDistributionGroupBy || !availableCols.includes(geneDistributionGroupBy)) {{
+            const curMeta = DATA.colors_meta?.[currentColor];
+            geneDistributionGroupBy = (curMeta && !curMeta.is_continuous) ? currentColor : availableCols[0];
+        }}
+
+        const colorOptions = availableCols.map(c => {{
+            const sel = c === geneDistributionGroupBy ? ' selected' : '';
+            return '<option value="' + escapeHtml(c) + '"' + sel + '>' + escapeHtml(formatMetadataLabel(c)) + '</option>';
+        }}).join('');
+
+        const geneVal = currentGene || '';
+        const controlsHtml = `
+            <div class="cluster-de-controls">
+                <div>
+                    <label>Gene</label>
+                    <input type="text" id="gene-distribution-input" list="gene-list" placeholder="e.g. Dbp" value="${{escapeHtml(geneVal)}}" autocomplete="off" spellcheck="false">
+                </div>
+                <div>
+                    <label>Group by</label>
+                    <select id="gene-distribution-groupby">${{colorOptions}}</select>
+                </div>
+            </div>
+        `;
+
+        if (!currentGene) {{
+            container.innerHTML = controlsHtml + '<div class="agg-group-meta">Type a gene name and press Enter to see per-group expression stats. The viewer will recolor by that gene.</div>';
+            wireGeneDistributionInputs(container);
+            return;
+        }}
+
+        const stats = computeGeneDistributionStats(currentGene, geneDistributionGroupBy);
+        if (!stats || !stats.length) {{
+            container.innerHTML = controlsHtml + '<div class="agg-group-meta">No data available for this gene \u00d7 group combination.</div>';
+            wireGeneDistributionInputs(container);
+            return;
+        }}
+
+        const sortDir = geneDistributionSortDir === 'asc' ? 1 : -1;
+        const sortKey = geneDistributionSortKey;
+        const sorted = stats.slice().sort((a, b) => {{
+            if (sortKey === 'cat') return String(a.cat).localeCompare(String(b.cat)) * sortDir;
+            const va = a[sortKey];
+            const vb = b[sortKey];
+            const aMissing = (va == null);
+            const bMissing = (vb == null);
+            if (aMissing && bMissing) return 0;
+            if (aMissing) return 1;
+            if (bMissing) return -1;
+            if (va === vb) return 0;
+            return (va < vb ? -1 : 1) * sortDir;
+        }});
+
+        const fmtN = n => n == null ? '\u2014' : Number(n).toLocaleString();
+        const fmtF = v => v == null ? '\u2014' : Number(v).toFixed(3);
+        const fmtP = v => v == null ? '\u2014' : Number(v).toFixed(1) + '%';
+        const arrow = k => geneDistributionSortKey === k ? (geneDistributionSortDir === 'asc' ? ' \u2191' : ' \u2193') : '';
+
+        const rows = sorted.map(s => `
+            <tr data-gene-dist-cat="${{escapeHtml(String(s.cat))}}" title="Click to spotlight \\"${{escapeHtml(String(s.cat))}}\\" in the viewer">
+                <td><span class="agg-dot" style="background:${{getCategoryColorForValue(geneDistributionGroupBy, s.cat)}}"></span>${{escapeHtml(String(s.cat))}}</td>
+                <td>${{fmtN(s.n)}}</td>
+                <td>${{fmtF(s.mean)}}</td>
+                <td>${{fmtF(s.median)}}</td>
+                <td>${{fmtP(s.pctExpr)}}</td>
+                <td>${{fmtF(s.max)}}</td>
+            </tr>
+        `).join('');
+
+        const tableHtml = `
+            <div class="gene-distribution-summary">Expression of <strong>${{escapeHtml(currentGene)}}</strong> across ${{escapeHtml(formatMetadataLabel(geneDistributionGroupBy))}} (${{stats.length}} groups)</div>
+            <table class="gene-distribution-table">
+                <thead>
+                    <tr>
+                        <th data-gene-dist-sort="cat">Group${{arrow('cat')}}</th>
+                        <th data-gene-dist-sort="n">n${{arrow('n')}}</th>
+                        <th data-gene-dist-sort="mean">Mean${{arrow('mean')}}</th>
+                        <th data-gene-dist-sort="median">Median${{arrow('median')}}</th>
+                        <th data-gene-dist-sort="pctExpr">% Expr${{arrow('pctExpr')}}</th>
+                        <th data-gene-dist-sort="max">Max${{arrow('max')}}</th>
+                    </tr>
+                </thead>
+                <tbody>${{rows}}</tbody>
+            </table>
+        `;
+
+        container.innerHTML = controlsHtml + tableHtml;
+        wireGeneDistributionInputs(container);
     }}
 
     function renderSpatialVariableGenes() {{
