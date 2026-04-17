@@ -64,7 +64,7 @@ dataset = load_spatial_data(
     groupby="sample_id",
     spatial_key="spatial",
     metadata_columns=[
-        "course",
+        "stage",
         "condition",
         "region",
         "day_of_sacrifice",

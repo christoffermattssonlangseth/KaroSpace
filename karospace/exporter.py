@@ -3655,6 +3655,48 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             color: rgba(245, 219, 231, 0.7);
             font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
         }}
+        .export-progress {{
+            position: fixed;
+            top: 14px;
+            right: 14px;
+            width: 280px;
+            padding: 12px 14px;
+            background: var(--panel-bg, #fff);
+            color: var(--text-color, #111);
+            border: 1px solid var(--border-color, #ccc);
+            border-radius: 8px;
+            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+            z-index: 2000;
+            font-size: 12px;
+            display: none;
+        }}
+        .export-progress.is-visible {{ display: block; }}
+        .export-progress-title {{ font-weight: 600; margin-bottom: 4px; }}
+        .export-progress-step {{ color: var(--muted-color, #666); margin-bottom: 8px; font-size: 11px; }}
+        .export-progress-bar-wrap {{ width: 100%; height: 6px; background: var(--input-bg, #eee); border-radius: 3px; overflow: hidden; }}
+        .export-progress-bar-fill {{ height: 100%; width: 0%; background: var(--accent-strong, #870052); transition: width 0.15s ease-out; }}
+        .export-progress-bar-fill.indeterminate {{
+            width: 30%;
+            background: linear-gradient(90deg, transparent, var(--accent-strong, #870052), transparent);
+            animation: export-indeterminate 1.4s infinite linear;
+        }}
+        @keyframes export-indeterminate {{
+            0% {{ transform: translateX(-100%); }}
+            100% {{ transform: translateX(333%); }}
+        }}
+        .export-progress-counter {{ margin-top: 6px; font-size: 10px; color: var(--muted-color, #666); }}
+        .export-progress-actions {{ display: flex; justify-content: flex-end; gap: 6px; margin-top: 10px; }}
+        .export-progress-cancel {{
+            padding: 3px 10px;
+            font-size: 11px;
+            border: 1px solid var(--border-color, #ccc);
+            border-radius: 4px;
+            background: var(--input-bg, #eee);
+            color: var(--text-color, #111);
+            cursor: pointer;
+        }}
+        .export-progress-cancel:hover {{ background: var(--hover-bg, #ddd); }}
+        .export-progress-cancel:disabled {{ opacity: 0.5; cursor: default; }}
     </style>
 </head>
 <body>
@@ -3729,6 +3771,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <span class="scale-sep">to</span>
                     <input type="number" id="expr-vmax" step="0.001" placeholder="max">
                     <button class="legend-btn" id="expr-auto" type="button">Auto (1-99%)</button>
+                    <select id="expr-colormap" title="Colormap used for gene expression and continuous metadata" style="font-size:11px; padding:3px 4px; border:1px solid var(--border-color); border-radius:4px; background:var(--input-bg); color:var(--text-color);"></select>
                 </div>
                 <div class="scale-hint" id="expr-scale-hint">Auto scale: 1-99 percentile.</div>
             </div>
@@ -3781,6 +3824,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 Load session
             </button>
             <input type="file" id="load-session-input" accept="application/json,.json" style="display:none">
+            <button class="export-btn" id="export-data-btn" title="Export data as a .tar.gz bundle (obs.csv, var.csv, X.csv, spatial.csv, umap.csv + README) for rebuilding an AnnData object in Python">
+                Export data
+            </button>
             <button class="theme-toggle" id="theme-toggle" title="Toggle dark/light mode" data-help="Switch between light and dark themes.">
                 <span id="theme-icon">{theme_icon}</span>
             </button>
@@ -4043,6 +4089,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     <div class="cell-tooltip" id="cell-tooltip"></div>
     <div class="help-tooltip" id="help-tooltip" aria-hidden="true"></div>
+    <div class="export-progress" id="export-progress" role="status" aria-live="polite">
+        <div class="export-progress-title" id="export-progress-title">Exporting data</div>
+        <div class="export-progress-step" id="export-progress-step">Preparing...</div>
+        <div class="export-progress-bar-wrap"><div class="export-progress-bar-fill indeterminate" id="export-progress-bar"></div></div>
+        <div class="export-progress-counter" id="export-progress-counter"></div>
+        <div class="export-progress-actions">
+            <button type="button" class="export-progress-cancel" id="export-progress-cancel">Cancel</button>
+        </div>
+    </div>
 
     <script>
     (function() {{
@@ -4457,6 +4512,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let geneDistributionGroupBy = '';
     let geneDistributionSortKey = 'mean';
     let geneDistributionSortDir = 'desc';
+    let geneDistributionRestrictBy = '';
+    let geneDistributionRestrictValue = '';
     let geneAuxManifest = null;
     let geneAuxManifestPromise = null;
     const geneAuxShardCache = new Map();
@@ -5489,25 +5546,136 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     // Color utilities
-    function magmaRgb(t) {{
-        const colors = [
-            [0.001, 0.000, 0.015], [0.092, 0.047, 0.256], [0.235, 0.073, 0.386],
-            [0.388, 0.100, 0.451], [0.531, 0.136, 0.430], [0.651, 0.188, 0.392],
-            [0.741, 0.259, 0.331], [0.813, 0.354, 0.255], [0.870, 0.477, 0.171],
-            [0.918, 0.624, 0.110], [0.987, 0.855, 0.185]
-        ];
-        const idx = Math.min(Math.floor(t * 10), 9);
-        const frac = (t * 10) - idx;
-        const c1 = colors[idx], c2 = colors[idx + 1];
+    const EXPRESSION_COLORMAPS = {{
+        magma: {{
+            label: 'Magma',
+            stops: [
+                [0.001, 0.000, 0.015], [0.092, 0.047, 0.256], [0.235, 0.073, 0.386],
+                [0.388, 0.100, 0.451], [0.531, 0.136, 0.430], [0.651, 0.188, 0.392],
+                [0.741, 0.259, 0.331], [0.813, 0.354, 0.255], [0.870, 0.477, 0.171],
+                [0.918, 0.624, 0.110], [0.987, 0.855, 0.185],
+            ],
+        }},
+        viridis: {{
+            label: 'Viridis',
+            stops: [
+                [0.267, 0.005, 0.329], [0.283, 0.141, 0.458], [0.254, 0.265, 0.530],
+                [0.207, 0.372, 0.553], [0.164, 0.471, 0.558], [0.128, 0.567, 0.551],
+                [0.135, 0.659, 0.518], [0.267, 0.749, 0.441], [0.478, 0.821, 0.318],
+                [0.741, 0.873, 0.150], [0.993, 0.906, 0.144],
+            ],
+        }},
+        plasma: {{
+            label: 'Plasma',
+            stops: [
+                [0.050, 0.030, 0.528], [0.244, 0.014, 0.608], [0.417, 0.001, 0.658],
+                [0.577, 0.021, 0.632], [0.710, 0.169, 0.538], [0.817, 0.302, 0.441],
+                [0.898, 0.437, 0.347], [0.952, 0.583, 0.253], [0.979, 0.744, 0.157],
+                [0.989, 0.912, 0.142], [0.940, 0.975, 0.131],
+            ],
+        }},
+        inferno: {{
+            label: 'Inferno',
+            stops: [
+                [0.001, 0.000, 0.014], [0.088, 0.043, 0.243], [0.233, 0.059, 0.437],
+                [0.385, 0.087, 0.433], [0.524, 0.147, 0.401], [0.655, 0.212, 0.357],
+                [0.779, 0.294, 0.298], [0.883, 0.391, 0.221], [0.963, 0.519, 0.126],
+                [0.988, 0.687, 0.072], [0.988, 0.998, 0.645],
+            ],
+        }},
+        turbo: {{
+            label: 'Turbo',
+            stops: [
+                [0.190, 0.070, 0.230], [0.230, 0.300, 0.750], [0.220, 0.600, 0.990],
+                [0.100, 0.850, 0.780], [0.360, 0.970, 0.460], [0.720, 0.960, 0.160],
+                [0.970, 0.800, 0.190], [0.990, 0.550, 0.240], [0.900, 0.270, 0.140],
+                [0.700, 0.020, 0.150], [0.480, 0.010, 0.110],
+            ],
+        }},
+        cividis: {{
+            label: 'Cividis',
+            stops: [
+                [0.000, 0.136, 0.303], [0.000, 0.207, 0.395], [0.093, 0.279, 0.449],
+                [0.193, 0.350, 0.454], [0.277, 0.420, 0.459], [0.357, 0.490, 0.472],
+                [0.444, 0.561, 0.479], [0.547, 0.629, 0.470], [0.664, 0.693, 0.437],
+                [0.790, 0.758, 0.380], [0.995, 0.909, 0.218],
+            ],
+        }},
+        blues: {{
+            label: 'Blues (light mode)',
+            stops: [
+                [0.969, 0.984, 1.000], [0.870, 0.922, 0.969], [0.776, 0.859, 0.937],
+                [0.620, 0.793, 0.882], [0.420, 0.682, 0.839], [0.259, 0.573, 0.776],
+                [0.129, 0.443, 0.710], [0.031, 0.318, 0.612], [0.031, 0.271, 0.529],
+                [0.008, 0.191, 0.404], [0.008, 0.133, 0.286],
+            ],
+        }},
+        reds: {{
+            label: 'Reds (light mode)',
+            stops: [
+                [1.000, 0.961, 0.941], [0.996, 0.878, 0.824], [0.988, 0.733, 0.631],
+                [0.988, 0.573, 0.447], [0.984, 0.416, 0.290], [0.937, 0.231, 0.173],
+                [0.796, 0.094, 0.114], [0.647, 0.059, 0.082], [0.529, 0.059, 0.082],
+                [0.404, 0.000, 0.051], [0.263, 0.000, 0.000],
+            ],
+        }},
+        greys: {{
+            label: 'Greys (light mode)',
+            stops: [
+                [1.000, 1.000, 1.000], [0.941, 0.941, 0.941], [0.851, 0.851, 0.851],
+                [0.741, 0.741, 0.741], [0.588, 0.588, 0.588], [0.451, 0.451, 0.451],
+                [0.321, 0.321, 0.321], [0.224, 0.224, 0.224], [0.145, 0.145, 0.145],
+                [0.078, 0.078, 0.078], [0.000, 0.000, 0.000],
+            ],
+        }},
+    }};
+
+    const EXPRESSION_COLORMAP_STORAGE_KEY = 'karospace-expression-colormap-v1:' + (location.pathname || '');
+    let expressionColormapName = 'magma';
+    try {{
+        const stored = localStorage.getItem(EXPRESSION_COLORMAP_STORAGE_KEY);
+        if (stored && EXPRESSION_COLORMAPS[stored]) expressionColormapName = stored;
+    }} catch (_) {{}}
+
+    function sampleColormapStops(stops, t) {{
+        const n = stops.length - 1;
+        const tt = Math.max(0, Math.min(1, t));
+        const idx = Math.min(Math.floor(tt * n), n - 1);
+        const frac = (tt * n) - idx;
+        const c1 = stops[idx], c2 = stops[idx + 1];
         const r = c1[0] + frac * (c2[0] - c1[0]);
         const g = c1[1] + frac * (c2[1] - c1[1]);
         const b = c1[2] + frac * (c2[2] - c1[2]);
         return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
     }}
 
-    function magma(t) {{
-        const rgb = magmaRgb(t);
+    function expressionRgb(t) {{
+        const cmap = EXPRESSION_COLORMAPS[expressionColormapName] || EXPRESSION_COLORMAPS.magma;
+        return sampleColormapStops(cmap.stops, t);
+    }}
+
+    function expressionColor(t) {{
+        const rgb = expressionRgb(t);
         return `rgb(${{rgb[0]}}, ${{rgb[1]}}, ${{rgb[2]}})`;
+    }}
+
+    // Backward-compatible aliases; use expressionColor/expressionRgb in new code.
+    const magmaRgb = expressionRgb;
+    const magma = expressionColor;
+
+    function setExpressionColormap(name) {{
+        if (!EXPRESSION_COLORMAPS[name]) return false;
+        if (name === expressionColormapName) return false;
+        expressionColormapName = name;
+        try {{ localStorage.setItem(EXPRESSION_COLORMAP_STORAGE_KEY, name); }} catch (_) {{}}
+        invalidateGeneDensityCaches();
+        renderLegend('legend');
+        renderLegend('modal-legend');
+        renderAllSections();
+        if (typeof modalSection !== 'undefined' && modalSection) renderModalSection();
+        if (typeof umapVisible !== 'undefined' && umapVisible) renderUMAP();
+        renderActiveInsightsPanel();
+        return true;
     }}
 
     function getCategoryColor(idx) {{ return PALETTE[idx % PALETTE.length]; }}
@@ -10988,6 +11156,390 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         reader.readAsText(file);
     }}
 
+    let exportCancelRequested = false;
+
+    function showExportProgress(title) {{
+        const panel = document.getElementById('export-progress');
+        if (!panel) return;
+        exportCancelRequested = false;
+        panel.classList.add('is-visible');
+        const titleEl = document.getElementById('export-progress-title');
+        if (titleEl) titleEl.textContent = title || 'Exporting data';
+        const stepEl = document.getElementById('export-progress-step');
+        if (stepEl) stepEl.textContent = 'Preparing...';
+        const bar = document.getElementById('export-progress-bar');
+        if (bar) {{
+            bar.classList.add('indeterminate');
+            bar.style.width = '';
+        }}
+        const counterEl = document.getElementById('export-progress-counter');
+        if (counterEl) counterEl.textContent = '';
+        const cancelBtn = document.getElementById('export-progress-cancel');
+        if (cancelBtn) {{
+            cancelBtn.disabled = false;
+            cancelBtn.textContent = 'Cancel';
+        }}
+    }}
+
+    function updateExportProgress(step, current, total) {{
+        const stepEl = document.getElementById('export-progress-step');
+        if (stepEl && step != null) stepEl.textContent = step;
+        const bar = document.getElementById('export-progress-bar');
+        const counterEl = document.getElementById('export-progress-counter');
+        if (Number.isFinite(current) && Number.isFinite(total) && total > 0) {{
+            if (bar) {{
+                bar.classList.remove('indeterminate');
+                const pct = Math.max(0, Math.min(100, (current / total) * 100));
+                bar.style.width = pct.toFixed(1) + '%';
+            }}
+            if (counterEl) counterEl.textContent = `${{current.toLocaleString()}} / ${{total.toLocaleString()}}`;
+        }} else {{
+            if (bar) {{
+                bar.classList.add('indeterminate');
+                bar.style.width = '';
+            }}
+            if (counterEl) counterEl.textContent = '';
+        }}
+    }}
+
+    function finalizeExportProgress(message) {{
+        const stepEl = document.getElementById('export-progress-step');
+        if (stepEl && message) stepEl.textContent = message;
+        const bar = document.getElementById('export-progress-bar');
+        if (bar) {{
+            bar.classList.remove('indeterminate');
+            bar.style.width = '100%';
+        }}
+        const cancelBtn = document.getElementById('export-progress-cancel');
+        if (cancelBtn) {{
+            cancelBtn.textContent = 'Close';
+            cancelBtn.disabled = false;
+        }}
+        setTimeout(() => {{
+            const panel = document.getElementById('export-progress');
+            if (panel) panel.classList.remove('is-visible');
+        }}, 2200);
+    }}
+
+    function hideExportProgress() {{
+        const panel = document.getElementById('export-progress');
+        if (panel) panel.classList.remove('is-visible');
+    }}
+
+    function yieldToUI() {{
+        return new Promise(resolve => setTimeout(resolve, 0));
+    }}
+
+    function csvEscape(value) {{
+        if (value == null) return '';
+        const str = String(value);
+        if (str.indexOf(',') === -1 && str.indexOf('"') === -1 && str.indexOf('\\n') === -1 && str.indexOf('\\r') === -1) return str;
+        return '"' + str.replace(/"/g, '""') + '"';
+    }}
+
+    function csvFormatNumber(v) {{
+        if (v == null || Number.isNaN(v)) return '';
+        if (!Number.isFinite(v)) return '';
+        return Number(v).toString();
+    }}
+
+    function buildTarBlock(name, contentBytes) {{
+        const header = new Uint8Array(512);
+        const nameBytes = new TextEncoder().encode(name);
+        if (nameBytes.length > 100) throw new Error('Tar filename too long: ' + name);
+        header.set(nameBytes, 0);
+        const write = (value, offset, length) => {{
+            const s = value.padStart(length - 1, '0') + '\0';
+            header.set(new TextEncoder().encode(s), offset);
+        }};
+        write('0000644', 100, 8);
+        write('0000000', 108, 8);
+        write('0000000', 116, 8);
+        write(contentBytes.length.toString(8), 124, 12);
+        write(Math.floor(Date.now() / 1000).toString(8), 136, 12);
+        for (let i = 148; i < 156; i++) header[i] = 0x20;
+        header[156] = 0x30;
+        header.set(new TextEncoder().encode('ustar\0'), 257);
+        header.set(new TextEncoder().encode('00'), 263);
+        let chksum = 0;
+        for (let i = 0; i < 512; i++) chksum += header[i];
+        write(chksum.toString(8), 148, 8);
+        header[155] = 0x20;
+        const padLen = (512 - (contentBytes.length % 512)) % 512;
+        const block = new Uint8Array(512 + contentBytes.length + padLen);
+        block.set(header, 0);
+        block.set(contentBytes, 512);
+        return block;
+    }}
+
+    function buildTarArchive(files) {{
+        const enc = new TextEncoder();
+        const blocks = [];
+        files.forEach(f => {{
+            const bytes = typeof f.content === 'string' ? enc.encode(f.content) : f.content;
+            blocks.push(buildTarBlock(f.name, bytes));
+        }});
+        blocks.push(new Uint8Array(1024));
+        let total = 0;
+        blocks.forEach(b => {{ total += b.length; }});
+        const out = new Uint8Array(total);
+        let offset = 0;
+        blocks.forEach(b => {{ out.set(b, offset); offset += b.length; }});
+        return out;
+    }}
+
+    async function gzipBytes(bytes) {{
+        if (typeof CompressionStream === 'undefined') return null;
+        const stream = new Response(new Blob([bytes])).body.pipeThrough(new CompressionStream('gzip'));
+        const buffer = await new Response(stream).arrayBuffer();
+        return new Uint8Array(buffer);
+    }}
+
+    function hydrateAllSectionArrays() {{
+        (DATA.sections || []).forEach((section) => {{
+            try {{ ensureSectionXY?.(section); }} catch (_) {{}}
+            try {{ ensureSectionObsIndices?.(section); }} catch (_) {{}}
+            try {{ ensureSectionUMAP?.(section); }} catch (_) {{}}
+        }});
+    }}
+
+    function collectLoadedGenes() {{
+        const meta = DATA.genes_meta || {{}};
+        return (DATA.available_genes || []).filter(g => meta[g]);
+    }}
+
+    async function exportDataBundle() {{
+        const sections = DATA.sections || [];
+        if (!sections.length) {{
+            alert('No sections available to export.');
+            return;
+        }}
+
+        const allGenes = DATA.available_genes || [];
+        let genesToExport = collectLoadedGenes();
+        if (allGenes.length > 0) {{
+            const choice = window.confirm(
+                `Include ALL ${{allGenes.length}} genes in X.csv?\n\n` +
+                `OK  = fetch + include every gene (may be slow and large for big datasets).\n` +
+                `Cancel = include only the ${{genesToExport.length}} gene${{genesToExport.length === 1 ? '' : 's'}} currently loaded in this session.`
+            );
+            if (choice) genesToExport = allGenes.slice();
+        }}
+
+        const btn = document.getElementById('export-data-btn');
+        const origLabel = btn ? btn.textContent : '';
+        const setLabel = (txt) => {{ if (btn) btn.textContent = txt; }};
+        if (btn) btn.disabled = true;
+        setLabel('Exporting...');
+        showExportProgress('Exporting data');
+        const cancelBtn = document.getElementById('export-progress-cancel');
+        const onCancelClick = () => {{
+            if (cancelBtn && cancelBtn.textContent === 'Close') {{
+                hideExportProgress();
+                return;
+            }}
+            exportCancelRequested = true;
+            if (cancelBtn) {{
+                cancelBtn.disabled = true;
+                cancelBtn.textContent = 'Cancelling...';
+            }}
+        }};
+        cancelBtn?.addEventListener('click', onCancelClick);
+        const checkCancel = () => {{
+            if (exportCancelRequested) throw new Error('Export cancelled');
+        }};
+
+        try {{
+            if (genesToExport.length && typeof ensureGeneAvailable === 'function') {{
+                updateExportProgress('Fetching gene shards', 0, genesToExport.length);
+                for (let i = 0; i < genesToExport.length; i++) {{
+                    checkCancel();
+                    const g = genesToExport[i];
+                    if (!DATA.genes_meta?.[g]) {{
+                        setLabel(`Fetching genes ${{i + 1}}/${{genesToExport.length}}`);
+                        try {{ await ensureGeneAvailable(g, {{ showErrors: false }}); }} catch (_) {{}}
+                    }}
+                    updateExportProgress('Fetching gene shards', i + 1, genesToExport.length);
+                }}
+                genesToExport = genesToExport.filter(g => DATA.genes_meta?.[g]);
+            }}
+
+            checkCancel();
+            updateExportProgress('Hydrating section arrays', null, null);
+            await yieldToUI();
+            hydrateAllSectionArrays();
+
+            const obsCols = (DATA.available_colors || []).filter(c => {{
+                const meta = DATA.colors_meta?.[c];
+                return !!meta;
+            }});
+
+            const obsHeader = ['cell_id', 'sample_id', ...obsCols.map(c => c)].map(csvEscape).join(',');
+            const spatialHeader = ['cell_id', 'sample_id', 'x', 'y'].map(csvEscape).join(',');
+            const umapHeader = ['cell_id', 'sample_id', 'umap1', 'umap2'].map(csvEscape).join(',');
+            const xHeader = ['cell_id', ...genesToExport].map(csvEscape).join(',');
+
+            const obsLines = [obsHeader];
+            const spatialLines = [spatialHeader];
+            const umapLines = [umapHeader];
+            const xLines = [xHeader];
+            let anyUMAP = false;
+            let totalCells = 0;
+
+            updateExportProgress('Writing CSV rows', 0, sections.length);
+            for (let sIdx = 0; sIdx < sections.length; sIdx++) {{
+                checkCancel();
+                const section = sections[sIdx];
+                const n = (section.x && section.x.length) ? section.x.length : 0;
+                if (!n) {{ updateExportProgress('Writing CSV rows', sIdx + 1, sections.length); continue; }}
+                const sampleId = section.id;
+                const obsIdx = section.obs_idx;
+                const xs = section.x, ys = section.y;
+                const ux = section.umap_x, uy = section.umap_y;
+                const hasUMAP = ux && uy && ux.length === n && uy.length === n;
+                if (hasUMAP) anyUMAP = true;
+
+                const obsColValues = obsCols.map(col => {{
+                    const meta = DATA.colors_meta?.[col];
+                    const values = getSectionColorValues(section, col);
+                    const cats = (meta && !meta.is_continuous && Array.isArray(meta.categories)) ? meta.categories : null;
+                    return {{ values, cats, isContinuous: !!meta?.is_continuous }};
+                }});
+
+                const geneArrays = genesToExport.map(gene => getSectionGeneValues(section, gene) || null);
+
+                for (let i = 0; i < n; i++) {{
+                    const globalIdx = (obsIdx && obsIdx.length > i) ? obsIdx[i] : (totalCells + i);
+                    const cellId = 'cell_' + globalIdx;
+
+                    const obsRow = [cellId, sampleId];
+                    for (let k = 0; k < obsColValues.length; k++) {{
+                        const ov = obsColValues[k];
+                        const v = ov.values ? ov.values[i] : null;
+                        if (v == null || Number.isNaN(v)) {{ obsRow.push(''); continue; }}
+                        if (ov.isContinuous) obsRow.push(csvFormatNumber(v));
+                        else if (ov.cats) {{
+                            const ci = Math.round(v);
+                            obsRow.push(ci >= 0 && ci < ov.cats.length ? String(ov.cats[ci]) : '');
+                        }} else obsRow.push(csvFormatNumber(v));
+                    }}
+                    obsLines.push(obsRow.map(csvEscape).join(','));
+
+                    spatialLines.push([cellId, sampleId, csvFormatNumber(xs[i]), csvFormatNumber(ys[i])].map(csvEscape).join(','));
+                    if (hasUMAP) umapLines.push([cellId, sampleId, csvFormatNumber(ux[i]), csvFormatNumber(uy[i])].map(csvEscape).join(','));
+
+                    if (genesToExport.length) {{
+                        const xRow = new Array(1 + genesToExport.length);
+                        xRow[0] = cellId;
+                        for (let g = 0; g < genesToExport.length; g++) {{
+                            const arr = geneArrays[g];
+                            xRow[g + 1] = arr ? csvFormatNumber(arr[i]) : '';
+                        }}
+                        xLines.push(xRow.join(','));
+                    }} else {{
+                        xLines.push(cellId);
+                    }}
+                }}
+                totalCells += n;
+                updateExportProgress('Writing CSV rows', sIdx + 1, sections.length);
+                if ((sIdx & 1) === 1) await yieldToUI();
+            }}
+
+            checkCancel();
+            const varLines = ['gene_name', ...genesToExport.map(csvEscape)].join('\\n');
+
+            const readme = [
+                '# KaroSpace data export',
+                '',
+                'Generated at ' + new Date().toISOString(),
+                '',
+                'Files:',
+                '- obs.csv      Per-cell metadata (' + totalCells.toLocaleString() + ' cells)',
+                '- var.csv      Gene list (' + genesToExport.length.toLocaleString() + ' genes)',
+                '- X.csv        Dense expression matrix (rows = cells, columns = genes)',
+                '- spatial.csv  Per-cell spatial coordinates',
+                anyUMAP ? '- umap.csv     Per-cell UMAP coordinates' : '- umap.csv     (not produced \u2014 no UMAP in viewer)',
+                '',
+                '## Rebuild AnnData in Python',
+                '',
+                '```python',
+                'import pandas as pd',
+                'import anndata as ad',
+                'import numpy as np',
+                '',
+                'obs = pd.read_csv("obs.csv").set_index("cell_id")',
+                'var = pd.read_csv("var.csv").set_index("gene_name")',
+                'X_df = pd.read_csv("X.csv").set_index("cell_id").loc[obs.index, var.index]',
+                'X = X_df.to_numpy(dtype=np.float32)',
+                '',
+                'spatial = pd.read_csv("spatial.csv").set_index("cell_id").loc[obs.index]',
+                'obsm = {{"spatial": spatial[["x", "y"]].to_numpy(dtype=np.float32)}}',
+                '',
+                'try:',
+                '    umap = pd.read_csv("umap.csv").set_index("cell_id").loc[obs.index]',
+                '    obsm["X_umap"] = umap[["umap1", "umap2"]].to_numpy(dtype=np.float32)',
+                'except FileNotFoundError:',
+                '    pass',
+                '',
+                'adata = ad.AnnData(X=X, obs=obs, var=var, obsm=obsm)',
+                'adata.write_h5ad("karospace_export.h5ad")',
+                '```',
+                '',
+            ].join('\\n');
+
+            const files = [
+                {{ name: 'karospace-export/README.md', content: readme }},
+                {{ name: 'karospace-export/obs.csv', content: obsLines.join('\\n') + '\\n' }},
+                {{ name: 'karospace-export/var.csv', content: varLines + '\\n' }},
+                {{ name: 'karospace-export/X.csv', content: xLines.join('\\n') + '\\n' }},
+                {{ name: 'karospace-export/spatial.csv', content: spatialLines.join('\\n') + '\\n' }},
+            ];
+            if (anyUMAP) files.push({{ name: 'karospace-export/umap.csv', content: umapLines.join('\\n') + '\\n' }});
+
+            setLabel('Packing archive...');
+            updateExportProgress('Packing archive', null, null);
+            await yieldToUI();
+            const tarBytes = buildTarArchive(files);
+
+            checkCancel();
+            updateExportProgress('Compressing (gzip)', null, null);
+            await yieldToUI();
+            let blob, ext;
+            const gz = await gzipBytes(tarBytes);
+            if (gz) {{
+                blob = new Blob([gz], {{ type: 'application/gzip' }});
+                ext = 'tar.gz';
+            }} else {{
+                blob = new Blob([tarBytes], {{ type: 'application/x-tar' }});
+                ext = 'tar';
+            }}
+
+            const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `karospace-export-${{stamp}}.${{ext}}`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+            setLabel(origLabel || 'Export data');
+            finalizeExportProgress(`Saved ${{totalCells.toLocaleString()}} cells \u00d7 ${{genesToExport.length.toLocaleString()}} genes`);
+        }} catch (err) {{
+            if (err && /cancelled/i.test(err.message)) {{
+                finalizeExportProgress('Export cancelled');
+            }} else {{
+                console.error('Export failed', err);
+                finalizeExportProgress('Export failed: ' + (err.message || err));
+                alert(`Export failed: ${{err.message || err}}`);
+            }}
+            setLabel(origLabel || 'Export data');
+        }} finally {{
+            cancelBtn?.removeEventListener('click', onCancelClick);
+            if (btn) btn.disabled = false;
+        }}
+    }}
+
     function exportModalAnnotations() {{
         if (!modalAnnotations.length) {{
             alert('No polygon annotations to export yet.');
@@ -13624,6 +14176,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const exprVmin = document.getElementById('expr-vmin');
         const exprVmax = document.getElementById('expr-vmax');
         const exprAuto = document.getElementById('expr-auto');
+        const exprColormap = document.getElementById('expr-colormap');
+        if (exprColormap) {{
+            Object.entries(EXPRESSION_COLORMAPS).forEach(([name, cmap]) => {{
+                const opt = document.createElement('option');
+                opt.value = name;
+                opt.textContent = cmap.label || name;
+                opt.selected = name === expressionColormapName;
+                exprColormap.appendChild(opt);
+            }});
+            exprColormap.addEventListener('change', () => {{
+                setExpressionColormap(exprColormap.value);
+            }});
+        }}
         if (exprVmin && exprVmax) {{
             const applyExpressionScale = () => {{
                 if (!currentGene) return;
@@ -14175,27 +14740,52 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }});
     }}
 
-    function computeGeneDistributionStats(gene, groupCol) {{
-        if (!gene || !groupCol) return null;
-        const cats = getCategoriesForColorColumn(groupCol);
-        if (!cats.length) return null;
-        const perGroup = cats.map(() => []);
-        (DATA.sections || []).forEach(section => {{
-            const vals = getSectionGeneValues(section, gene);
-            const colVals = getSectionColorValues(section, groupCol);
-            if (!vals || !colVals) return;
-            const n = Math.min(vals.length, colVals.length);
-            for (let i = 0; i < n; i++) {{
-                const v = vals[i];
-                if (isMissingDisplayValue(v)) continue;
-                const catIdx = Math.round(colVals[i]);
-                if (catIdx >= 0 && catIdx < cats.length) {{
-                    perGroup[catIdx].push(v);
-                }}
+    function parseGeneDistributionGroupSpec(encoded) {{
+        if (!encoded) return null;
+        const s = String(encoded);
+        const sep = s.indexOf(':');
+        if (sep > 0) {{
+            const kind = s.slice(0, sep);
+            const key = s.slice(sep + 1);
+            if ((kind === 'cell' || kind === 'meta') && key) return {{ kind, key }};
+        }}
+        return {{ kind: 'cell', key: s }};
+    }}
+
+    function encodeGeneDistributionGroupSpec(kind, key) {{
+        return `${{kind}}:${{key}}`;
+    }}
+
+    function getAvailableSectionMetadataKeys() {{
+        const keySet = new Set();
+        (DATA.sections || []).forEach((section) => {{
+            if (section && section.metadata && typeof section.metadata === 'object') {{
+                Object.keys(section.metadata).forEach((k) => {{ if (k) keySet.add(k); }});
             }}
         }});
-        return cats.map((cat, idx) => {{
-            const arr = perGroup[idx];
+        return Array.from(keySet).sort((a, b) => a.localeCompare(b));
+    }}
+
+    function getSectionMetadataValues(metaKey) {{
+        const values = new Set();
+        (DATA.sections || []).forEach((section) => {{
+            if (section && section.metadata && Object.prototype.hasOwnProperty.call(section.metadata, metaKey)) {{
+                const raw = section.metadata[metaKey];
+                if (raw === undefined || raw === null || raw === '') return;
+                values.add(String(raw));
+            }}
+        }});
+        return Array.from(values).sort((a, b) => a.localeCompare(b));
+    }}
+
+    function getRestrictValuesForSpec(spec) {{
+        if (!spec || !spec.key) return [];
+        if (spec.kind === 'meta') return getSectionMetadataValues(spec.key);
+        return getCategoriesForColorColumn(spec.key).map((v) => String(v));
+    }}
+
+    function finalizeDistributionBuckets(groups) {{
+        return Array.from(groups.entries()).map(([cat, arr]) => {{
             const n = arr.length;
             if (n === 0) return {{ cat, n: 0, mean: null, median: null, pctExpr: null, max: null }};
             let sum = 0, nnz = 0, max = -Infinity;
@@ -14211,6 +14801,86 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const median = n % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
             return {{ cat, n, mean, median, pctExpr: (nnz / n) * 100, max }};
         }});
+    }}
+
+    function buildGeneDistributionRestrictPredicate(restrictSpec, restrictValue) {{
+        if (!restrictSpec || !restrictSpec.key || restrictValue == null || restrictValue === '') return null;
+        const target = String(restrictValue);
+        if (restrictSpec.kind === 'meta') {{
+            const metaKey = restrictSpec.key;
+            return {{
+                sectionAllows(section) {{
+                    const raw = section && section.metadata ? section.metadata[metaKey] : undefined;
+                    return (raw !== undefined && raw !== null && raw !== '' && String(raw) === target);
+                }},
+                cellAllows: null,
+            }};
+        }}
+        const col = restrictSpec.key;
+        const cats = getCategoriesForColorColumn(col);
+        const targetIdx = cats.findIndex((c) => String(c) === target);
+        if (targetIdx < 0) {{
+            return {{
+                sectionAllows: () => false,
+                cellAllows: () => false,
+            }};
+        }}
+        return {{
+            sectionAllows: () => true,
+            cellAllows(section, cellIdx) {{
+                const colVals = getSectionColorValues(section, col);
+                if (!colVals || cellIdx >= colVals.length) return false;
+                return Math.round(colVals[cellIdx]) === targetIdx;
+            }},
+        }};
+    }}
+
+    function computeGeneDistributionStats(gene, spec, restrictSpec, restrictValue) {{
+        if (!gene || !spec || !spec.key) return null;
+        const restrict = buildGeneDistributionRestrictPredicate(restrictSpec, restrictValue);
+
+        if (spec.kind === 'meta') {{
+            const metaKey = spec.key;
+            const groups = new Map();
+            (DATA.sections || []).forEach((section) => {{
+                if (restrict && !restrict.sectionAllows(section)) return;
+                const vals = getSectionGeneValues(section, gene);
+                if (!vals || !vals.length) return;
+                const raw = section.metadata ? section.metadata[metaKey] : undefined;
+                const groupVal = (raw === undefined || raw === null || raw === '') ? 'unknown' : String(raw);
+                if (!groups.has(groupVal)) groups.set(groupVal, []);
+                const bucket = groups.get(groupVal);
+                for (let i = 0; i < vals.length; i++) {{
+                    const v = vals[i];
+                    if (isMissingDisplayValue(v)) continue;
+                    if (restrict && restrict.cellAllows && !restrict.cellAllows(section, i)) continue;
+                    bucket.push(v);
+                }}
+            }});
+            return finalizeDistributionBuckets(groups);
+        }}
+
+        const cats = getCategoriesForColorColumn(spec.key);
+        if (!cats.length) return null;
+        const groups = new Map();
+        cats.forEach((cat) => groups.set(String(cat), []));
+        (DATA.sections || []).forEach((section) => {{
+            if (restrict && !restrict.sectionAllows(section)) return;
+            const vals = getSectionGeneValues(section, gene);
+            const colVals = getSectionColorValues(section, spec.key);
+            if (!vals || !colVals) return;
+            const n = Math.min(vals.length, colVals.length);
+            for (let i = 0; i < n; i++) {{
+                const v = vals[i];
+                if (isMissingDisplayValue(v)) continue;
+                if (restrict && restrict.cellAllows && !restrict.cellAllows(section, i)) continue;
+                const catIdx = Math.round(colVals[i]);
+                if (catIdx >= 0 && catIdx < cats.length) {{
+                    groups.get(String(cats[catIdx])).push(v);
+                }}
+            }}
+        }});
+        return finalizeDistributionBuckets(groups);
     }}
 
     function wireGeneDistributionInputs(container) {{
@@ -14234,6 +14904,21 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 renderGeneDistributionInsights();
             }});
         }}
+        const restrictBySel = container.querySelector('#gene-distribution-restrictby');
+        if (restrictBySel) {{
+            restrictBySel.addEventListener('change', () => {{
+                geneDistributionRestrictBy = restrictBySel.value || '';
+                geneDistributionRestrictValue = '';
+                renderGeneDistributionInsights();
+            }});
+        }}
+        const restrictValSel = container.querySelector('#gene-distribution-restrictvalue');
+        if (restrictValSel) {{
+            restrictValSel.addEventListener('change', () => {{
+                geneDistributionRestrictValue = restrictValSel.value || '';
+                renderGeneDistributionInsights();
+            }});
+        }}
         container.querySelectorAll('[data-gene-dist-sort]').forEach(th => {{
             th.addEventListener('click', () => {{
                 const key = th.getAttribute('data-gene-dist-sort');
@@ -14251,8 +14936,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             tr.addEventListener('click', () => {{
                 const cat = tr.getAttribute('data-gene-dist-cat');
                 if (!cat) return;
-                if (currentColor !== geneDistributionGroupBy) {{
-                    setViewerColorColumn(geneDistributionGroupBy);
+                const spec = parseGeneDistributionGroupSpec(geneDistributionGroupBy);
+                if (!spec || spec.kind !== 'cell') return;
+                if (currentColor !== spec.key) {{
+                    setViewerColorColumn(spec.key);
                 }}
                 linkedSpotlightEnabled = true;
                 spotlightPinnedCategory = spotlightPinnedCategory === cat ? null : cat;
@@ -14267,24 +14954,66 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const container = document.getElementById('gene-distribution-panel');
         if (!container) return;
 
-        const availableCols = (DATA.available_colors || []).filter(c => {{
+        const availableCellCols = (DATA.available_colors || []).filter(c => {{
             const meta = DATA.colors_meta?.[c];
             return meta && !meta.is_continuous && (meta.categories || []).length > 0;
         }});
-        if (!availableCols.length) {{
-            container.innerHTML = '<div class="agg-group-meta">No categorical metadata columns available.</div>';
+        const availableMetaKeys = getAvailableSectionMetadataKeys();
+
+        if (!availableCellCols.length && !availableMetaKeys.length) {{
+            container.innerHTML = '<div class="agg-group-meta">No categorical columns or section metadata available.</div>';
             return;
         }}
 
-        if (!geneDistributionGroupBy || !availableCols.includes(geneDistributionGroupBy)) {{
+        const validSpecs = new Set();
+        availableCellCols.forEach(c => validSpecs.add(encodeGeneDistributionGroupSpec('cell', c)));
+        availableMetaKeys.forEach(k => validSpecs.add(encodeGeneDistributionGroupSpec('meta', k)));
+
+        const currentSpec = parseGeneDistributionGroupSpec(geneDistributionGroupBy);
+        const currentEncoded = currentSpec ? encodeGeneDistributionGroupSpec(currentSpec.kind, currentSpec.key) : '';
+        if (!currentEncoded || !validSpecs.has(currentEncoded)) {{
             const curMeta = DATA.colors_meta?.[currentColor];
-            geneDistributionGroupBy = (curMeta && !curMeta.is_continuous) ? currentColor : availableCols[0];
+            const fallback = (curMeta && !curMeta.is_continuous && availableCellCols.includes(currentColor))
+                ? encodeGeneDistributionGroupSpec('cell', currentColor)
+                : (availableCellCols.length
+                    ? encodeGeneDistributionGroupSpec('cell', availableCellCols[0])
+                    : encodeGeneDistributionGroupSpec('meta', availableMetaKeys[0]));
+            geneDistributionGroupBy = fallback;
         }}
 
-        const colorOptions = availableCols.map(c => {{
-            const sel = c === geneDistributionGroupBy ? ' selected' : '';
-            return '<option value="' + escapeHtml(c) + '"' + sel + '>' + escapeHtml(formatMetadataLabel(c)) + '</option>';
+        const spec = parseGeneDistributionGroupSpec(geneDistributionGroupBy);
+        const buildOptions = (kind, keys, selectedEncoded) => keys.map(k => {{
+            const enc = encodeGeneDistributionGroupSpec(kind, k);
+            const sel = enc === selectedEncoded ? ' selected' : '';
+            return '<option value="' + escapeHtml(enc) + '"' + sel + '>' + escapeHtml(formatMetadataLabel(k)) + '</option>';
         }}).join('');
+        let optionsHtml = '';
+        if (availableCellCols.length) optionsHtml += '<optgroup label="Cell annotations">' + buildOptions('cell', availableCellCols, geneDistributionGroupBy) + '</optgroup>';
+        if (availableMetaKeys.length) optionsHtml += '<optgroup label="Sample metadata">' + buildOptions('meta', availableMetaKeys, geneDistributionGroupBy) + '</optgroup>';
+
+        const restrictSpec = parseGeneDistributionGroupSpec(geneDistributionRestrictBy);
+        const restrictEnabled = !!(restrictSpec && restrictSpec.key && validSpecs.has(encodeGeneDistributionGroupSpec(restrictSpec.kind, restrictSpec.key)));
+        if (!restrictEnabled) {{
+            geneDistributionRestrictBy = '';
+            geneDistributionRestrictValue = '';
+        }}
+        const restrictValues = restrictEnabled ? getRestrictValuesForSpec(restrictSpec) : [];
+        if (restrictEnabled && geneDistributionRestrictValue && !restrictValues.includes(geneDistributionRestrictValue)) {{
+            geneDistributionRestrictValue = '';
+        }}
+
+        let restrictOptionsHtml = '<option value="">All cells (no filter)</option>';
+        if (availableCellCols.length) restrictOptionsHtml += '<optgroup label="Cell annotations">' + buildOptions('cell', availableCellCols, geneDistributionRestrictBy || '') + '</optgroup>';
+        if (availableMetaKeys.length) restrictOptionsHtml += '<optgroup label="Sample metadata">' + buildOptions('meta', availableMetaKeys, geneDistributionRestrictBy || '') + '</optgroup>';
+
+        const restrictValueOptions = restrictEnabled
+            ? '<option value="">— pick a value —</option>' + restrictValues.map((v) => {{
+                const sel = v === geneDistributionRestrictValue ? ' selected' : '';
+                return '<option value="' + escapeHtml(v) + '"' + sel + '>' + escapeHtml(v) + '</option>';
+            }}).join('')
+            : '<option value="">—</option>';
+
+        const activeRestrict = restrictEnabled && geneDistributionRestrictValue;
 
         const geneVal = currentGene || '';
         const controlsHtml = `
@@ -14295,7 +15024,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 </div>
                 <div>
                     <label>Group by</label>
-                    <select id="gene-distribution-groupby">${{colorOptions}}</select>
+                    <select id="gene-distribution-groupby">${{optionsHtml}}</select>
+                </div>
+            </div>
+            <div class="cluster-de-controls">
+                <div>
+                    <label>Restrict to</label>
+                    <select id="gene-distribution-restrictby">${{restrictOptionsHtml}}</select>
+                </div>
+                <div>
+                    <label>Value</label>
+                    <select id="gene-distribution-restrictvalue"${{restrictEnabled ? '' : ' disabled'}}>${{restrictValueOptions}}</select>
                 </div>
             </div>
         `;
@@ -14306,7 +15045,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             return;
         }}
 
-        const stats = computeGeneDistributionStats(currentGene, geneDistributionGroupBy);
+        const stats = computeGeneDistributionStats(
+            currentGene,
+            spec,
+            activeRestrict ? restrictSpec : null,
+            activeRestrict ? geneDistributionRestrictValue : null,
+        );
         if (!stats || !stats.length) {{
             container.innerHTML = controlsHtml + '<div class="agg-group-meta">No data available for this gene \u00d7 group combination.</div>';
             wireGeneDistributionInputs(container);
@@ -14333,9 +15077,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const fmtP = v => v == null ? '\u2014' : Number(v).toFixed(1) + '%';
         const arrow = k => geneDistributionSortKey === k ? (geneDistributionSortDir === 'asc' ? ' \u2191' : ' \u2193') : '';
 
-        const rows = sorted.map(s => `
-            <tr data-gene-dist-cat="${{escapeHtml(String(s.cat))}}" title="Click to spotlight \\"${{escapeHtml(String(s.cat))}}\\" in the viewer">
-                <td><span class="agg-dot" style="background:${{getCategoryColorForValue(geneDistributionGroupBy, s.cat)}}"></span>${{escapeHtml(String(s.cat))}}</td>
+        const isCellKind = spec.kind === 'cell';
+        const dotColorFor = (cat, idx) => isCellKind
+            ? getCategoryColorForValue(spec.key, cat)
+            : getCategoryColor(idx);
+        const rows = sorted.map((s, idx) => `
+            <tr data-gene-dist-cat="${{escapeHtml(String(s.cat))}}" ${{isCellKind ? 'style="cursor:pointer"' : 'style="cursor:default"'}} title="${{isCellKind ? `Click to spotlight \\"${{escapeHtml(String(s.cat))}}\\" in the viewer` : 'Sample-metadata group (not linked to spatial view)'}}">
+                <td><span class="agg-dot" style="background:${{dotColorFor(String(s.cat), idx)}}"></span>${{escapeHtml(String(s.cat))}}</td>
                 <td>${{fmtN(s.n)}}</td>
                 <td>${{fmtF(s.mean)}}</td>
                 <td>${{fmtF(s.median)}}</td>
@@ -14344,8 +15092,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             </tr>
         `).join('');
 
+        const scopeLabel = spec.kind === 'meta' ? 'sample metadata' : 'cell annotation';
+        const restrictLabel = activeRestrict
+            ? ` \u2014 restricted to ${{escapeHtml(formatMetadataLabel(restrictSpec.key))}} = <strong>${{escapeHtml(String(geneDistributionRestrictValue))}}</strong>`
+            : '';
         const tableHtml = `
-            <div class="gene-distribution-summary">Expression of <strong>${{escapeHtml(currentGene)}}</strong> across ${{escapeHtml(formatMetadataLabel(geneDistributionGroupBy))}} (${{stats.length}} groups)</div>
+            <div class="gene-distribution-summary">Expression of <strong>${{escapeHtml(currentGene)}}</strong> across ${{escapeHtml(formatMetadataLabel(spec.key))}} (${{scopeLabel}}, ${{stats.length}} groups)${{restrictLabel}}</div>
             <table class="gene-distribution-table">
                 <thead>
                     <tr>
@@ -18490,6 +19242,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         document.getElementById('save-session-btn')?.addEventListener('click', () => {{
             try {{ downloadSessionState(); }}
             catch (e) {{ alert(`Could not save session: ${{e.message || e}}`); }}
+        }});
+        document.getElementById('export-data-btn')?.addEventListener('click', () => {{
+            exportDataBundle().catch(e => alert(`Export failed: ${{e.message || e}}`));
         }});
         const loadSessionBtn = document.getElementById('load-session-btn');
         const loadSessionInput = document.getElementById('load-session-input');
