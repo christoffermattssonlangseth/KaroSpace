@@ -5,7 +5,7 @@ Command-line interface for KaroSpace.
 import argparse
 import sys
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 
 def _parse_section_rotations_arg(raw: str) -> Optional[Dict[str, float]]:
@@ -111,6 +111,15 @@ def _run_export_cli(argv=None):
         type=str,
         default=None,
         help="Optional output path for the gene sidecar JSON when --gene-storage sidecar."
+    )
+    parser.add_argument(
+        "--modalities",
+        type=str,
+        default=None,
+        help=(
+            "Comma-separated list of modalities to export (e.g. 'rna,protein'). "
+            "Defaults to all detected. Non-default modalities require --gene-storage sidecar."
+        ),
     )
     parser.add_argument(
         "--gene-sparse-zero-threshold",
@@ -273,12 +282,17 @@ def _run_export_cli(argv=None):
         groupby=args.groupby,
     )
 
+    modalities_arg: Optional[List[str]] = None
+    if args.modalities:
+        modalities_arg = [m.strip() for m in args.modalities.split(",") if m.strip()]
+
     print(f"Exporting to HTML...")
     output_path = export_to_html(
         dataset,
         output_path=args.output,
         color=args.color,
         title=args.title,
+        modalities=modalities_arg,
         min_panel_size=args.min_panel_size,
         spot_size=spot_size_value,
         downsample=args.downsample,

@@ -82,7 +82,7 @@ common_kwargs = dict(
     neighbor_stats_seed=42,
     cluster_de_groupby=[
         "leiden_1.0",
-    ],
+ 3   ],
     cluster_de_top_n=20,
     cluster_de_method="t-test",
     cluster_de_layer=None,

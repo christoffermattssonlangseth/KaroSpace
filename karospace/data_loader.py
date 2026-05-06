@@ -265,6 +265,38 @@ class SectionData:
 
 
 @dataclass
+class Modality:
+    """One modality (RNA, protein, etc.) — n_cells × n_features matrix + var."""
+    name: str
+    matrix: Any
+    var: pd.DataFrame
+    layers: Dict[str, Any] = field(default_factory=dict)
+    value_kind: str = "counts"  # 'counts' (RNA-like) or 'intensity' (protein-like)
+    label: Optional[str] = None
+
+    @property
+    def feature_names(self) -> List[str]:
+        return list(self.var.index)
+
+    @property
+    def n_features(self) -> int:
+        return int(self.matrix.shape[1])
+
+    def feature_position(self, name: str) -> int:
+        return self.feature_names.index(name)
+
+    def get_feature_vector(self, name: str) -> np.ndarray:
+        idx = self.feature_position(name)
+        source = self.layers.get("normalized")
+        if source is None:
+            source = self.matrix
+        col = source[:, idx]
+        if issparse(col):
+            return np.asarray(col.toarray()).ravel()
+        return np.asarray(col).ravel()
+
+
+@dataclass
 class SpatialDataset:
     """Container for spatial transcriptomics dataset."""
     adata: sc.AnnData
@@ -274,6 +306,8 @@ class SpatialDataset:
     var_names: List[str]
     metadata_columns: List[str]
     metadata_value_order: Optional[Dict[str, List[str]]] = None
+    modalities: Dict[str, Modality] = field(default_factory=dict)
+    default_modality: str = "rna"
 
     @property
     def n_sections(self) -> int:
@@ -292,11 +326,18 @@ class SpatialDataset:
         """Return normalized KaroSpaceCompanion analytics embedded in adata.uns."""
         return _load_companion_analytics(self.adata)
 
+    def _resolve_modality(self, modality: Optional[str]) -> Optional[Modality]:
+        if not self.modalities:
+            return None
+        name = modality or self.default_modality
+        return self.modalities.get(name)
+
     def get_color_data(
         self,
         color: str,
         vmin: Optional[float] = None,
-        vmax: Optional[float] = None
+        vmax: Optional[float] = None,
+        modality: Optional[str] = None,
     ) -> Tuple[np.ndarray, bool, Optional[List[str]]]:
         """
         Get color values for all cells.
@@ -304,9 +345,11 @@ class SpatialDataset:
         Parameters
         ----------
         color : str
-            Column in obs or gene name
+            Column in obs or feature name within the active modality
         vmin, vmax : float, optional
             Min/max for continuous data
+        modality : str, optional
+            Modality name to look up the feature in. Defaults to ``default_modality``.
 
         Returns
         -------
@@ -335,8 +378,13 @@ class SpatialDataset:
                 values = cat.cat.codes.to_numpy().astype(float)
                 values[values < 0] = np.nan
                 return values, False, categories
-        elif color in self.adata.var_names:
-            # Gene expression (prefer normalized layer when available)
+
+        mod = self._resolve_modality(modality)
+        if mod is not None and color in mod.feature_names:
+            return mod.get_feature_vector(color), True, None
+
+        if color in self.adata.var_names:
+            # Back-compat fallback when modality registry is unpopulated.
             gene_idx = self.adata.var_names.get_loc(color)
             expr_layer = None
             if "normalized" in self.adata.layers:
@@ -347,8 +395,8 @@ class SpatialDataset:
             else:
                 values = np.asarray(x).ravel()
             return values, True, None
-        else:
-            raise KeyError(f"{color!r} not found in obs columns or var_names")
+
+        raise KeyError(f"{color!r} not found in obs columns or modality {modality or self.default_modality!r}")
 
     def get_section_indices(self) -> Dict[str, np.ndarray]:
         """Get cell indices for each section."""
@@ -405,14 +453,20 @@ class SpatialDataset:
             export_indices[section.section_id] = np.asarray(idx)
         return export_indices
 
-    def _collect_gene_data(self, genes: Optional[List[str]] = None) -> Dict[str, Dict[str, Union[np.ndarray, float]]]:
-        """Collect gene vectors and ranges for export."""
+    def _collect_gene_data(
+        self,
+        genes: Optional[List[str]] = None,
+        modality: Optional[str] = None,
+    ) -> Dict[str, Dict[str, Union[np.ndarray, float]]]:
+        """Collect feature vectors and ranges for export within a modality."""
         gene_data: Dict[str, Dict[str, Union[np.ndarray, float]]] = {}
+        mod = self._resolve_modality(modality)
+        feature_set = set(mod.feature_names) if mod is not None else set(self.adata.var_names)
         for gene in genes or []:
-            if gene not in self.adata.var_names:
+            if gene not in feature_set:
                 continue
             try:
-                vals, _, _ = self.get_color_data(gene)
+                vals, _, _ = self.get_color_data(gene, modality=modality)
                 finite = np.isfinite(vals)
                 gene_vmin = float(np.nanmin(vals[finite])) if finite.any() else 0.0
                 gene_vmax = float(np.nanmax(vals[finite])) if finite.any() else 1.0
@@ -422,7 +476,7 @@ class SpatialDataset:
                     "vmax": gene_vmax,
                 }
             except Exception as e:
-                print(f"  Warning: Could not load gene '{gene}': {e}")
+                print(f"  Warning: Could not load feature '{gene}': {e}")
         return gene_data
 
     @staticmethod
@@ -582,15 +636,25 @@ class SpatialDataset:
         gene_sparse_zero_threshold: float = 0.8,
         gene_sparse_pack: bool = True,
         gene_sparse_pack_min_nnz: int = 256,
+        modality: Optional[str] = None,
     ) -> Dict:
         """Export a gene-major sidecar payload for downstream viewer loading."""
         self._validate_gene_export_options(gene_encoding, gene_sparse_zero_threshold, gene_sparse_pack_min_nnz)
         resolved_value_encoding = self._validate_gene_value_encoding(gene_value_encoding)
         export_indices = export_indices or self._get_export_section_indices(downsample=downsample)
+
+        mod = self._resolve_modality(modality)
+        if mod is not None:
+            feature_pos = {n: i for i, n in enumerate(mod.feature_names)}
+            source_matrix = mod.layers.get("normalized", mod.matrix)
+        else:
+            feature_pos = {n: i for i, n in enumerate(self.adata.var_names)}
+            source_matrix = self.adata.layers["normalized"] if "normalized" in self.adata.layers else self.adata.X
+
         unique_genes = []
         seen = set()
         for gene in genes or []:
-            if gene in seen or gene not in self.adata.var_names:
+            if gene in seen or gene not in feature_pos:
                 continue
             seen.add(gene)
             unique_genes.append(gene)
@@ -606,8 +670,8 @@ class SpatialDataset:
         gene_encodings: Dict[str, str] = {}
         gene_value_encodings: Dict[str, str] = {}
         if unique_genes:
-            gene_indices = [self.adata.var_names.get_loc(gene) for gene in unique_genes]
-            expr_layer = self.adata.layers["normalized"] if "normalized" in self.adata.layers else self.adata.X
+            gene_indices = [feature_pos[gene] for gene in unique_genes]
+            expr_layer = source_matrix
             batch = expr_layer[:, gene_indices]
             resolved_gene_encoding = str(gene_encoding or "auto").lower()
 
@@ -813,6 +877,7 @@ class SpatialDataset:
 
         return {
             "format": "karospace-gene-sidecar-v1",
+            "modality": (mod.name if mod is not None else "rna"),
             "genes_meta": genes_meta,
             "gene_encodings": gene_encodings,
             "gene_value_encodings": gene_value_encodings,
@@ -851,6 +916,7 @@ class SpatialDataset:
         interaction_markers_method: str = "wilcoxon",
         interaction_markers_layer: Optional[str] = "normalized",
         section_rotations: Optional[Dict[str, float]] = None,
+        deconvolutions: Optional[Dict[str, str]] = None,
     ) -> Dict:
         """
         Export dataset to JSON-serializable format for the HTML viewer.
@@ -1002,6 +1068,45 @@ class SpatialDataset:
                 }
             except Exception as e:
                 print(f"  Warning: Could not load color '{col}': {e}")
+
+        # Pre-compute deconvolution proportion matrices (per-cell × K cell types)
+        # deconvolutions: {display_name: obsm_key} where adata.obsm[obsm_key] is (N, K)
+        decon_data: Dict[str, Dict[str, Any]] = {}
+        if deconvolutions:
+            for decon_name, obsm_key in deconvolutions.items():
+                if not isinstance(obsm_key, str) or obsm_key not in self.adata.obsm:
+                    print(f"  Warning: deconvolution obsm key '{obsm_key}' not found; skipping '{decon_name}'.")
+                    continue
+                raw = self.adata.obsm[obsm_key]
+                if hasattr(raw, "columns"):
+                    cat_labels = [str(c) for c in raw.columns]
+                    matrix = np.asarray(raw.to_numpy(), dtype=np.float32)
+                else:
+                    matrix = np.asarray(raw, dtype=np.float32)
+                    uns_cols_key = f"{obsm_key}_columns"
+                    if uns_cols_key in self.adata.uns:
+                        cat_labels = [str(c) for c in self.adata.uns[uns_cols_key]]
+                    else:
+                        cat_labels = [f"comp_{i}" for i in range(matrix.shape[1])]
+                if matrix.ndim != 2 or matrix.shape[0] != self.adata.n_obs:
+                    print(f"  Warning: deconvolution '{decon_name}' has bad shape {matrix.shape}; skipping.")
+                    continue
+                if len(cat_labels) != matrix.shape[1]:
+                    cat_labels = [f"comp_{i}" for i in range(matrix.shape[1])]
+                # Row-normalize so wedges sum to 1; tolerate already-normalized inputs.
+                row_sums = matrix.sum(axis=1, keepdims=True)
+                row_sums = np.where(np.isfinite(row_sums) & (row_sums > 0), row_sums, 1.0)
+                matrix = matrix / row_sums
+                # Compute dominant component per cell (categorical code, NaN where row is all-zero/NaN)
+                dominant = np.argmax(matrix, axis=1).astype(np.float32)
+                row_max = matrix.max(axis=1)
+                dominant[~np.isfinite(row_max) | (row_max <= 0)] = np.nan
+                decon_data[decon_name] = {
+                    "matrix": matrix.astype(np.float32, copy=False),
+                    "categories": cat_labels,
+                    "k": int(matrix.shape[1]),
+                    "dominant": dominant,
+                }
 
         # Pre-compute gene expression data
         gene_data = self._collect_gene_data(genes)
@@ -1798,6 +1903,24 @@ class SpatialDataset:
                         float(v) if np.isfinite(v) else None for v in section_vals
                     ]
 
+            # Deconvolution proportions: store per-section as flat row-major float32,
+            # plus the dominant-component code array (used for legend/filter pipeline).
+            section_proportions_b64: Dict[str, Dict[str, Any]] = {}
+            for decon_name, ddata in decon_data.items():
+                sec_matrix = ddata["matrix"][idx]  # (n_section, K)
+                sec_dominant = ddata["dominant"][idx]
+                # Dominant code feeds the existing categorical color pipeline.
+                if bool(section_array_pack) and int(len(idx)) >= int(section_array_pack_min_len):
+                    section_colors_b64[decon_name] = _b64(sec_dominant.astype("<f4", copy=False))
+                else:
+                    section_colors[decon_name] = [
+                        float(v) if np.isfinite(v) else None for v in sec_dominant
+                    ]
+                section_proportions_b64[decon_name] = {
+                    "k": ddata["k"],
+                    "b64": _b64(np.ascontiguousarray(sec_matrix, dtype="<f4")),
+                }
+
             # Build gene expression values for this section
             section_genes_dense = {}
             section_genes_sparse = {}
@@ -1829,6 +1952,7 @@ class SpatialDataset:
                 "obs_idxb64": None,
                 "colors": section_colors,
                 "colors_b64": section_colors_b64,
+                "proportions_b64": section_proportions_b64,
                 "genes": section_genes_dense,
                 "genes_sparse": section_genes_sparse,
                 "bounds": {
@@ -1904,6 +2028,16 @@ class SpatialDataset:
                 "vmin": cdata["vmin"],
                 "vmax": cdata["vmax"],
             }
+        # Deconvolution proportion entries: appear as additional categorical color modes.
+        for decon_name, ddata in decon_data.items():
+            colors_meta[decon_name] = {
+                "is_continuous": False,
+                "is_proportions": True,
+                "categories": list(ddata["categories"]),
+                "n_components": ddata["k"],
+                "vmin": None,
+                "vmax": None,
+            }
 
         # Build gene metadata
         genes_meta = {}
@@ -1923,7 +2057,8 @@ class SpatialDataset:
             "n_sections": len(sections_data),
             "total_cells": sum(s["n_cells"] for s in sections_data),
             "sections": sections_data,
-            "available_colors": list(color_data.keys()),
+            "available_colors": list(color_data.keys()) + list(decon_data.keys()),
+            "available_deconvolutions": list(decon_data.keys()),
             "available_genes": list(gene_data.keys()),
             "marker_genes": marker_genes,
             "cluster_de": cluster_de,
@@ -1934,6 +2069,71 @@ class SpatialDataset:
             "neighbor_stats": neighbor_stats,
             "interaction_markers": interaction_markers,
         }
+
+
+_MODALITY_OBSM_SKIP_KEYS = {"spatial", "deconvolutions"}
+_MODALITY_OBSM_SKIP_PREFIXES = ("X_",)
+
+
+def _coerce_modality_var(uns_var: Any, expected_rows: int) -> Optional[pd.DataFrame]:
+    if uns_var is None:
+        return None
+    if isinstance(uns_var, pd.DataFrame):
+        df = uns_var.copy()
+    else:
+        try:
+            df = pd.DataFrame(uns_var)
+        except Exception:
+            return None
+    if df.shape[0] != expected_rows:
+        return None
+    if df.index.name is None:
+        for cand in ("protein", "gene", "feature", "name"):
+            if cand in df.columns:
+                df = df.set_index(cand)
+                break
+    df.index = df.index.map(str)
+    return df
+
+
+def _detect_modalities(adata: sc.AnnData) -> Dict[str, Modality]:
+    modalities: Dict[str, Modality] = {}
+    rna_var = adata.var.copy()
+    rna_layers: Dict[str, Any] = {}
+    if "normalized" in adata.layers:
+        rna_layers["normalized"] = adata.layers["normalized"]
+    if "counts" in adata.layers:
+        rna_layers["counts"] = adata.layers["counts"]
+    modalities["rna"] = Modality(
+        name="rna",
+        matrix=adata.X,
+        var=rna_var,
+        layers=rna_layers,
+        value_kind="counts",
+        label="RNA",
+    )
+
+    for key in list(adata.obsm.keys()):
+        if key in _MODALITY_OBSM_SKIP_KEYS:
+            continue
+        if any(key.startswith(p) for p in _MODALITY_OBSM_SKIP_PREFIXES):
+            continue
+        matrix = adata.obsm[key]
+        shape = getattr(matrix, "shape", None)
+        if shape is None or len(shape) != 2 or shape[1] <= 0:
+            continue
+        var_df = _coerce_modality_var(adata.uns.get(f"{key}_var"), int(shape[1]))
+        if var_df is None:
+            continue
+        modalities[key] = Modality(
+            name=key,
+            matrix=matrix,
+            var=var_df,
+            layers={},
+            value_kind="intensity",
+            label=key.replace("_", " "),
+        )
+    return modalities
 
 
 def load_spatial_data(
@@ -2053,6 +2253,12 @@ def load_spatial_data(
         or pd.api.types.is_numeric_dtype(adata.obs[col])
     ]
 
+    modalities = _detect_modalities(adata)
+    default_modality = "rna" if "rna" in modalities else next(iter(modalities))
+    extra_modalities = [m for m in modalities if m != default_modality]
+    if extra_modalities:
+        print(f"  Modalities: {default_modality} (default) + {', '.join(extra_modalities)}")
+
     return SpatialDataset(
         adata=adata,
         sections=sections,
@@ -2061,4 +2267,6 @@ def load_spatial_data(
         var_names=list(adata.var_names),
         metadata_columns=metadata_columns,
         metadata_value_order=metadata_value_order,
+        modalities=modalities,
+        default_modality=default_modality,
     )

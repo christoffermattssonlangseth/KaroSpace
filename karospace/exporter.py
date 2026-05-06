@@ -16,7 +16,7 @@ import time
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Mapping, Optional, List, Tuple, Union
+from typing import Any, Dict, Mapping, Optional, List, Tuple, Union
 import numpy as np
 import pandas as pd
 try:
@@ -3748,6 +3748,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 <label>Color:</label>
                 <select id="color-select"></select>
             </div>
+            <div class="control-group" id="modality-control-group" style="display: none;">
+                <label>Modality:</label>
+                <select id="modality-select"></select>
+            </div>
             <div class="control-group gene-control-group">
                 <label>Gene:</label>
                 <div class="gene-input-shell" id="gene-input-shell">
@@ -4188,10 +4192,120 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     const METADATA_LABELS = {metadata_labels_json};
     const OUTLINE_BY = {outline_by_json};
     const VIEWER_INFO_HTML = {viewer_info_html_json};
-    const AVAILABLE_GENE_SET = new Set(DATA.available_genes || []);
-    const GENE_NAME_BY_LOWER = new Map(
-        (DATA.available_genes || []).map(gene => [String(gene).toLowerCase(), gene])
+    // Modality registry — RNA-only datasets keep an empty registry so legacy paths run unchanged.
+    const MODALITY_DESCRIPTORS = Array.isArray(DATA.modalities) ? DATA.modalities : [];
+    const FEATURES_BY_MODALITY = (DATA.features_by_modality && typeof DATA.features_by_modality === 'object')
+        ? DATA.features_by_modality
+        : {{}};
+    const DEFAULT_MODALITY_NAME = DATA.default_modality
+        || (MODALITY_DESCRIPTORS.find(d => d && d.is_default)?.name)
+        || (MODALITY_DESCRIPTORS[0]?.name)
+        || 'rna';
+    let CURRENT_MODALITY = DEFAULT_MODALITY_NAME;
+
+    function getActiveModalityDescriptor() {{
+        return MODALITY_DESCRIPTORS.find(d => d && d.name === CURRENT_MODALITY) || null;
+    }}
+    function getActiveFeatureList() {{
+        if (MODALITY_DESCRIPTORS.length && FEATURES_BY_MODALITY[CURRENT_MODALITY]) {{
+            return FEATURES_BY_MODALITY[CURRENT_MODALITY];
+        }}
+        return DATA.available_genes || [];
+    }}
+    function isActiveModalityIntensity() {{
+        const desc = getActiveModalityDescriptor();
+        return desc?.value_kind === 'intensity';
+    }}
+
+    // Rebuilt on modality switch. Initialized to the default modality (or DATA.available_genes for legacy datasets).
+    let AVAILABLE_GENE_SET = new Set(getActiveFeatureList());
+    let GENE_NAME_BY_LOWER = new Map(
+        getActiveFeatureList().map(gene => [String(gene).toLowerCase(), gene])
     );
+    function rebuildActiveFeatureIndex() {{
+        const features = getActiveFeatureList();
+        AVAILABLE_GENE_SET = new Set(features);
+        GENE_NAME_BY_LOWER = new Map(features.map(gene => [String(gene).toLowerCase(), gene]));
+    }}
+    function getActiveFeatureSet() {{
+        return AVAILABLE_GENE_SET;
+    }}
+
+    // Per-modality cache of hydrated gene state. On switch we stash the current
+    // state and restore (or initialize) the new modality's slice.
+    const MODALITY_GENE_STATE = {{}};
+    function _snapshotModalityGeneState(name) {{
+        if (!name) return;
+        const sections = Array.isArray(DATA.sections) ? DATA.sections : [];
+        MODALITY_GENE_STATE[name] = {{
+            genes_meta: DATA.genes_meta || {{}},
+            gene_encodings: DATA.gene_encodings || {{}},
+            gene_value_encodings: DATA.gene_value_encodings || {{}},
+            sections: sections.map(s => ({{
+                genes: s.genes || {{}},
+                genes_sparse: s.genes_sparse || {{}},
+            }})),
+        }};
+    }}
+    function _restoreModalityGeneState(name) {{
+        const cached = MODALITY_GENE_STATE[name];
+        const sections = Array.isArray(DATA.sections) ? DATA.sections : [];
+        if (cached) {{
+            DATA.genes_meta = cached.genes_meta;
+            DATA.gene_encodings = cached.gene_encodings;
+            DATA.gene_value_encodings = cached.gene_value_encodings;
+            sections.forEach((s, i) => {{
+                s.genes = cached.sections[i]?.genes || {{}};
+                s.genes_sparse = cached.sections[i]?.genes_sparse || {{}};
+            }});
+        }} else {{
+            DATA.genes_meta = {{}};
+            DATA.gene_encodings = {{}};
+            DATA.gene_value_encodings = {{}};
+            sections.forEach(s => {{
+                s.genes = {{}};
+                s.genes_sparse = {{}};
+            }});
+        }}
+    }}
+    function getActiveModalityManifestEntry(manifest) {{
+        if (!manifest) return null;
+        const map = manifest.modalities;
+        if (map && typeof map === 'object' && map[CURRENT_MODALITY]) return map[CURRENT_MODALITY];
+        // Legacy v2/v3 manifests have no modalities map; only valid for default modality.
+        if (CURRENT_MODALITY === DEFAULT_MODALITY_NAME) return manifest;
+        return null;
+    }}
+    async function setActiveModality(name) {{
+        if (!name || name === CURRENT_MODALITY) return;
+        if (!FEATURES_BY_MODALITY[name] && name !== DEFAULT_MODALITY_NAME) {{
+            console.warn('Unknown modality:', name);
+            return;
+        }}
+        _snapshotModalityGeneState(CURRENT_MODALITY);
+        CURRENT_MODALITY = name;
+        _restoreModalityGeneState(CURRENT_MODALITY);
+        rebuildActiveFeatureIndex();
+        // Repopulate datalist used by every gene input.
+        const geneListEl = document.getElementById('gene-list');
+        if (geneListEl) {{
+            const fragment = document.createDocumentFragment();
+            for (const feat of getActiveFeatureList()) {{
+                const opt = document.createElement('option');
+                opt.value = feat;
+                fragment.appendChild(opt);
+            }}
+            geneListEl.replaceChildren(fragment);
+        }}
+        // Clear any active gene selection so cells don't render with a feature
+        // that doesn't exist in the new modality.
+        if (typeof activateViewerGene === 'function') {{
+            try {{ await activateViewerGene(''); }} catch (e) {{ console.warn(e); }}
+        }}
+        if (typeof renderGeneDiscoveryPanel === 'function') {{
+            try {{ renderGeneDiscoveryPanel(); }} catch (e) {{}}
+        }}
+    }}
 
     const USER_AGENT = navigator.userAgent || '';
     const IS_SAFARI = /Safari/i.test(USER_AGENT) &&
@@ -5985,7 +6099,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         DATA.sections.forEach(section => {{
             if (!section.colors) section.colors = {{}};
             if (!section.colors_b64) section.colors_b64 = {{}};
+            if (!section.proportions_b64) section.proportions_b64 = {{}};
             if (!section._colorCache) section._colorCache = {{}};
+            if (!section._propCache) section._propCache = {{}};
             if (!section._edgesCache) section._edgesCache = null;
             section.rotation_deg = normalizeRotationDeg(section.rotation_deg ?? 0);
         }});
@@ -6219,6 +6335,77 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return decoded;
     }}
 
+    // Lazy decode proportion matrix (N x K) for a deconvolution color column.
+    // Returns {{ matrix: Float32Array(N*K), k }} or null if unavailable.
+    function getSectionProportions(section, name) {{
+        if (!section || !name) return null;
+        const slot = section.proportions_b64?.[name];
+        if (!slot || typeof slot.b64 !== 'string') return null;
+        section._propCache = section._propCache || {{}};
+        if (section._propCache[name]) return section._propCache[name];
+        const k = Number(slot.k) || 0;
+        if (k <= 0) return null;
+        const matrix = base64ToFloat32Array(slot.b64);
+        const entry = {{ matrix, k }};
+        section._propCache[name] = entry;
+        return entry;
+    }}
+
+    // Draw a pie chart at (cx, cy) with radius r using K wedges.
+    // props is a Float32Array of length K, hiddenMask is a Uint8Array of length K (1 = hide).
+    // Wedges below MIN_WEDGE are skipped. Hidden wedges renormalize to remainder.
+    function drawProportionsPie(ctx, cx, cy, r, props, k, hiddenMask, paletteCss) {{
+        let total = 0;
+        for (let j = 0; j < k; j++) {{
+            if (hiddenMask && hiddenMask[j]) continue;
+            const v = props[j];
+            if (v > 0) total += v;
+        }}
+        if (total <= 0) return false;
+        const inv = 1 / total;
+        const TWO_PI = Math.PI * 2;
+        const MIN_WEDGE = 0.001; // skip wedges smaller than 0.1%
+        let a0 = -Math.PI / 2; // start at top
+        for (let j = 0; j < k; j++) {{
+            if (hiddenMask && hiddenMask[j]) continue;
+            const frac = props[j] * inv;
+            if (!(frac > MIN_WEDGE)) continue;
+            const a1 = a0 + frac * TWO_PI;
+            ctx.fillStyle = paletteCss[j];
+            ctx.beginPath();
+            // Single wedge: when a wedge covers everything, draw a circle to avoid the radius-line seam.
+            if (frac >= 0.9999) {{
+                ctx.arc(cx, cy, r, 0, TWO_PI);
+            }} else {{
+                ctx.moveTo(cx, cy);
+                ctx.arc(cx, cy, r, a0, a1);
+                ctx.closePath();
+            }}
+            ctx.fill();
+            a0 = a1;
+        }}
+        return true;
+    }}
+
+    // Build a CSS palette array of length k for the categories of a proportions config.
+    function getProportionsPaletteCss(config) {{
+        const k = (config && config.categories) ? config.categories.length : 0;
+        const palette = new Array(k);
+        for (let j = 0; j < k; j++) palette[j] = getCategoryColor(j);
+        return palette;
+    }}
+
+    function getProportionsHiddenMask(config) {{
+        const cats = (config && config.categories) || [];
+        if (!hiddenCategories || hiddenCategories.size === 0) return null;
+        const mask = new Uint8Array(cats.length);
+        let any = 0;
+        for (let j = 0; j < cats.length; j++) {{
+            if (hiddenCategories.has(cats[j])) {{ mask[j] = 1; any = 1; }}
+        }}
+        return any ? mask : null;
+    }}
+
     function getSectionGeneValues(section, gene) {{
         const dense = section.genes?.[gene];
         if (dense) return dense;
@@ -6338,14 +6525,21 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function hydrateGeneFromAux(gene, auxData) {{
         const geneEntry = auxData?.genes?.[gene];
-        const geneMeta = auxData?.genes_meta?.[gene] || geneAuxManifest?.genes_meta?.[gene];
+        const modalityEntry = getActiveModalityManifestEntry(geneAuxManifest);
+        const geneMeta = auxData?.genes_meta?.[gene]
+            || modalityEntry?.genes_meta?.[gene]
+            || geneAuxManifest?.genes_meta?.[gene];
         if (!geneEntry || !geneMeta) return false;
         DATA.genes_meta[gene] = geneMeta;
-        const encoding = auxData?.gene_encodings?.[gene] || geneAuxManifest?.gene_encodings?.[gene];
+        const encoding = auxData?.gene_encodings?.[gene]
+            || modalityEntry?.gene_encodings?.[gene]
+            || geneAuxManifest?.gene_encodings?.[gene];
         if (encoding) {{
             DATA.gene_encodings[gene] = encoding;
         }}
-        const valueEncoding = auxData?.gene_value_encodings?.[gene] || geneAuxManifest?.gene_value_encodings?.[gene];
+        const valueEncoding = auxData?.gene_value_encodings?.[gene]
+            || modalityEntry?.gene_value_encodings?.[gene]
+            || geneAuxManifest?.gene_value_encodings?.[gene];
         if (valueEncoding) {{
             DATA.gene_value_encodings[gene] = valueEncoding;
         }}
@@ -6604,14 +6798,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function hydrateGeneFromBinary(gene, geneEntry) {{
-        const geneMeta = geneAuxManifest?.genes_meta?.[gene];
+        const modalityEntry = getActiveModalityManifestEntry(geneAuxManifest);
+        const geneMeta = modalityEntry?.genes_meta?.[gene] || geneAuxManifest?.genes_meta?.[gene];
         if (!geneEntry || !geneMeta) return false;
         DATA.genes_meta[gene] = geneMeta;
-        const encoding = geneAuxManifest?.gene_encodings?.[gene];
+        const encoding = modalityEntry?.gene_encodings?.[gene] || geneAuxManifest?.gene_encodings?.[gene];
         if (encoding) {{
             DATA.gene_encodings[gene] = encoding;
         }}
-        const valueEncoding = geneAuxManifest?.gene_value_encodings?.[gene];
+        const valueEncoding = modalityEntry?.gene_value_encodings?.[gene] || geneAuxManifest?.gene_value_encodings?.[gene];
         if (valueEncoding) {{
             DATA.gene_value_encodings[gene] = valueEncoding;
         }}
@@ -6654,7 +6849,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }})
             .then((payload) => {{
                 const format = payload?.format;
-                if (!payload || (format !== 'karospace-gene-sidecar-manifest-v2' && format !== 'karospace-gene-sidecar-manifest-v3')) {{
+                if (!payload || (format !== 'karospace-gene-sidecar-manifest-v2' && format !== 'karospace-gene-sidecar-manifest-v3' && format !== 'karospace-gene-sidecar-manifest-v4')) {{
                     throw new Error('Unsupported gene sidecar manifest format');
                 }}
                 if (getGeneAuxSidecarFormat(payload) === 'binary-v1' && !Array.isArray(payload.section_order)) {{
@@ -6728,19 +6923,22 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         const manifest = await loadGeneAuxManifest();
         if (!manifest) return false;
-        const shardUrl = manifest?.gene_to_shard?.[token];
+        const modalityEntry = getActiveModalityManifestEntry(manifest);
+        const shardUrl = modalityEntry?.gene_to_shard?.[token] ?? manifest?.gene_to_shard?.[token];
         if (!shardUrl) {{
             if (showErrors) {{
                 alert(`Gene "${{token}}" is listed in the dataset but was not indexed in the auxiliary manifest.`);
             }}
             return false;
         }}
+        const sectionOrder = modalityEntry?.section_order || manifest.section_order || [];
+        const geneMeta = modalityEntry?.genes_meta?.[token] ?? manifest?.genes_meta?.[token] ?? null;
         let hydrated = false;
         if (getGeneAuxSidecarFormat(manifest) === 'binary-v1') {{
             try {{
                 const payloadBuffer = await readBinaryGenePayload(shardUrl, token);
                 if (!payloadBuffer) return false;
-                const geneEntry = parseBinaryGenePayload(payloadBuffer, manifest.section_order || [], manifest?.genes_meta?.[token] || null);
+                const geneEntry = parseBinaryGenePayload(payloadBuffer, sectionOrder, geneMeta);
                 hydrated = hydrateGeneFromBinary(token, geneEntry);
             }} catch (error) {{
                 console.error('Failed to load binary gene payload:', error);
@@ -10450,7 +10648,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function getGeneSearchResults(query, limit = GENE_DISCOVERY_MAX_RESULTS) {{
         const token = String(query || '').trim();
         if (!token) return [];
-        return (DATA.available_genes || [])
+        return getActiveFeatureList()
             .map((gene) => {{
                 const match = fuzzyGeneMatchScore(gene, token);
                 if (!match) return null;
@@ -11243,56 +11441,64 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return Number(v).toString();
     }}
 
-    function buildTarBlock(name, contentBytes) {{
+    function buildTarHeader(name, contentSize) {{
         const header = new Uint8Array(512);
         const nameBytes = new TextEncoder().encode(name);
         if (nameBytes.length > 100) throw new Error('Tar filename too long: ' + name);
         header.set(nameBytes, 0);
         const write = (value, offset, length) => {{
-            const s = value.padStart(length - 1, '0') + '\0';
+            const s = value.padStart(length - 1, '0') + '\\0';
             header.set(new TextEncoder().encode(s), offset);
         }};
         write('0000644', 100, 8);
         write('0000000', 108, 8);
         write('0000000', 116, 8);
-        write(contentBytes.length.toString(8), 124, 12);
+        write(contentSize.toString(8), 124, 12);
         write(Math.floor(Date.now() / 1000).toString(8), 136, 12);
         for (let i = 148; i < 156; i++) header[i] = 0x20;
         header[156] = 0x30;
-        header.set(new TextEncoder().encode('ustar\0'), 257);
+        header.set(new TextEncoder().encode('ustar\\0'), 257);
         header.set(new TextEncoder().encode('00'), 263);
         let chksum = 0;
         for (let i = 0; i < 512; i++) chksum += header[i];
         write(chksum.toString(8), 148, 8);
         header[155] = 0x20;
-        const padLen = (512 - (contentBytes.length % 512)) % 512;
-        const block = new Uint8Array(512 + contentBytes.length + padLen);
-        block.set(header, 0);
-        block.set(contentBytes, 512);
-        return block;
+        return header;
     }}
 
-    function buildTarArchive(files) {{
+    function normalizeTarFileChunks(content) {{
         const enc = new TextEncoder();
-        const blocks = [];
-        files.forEach(f => {{
-            const bytes = typeof f.content === 'string' ? enc.encode(f.content) : f.content;
-            blocks.push(buildTarBlock(f.name, bytes));
-        }});
-        blocks.push(new Uint8Array(1024));
-        let total = 0;
-        blocks.forEach(b => {{ total += b.length; }});
-        const out = new Uint8Array(total);
-        let offset = 0;
-        blocks.forEach(b => {{ out.set(b, offset); offset += b.length; }});
-        return out;
+        if (typeof content === 'string') return [enc.encode(content)];
+        if (content instanceof Uint8Array) return [content];
+        if (Array.isArray(content)) {{
+            return content.map(part => {{
+                if (typeof part === 'string') return enc.encode(part);
+                if (part instanceof Uint8Array) return part;
+                throw new Error('Unsupported tar chunk type');
+            }});
+        }}
+        throw new Error('Unsupported tar content');
     }}
 
-    async function gzipBytes(bytes) {{
+    function buildTarChunks(files) {{
+        const chunks = [];
+        files.forEach(f => {{
+            const contentChunks = normalizeTarFileChunks(f.content);
+            let size = 0;
+            for (const c of contentChunks) size += c.length;
+            chunks.push(buildTarHeader(f.name, size));
+            for (const c of contentChunks) chunks.push(c);
+            const padLen = (512 - (size % 512)) % 512;
+            if (padLen > 0) chunks.push(new Uint8Array(padLen));
+        }});
+        chunks.push(new Uint8Array(1024));
+        return chunks;
+    }}
+
+    async function gzipBlob(blob) {{
         if (typeof CompressionStream === 'undefined') return null;
-        const stream = new Response(new Blob([bytes])).body.pipeThrough(new CompressionStream('gzip'));
-        const buffer = await new Response(stream).arrayBuffer();
-        return new Uint8Array(buffer);
+        const stream = blob.stream().pipeThrough(new CompressionStream('gzip'));
+        return await new Response(stream).blob();
     }}
 
     function hydrateAllSectionArrays() {{
@@ -11306,6 +11512,35 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function collectLoadedGenes() {{
         const meta = DATA.genes_meta || {{}};
         return (DATA.available_genes || []).filter(g => meta[g]);
+    }}
+
+    function makeChunkWriter(chunkTargetBytes) {{
+        const target = chunkTargetBytes || 1048576;
+        const chunks = [];
+        let buf = '';
+        const enc = new TextEncoder();
+        return {{
+            write(text) {{
+                if (text == null || text === '') return;
+                buf += text;
+                if (buf.length >= target) {{
+                    chunks.push(enc.encode(buf));
+                    buf = '';
+                }}
+            }},
+            flush() {{
+                if (buf.length > 0) {{
+                    chunks.push(enc.encode(buf));
+                    buf = '';
+                }}
+                return chunks;
+            }},
+            totalBytes() {{
+                let s = 0;
+                for (const c of chunks) s += c.length;
+                return s + (new TextEncoder().encode(buf)).length;
+            }},
+        }};
     }}
 
     async function exportDataBundle() {{
@@ -11374,17 +11609,27 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 return !!meta;
             }});
 
-            const obsHeader = ['cell_id', 'sample_id', ...obsCols.map(c => c)].map(csvEscape).join(',');
-            const spatialHeader = ['cell_id', 'sample_id', 'x', 'y'].map(csvEscape).join(',');
-            const umapHeader = ['cell_id', 'sample_id', 'umap1', 'umap2'].map(csvEscape).join(',');
-            const xHeader = ['cell_id', ...genesToExport].map(csvEscape).join(',');
+            const nGenes = genesToExport.length;
+            const totalCellEstimate = sections.reduce((s, sec) => s + (sec.x?.length || 0), 0);
+            const DENSE_BYTE_LIMIT = 200 * 1024 * 1024;
+            const denseEstimateBytes = totalCellEstimate * (nGenes * 8 + 16);
+            const useSparse = nGenes > 0 && denseEstimateBytes > DENSE_BYTE_LIMIT;
 
-            const obsLines = [obsHeader];
-            const spatialLines = [spatialHeader];
-            const umapLines = [umapHeader];
-            const xLines = [xHeader];
+            const obsWriter = makeChunkWriter();
+            const spatialWriter = makeChunkWriter();
+            const umapWriter = makeChunkWriter();
+            const xWriter = makeChunkWriter();
+
+            obsWriter.write(['cell_id', 'sample_id', ...obsCols.map(c => c)].map(csvEscape).join(',') + '\\n');
+            spatialWriter.write(['cell_id', 'sample_id', 'x', 'y'].map(csvEscape).join(',') + '\\n');
+            umapWriter.write(['cell_id', 'sample_id', 'umap1', 'umap2'].map(csvEscape).join(',') + '\\n');
+            if (!useSparse) {{
+                xWriter.write(['cell_id', ...genesToExport].map(csvEscape).join(',') + '\\n');
+            }}
+
             let anyUMAP = false;
             let totalCells = 0;
+            let nnz = 0;
 
             updateExportProgress('Writing CSV rows', 0, sections.length);
             for (let sIdx = 0; sIdx < sections.length; sIdx++) {{
@@ -11411,6 +11656,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 for (let i = 0; i < n; i++) {{
                     const globalIdx = (obsIdx && obsIdx.length > i) ? obsIdx[i] : (totalCells + i);
                     const cellId = 'cell_' + globalIdx;
+                    const cellRow1Based = totalCells + i + 1;
 
                     const obsRow = [cellId, sampleId];
                     for (let k = 0; k < obsColValues.length; k++) {{
@@ -11423,21 +11669,32 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                             obsRow.push(ci >= 0 && ci < ov.cats.length ? String(ov.cats[ci]) : '');
                         }} else obsRow.push(csvFormatNumber(v));
                     }}
-                    obsLines.push(obsRow.map(csvEscape).join(','));
+                    obsWriter.write(obsRow.map(csvEscape).join(',') + '\\n');
 
-                    spatialLines.push([cellId, sampleId, csvFormatNumber(xs[i]), csvFormatNumber(ys[i])].map(csvEscape).join(','));
-                    if (hasUMAP) umapLines.push([cellId, sampleId, csvFormatNumber(ux[i]), csvFormatNumber(uy[i])].map(csvEscape).join(','));
+                    spatialWriter.write([cellId, sampleId, csvFormatNumber(xs[i]), csvFormatNumber(ys[i])].map(csvEscape).join(',') + '\\n');
+                    if (hasUMAP) umapWriter.write([cellId, sampleId, csvFormatNumber(ux[i]), csvFormatNumber(uy[i])].map(csvEscape).join(',') + '\\n');
 
-                    if (genesToExport.length) {{
-                        const xRow = new Array(1 + genesToExport.length);
-                        xRow[0] = cellId;
-                        for (let g = 0; g < genesToExport.length; g++) {{
-                            const arr = geneArrays[g];
-                            xRow[g + 1] = arr ? csvFormatNumber(arr[i]) : '';
+                    if (nGenes > 0) {{
+                        if (useSparse) {{
+                            for (let g = 0; g < nGenes; g++) {{
+                                const arr = geneArrays[g];
+                                if (!arr) continue;
+                                const v = arr[i];
+                                if (!Number.isFinite(v) || v === 0) continue;
+                                xWriter.write(cellRow1Based + ' ' + (g + 1) + ' ' + v + '\\n');
+                                nnz++;
+                            }}
+                        }} else {{
+                            const parts = new Array(1 + nGenes);
+                            parts[0] = cellId;
+                            for (let g = 0; g < nGenes; g++) {{
+                                const arr = geneArrays[g];
+                                parts[g + 1] = arr ? csvFormatNumber(arr[i]) : '';
+                            }}
+                            xWriter.write(parts.join(',') + '\\n');
                         }}
-                        xLines.push(xRow.join(','));
                     }} else {{
-                        xLines.push(cellId);
+                        xWriter.write(cellId + '\\n');
                     }}
                 }}
                 totalCells += n;
@@ -11446,17 +11703,35 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
 
             checkCancel();
-            const varLines = ['gene_name', ...genesToExport.map(csvEscape)].join('\\n');
 
-            const readme = [
+            const obsChunks = obsWriter.flush();
+            const spatialChunks = spatialWriter.flush();
+            const umapChunks = anyUMAP ? umapWriter.flush() : [];
+            let xChunks = xWriter.flush();
+
+            if (useSparse) {{
+                const header = new TextEncoder().encode(
+                    '%%MatrixMarket matrix coordinate real general\\n' +
+                    '%\\n' +
+                    totalCells + ' ' + nGenes + ' ' + nnz + '\\n'
+                );
+                xChunks = [header, ...xChunks];
+            }}
+
+            const varCsv = 'gene_name\\n' + genesToExport.map(csvEscape).join('\\n') + (nGenes ? '\\n' : '');
+
+            const xFileName = useSparse ? 'X.mtx' : 'X.csv';
+            const readmeLines = [
                 '# KaroSpace data export',
                 '',
                 'Generated at ' + new Date().toISOString(),
                 '',
                 'Files:',
                 '- obs.csv      Per-cell metadata (' + totalCells.toLocaleString() + ' cells)',
-                '- var.csv      Gene list (' + genesToExport.length.toLocaleString() + ' genes)',
-                '- X.csv        Dense expression matrix (rows = cells, columns = genes)',
+                '- var.csv      Gene list (' + nGenes.toLocaleString() + ' genes)',
+                useSparse
+                    ? '- X.mtx        Sparse expression matrix in Matrix Market coordinate format (' + nnz.toLocaleString() + ' non-zero entries)'
+                    : '- X.csv        Dense expression matrix (rows = cells, columns = genes)',
                 '- spatial.csv  Per-cell spatial coordinates',
                 anyUMAP ? '- umap.csv     Per-cell UMAP coordinates' : '- umap.csv     (not produced \u2014 no UMAP in viewer)',
                 '',
@@ -11469,8 +11744,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 '',
                 'obs = pd.read_csv("obs.csv").set_index("cell_id")',
                 'var = pd.read_csv("var.csv").set_index("gene_name")',
-                'X_df = pd.read_csv("X.csv").set_index("cell_id").loc[obs.index, var.index]',
-                'X = X_df.to_numpy(dtype=np.float32)',
+            ];
+            if (useSparse) {{
+                readmeLines.push(
+                    'from scipy.io import mmread',
+                    'X = mmread("X.mtx").tocsr().astype(np.float32)',
+                    'assert X.shape == (len(obs), len(var)), "Row/col order must match obs.csv / var.csv"',
+                );
+            }} else {{
+                readmeLines.push(
+                    'X_df = pd.read_csv("X.csv").set_index("cell_id").loc[obs.index, var.index]',
+                    'X = X_df.to_numpy(dtype=np.float32)',
+                );
+            }}
+            readmeLines.push(
                 '',
                 'spatial = pd.read_csv("spatial.csv").set_index("cell_id").loc[obs.index]',
                 'obsm = {{"spatial": spatial[["x", "y"]].to_numpy(dtype=np.float32)}}',
@@ -11485,32 +11772,34 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'adata.write_h5ad("karospace_export.h5ad")',
                 '```',
                 '',
-            ].join('\\n');
+            );
+            const readme = readmeLines.join('\\n');
 
             const files = [
                 {{ name: 'karospace-export/README.md', content: readme }},
-                {{ name: 'karospace-export/obs.csv', content: obsLines.join('\\n') + '\\n' }},
-                {{ name: 'karospace-export/var.csv', content: varLines + '\\n' }},
-                {{ name: 'karospace-export/X.csv', content: xLines.join('\\n') + '\\n' }},
-                {{ name: 'karospace-export/spatial.csv', content: spatialLines.join('\\n') + '\\n' }},
+                {{ name: 'karospace-export/obs.csv', content: obsChunks }},
+                {{ name: 'karospace-export/var.csv', content: varCsv }},
+                {{ name: 'karospace-export/' + xFileName, content: xChunks }},
+                {{ name: 'karospace-export/spatial.csv', content: spatialChunks }},
             ];
-            if (anyUMAP) files.push({{ name: 'karospace-export/umap.csv', content: umapLines.join('\\n') + '\\n' }});
+            if (anyUMAP) files.push({{ name: 'karospace-export/umap.csv', content: umapChunks }});
 
             setLabel('Packing archive...');
             updateExportProgress('Packing archive', null, null);
             await yieldToUI();
-            const tarBytes = buildTarArchive(files);
+            const tarChunks = buildTarChunks(files);
+            const tarBlob = new Blob(tarChunks, {{ type: 'application/x-tar' }});
 
             checkCancel();
             updateExportProgress('Compressing (gzip)', null, null);
             await yieldToUI();
             let blob, ext;
-            const gz = await gzipBytes(tarBytes);
+            const gz = await gzipBlob(tarBlob);
             if (gz) {{
-                blob = new Blob([gz], {{ type: 'application/gzip' }});
+                blob = gz;
                 ext = 'tar.gz';
             }} else {{
-                blob = new Blob([tarBytes], {{ type: 'application/x-tar' }});
+                blob = tarBlob;
                 ext = 'tar';
             }}
 
@@ -12146,7 +12435,47 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const focusCategory = activeSpotlight || modalSelectedCategory;
         const hasNeighborFocus = neighborNetworkFocusCategories && neighborNetworkFocusCategories.size > 0;
         const hasTypeFocus = !config.is_continuous && (focusCategory || hasNeighborFocus);
-        if (showGeneCells) {{
+        if (showGeneCells && config.is_proportions) {{
+            const propData = getSectionProportions(section, currentColor);
+            const k = propData?.k || 0;
+            // Below this radius pies are unreadable; fall back to dominant-component solid.
+            const PIE_MIN_RADIUS = 2.0;
+            if (propData && k > 0) {{
+                const matrix = propData.matrix;
+                const paletteCss = getProportionsPaletteCss(config);
+                const hiddenMask = getProportionsHiddenMask(config);
+                if (spotSize >= PIE_MIN_RADIUS) {{
+                    for (let di = 0; di < section.x.length; di++) {{
+                        const i = drawOrder ? drawOrder[di] : di;
+                        const val = values[i];
+                        if (isMissingDisplayValue(val)) continue;
+                        const off = i * k;
+                        // Reject rows that are all-zero/NaN (already encoded as missing val above).
+                        const point = transform.dataToScreen(section.x[i], section.y[i]);
+                        ctx.globalAlpha = 1;
+                        drawProportionsPie(
+                            ctx, point.x, point.y, spotSize,
+                            matrix.subarray(off, off + k), k, hiddenMask, paletteCss,
+                        );
+                    }}
+                }} else {{
+                    // Solid fallback by dominant component when pies would be sub-pixel.
+                    for (let di = 0; di < section.x.length; di++) {{
+                        const i = drawOrder ? drawOrder[di] : di;
+                        const val = values[i];
+                        if (isMissingDisplayValue(val)) continue;
+                        const catInfo = getCategoricalValueInfo(config, val);
+                        if (!catInfo || hiddenCategories.has(catInfo.catName)) continue;
+                        const point = transform.dataToScreen(section.x[i], section.y[i]);
+                        ctx.fillStyle = paletteCss[catInfo.catIdx];
+                        ctx.globalAlpha = 1;
+                        ctx.beginPath();
+                        ctx.arc(point.x, point.y, spotSize, 0, Math.PI * 2);
+                        ctx.fill();
+                    }}
+                }}
+            }}
+        }} else if (showGeneCells) {{
             for (let di = 0; di < section.x.length; di++) {{
                 const i = drawOrder ? drawOrder[di] : di;
                 const val = values[i];
@@ -13078,6 +13407,49 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ctx.stroke();
             ctx.setLineDash([]);
             ensureModalBlendRenderCache(modalSection, transform, width, height, dpr, adjustedSpotSize, blendRuntimes, candidateIndices);
+        }} else if (showGeneCells && config.is_proportions) {{
+            const propData = getSectionProportions(modalSection, currentColor);
+            const k = propData?.k || 0;
+            const PIE_MIN_RADIUS = 2.0;
+            if (propData && k > 0) {{
+                const matrix = propData.matrix;
+                const paletteCss = getProportionsPaletteCss(config);
+                const hiddenMask = getProportionsHiddenMask(config);
+                if (adjustedSpotSize >= PIE_MIN_RADIUS) {{
+                    for (let kc = 0; kc < nCandidates; kc++) {{
+                        const i = candidateIndices ? candidateIndices[kc] : kc;
+                        const val = values[i];
+                        if (isMissingDisplayValue(val)) continue;
+                        const point = transform.dataToScreen(modalSection.x[i], modalSection.y[i]);
+                        const x = point.x;
+                        const y = point.y;
+                        if (!transform.isPointVisible(x, y, adjustedSpotSize)) continue;
+                        const off = i * k;
+                        ctx.globalAlpha = 1;
+                        drawProportionsPie(
+                            ctx, x, y, adjustedSpotSize,
+                            matrix.subarray(off, off + k), k, hiddenMask, paletteCss,
+                        );
+                    }}
+                }} else {{
+                    for (let kc = 0; kc < nCandidates; kc++) {{
+                        const i = candidateIndices ? candidateIndices[kc] : kc;
+                        const val = values[i];
+                        if (isMissingDisplayValue(val)) continue;
+                        const catInfo = getCategoricalValueInfo(config, val);
+                        if (!catInfo || hiddenCategories.has(catInfo.catName)) continue;
+                        const point = transform.dataToScreen(modalSection.x[i], modalSection.y[i]);
+                        const x = point.x;
+                        const y = point.y;
+                        if (!transform.isPointVisible(x, y, adjustedSpotSize)) continue;
+                        ctx.fillStyle = paletteCss[catInfo.catIdx];
+                        ctx.globalAlpha = 1;
+                        ctx.beginPath();
+                        ctx.arc(x, y, adjustedSpotSize, 0, Math.PI * 2);
+                        ctx.fill();
+                    }}
+                }}
+            }}
         }} else if (showGeneCells) {{
             const activeSpotlight = getLinkedSpotlightCategory(config);
             const focusCategory = activeSpotlight || modalSelectedCategory;
@@ -13261,8 +13633,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
         }} else {{
             const activeSpotlight = getLinkedSpotlightCategory(config);
+            const proportionsBadge = config.is_proportions
+                ? `<div class="legend-subtitle" style="font-size:11px;opacity:0.7;margin-top:-4px;margin-bottom:6px;">Cell-type proportions (pie per spot)</div>`
+                : '';
             let html = `
                 <div class="legend-title">${{colorLabel}}</div>
+                ${{proportionsBadge}}
                 <div class="legend-actions">
                     <button class="legend-btn" id="${{targetId}}-show-all">Show All</button>
                     <button class="legend-btn" id="${{targetId}}-hide-all">Hide All</button>
@@ -18930,11 +19306,29 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }});
 
         const geneList = document.getElementById('gene-list');
-        (DATA.available_genes || []).forEach(gene => {{
+        getActiveFeatureList().forEach(gene => {{
             const opt = document.createElement('option');
             opt.value = gene;
             geneList.appendChild(opt);
         }});
+
+        // Modality picker: only render when more than one modality is exported.
+        const modalityControl = document.getElementById('modality-control-group');
+        const modalitySelect = document.getElementById('modality-select');
+        if (modalityControl && modalitySelect && MODALITY_DESCRIPTORS.length > 1) {{
+            for (const desc of MODALITY_DESCRIPTORS) {{
+                const opt = document.createElement('option');
+                opt.value = desc.name;
+                opt.textContent = desc.label || desc.name;
+                if (desc.name === CURRENT_MODALITY) opt.selected = true;
+                modalitySelect.appendChild(opt);
+            }}
+            modalityControl.style.display = '';
+            modalitySelect.addEventListener('change', async (e) => {{
+                const target = e.target.value;
+                await setActiveModality(target);
+            }});
+        }}
 
         const geneInput = document.getElementById('gene-input');
         const geneInputShell = document.getElementById('gene-input-shell');
@@ -20066,10 +20460,12 @@ def export_to_html(
     interaction_markers_method: str = "wilcoxon",
     interaction_markers_layer: Optional[str] = "normalized",
     section_rotations: Optional[Mapping[str, Union[int, float]]] = None,
+    deconvolutions: Optional[Dict[str, str]] = None,
     gene_correlation_top_n: int = 10,
     cluster_means_n_genes: int = 500,
     spatial_variable_genes_n: int = 200,
     scalebar_unit: str = "μm",
+    modalities: Optional[List[str]] = None,
 ) -> str:
     """
     Export spatial dataset to a standalone HTML file.
@@ -20358,8 +20754,30 @@ def export_to_html(
         interaction_markers_method=interaction_markers_method,
         interaction_markers_layer=interaction_markers_layer,
         section_rotations=resolved_section_rotations,
+        deconvolutions=deconvolutions,
     )
     data["scalebar_unit"] = str(scalebar_unit or "μm")
+
+    # Resolve which non-default modalities to export. Only meaningful when sidecar-based.
+    available_modalities = list(getattr(dataset, "modalities", {}).keys())
+    default_modality_name = getattr(dataset, "default_modality", "rna")
+    if modalities is None:
+        selected_modalities = list(available_modalities)
+    else:
+        requested = [str(m) for m in modalities]
+        unknown = [m for m in requested if m not in available_modalities]
+        if unknown:
+            raise ValueError(f"Unknown modalities: {unknown}. Available: {available_modalities}")
+        selected_modalities = requested
+    if default_modality_name in available_modalities and default_modality_name not in selected_modalities:
+        selected_modalities.insert(0, default_modality_name)
+    extra_modalities = [m for m in selected_modalities if m != default_modality_name]
+    if extra_modalities and gene_storage != "sidecar":
+        print(
+            f"  Note: extra modalities {extra_modalities} require gene_storage='sidecar'; "
+            "skipping in embedded mode."
+        )
+        extra_modalities = []
 
     if gene_storage == "sidecar":
         assert resolved_gene_aux_path is not None
@@ -20370,6 +20788,24 @@ def export_to_html(
         gene_aux_url = data["gene_aux_url"]
     else:
         data["gene_aux_url"] = None
+
+    # Modality descriptors for the viewer (always emitted; older viewers ignore).
+    modality_descriptors: List[Dict[str, Any]] = []
+    features_by_modality: Dict[str, List[str]] = {}
+    if available_modalities:
+        for mod_name in selected_modalities:
+            mod = dataset.modalities[mod_name]
+            features_by_modality[mod_name] = list(mod.feature_names)
+            modality_descriptors.append({
+                "name": mod_name,
+                "label": mod.label or mod_name,
+                "value_kind": mod.value_kind,
+                "n_features": int(mod.n_features),
+                "is_default": (mod_name == default_modality_name),
+            })
+    data["modalities"] = modality_descriptors
+    data["features_by_modality"] = features_by_modality
+    data["default_modality"] = default_modality_name if modality_descriptors else None
 
     if int(gene_correlation_top_n) > 0 and embedded_genes:
         if "gene_correlations" in companion_analytics:
@@ -20577,6 +21013,88 @@ def export_to_html(
                     f"    wrote {shard_filename} ({genes_written}/{total_sidecar_genes} genes) "
                     f"in {shard_elapsed:.1f}s"
                 )
+        # Mirror RNA fields under manifest.modalities for forward-compat.
+        manifest["modalities"] = {
+            default_modality_name: {
+                "shards": dict(manifest["shards"]),
+                "genes_meta": dict(manifest["genes_meta"]),
+                "gene_encodings": dict(manifest["gene_encodings"]),
+                "gene_value_encodings": dict(manifest["gene_value_encodings"]),
+                "gene_to_shard": dict(manifest["gene_to_shard"]),
+                "value_kind": "counts",
+            }
+        }
+        if gene_sidecar_format == GENE_SIDECAR_FORMAT_BINARY_V1:
+            manifest["modalities"][default_modality_name]["section_order"] = list(manifest["section_order"])
+
+        # Per-modality shard writes for non-default modalities.
+        for mod_name in extra_modalities:
+            mod = dataset.modalities[mod_name]
+            mod_features = list(mod.feature_names)
+            if not mod_features:
+                continue
+            mod_aux_dir = resolved_gene_aux_dir / mod_name
+            mod_aux_dir.mkdir(parents=True, exist_ok=True)
+            mod_shard_groups = _chunked(mod_features, gene_sidecar_shard_size)
+            print(
+                f"Building modality '{mod_name}' sidecar: {len(mod_features)} features × "
+                f"{len(mod_shard_groups)} shard{'s' if len(mod_shard_groups) != 1 else ''}..."
+            )
+            mod_entry: Dict[str, Any] = {
+                "shards": {},
+                "genes_meta": {},
+                "gene_encodings": {},
+                "gene_value_encodings": {},
+                "gene_to_shard": {},
+                "value_kind": mod.value_kind,
+                "label": mod.label or mod_name,
+            }
+            if gene_sidecar_format == GENE_SIDECAR_FORMAT_BINARY_V1:
+                mod_entry["section_order"] = [section.section_id for section in dataset.sections]
+            for shard_idx, shard_features in enumerate(mod_shard_groups):
+                shard_suffix = ".bin" if gene_sidecar_format == GENE_SIDECAR_FORMAT_BINARY_V1 else ".json"
+                shard_filename = f"{shard_idx:03d}{shard_suffix}"
+                shard_path = mod_aux_dir / shard_filename
+                shard_rel = Path(os.path.relpath(shard_path, start=output_parent)).as_posix()
+                shard_data = dataset.to_gene_sidecar_data(
+                    genes=shard_features,
+                    downsample=downsample,
+                    export_indices=sidecar_export_indices,
+                    gene_encoding=gene_encoding,
+                    gene_value_encoding=gene_value_encoding,
+                    gene_sparse_zero_threshold=gene_sparse_zero_threshold,
+                    modality=mod_name,
+                )
+                mod_entry["shards"][shard_rel] = shard_features
+                for feat in shard_features:
+                    mod_entry["gene_to_shard"][feat] = shard_rel
+                    if feat in shard_data.get("genes_meta", {}):
+                        mod_entry["genes_meta"][feat] = shard_data["genes_meta"][feat]
+                    if feat in shard_data.get("gene_encodings", {}):
+                        mod_entry["gene_encodings"][feat] = shard_data["gene_encodings"][feat]
+                    if feat in shard_data.get("gene_value_encodings", {}):
+                        mod_entry["gene_value_encodings"][feat] = shard_data["gene_value_encodings"][feat]
+                if gene_sidecar_format == GENE_SIDECAR_FORMAT_BINARY_V1:
+                    _write_binary_gene_shard(
+                        shard_path=shard_path,
+                        shard_genes=shard_features,
+                        shard_data=shard_data,
+                        section_order=mod_entry["section_order"],
+                        section_cell_counts=section_cell_counts,
+                    )
+                else:
+                    shard_data["format"] = "karospace-gene-sidecar-shard-v2"
+                    shard_data.pop("genes_meta", None)
+                    shard_data.pop("gene_encodings", None)
+                    shard_data.pop("gene_value_encodings", None)
+                    with open(shard_path, "w", encoding="utf-8") as f:
+                        json.dump(shard_data, f, separators=(",", ":"))
+            manifest["modalities"][mod_name] = mod_entry
+
+        # Bump format only when extra modalities are actually present.
+        if extra_modalities:
+            manifest["format"] = "karospace-gene-sidecar-manifest-v4"
+
         with open(resolved_gene_aux_path, "w", encoding="utf-8") as f:
             json.dump(manifest, f, separators=(",", ":"))
         if total_sidecar_genes:
