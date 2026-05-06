@@ -103,8 +103,8 @@ If the package is unpacked as-is, the unpacked files should be equivalent to a n
 That means:
 
 - `index.html` is still a normal KaroSpace HTML viewer
-- the packaged gene manifest is still a normal `karospace-gene-sidecar-manifest-v2`
-- the packaged gene shards are still normal `karospace-gene-sidecar-shard-v2` JSON files
+- the packaged gene manifest is still a normal `karospace-gene-sidecar-manifest-v2` (or `v3`/`v4`)
+- the packaged gene shards are still normal `karospace-gene-sidecar-shard-v2` JSON files (or binary shards)
 
 The package manifest only adds packaging metadata. It must not replace the existing viewer and sidecar formats.
 
@@ -190,12 +190,12 @@ Optional but recommended:
 
 ### 9.2 Gene Manifest
 
-- Must remain `karospace-gene-sidecar-manifest-v2`
+- Must remain `karospace-gene-sidecar-manifest-v2`, `v3`, or `v4`
 - `shards` paths inside the gene manifest must be valid relative archive paths after unpacking
 
 ### 9.3 Gene Shards
 
-- Must remain `karospace-gene-sidecar-shard-v2`
+- Must remain `karospace-gene-sidecar-shard-v2` or binary shards
 
 ## 10. Loader Contract
 
@@ -235,7 +235,7 @@ A `.karospace` package is valid only if:
 - `viewer.gene_storage == "sidecar"`
 - `viewer.gene_manifest_path` exists in the archive
 - `viewer.gene_shard_dir` exists in the archive
-- packaged gene manifest parses and reports `format == "karospace-gene-sidecar-manifest-v2"`
+- packaged gene manifest parses and reports `format == "karospace-gene-sidecar-manifest-v2"`, `v3`, or `v4`
 - every shard path named in the gene manifest exists in the archive
 - no declared path escapes archive root
 
@@ -259,8 +259,8 @@ There are three distinct version surfaces:
 2. HTML viewer payload/schema
    - whatever the viewer already emits
 3. Gene sidecar schema
-   - currently `karospace-gene-sidecar-manifest-v2`
-   - currently `karospace-gene-sidecar-shard-v2`
+   - currently `karospace-gene-sidecar-manifest-v2`, `v3`, or `v4`
+   - currently `karospace-gene-sidecar-shard-v2` or binary shards
 
 Future package versions may wrap newer sidecar versions without changing the core design principle that package mode is a wrapper over standard sidecar export.
 

@@ -641,7 +641,8 @@
         if (
           !packagedGeneManifest ||
           (packagedGeneManifest.format !== 'karospace-gene-sidecar-manifest-v2' &&
-           packagedGeneManifest.format !== 'karospace-gene-sidecar-manifest-v3')
+           packagedGeneManifest.format !== 'karospace-gene-sidecar-manifest-v3' &&
+           packagedGeneManifest.format !== 'karospace-gene-sidecar-manifest-v4')
         ) {
           throw new Error('Packaged gene manifest format is not supported');
         }

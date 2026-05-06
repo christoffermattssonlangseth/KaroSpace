@@ -746,6 +746,7 @@ def test_karospace_package_loader_page_contains_expected_runtime_hooks():
     assert "DecompressionStream" in loader_html
     assert "karospace-gene-sidecar-manifest-v2" in loader_html
     assert "karospace-gene-sidecar-manifest-v3" in loader_html
+    assert "karospace-gene-sidecar-manifest-v4" in loader_html
     assert "function injectBootstrap(htmlText, sessionId)" in loader_html
     assert "window.fetch = function packageAwareFetch(input, init)" in loader_html
     assert "window.__karospacePackageSession" in loader_html
