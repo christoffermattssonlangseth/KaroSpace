@@ -3842,17 +3842,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     <div class="overview-blend-panel" id="overview-blend-panel">
         <div class="overview-blend-row">
             <span class="overview-blend-side">A</span>
-            <select id="overview-blend-a-kind"><option value="cell">Cell type</option><option value="gene">Gene</option></select>
+            <select id="overview-blend-a-kind"></select>
             <select id="overview-blend-a-color"></select>
             <select id="overview-blend-a-category"></select>
-            <input type="text" id="overview-blend-a-gene" list="gene-list" placeholder="Gene symbol" style="display:none;">
+            <input type="text" id="overview-blend-a-gene" list="overview-blend-a-gene-list" placeholder="Gene symbol" style="display:none;">
+            <datalist id="overview-blend-a-gene-list"></datalist>
         </div>
         <div class="overview-blend-row">
             <span class="overview-blend-side">B</span>
-            <select id="overview-blend-b-kind"><option value="cell">Cell type</option><option value="gene">Gene</option></select>
+            <select id="overview-blend-b-kind"></select>
             <select id="overview-blend-b-color"></select>
             <select id="overview-blend-b-category"></select>
-            <input type="text" id="overview-blend-b-gene" list="gene-list" placeholder="Gene symbol" style="display:none;">
+            <input type="text" id="overview-blend-b-gene" list="overview-blend-b-gene-list" placeholder="Gene symbol" style="display:none;">
+            <datalist id="overview-blend-b-gene-list"></datalist>
         </div>
         <div class="overview-blend-row">
             <span class="overview-blend-side">Split</span>
@@ -3957,14 +3959,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         <div class="modal-blend-loading" id="modal-blend-loading" role="status" aria-live="polite"></div>
                         <div class="modal-blend-row">
                             <span class="modal-blend-side">A</span>
-                            <select id="modal-blend-a-kind">
-                                <option value="cell">Cell type</option>
-                                <option value="gene">Gene</option>
-                            </select>
+                            <select id="modal-blend-a-kind"></select>
                             <div class="modal-blend-fields">
                                 <select id="modal-blend-a-color"></select>
                                 <select id="modal-blend-a-category"></select>
-                                <input type="text" id="modal-blend-a-gene" list="gene-list" placeholder="Gene symbol">
+                                <input type="text" id="modal-blend-a-gene" list="modal-blend-a-gene-list" placeholder="Gene symbol">
+                                <datalist id="modal-blend-a-gene-list"></datalist>
                             </div>
                         </div>
                         <div class="modal-blend-row modal-blend-scale-row" id="modal-blend-a-scale-row" style="display: none;">
@@ -3979,14 +3979,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         </div>
                         <div class="modal-blend-row">
                             <span class="modal-blend-side">B</span>
-                            <select id="modal-blend-b-kind">
-                                <option value="cell">Cell type</option>
-                                <option value="gene">Gene</option>
-                            </select>
+                            <select id="modal-blend-b-kind"></select>
                             <div class="modal-blend-fields">
                                 <select id="modal-blend-b-color"></select>
                                 <select id="modal-blend-b-category"></select>
-                                <input type="text" id="modal-blend-b-gene" list="gene-list" placeholder="Gene symbol">
+                                <input type="text" id="modal-blend-b-gene" list="modal-blend-b-gene-list" placeholder="Gene symbol">
+                                <datalist id="modal-blend-b-gene-list"></datalist>
                             </div>
                         </div>
                         <div class="modal-blend-row modal-blend-scale-row" id="modal-blend-b-scale-row" style="display: none;">
@@ -5852,8 +5850,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return value.toFixed(3);
     }}
 
-    function getGeneScaleRange(gene) {{
-        const base = DATA.genes_meta?.[gene] || {{}};
+    function getGeneScaleRange(gene, modality = null) {{
+        const targetModality = modality || CURRENT_MODALITY;
+        const isCurrent = targetModality === CURRENT_MODALITY;
+        const manifest = isCurrent ? DATA : (MODALITY_GENE_STATE[targetModality] || DATA);
+        const base = manifest.genes_meta?.[gene] || {{}};
+        
         const autoScale = geneScaleAuto[gene];
         const overrideScale = geneScaleOverrides[gene];
         let vmin = Number.isFinite(overrideScale?.vmin) ? overrideScale.vmin
@@ -5964,17 +5966,26 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return value.toFixed(2);
     }}
 
-    function computeGenePercentiles(gene, pmin = GENE_SCALE_PMIN, pmax = GENE_SCALE_PMAX) {{
+    function computeGenePercentiles(gene, pmin = GENE_SCALE_PMIN, pmax = GENE_SCALE_PMAX, modality = null) {{
+        const targetModality = modality || CURRENT_MODALITY;
+        const isCurrent = targetModality === CURRENT_MODALITY;
+        
+        let sectionsSource = DATA.sections || [];
+        if (!isCurrent && MODALITY_GENE_STATE[targetModality]) {{
+            sectionsSource = MODALITY_GENE_STATE[targetModality].sections;
+        }}
+
         const samples = [];
         let seenNonZero = 0;
         let totalCells = 0;
         let totalNonZero = 0;
-        DATA.sections.forEach(section => {{
+        sectionsSource.forEach((section, idx) => {{
+            const nCells = isCurrent ? (section.n_cells ?? section.x?.length ?? 0) : (DATA.sections[idx]?.n_cells ?? DATA.sections[idx]?.x?.length ?? 0);
+            
             const sparse = section.genes_sparse?.[gene];
             if (sparse && typeof sparse.vb64 === 'string') {{
-                const sectionCells = section.n_cells ?? section.x?.length ?? 0;
                 const vals = base64ToFloat32Array(sparse.vb64);
-                totalCells += sectionCells;
+                totalCells += nCells;
                 totalNonZero += vals.length;
                 for (let i = 0; i < vals.length; i++) {{
                     const v = vals[i];
@@ -5990,8 +6001,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 return;
             }}
             if (sparse && Array.isArray(sparse.v)) {{
-                const sectionCells = section.n_cells ?? section.x?.length ?? 0;
-                totalCells += sectionCells;
+                totalCells += nCells;
                 totalNonZero += Array.isArray(sparse.i) ? sparse.i.length : sparse.v.length;
                 for (let i = 0; i < sparse.v.length; i++) {{
                     const v = sparse.v[i];
@@ -6009,7 +6019,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
             const vals = section.genes?.[gene];
             if (!vals) return;
-            totalCells += vals.length;
+            totalCells += nCells;
             for (let i = 0; i < vals.length; i++) {{
                 const v = vals[i];
                 if (v === null || v === undefined || Number.isNaN(v)) continue;
@@ -6406,20 +6416,35 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return any ? mask : null;
     }}
 
-    function getSectionGeneValues(section, gene) {{
-        const dense = section.genes?.[gene];
+    function getSectionGeneValues(section, gene, modality = null) {{
+        const targetModality = modality || CURRENT_MODALITY;
+        const isCurrent = targetModality === CURRENT_MODALITY;
+        
+        let sectionSource = section;
+        let manifestSource = DATA;
+
+        if (!isCurrent && MODALITY_GENE_STATE[targetModality]) {{
+            const cachedMod = MODALITY_GENE_STATE[targetModality];
+            const sectionIdx = DATA.sections.indexOf(section);
+            if (sectionIdx >= 0 && cachedMod.sections[sectionIdx]) {{
+                sectionSource = cachedMod.sections[sectionIdx];
+                manifestSource = cachedMod;
+            }}
+        }}
+
+        const dense = sectionSource.genes?.[gene];
         if (dense) return dense;
 
-        const sparse = section.genes_sparse?.[gene];
+        const sparse = sectionSource.genes_sparse?.[gene];
         if (!sparse) return null;
 
-        const key = `${{section.id}}::${{gene}}`;
+        const key = `${{section.id}}::${{targetModality}}::${{gene}}`;
         const cached = geneDenseCache.get(key);
         if (cached) return cached;
 
         const n = section.n_cells ?? section.x?.length ?? 0;
         const arr = new Float32Array(n);
-        const geneMeta = DATA.genes_meta?.[gene] || null;
+        const geneMeta = manifestSource.genes_meta?.[gene] || null;
         if (typeof sparse.ib64 === 'string' && typeof sparse.vq16b64 === 'string') {{
             const idxs = base64ToUint32Array(sparse.ib64);
             const vals = base64ToUint16Array(sparse.vq16b64);
@@ -6523,29 +6548,53 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
     }}
 
-    function hydrateGeneFromAux(gene, auxData) {{
+    function hydrateGeneFromAux(gene, auxData, modality = null) {{
+        const targetModality = modality || CURRENT_MODALITY;
+        const isCurrent = targetModality === CURRENT_MODALITY;
+        
         const geneEntry = auxData?.genes?.[gene];
-        const modalityEntry = getActiveModalityManifestEntry(geneAuxManifest);
+        const manifest = geneAuxManifest;
+        const map = manifest?.modalities;
+        const modalityEntry = (map && map[targetModality]) ? map[targetModality] : (targetModality === DEFAULT_MODALITY_NAME ? manifest : null);
+
         const geneMeta = auxData?.genes_meta?.[gene]
             || modalityEntry?.genes_meta?.[gene]
-            || geneAuxManifest?.genes_meta?.[gene];
+            || manifest?.genes_meta?.[gene];
         if (!geneEntry || !geneMeta) return false;
-        DATA.genes_meta[gene] = geneMeta;
+
+        let targetManifest = DATA;
+        let targetSections = DATA.sections || [];
+
+        if (!isCurrent) {{
+            if (!MODALITY_GENE_STATE[targetModality]) {{
+                MODALITY_GENE_STATE[targetModality] = {{
+                    genes_meta: {{}},
+                    gene_encodings: {{}},
+                    gene_value_encodings: {{}},
+                    sections: (DATA.sections || []).map(() => ({{ genes: {{}}, genes_sparse: {{}} }})),
+                }};
+            }}
+            targetManifest = MODALITY_GENE_STATE[targetModality];
+            targetSections = targetManifest.sections;
+        }}
+
+        targetManifest.genes_meta[gene] = geneMeta;
         const encoding = auxData?.gene_encodings?.[gene]
             || modalityEntry?.gene_encodings?.[gene]
-            || geneAuxManifest?.gene_encodings?.[gene];
+            || manifest?.gene_encodings?.[gene];
         if (encoding) {{
-            DATA.gene_encodings[gene] = encoding;
+            targetManifest.gene_encodings[gene] = encoding;
         }}
         const valueEncoding = auxData?.gene_value_encodings?.[gene]
             || modalityEntry?.gene_value_encodings?.[gene]
-            || geneAuxManifest?.gene_value_encodings?.[gene];
+            || manifest?.gene_value_encodings?.[gene];
         if (valueEncoding) {{
-            DATA.gene_value_encodings[gene] = valueEncoding;
+            targetManifest.gene_value_encodings[gene] = valueEncoding;
         }}
 
-        (DATA.sections || []).forEach((section) => {{
-            const sectionEntry = geneEntry.sections?.[section.id];
+        targetSections.forEach((section, i) => {{
+            const sectionId = isCurrent ? section.id : (DATA.sections[i]?.id);
+            const sectionEntry = geneEntry.sections?.[sectionId];
             if (!sectionEntry) return;
             section.genes = section.genes || {{}};
             section.genes_sparse = section.genes_sparse || {{}};
@@ -6797,22 +6846,47 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return {{ sections }};
     }}
 
-    function hydrateGeneFromBinary(gene, geneEntry) {{
-        const modalityEntry = getActiveModalityManifestEntry(geneAuxManifest);
-        const geneMeta = modalityEntry?.genes_meta?.[gene] || geneAuxManifest?.genes_meta?.[gene];
+    function hydrateGeneFromBinary(gene, geneEntry, modality = null) {{
+        const targetModality = modality || CURRENT_MODALITY;
+        const isCurrent = targetModality === CURRENT_MODALITY;
+        
+        const manifest = geneAuxManifest;
+        const map = manifest?.modalities;
+        const modalityEntry = (map && map[targetModality]) ? map[targetModality] : (targetModality === DEFAULT_MODALITY_NAME ? manifest : null);
+        
+        const geneMeta = modalityEntry?.genes_meta?.[gene] || manifest?.genes_meta?.[gene];
         if (!geneEntry || !geneMeta) return false;
-        DATA.genes_meta[gene] = geneMeta;
-        const encoding = modalityEntry?.gene_encodings?.[gene] || geneAuxManifest?.gene_encodings?.[gene];
-        if (encoding) {{
-            DATA.gene_encodings[gene] = encoding;
-        }}
-        const valueEncoding = modalityEntry?.gene_value_encodings?.[gene] || geneAuxManifest?.gene_value_encodings?.[gene];
-        if (valueEncoding) {{
-            DATA.gene_value_encodings[gene] = valueEncoding;
+
+        let targetManifest = DATA;
+        let targetSections = DATA.sections || [];
+
+        if (!isCurrent) {{
+            if (!MODALITY_GENE_STATE[targetModality]) {{
+                // Initialize if missing
+                MODALITY_GENE_STATE[targetModality] = {{
+                    genes_meta: {{}},
+                    gene_encodings: {{}},
+                    gene_value_encodings: {{}},
+                    sections: (DATA.sections || []).map(() => ({{ genes: {{}}, genes_sparse: {{}} }})),
+                }};
+            }}
+            targetManifest = MODALITY_GENE_STATE[targetModality];
+            targetSections = targetManifest.sections;
         }}
 
-        (DATA.sections || []).forEach((section) => {{
-            const sectionEntry = geneEntry?.sections?.[section.id];
+        targetManifest.genes_meta[gene] = geneMeta;
+        const encoding = modalityEntry?.gene_encodings?.[gene] || manifest?.gene_encodings?.[gene];
+        if (encoding) {{
+            targetManifest.gene_encodings[gene] = encoding;
+        }}
+        const valueEncoding = modalityEntry?.gene_value_encodings?.[gene] || manifest?.gene_value_encodings?.[gene];
+        if (valueEncoding) {{
+            targetManifest.gene_value_encodings[gene] = valueEncoding;
+        }}
+
+        targetSections.forEach((section, i) => {{
+            const sectionId = isCurrent ? section.id : (DATA.sections[i]?.id);
+            const sectionEntry = geneEntry?.sections?.[sectionId];
             if (!sectionEntry) return;
             section.genes = section.genes || {{}};
             section.genes_sparse = section.genes_sparse || {{}};
@@ -6913,9 +6987,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     async function ensureGeneAvailable(gene, options = {{}}) {{
         const token = String(gene || '').trim();
         const showErrors = options.showErrors !== false;
+        const targetModality = options.modality || CURRENT_MODALITY;
+        const isCurrent = targetModality === CURRENT_MODALITY;
+
         if (!token) return false;
-        if (DATA.genes_meta?.[token]) return true;
-        if (!AVAILABLE_GENE_SET.has(token)) {{
+        
+        // Check if already in current DATA or MODALITY_GENE_STATE
+        const currentMeta = (isCurrent || (targetModality === 'gene' && CURRENT_MODALITY === 'rna'))
+            ? DATA.genes_meta
+            : (MODALITY_GENE_STATE[targetModality]?.genes_meta);
+        if (currentMeta && currentMeta[token]) return true;
+
+        if (!AVAILABLE_GENE_SET.has(token) && isCurrent) {{
             if (showErrors) {{
                 alert(`Gene "${{token}}" was not found in this dataset.`);
             }}
@@ -6923,7 +7006,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         const manifest = await loadGeneAuxManifest();
         if (!manifest) return false;
-        const modalityEntry = getActiveModalityManifestEntry(manifest);
+        
+        const map = manifest.modalities;
+        const modalityEntry = (map && map[targetModality]) ? map[targetModality] : (targetModality === DEFAULT_MODALITY_NAME ? manifest : null);
+        
         const shardUrl = modalityEntry?.gene_to_shard?.[token] ?? manifest?.gene_to_shard?.[token];
         if (!shardUrl) {{
             if (showErrors) {{
@@ -6939,7 +7025,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const payloadBuffer = await readBinaryGenePayload(shardUrl, token);
                 if (!payloadBuffer) return false;
                 const geneEntry = parseBinaryGenePayload(payloadBuffer, sectionOrder, geneMeta);
-                hydrated = hydrateGeneFromBinary(token, geneEntry);
+                hydrated = hydrateGeneFromBinary(token, geneEntry, targetModality);
             }} catch (error) {{
                 console.error('Failed to load binary gene payload:', error);
                 if (showErrors) {{
@@ -6952,7 +7038,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }} else {{
             const shardData = await loadGeneAuxShard(shardUrl);
             if (!shardData) return false;
-            hydrated = hydrateGeneFromAux(token, shardData);
+            hydrated = hydrateGeneFromAux(token, shardData, targetModality);
         }}
         if (!hydrated && showErrors) {{
             alert(`Gene "${{token}}" is listed in the dataset but was not found in the auxiliary gene file.`);
@@ -6971,19 +7057,27 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
     }}
 
-    function requestModalBlendGene(gene) {{
+    function requestModalBlendGene(gene, modality = null) {{
+        const targetModality = modality || CURRENT_MODALITY;
         const token = String(gene || '').trim();
-        if (!token || DATA.genes_meta?.[token] || modalBlendGeneLoads.has(token)) return;
-        modalBlendGeneLoads.add(token);
+        const key = `${{targetModality}}::${{token}}`;
+        if (!token || modalBlendGeneLoads.has(key)) return;
+        
+        const meta = (targetModality === CURRENT_MODALITY || (targetModality === 'gene' && CURRENT_MODALITY === 'rna'))
+            ? DATA.genes_meta
+            : (MODALITY_GENE_STATE[targetModality]?.genes_meta);
+        if (meta && meta[token]) return;
+
+        modalBlendGeneLoads.add(key);
         runAsyncUIAction(`Modal split gene load (${{token}})`, async () => {{
-            const ok = await ensureGeneAvailable(token, {{ showErrors: false }});
+            const ok = await ensureGeneAvailable(token, {{ showErrors: false, modality: targetModality }});
             if (ok) {{
-                ensureGeneAutoScale(token);
+                ensureGeneAutoScale(token, targetModality);
                 renderLegend('modal-legend');
                 if (modalSection) renderModalSection();
             }}
         }}).finally(() => {{
-            modalBlendGeneLoads.delete(token);
+            modalBlendGeneLoads.delete(key);
         }});
     }}
 
@@ -7281,10 +7375,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return false;
     }}
 
-    function ensureGeneAutoScale(gene) {{
+    function ensureGeneAutoScale(gene, modality = null) {{
         if (!gene) return;
         if (!geneScaleAuto[gene]) {{
-            const autoScale = computeGenePercentiles(gene);
+            const autoScale = computeGenePercentiles(gene, GENE_SCALE_PMIN, GENE_SCALE_PMAX, modality);
             if (autoScale) geneScaleAuto[gene] = autoScale;
         }}
     }}
@@ -7455,7 +7549,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function getModalBlendVariableLabel(spec) {{
         if (!spec) return 'Unknown';
-        if (spec.kind === 'gene') return spec.gene ? `Gene: ${{spec.gene}}` : 'Gene';
+        if (spec.kind !== 'cell') {{
+            const modName = spec.kind;
+            const modDesc = MODALITY_DESCRIPTORS.find(m => m.name === modName);
+            const modLabel = modDesc?.label || (modName === 'gene' ? 'Gene' : modName);
+            const isGene = ['RNA', 'rna', 'Gene', 'gene'].includes(modLabel);
+            const featureLabel = isGene ? 'Gene' : modLabel;
+            return spec.gene ? `${{featureLabel}}: ${{spec.gene}}` : featureLabel;
+        }}
         const colLabel = spec.color ? formatMetadataLabel(spec.color) : 'Cell type';
         if (spec.category === BLEND_ALL_CATEGORIES) return `${{colLabel}}: All`;
         return spec.category ? `${{colLabel}}: ${{spec.category}}` : colLabel;
@@ -7465,13 +7566,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const spec = modalBlendSpec?.[side];
         if (!spec) return null;
         const sideLabel = side === 'a' ? 'A (left)' : 'B (right)';
-        if (spec.kind === 'gene') {{
-            const geneLabel = spec.gene ? `Gene: ${{spec.gene}}` : 'Gene';
-            const scale = getGeneScaleRange(spec.gene);
+        
+        if (spec.kind !== 'cell') {{
+            const modName = spec.kind;
+            const modDesc = MODALITY_DESCRIPTORS.find(m => m.name === modName);
+            const modLabel = modDesc?.label || (modName === 'gene' ? 'Gene' : modName);
+            const isGene = ['RNA', 'rna', 'Gene', 'gene'].includes(modLabel);
+            const featureTypeLabel = isGene ? 'Gene' : modLabel;
+            const featureLabel = spec.gene ? `${{featureTypeLabel}}: ${{spec.gene}}` : featureTypeLabel;
+            
+            const scale = getGeneScaleRange(spec.gene, modName);
             return {{
                 side,
                 sideLabel,
-                label: geneLabel,
+                label: featureLabel,
                 detail: `Expression (${{formatScaleNumber(scale.vmin)}} to ${{formatScaleNumber(scale.vmax)}})`,
                 swatchClass: 'split-legend-swatch-bar',
                 swatchBackground: `linear-gradient(90deg, ${{magma(0)}}, ${{magma(0.5)}}, ${{magma(1)}})`,
@@ -7519,16 +7627,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function getModalBlendRuntime(section, spec) {{
         if (!section || !spec) return null;
-        if (spec.kind === 'gene') {{
+        
+        if (spec.kind !== 'cell') {{
             const gene = (spec.gene || '').trim();
             if (!gene) return null;
-            if (!DATA.genes_meta?.[gene]) {{
-                requestModalBlendGene(gene);
+            
+            const modName = spec.kind;
+            const meta = (modName === CURRENT_MODALITY || (modName === 'gene' && CURRENT_MODALITY === 'rna'))
+                ? DATA.genes_meta
+                : (MODALITY_GENE_STATE[modName]?.genes_meta);
+            
+            if (!meta || !meta[gene]) {{
+                requestModalBlendGene(gene, modName);
                 return null;
             }}
-            const values = getSectionGeneValues(section, gene);
+            const values = getSectionGeneValues(section, gene, modName);
             if (!values) return null;
-            const scale = getGeneScaleRange(gene);
+            const scale = getGeneScaleRange(gene, modName);
             return {{ kind: 'gene', values, vmin: scale.vmin, vmax: scale.vmax }};
         }}
 
@@ -19487,10 +19602,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             function ensureOverviewBlendDefaults() {{
                 const catCols = getCategoricalColorColumns();
                 const preferredCol = catCols.includes(currentColor) ? currentColor : (catCols[0] || null);
+                const modalityNames = MODALITY_DESCRIPTORS.map(m => m.name);
+                const defaultModality = modalityNames.includes(DEFAULT_MODALITY_NAME) ? DEFAULT_MODALITY_NAME : (modalityNames[0] || 'gene');
+
                 const normalize = (entry, preferSecond) => {{
-                    if (!entry.kind) entry.kind = catCols.length ? 'cell' : 'gene';
+                    if (!entry.kind) entry.kind = catCols.length ? 'cell' : defaultModality;
                     if (entry.kind === 'cell') {{
-                        if (!catCols.length) {{ entry.kind = 'gene'; }}
+                        if (!catCols.length) {{ entry.kind = defaultModality; }}
                         else {{
                             if (!entry.color || !catCols.includes(entry.color)) entry.color = preferredCol;
                             const cats = getCategoriesForColorColumn(entry.color);
@@ -19500,8 +19618,24 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                             }}
                         }}
                     }}
-                    if (entry.kind === 'gene' && !entry.gene) {{
-                        entry.gene = (DATA.available_genes || [])[0] || '';
+                    if (entry.kind !== 'cell') {{
+                        const modName = entry.kind;
+                        const features = (modName === 'gene' && !modalityNames.includes('gene'))
+                            ? (DATA.available_genes || [])
+                            : (FEATURES_BY_MODALITY[modName] || []);
+                        
+                        if (!features.length && catCols.length) {{
+                            entry.kind = 'cell';
+                            return normalize(entry, preferSecond);
+                        }}
+
+                        const meta = (modName === CURRENT_MODALITY || (modName === 'gene' && CURRENT_MODALITY === 'rna'))
+                            ? DATA.genes_meta
+                            : (MODALITY_GENE_STATE[modName]?.genes_meta);
+                        
+                        if (!entry.gene || !(meta && meta[entry.gene])) {{
+                            entry.gene = features[preferSecond && features.length > 1 ? 1 : 0] || '';
+                        }}
                     }}
                 }};
                 normalize(overviewBlendSpec.a, false);
@@ -19512,7 +19646,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const controls = ovBlendControls[side];
                 const spec = overviewBlendSpec[side];
                 if (!controls || !spec) return;
-                controls.kind.value = spec.kind;
+
+                // Populate kind select
+                const kindOptions = [{{ value: 'cell', label: 'Cell type' }}];
+                if (MODALITY_DESCRIPTORS.length > 0) {{
+                    for (const mod of MODALITY_DESCRIPTORS) {{
+                        kindOptions.push({{ value: mod.name, label: mod.label || mod.name }});
+                    }}
+                }} else {{
+                    kindOptions.push({{ value: 'gene', label: 'Gene' }});
+                }}
+                setSelectOptions(controls.kind, kindOptions, spec.kind);
+
                 const isCell = spec.kind === 'cell';
                 controls.color.style.display = isCell ? '' : 'none';
                 controls.category.style.display = isCell ? '' : 'none';
@@ -19525,7 +19670,29 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         .concat(cats.map(cat => ({{ value: cat, label: cat }})));
                     setSelectOptions(controls.category, catOpts, spec.category);
                 }} else {{
+                    const modName = spec.kind;
+                    const modDesc = MODALITY_DESCRIPTORS.find(m => m.name === modName);
+                    const modLabel = modDesc?.label || (modName === 'gene' ? 'Gene' : modName);
+                    controls.gene.placeholder = `${{modLabel}} feature`;
                     controls.gene.value = spec.gene || '';
+
+                    // Populate side-specific feature datalist
+                    const listId = `overview-blend-${{side}}-gene-list`;
+                    const listEl = document.getElementById(listId);
+                    if (listEl) {{
+                        const features = (modName === 'gene' && !MODALITY_DESCRIPTORS.some(m => m.name === 'gene'))
+                            ? (DATA.available_genes || [])
+                            : (FEATURES_BY_MODALITY[modName] || []);
+                        const fragment = document.createDocumentFragment();
+                        for (const f of features) {{
+                            const opt = document.createElement('option');
+                            opt.value = f;
+                            fragment.appendChild(opt);
+                        }}
+                        listEl.replaceChildren(fragment);
+                    }}
+                    
+                    if (spec.gene) ensureGeneAutoScale(spec.gene, modName);
                 }}
             }}
 
@@ -19562,7 +19729,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const controls = ovBlendControls[side];
                 if (!controls) return;
                 controls.kind?.addEventListener('change', () => {{
-                    overviewBlendSpec[side].kind = controls.kind.value === 'gene' ? 'gene' : 'cell';
+                    overviewBlendSpec[side].kind = controls.kind.value;
                     applyOverviewBlendChange();
                 }});
                 controls.color?.addEventListener('change', () => {{
@@ -19575,19 +19742,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     applyOverviewBlendChange();
                 }});
                 controls.gene?.addEventListener('change', async () => {{
-                    await runAsyncUIAction(`Overview split gene (${{side.toUpperCase()}})`, async () => {{
+                    await runAsyncUIAction(`Overview split feature (${{side.toUpperCase()}})`, async () => {{
                         const gene = controls.gene.value.trim();
+                        const modName = overviewBlendSpec[side].kind;
                         if (!gene) {{
                             overviewBlendSpec[side].gene = '';
                             applyOverviewBlendChange();
                             return;
                         }}
-                        if (!await ensureGeneAvailable(gene)) {{
+                        if (!await ensureGeneAvailable(gene, {{ modality: modName }})) {{
                             controls.gene.value = overviewBlendSpec[side].gene || '';
                             return;
                         }}
                         overviewBlendSpec[side].gene = gene;
-                        ensureGeneAutoScale(gene);
+                        ensureGeneAutoScale(gene, modName);
                         applyOverviewBlendChange();
                     }});
                 }});
@@ -19835,14 +20003,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         function ensureModalBlendDefaults() {{
             const catCols = getCategoricalColorColumns();
             const preferredCol = catCols.includes(currentColor) ? currentColor : (catCols[0] || null);
-            const genes = DATA.available_genes || [];
-            const firstGene = genes.length ? genes[0] : '';
+            const modalityNames = MODALITY_DESCRIPTORS.map(m => m.name);
+            const defaultModality = modalityNames.includes(DEFAULT_MODALITY_NAME) ? DEFAULT_MODALITY_NAME : (modalityNames[0] || 'gene');
 
             const normalize = (entry, preferSecondCategory = false) => {{
-                if (!entry.kind) entry.kind = catCols.length ? 'cell' : 'gene';
+                if (!entry.kind) {{
+                    entry.kind = catCols.length ? 'cell' : defaultModality;
+                }}
+                
                 if (entry.kind === 'cell') {{
                     if (!catCols.length) {{
-                        entry.kind = 'gene';
+                        entry.kind = defaultModality;
                     }} else {{
                         if (!entry.color || !catCols.includes(entry.color)) entry.color = preferredCol;
                         const cats = getCategoriesForColorColumn(entry.color);
@@ -19853,19 +20024,25 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         }}
                     }}
                 }}
-                if (entry.kind === 'gene') {{
-                    if (!firstGene) {{
-                        if (catCols.length) entry.kind = 'cell';
-                    }} else if (!entry.gene || !DATA.genes_meta?.[entry.gene]) {{
-                        if (preferSecondCategory && genes.length > 1) entry.gene = genes[1];
-                        else entry.gene = firstGene;
+
+                if (entry.kind !== 'cell') {{
+                    const modName = entry.kind;
+                    const features = (modName === 'gene' && !modalityNames.includes('gene'))
+                        ? (DATA.available_genes || [])
+                        : (FEATURES_BY_MODALITY[modName] || []);
+
+                    if (!features.length && catCols.length) {{
+                        entry.kind = 'cell';
+                        return normalize(entry, preferSecondCategory);
                     }}
-                }}
-                if (entry.kind === 'cell') {{
-                    const cats = getCategoriesForColorColumn(entry.color);
-                    if (!cats.length && firstGene) {{
-                        entry.kind = 'gene';
-                        entry.gene = firstGene;
+                    
+                    const meta = (modName === CURRENT_MODALITY || (modName === 'gene' && CURRENT_MODALITY === 'rna'))
+                        ? DATA.genes_meta
+                        : (MODALITY_GENE_STATE[modName]?.genes_meta);
+
+                    if (!entry.gene || !(meta && meta[entry.gene])) {{
+                        if (preferSecondCategory && features.length > 1) entry.gene = features[1];
+                        else entry.gene = features[0] || '';
                     }}
                 }}
             }};
@@ -19945,12 +20122,24 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const controls = modalBlendControls[side];
             const spec = modalBlendSpec[side];
             if (!controls || !spec) return;
-            controls.kind.value = spec.kind;
+
+            // Populate kind select
+            const kindOptions = [{{ value: 'cell', label: 'Cell type' }}];
+            if (MODALITY_DESCRIPTORS.length > 0) {{
+                for (const mod of MODALITY_DESCRIPTORS) {{
+                    kindOptions.push({{ value: mod.name, label: mod.label || mod.name }});
+                }}
+            }} else {{
+                kindOptions.push({{ value: 'gene', label: 'Gene' }});
+            }}
+            setSelectOptions(controls.kind, kindOptions, spec.kind);
+
             const isCell = spec.kind === 'cell';
             controls.color.style.display = isCell ? '' : 'none';
             controls.category.style.display = isCell ? '' : 'none';
             controls.gene.style.display = isCell ? 'none' : '';
             if (controls.scaleRow) controls.scaleRow.style.display = isCell ? 'none' : '';
+            
             if (isCell) {{
                 const cols = getCategoricalColorColumns();
                 setSelectOptions(controls.color, cols, spec.color);
@@ -19959,11 +20148,36 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     .concat(cats.map(cat => ({{ value: cat, label: cat }})));
                 setSelectOptions(controls.category, catOptions, spec.category);
             }} else {{
+                const modName = spec.kind;
+                const modDesc = MODALITY_DESCRIPTORS.find(m => m.name === modName);
+                const modLabel = modDesc?.label || (modName === 'gene' ? 'Gene' : modName);
+                controls.gene.placeholder = `${{modLabel}} feature`;
                 controls.gene.value = spec.gene || '';
+
+                // Populate side-specific feature datalist
+                const listId = `modal-blend-${{side}}-gene-list`;
+                const listEl = document.getElementById(listId);
+                if (listEl) {{
+                    const features = (modName === 'gene' && !MODALITY_DESCRIPTORS.some(m => m.name === 'gene'))
+                        ? (DATA.available_genes || [])
+                        : (FEATURES_BY_MODALITY[modName] || []);
+                    const fragment = document.createDocumentFragment();
+                    for (const f of features) {{
+                        const opt = document.createElement('option');
+                        opt.value = f;
+                        fragment.appendChild(opt);
+                    }}
+                    listEl.replaceChildren(fragment);
+                }}
+                
                 const gene = (spec.gene || '').trim();
-                const hasGene = !!(gene && DATA.genes_meta?.[gene]);
-                if (hasGene) ensureGeneAutoScale(gene);
-                const scale = hasGene ? getGeneScaleRange(gene) : null;
+                const meta = (modName === CURRENT_MODALITY || (modName === 'gene' && CURRENT_MODALITY === 'rna'))
+                    ? DATA.genes_meta
+                    : (MODALITY_GENE_STATE[modName]?.genes_meta);
+                const hasGene = !!(gene && meta && meta[gene]);
+                
+                if (hasGene) ensureGeneAutoScale(gene, modName);
+                const scale = hasGene ? getGeneScaleRange(gene, modName) : null;
                 if (controls.scaleMin) {{
                     controls.scaleMin.value = scale ? scale.vmin.toFixed(3) : '';
                     controls.scaleMin.disabled = !hasGene;
@@ -19996,9 +20210,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         function applyModalBlendGeneScale(side, useAuto = false) {{
             const controls = modalBlendControls[side];
             const spec = modalBlendSpec[side];
-            if (!controls || !spec || spec.kind !== 'gene') return;
+            const isCell = spec.kind === 'cell';
+            if (!controls || !spec || isCell) return;
             const gene = (spec.gene || '').trim();
-            if (!gene || !DATA.genes_meta?.[gene]) return;
+            const modName = spec.kind;
+            const meta = (modName === CURRENT_MODALITY) ? DATA.genes_meta : (MODALITY_GENE_STATE[modName]?.genes_meta);
+            if (!gene || !(meta && meta[gene])) return;
 
             if (useAuto) {{
                 const autoScale = computeGenePercentiles(gene);
@@ -20041,7 +20258,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const controls = modalBlendControls[side];
             if (!controls) return;
             controls.kind?.addEventListener('change', () => {{
-                modalBlendSpec[side].kind = controls.kind.value === 'gene' ? 'gene' : 'cell';
+                modalBlendSpec[side].kind = controls.kind.value;
                 applyModalBlendControlChange();
             }});
             controls.color?.addEventListener('change', () => {{
@@ -20056,17 +20273,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             controls.gene?.addEventListener('change', async () => {{
                 await runAsyncUIAction(`Modal gene selection (${{side.toUpperCase()}})`, async () => {{
                     const gene = controls.gene.value.trim();
+                    const modName = modalBlendSpec[side].kind;
                     if (!gene) {{
                         modalBlendSpec[side].gene = '';
                         applyModalBlendControlChange();
                         return;
                     }}
-                    if (!await ensureGeneAvailable(gene)) {{
+                    if (!await ensureGeneAvailable(gene, {{ modality: modName }})) {{
                         controls.gene.value = modalBlendSpec[side].gene || '';
                         return;
                     }}
                     modalBlendSpec[side].gene = gene;
-                    ensureGeneAutoScale(gene);
+                    ensureGeneAutoScale(gene, modName);
                     applyModalBlendControlChange();
                 }});
             }});
