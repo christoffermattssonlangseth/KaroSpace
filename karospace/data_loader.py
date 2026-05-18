@@ -2021,13 +2021,23 @@ class SpatialDataset:
 
         # Build color metadata
         colors_meta = {}
+        uns = getattr(self.adata, "uns", {}) or {}
         for col, cdata in color_data.items():
-            colors_meta[col] = {
+            meta = {
                 "is_continuous": cdata["is_continuous"],
                 "categories": cdata["categories"],
                 "vmin": cdata["vmin"],
                 "vmax": cdata["vmax"],
             }
+            if not cdata["is_continuous"]:
+                uns_palette = uns.get(f"{col}_colors")
+                cats = cdata.get("categories") or []
+                if uns_palette is not None and len(uns_palette) == len(cats) and len(cats) > 0:
+                    try:
+                        meta["palette"] = [str(c) for c in uns_palette]
+                    except Exception:
+                        pass
+            colors_meta[col] = meta
         # Deconvolution proportion entries: appear as additional categorical color modes.
         for decon_name, ddata in decon_data.items():
             colors_meta[decon_name] = {

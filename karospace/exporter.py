@@ -5790,7 +5790,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return true;
     }}
 
-    function getCategoryColor(idx) {{ return PALETTE[idx % PALETTE.length]; }}
+    function getCategoryColor(idx, colorCol) {{
+        if (colorCol) {{
+            const meta = DATA.colors_meta && DATA.colors_meta[colorCol];
+            const pal = meta && meta.palette;
+            if (pal && idx >= 0 && idx < pal.length) return pal[idx];
+        }}
+        return PALETTE[idx % PALETTE.length];
+    }}
 
     const cssColorRgbCache = new Map();
     function cssColorToRgb(color) {{
@@ -5889,7 +5896,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 vmax: scale.vmax
             }};
         }}
-        return DATA.colors_meta[currentColor] || {{ is_continuous: false, categories: [], vmin: 0, vmax: 1 }};
+        const base = DATA.colors_meta[currentColor] || {{ is_continuous: false, categories: [], vmin: 0, vmax: 1 }};
+        return Object.assign({{}}, base, {{ colorCol: currentColor }});
     }}
 
     function getLinkedSpotlightCategory(config = getColorConfig()) {{
@@ -7592,7 +7600,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const colLabel = colorCol ? formatMetadataLabel(colorCol) : 'Cell type';
         const categoryEntries = categories.map((cat, idx) => ({{
             label: cat,
-            color: getCategoryColor(idx),
+            color: getCategoryColor(idx, colorCol),
         }}));
         if (spec.category && spec.category !== BLEND_ALL_CATEGORIES) {{
             const catIdx = categories.indexOf(spec.category);
@@ -7603,7 +7611,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     label: `${{colLabel}}: ${{spec.category}}`,
                     detail: 'Selected category',
                     swatchClass: 'split-legend-swatch-dot',
-                    swatchBackground: getCategoryColor(catIdx),
+                    swatchBackground: getCategoryColor(catIdx, colorCol),
                     categories: [categoryEntries[catIdx]],
                 }};
             }}
@@ -7611,7 +7619,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         const gradientStops = categories
             .slice(0, 5)
-            .map((_, idx) => getCategoryColor(idx));
+            .map((_, idx) => getCategoryColor(idx, colorCol));
         return {{
             side,
             sideLabel,
@@ -7656,7 +7664,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             return {{
                 kind: 'cell-all',
                 values,
-                paletteRgb: categories.map((_, idx) => cssColorToRgb(getCategoryColor(idx))),
+                paletteRgb: categories.map((_, idx) => cssColorToRgb(getCategoryColor(idx, colorCol))),
             }};
         }}
         const catIdx = categories.indexOf(spec.category);
@@ -7665,7 +7673,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             kind: 'cell',
             values,
             catIdx,
-            activeRgb: cssColorToRgb(getCategoryColor(catIdx)),
+            activeRgb: cssColorToRgb(getCategoryColor(catIdx, colorCol)),
             inactiveRgb: [176, 176, 176],
         }};
     }}
@@ -9956,7 +9964,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 }} else {{
                     isSpotlightCategory = (hasSpotlight && catInfo.catName === activeSpotlight) ||
                                           (hasNeighborFocusUMAP && neighborNetworkFocusCategories.has(catInfo.catName));
-                    color = getCategoryColor(catInfo.catIdx);
+                    color = getCategoryColor(catInfo.catIdx, config.colorCol);
                 }}
 
                 if (hasSpotlight && !isSpotlightCategory) {{
@@ -10892,7 +10900,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function getCategoryColorForValue(colorCol, category) {{
         const categories = getCategoriesForColorColumn(colorCol).map(value => String(value));
         const idx = categories.indexOf(String(category));
-        return idx >= 0 ? getCategoryColor(idx) : '#999';
+        return idx >= 0 ? getCategoryColor(idx, colorCol) : '#999';
     }}
 
     function getNeighborPairSummary(colorCol, sourceCategory, targetCategory) {{
@@ -12606,7 +12614,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     if (!catInfo || hiddenCategories.has(catInfo.catName)) continue;
                     isSelectedCat = (focusCategory && catInfo.catName === focusCategory) ||
                                     (hasNeighborFocus && neighborNetworkFocusCategories.has(catInfo.catName));
-                    color = getCategoryColor(catInfo.catIdx);
+                    color = getCategoryColor(catInfo.catIdx, config.colorCol);
                 }}
 
                 const point = transform.dataToScreen(section.x[i], section.y[i]);
@@ -12923,7 +12931,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             if (!catInfo) {{
                 return `<span class="cell-tooltip-label">Missing ${{escapeHtml(colorLabel)}}</span>`;
             }}
-            const color = getCategoryColor(catInfo.catIdx);
+            const color = getCategoryColor(catInfo.catIdx, config.colorCol);
             return `<span class="cell-tooltip-color" style="background: ${{color}}"></span>
                     <span class="cell-tooltip-label">${{catInfo.catName}}</span>`;
         }}
@@ -13585,7 +13593,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     if (!catInfo || hiddenCategories.has(catInfo.catName)) continue;
                     isSelectedCat = (focusCategory && catInfo.catName === focusCategory) ||
                                     (hasNeighborFocusModal && neighborNetworkFocusCategories.has(catInfo.catName));
-                    color = getCategoryColor(catInfo.catIdx);
+                    color = getCategoryColor(catInfo.catIdx, config.colorCol);
                 }}
 
                 const point = transform.dataToScreen(modalSection.x[i], modalSection.y[i]);
@@ -13766,7 +13774,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const spotlightClass = activeSpotlight && cat === activeSpotlight ? 'spotlight' : '';
                 const dimmedClass = activeSpotlight && cat !== activeSpotlight ? 'dimmed' : '';
                 html += `<div class="legend-item ${{hiddenClass}} ${{selectedClass}} ${{spotlightClass}} ${{dimmedClass}}" data-category="${{cat}}">
-                    <div class="legend-color" style="background: ${{getCategoryColor(idx)}}"></div>
+                    <div class="legend-color" style="background: ${{getCategoryColor(idx, config.colorCol)}}"></div>
                     <span>${{cat}}</span>
                 </div>`;
             }});
@@ -14795,7 +14803,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return {{ categories, rows }};
     }}
 
-    function buildSamplesBarsSvg(rows, categories) {{
+    function buildSamplesBarsSvg(rows, categories, colorCol) {{
         const ROW_H = 18, STRIP_W = 8, LABEL_W = 88, BAR_W = 194, PL = 4, PT = 2, PR = 4;
         const W = PL + STRIP_W + 3 + LABEL_W + 3 + BAR_W + PR;
         const H = PT + rows.length * ROW_H + PT;
@@ -14819,7 +14827,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const frac = row.fractions[ci] || 0;
                 if (frac <= 0) return;
                 const w = Math.max(1, frac * BAR_W);
-                const col = getCategoryColor(ci);
+                const col = getCategoryColor(ci, colorCol);
                 const tip = escapeHtml(sid + ' \u00b7 ' + cat + ': ' + Math.round(frac * 100) + '% (' + row.counts[ci].toLocaleString() + ' cells)');
                 parts.push('<rect x="' + (barX + ox).toFixed(1) + '" y="' + (y+2) + '" width="' + w.toFixed(1) + '" height="' + (ROW_H-4) + '" fill="' + col + '" data-bar-cat="' + escapeHtml(cat) + '" data-tooltip="' + tip + '" style="cursor:pointer"/>');
                 ox += w;
@@ -14829,7 +14837,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return parts.join('');
     }}
 
-    function buildSamplesHeatmapSvg(rows, categories) {{
+    function buildSamplesHeatmapSvg(rows, categories, colorCol) {{
         const cats = categories.slice(0, 30);
         const CELL_W = 14, CELL_H = 14, LABEL_W = 88, HEADER_H = 54, PL = 4, PR = 4, PT = 2;
         const W = PL + LABEL_W + cats.length * CELL_W + PR;
@@ -14850,7 +14858,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             cats.forEach(function(cat, ci) {{
                 const frac = row.fractions[ci] || 0;
                 const alpha = Math.min(1, frac * 3.5).toFixed(3);
-                const col = getCategoryColor(ci);
+                const col = getCategoryColor(ci, colorCol);
                 const cellX = PL + LABEL_W + ci * CELL_W;
                 const tip = escapeHtml(sid + ' \u00b7 ' + cat + ': ' + Math.round(frac * 100) + '% (' + row.counts[ci].toLocaleString() + ' cells)');
                 parts.push('<rect x="' + cellX + '" y="' + y + '" width="' + CELL_W + '" height="' + CELL_H + '" fill="' + col + '" fill-opacity="' + alpha + '" stroke="var(--input-bg)" stroke-width="0.5" data-bar-cat="' + escapeHtml(cat) + '" data-tooltip="' + tip + '" style="cursor:pointer"/>');
@@ -14895,8 +14903,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         const categories = comp.categories;
         const svgHtml = samplesView === 'heatmap'
-            ? buildSamplesHeatmapSvg(rows, categories)
-            : buildSamplesBarsSvg(rows, categories);
+            ? buildSamplesHeatmapSvg(rows, categories, samplesColorCol)
+            : buildSamplesBarsSvg(rows, categories, samplesColorCol);
 
         const metaKeys = new Set();
         comp.rows.forEach(function(r) {{ Object.keys(r.metadata).forEach(function(k) {{ metaKeys.add(k); }}); }});
@@ -14913,7 +14921,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         const maxLeg = Math.min(categories.length, 16);
         const legendHtml = categories.slice(0, maxLeg).map(function(cat, idx) {{
-            return '<span class="samples-legend-item"><span class="samples-legend-swatch" style="background:' + getCategoryColor(idx) + '"></span>' + escapeHtml(cat) + '</span>';
+            return '<span class="samples-legend-item"><span class="samples-legend-swatch" style="background:' + getCategoryColor(idx, samplesColorCol) + '"></span>' + escapeHtml(cat) + '</span>';
         }}).join('') + (categories.length > maxLeg ? '<span class="samples-legend-item agg-group-meta">+' + (categories.length - maxLeg) + ' more</span>' : '');
 
         container.innerHTML = `
@@ -15083,7 +15091,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const rows = top.map(([cat, count]) => {{
                 const pct = total > 0 ? Math.round((count / total) * 100) : 0;
                 const catIdx = config.categories?.indexOf(cat) ?? -1;
-                const color = catIdx >= 0 ? getCategoryColor(catIdx) : '#999';
+                const color = catIdx >= 0 ? getCategoryColor(catIdx, config.colorCol) : '#999';
                 const isActive = linkedSpotlightEnabled && spotlightPinnedCategory === cat;
                 return `
                     <div class="agg-row${{isActive ? ' is-active' : ''}}" data-agg-cat="${{escapeHtml(cat)}}">
@@ -18252,7 +18260,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const rowsHtml = top.map(([j, val]) => {{
                 const pct = total > 0 ? (val / total) * 100 : 0;
                 const target = String(categories[j] ?? 'unknown');
-                const color = j >= 0 ? getCategoryColor(j) : '#999';
+                const color = j >= 0 ? getCategoryColor(j, currentColor) : '#999';
                 let zLabel = '';
                 if (zscores && zscores[idx] && Number.isFinite(zscores[idx][j])) {{
                     zLabel = ` z=${{zscores[idx][j].toFixed(2)}}`;
@@ -18432,7 +18440,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     tabindex="0"
                 >
                     <title>${{escapeHtml(label)}} | n=${{nodeN.toLocaleString()}} | outgoing edges=${{formatNeighborCount(getNeighborRowTotal(viewState.counts, categoryIdx))}}</title>
-                    <circle cx="${{pos.x.toFixed(2)}}" cy="${{pos.y.toFixed(2)}}" r="${{radius.toFixed(2)}}" fill="${{getCategoryColor(categoryIdx)}}"></circle>
+                    <circle cx="${{pos.x.toFixed(2)}}" cy="${{pos.y.toFixed(2)}}" r="${{radius.toFixed(2)}}" fill="${{getCategoryColor(categoryIdx, currentColor)}}"></circle>
                     ${{labelText}}
                     ${{metaText}}
                 </g>
@@ -18600,7 +18608,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 <path
                     class="neighbor-chord-arc neighbor-interactive"
                     d="${{describeSvgArc(cx, cy, outerRadius, layout[pos].start, layout[pos].end)}}"
-                    stroke="${{getCategoryColor(categoryIdx)}}"
+                    stroke="${{getCategoryColor(categoryIdx, currentColor)}}"
                     stroke-width="16"
                     data-neighbor-kind="category"
                     data-neighbor-source-idx="${{categoryIdx}}"
@@ -18631,8 +18639,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 if (i < 0 || j < 0) return '';
                 const sourceLabel = categories[entry.sourceIdx];
                 const targetLabel = categories[entry.targetIdx];
-                const sourceColor = cssColorToRgb(getCategoryColor(entry.sourceIdx));
-                const targetColor = cssColorToRgb(getCategoryColor(entry.targetIdx));
+                const sourceColor = cssColorToRgb(getCategoryColor(entry.sourceIdx, currentColor));
+                const targetColor = cssColorToRgb(getCategoryColor(entry.targetIdx, currentColor));
                 const alpha = entry.sourceIdx === entry.targetIdx
                     ? 0.40
                     : 0.18 + 0.22 * Math.sqrt(maxMetric > 0 ? clamp01(entry.metricValue / maxMetric) : 0);
@@ -18667,7 +18675,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const legend = indices.map((categoryIdx, pos) => {{
             return `
                 <div class="neighbor-chord-legend-item neighbor-interactive" data-neighbor-kind="category" data-neighbor-source-idx="${{categoryIdx}}" role="button" tabindex="0">
-                    <span class="agg-dot" style="background:${{getCategoryColor(categoryIdx)}}"></span>
+                    <span class="agg-dot" style="background:${{getCategoryColor(categoryIdx, currentColor)}}"></span>
                     <span>${{escapeHtml(categories[categoryIdx])}} · n=${{Number(nCells[categoryIdx] ?? 0).toLocaleString()}} · ${{formatNeighborMetricLabel(controls.metric)}}=${{formatNeighborMetricValue(controls.metric, totals[pos])}}</span>
                 </div>
             `;
@@ -18890,9 +18898,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const sourceN = (nCells[sourceIdx] ?? 0).toLocaleString();
         const degreeLabel = Number.isFinite(meanDegree[sourceIdx]) ? meanDegree[sourceIdx].toFixed(2) : '0.00';
         const withContactMarkers = topEntries.filter(entry => !!entry.contact).length;
-        const sourceColor = getCategoryColor(sourceIdx);
+        const sourceColor = getCategoryColor(sourceIdx, currentColor);
         const rows = topEntries.map(entry => {{
-            const color = getCategoryColor(entry.targetIdx);
+            const color = getCategoryColor(entry.targetIdx, currentColor);
             const zLabel = entry.z === null ? 'n/a' : entry.z.toFixed(2);
             const markerLabel = entry.targetMarkers.length ? renderInlineGeneLinks(entry.targetMarkers) : '—';
             const contactLabel = entry.contactMarkers.length ? renderInlineGeneLinks(entry.contactMarkers) : '—';
