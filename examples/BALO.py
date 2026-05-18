@@ -5,11 +5,23 @@ This script demonstrates how to load Xenium spatial transcriptomics data
 and export it to an interactive HTML viewer.
 """
 
+import os
+import sys
+from pathlib import Path
+
+# Prefer the local repo checkout over any older site-packages install.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from karospace import load_spatial_data, export_to_html
 
 # Path to your h5ad file
 # Update this path to point to your EAE/MANA data
-H5AD_PATH = '/Volumes/processing2/BALO/baloMS-nuclei-clustered-balo.h5ad'#'/Volumes/processing2/RRmap/data/EAE_proseg_clustered_louvain_leiden_all_sections_annotated_rotated_scVI_mana_embedding_clustered.h5ad'
+H5AD_PATH = os.environ.get("BALO_H5AD_PATH", "/path/to/baloMS_indep_clust_balo_MANA_balo_annot.h5ad")
+
+if H5AD_PATH.startswith("/path/to/"):
+    raise SystemExit("Set BALO_H5AD_PATH to your .h5ad file before running examples/BALO.py.")
 
 # Load the dataset
 # - groupby: column in adata.obs that identifies each section
@@ -89,6 +101,10 @@ export_to_html(
     use_hvgs=USE_HVGS,
     hvg_limit=200,
 
+    #gene_storage="sidecar",
+    
+    #gene_aux_path="BALO.genes.json",  # optional; otherwise defaults to BALO.genes.json
+
     # Compute marker genes for these categorical color columns
     # (appears in the Color panel under "Marker genes")
     marker_genes_groupby=[
@@ -115,7 +131,7 @@ export_to_html(
 # 4. Click to expand sections with zoom/pan
 # 5. Toggle categories on/off in the legend
 
-print("\nDone! Open eae_mana_viewer.html in a browser.")
+print("\nDone! Open BALO.html in a browser.")
 print("Use the filter chips to show only specific courses (e.g., peak_III)")
 print("Use the Color dropdown to switch between different annotations")
 print("Type a gene name to view expression (must be in the genes list)")

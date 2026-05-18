@@ -72,6 +72,33 @@ def _resolve_from_local_indices(
     return sorted(set(int(section_positions[i]) for i in local_unique))
 
 
+def _columnarize_polygon_metadata(polygons: Sequence[Mapping[str, Any]]) -> dict[str, list[Any]]:
+    """Convert polygon records to a writeable columnar structure for AnnData uns."""
+    if not polygons:
+        return {
+            "id": [],
+            "label": [],
+            "section_id": [],
+            "n_cells": [],
+            "cell_global_indices": [],
+            "vertices": [],
+            "created_at": [],
+            "color": [],
+        }
+
+    column_order = list(polygons[0].keys())
+    columns: dict[str, list[Any]] = {key: [] for key in column_order}
+    for polygon in polygons:
+        for key in column_order:
+            value = polygon.get(key)
+            if isinstance(value, (list, dict)):
+                value = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+            elif value is None:
+                value = ""
+            columns[key].append(value)
+    return columns
+
+
 def integrate_polygon_annotations(
     adata,
     annotations: str | Path | Mapping[str, Any],
@@ -151,10 +178,10 @@ def integrate_polygon_annotations(
             }
         )
 
-    label_values = [delimiter.join(labels) if labels else pd.NA for labels in labels_by_cell]
+    label_values = [delimiter.join(labels) if labels else None for labels in labels_by_cell]
     count_values = [int(len(labels)) for labels in labels_by_cell]
 
-    adata.obs[label_key] = pd.Series(label_values, index=adata.obs_names, dtype="string")
+    adata.obs[label_key] = pd.Series(label_values, index=adata.obs_names, dtype="object")
     adata.obs[count_key] = pd.Series(count_values, index=adata.obs_names, dtype="int32")
 
     adata.uns[uns_key] = {
@@ -162,6 +189,7 @@ def integrate_polygon_annotations(
         "created_at": payload.get("created_at"),
         "groupby": groupby,
         "n_polygons": len(resolved_polygons),
-        "polygons": resolved_polygons,
+        "polygons_storage": "columnar-json-v1",
+        "polygons": _columnarize_polygon_metadata(resolved_polygons),
     }
     return adata

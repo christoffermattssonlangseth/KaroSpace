@@ -7,11 +7,32 @@ for interactive visualization of spatial transcriptomics data.
 
 import base64
 import json
+import os
+import re
+import shutil
+import struct
+import tempfile
+import time
+import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, List, Tuple, Union
+from typing import Any, Dict, Mapping, Optional, List, Tuple, Union
 import numpy as np
+import pandas as pd
+try:
+    from tqdm.auto import tqdm
+except Exception:  # pragma: no cover - optional dependency fallback
+    tqdm = None
 
 from .data_loader import SpatialDataset
+
+GENE_SIDECAR_SHARD_SIZE = 256
+KAROSPACE_PACKAGE_MANIFEST = "karospace-package.json"
+KAROSPACE_PACKAGE_LOADER_FILENAME = "karospace-package-loader.html"
+GENE_SIDECAR_FORMAT_JSON_V2 = "json-v2"
+GENE_SIDECAR_FORMAT_BINARY_V1 = "binary-v1"
+GENE_SIDECAR_BINARY_MAGIC = b"KSB1"
+GENE_SIDECAR_BINARY_VERSION = 1
 
 
 def _load_logo_base64() -> Optional[str]:
@@ -21,6 +42,595 @@ def _load_logo_base64() -> Optional[str]:
         with open(logo_path, "rb") as f:
             return base64.b64encode(f.read()).decode("utf-8")
     return None
+
+
+def _chunked(values: List[str], size: int) -> List[List[str]]:
+    if size < 1:
+        raise ValueError("chunk size must be >= 1")
+    return [values[i:i + size] for i in range(0, len(values), size)]
+
+
+def _isoformat_utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _get_karospace_version() -> str:
+    try:
+        from . import __version__
+
+        return str(__version__)
+    except Exception:
+        return "unknown"
+
+
+def _guess_package_media_type(path: Union[str, Path]) -> str:
+    suffix = Path(path).suffix.lower()
+    if suffix == ".html":
+        return "text/html"
+    if suffix == ".json":
+        return "application/json"
+    if suffix == ".bin":
+        return "application/octet-stream"
+    return "application/octet-stream"
+
+
+def _validate_gene_sidecar_format(gene_sidecar_format: str) -> str:
+    normalized = str(gene_sidecar_format or GENE_SIDECAR_FORMAT_JSON_V2).strip().lower()
+    if normalized not in {GENE_SIDECAR_FORMAT_JSON_V2, GENE_SIDECAR_FORMAT_BINARY_V1}:
+        raise ValueError(
+            "gene_sidecar_format must be one of: "
+            f"'{GENE_SIDECAR_FORMAT_JSON_V2}', '{GENE_SIDECAR_FORMAT_BINARY_V1}'"
+        )
+    return normalized
+
+
+def _u32_bytes(values: List[int]) -> bytes:
+    if not values:
+        return b""
+    arr = np.asarray(values, dtype="<u4")
+    return np.ascontiguousarray(arr).tobytes(order="C")
+
+
+def _decode_sidecar_packed_bytes(value, *, dtype: str) -> bytes:
+    if value is None:
+        return b""
+    if isinstance(value, str):
+        return base64.b64decode(value.encode("ascii"))
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value)
+    arr = np.asarray(value, dtype=dtype)
+    return np.ascontiguousarray(arr).tobytes(order="C")
+
+
+def _binary_payload_kind_from_sections(section_entries: Mapping[str, dict]) -> int:
+    kinds = set()
+    for section_entry in section_entries.values():
+        if not section_entry:
+            continue
+        if "sparse" in section_entry:
+            kinds.add("sparse")
+        else:
+            kinds.add("dense")
+    if kinds == {"dense"}:
+        return 1
+    if kinds == {"sparse"}:
+        return 2
+    return 0
+
+
+def _build_binary_gene_payload(
+    *,
+    gene_entry: Mapping[str, object],
+    section_order: List[str],
+    section_cell_counts: Mapping[str, int],
+) -> Tuple[int, bytes]:
+    section_entries = gene_entry.get("sections") or {}
+    payload_kind = _binary_payload_kind_from_sections(section_entries)
+    chunks: List[bytes] = [struct.pack("<I", len(section_order))]
+
+    for section_index, section_id in enumerate(section_order):
+        section_entry = section_entries.get(section_id) or {}
+        cell_count = int(section_cell_counts.get(section_id, 0))
+        section_encoding = 0
+        nnz = 0
+        nan_values: List[int] = []
+        section_data = b""
+
+        if "sparse" in section_entry:
+            sparse = section_entry.get("sparse") or {}
+            index_bytes = _decode_sidecar_packed_bytes(sparse.get("ib64"), dtype="<u4")
+            if "vq8b64" in sparse:
+                value_bytes = _decode_sidecar_packed_bytes(sparse.get("vq8b64"), dtype="u1")
+                section_encoding = 2
+            elif "vq16b64" in sparse:
+                value_bytes = _decode_sidecar_packed_bytes(sparse.get("vq16b64"), dtype="<u2")
+                section_encoding = 4
+            else:
+                raise ValueError("binary-v1 requires quantized sparse sidecar values")
+            nnz = len(index_bytes) // 4
+            nan_values = [int(v) for v in (sparse.get("nan") or [])]
+            section_data = index_bytes + value_bytes
+        elif section_entry:
+            if "dq8b64" in section_entry:
+                value_bytes = _decode_sidecar_packed_bytes(section_entry.get("dq8b64"), dtype="u1")
+                section_encoding = 1
+            elif "dq16b64" in section_entry:
+                value_bytes = _decode_sidecar_packed_bytes(section_entry.get("dq16b64"), dtype="<u2")
+                section_encoding = 3
+            else:
+                raise ValueError("binary-v1 requires quantized dense sidecar values")
+            nan_values = [int(v) for v in (section_entry.get("nan") or [])]
+            section_data = value_bytes
+
+        chunks.append(
+            struct.pack(
+                "<HBBIII",
+                int(section_index),
+                int(section_encoding),
+                0,
+                int(cell_count),
+                int(nnz),
+                int(len(nan_values)),
+            )
+        )
+        chunks.append(section_data)
+        chunks.append(_u32_bytes(nan_values))
+
+    return payload_kind, b"".join(chunks)
+
+
+def _write_binary_gene_shard(
+    *,
+    shard_path: Path,
+    shard_genes: List[str],
+    shard_data: Mapping[str, object],
+    section_order: List[str],
+    section_cell_counts: Mapping[str, int],
+) -> None:
+    genes_payload = shard_data.get("genes") or {}
+    payload_blobs: List[Tuple[bytes, int, bytes]] = []
+    index_size = 0
+
+    for gene in shard_genes:
+        gene_name_bytes = str(gene).encode("utf-8")
+        payload_kind, payload_bytes = _build_binary_gene_payload(
+            gene_entry=genes_payload.get(gene) or {},
+            section_order=section_order,
+            section_cell_counts=section_cell_counts,
+        )
+        payload_blobs.append((gene_name_bytes, payload_kind, payload_bytes))
+        index_size += 2 + len(gene_name_bytes) + 1 + 1 + 8 + 8
+
+    header = struct.pack(
+        "<4sHHII",
+        GENE_SIDECAR_BINARY_MAGIC,
+        GENE_SIDECAR_BINARY_VERSION,
+        0,
+        len(payload_blobs),
+        0,
+    )
+    payload_offset = len(header) + index_size
+    out = bytearray()
+    out.extend(header)
+
+    current_offset = payload_offset
+    for gene_name_bytes, payload_kind, payload_bytes in payload_blobs:
+        out.extend(struct.pack("<H", len(gene_name_bytes)))
+        out.extend(gene_name_bytes)
+        out.extend(struct.pack("<BBQQ", payload_kind, 0, current_offset, len(payload_bytes)))
+        current_offset += len(payload_bytes)
+
+    for _, _, payload_bytes in payload_blobs:
+        out.extend(payload_bytes)
+
+    shard_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(shard_path, "wb") as handle:
+        handle.write(out)
+
+
+def _build_karospace_package_manifest(
+    *,
+    source_root: Path,
+    entry_html: str,
+    gene_manifest_path: str,
+    gene_shard_dir: str,
+    title: str,
+    n_sections: int,
+    total_cells: int,
+) -> dict:
+    files = {}
+    for file_path in sorted(p for p in source_root.rglob("*") if p.is_file()):
+        rel_path = file_path.relative_to(source_root).as_posix()
+        files[rel_path] = {
+            "media_type": _guess_package_media_type(rel_path),
+            "size_bytes": int(file_path.stat().st_size),
+        }
+
+    return {
+        "format": "karospace-package-v1",
+        "package_version": 1,
+        "entry_html": entry_html,
+        "created_at": _isoformat_utc_now(),
+        "producer": {
+            "name": "karospace",
+            "version": _get_karospace_version(),
+        },
+        "title": title,
+        "n_sections": int(n_sections),
+        "total_cells": int(total_cells),
+        "viewer": {
+            "mode": "sidecar-package",
+            "gene_storage": "sidecar",
+            "gene_manifest_path": gene_manifest_path,
+            "gene_shard_dir": gene_shard_dir,
+        },
+        "files": files,
+    }
+
+
+def _write_karospace_package(
+    *,
+    package_path: Path,
+    source_root: Path,
+    entry_html: str,
+    gene_manifest_path: str,
+    gene_shard_dir: str,
+    title: str,
+    n_sections: int,
+    total_cells: int,
+) -> None:
+    if not (source_root / entry_html).exists():
+        raise FileNotFoundError(f"package entry HTML missing: {entry_html}")
+    if not (source_root / gene_manifest_path).exists():
+        raise FileNotFoundError(f"package gene manifest missing: {gene_manifest_path}")
+    if not (source_root / gene_shard_dir).exists():
+        raise FileNotFoundError(f"package gene shard directory missing: {gene_shard_dir}")
+
+    package_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest = _build_karospace_package_manifest(
+        source_root=source_root,
+        entry_html=entry_html,
+        gene_manifest_path=gene_manifest_path,
+        gene_shard_dir=gene_shard_dir,
+        title=title,
+        n_sections=n_sections,
+        total_cells=total_cells,
+    )
+
+    def _package_sort_key(path: Path) -> tuple[int, str]:
+        rel_path = path.relative_to(source_root).as_posix()
+        if rel_path == entry_html:
+            return (0, rel_path)
+        if rel_path == gene_manifest_path:
+            return (1, rel_path)
+        if rel_path.startswith(f"{gene_shard_dir.rstrip('/')}/"):
+            return (3, rel_path)
+        return (2, rel_path)
+
+    with zipfile.ZipFile(package_path, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(
+            KAROSPACE_PACKAGE_MANIFEST,
+            json.dumps(manifest, separators=(",", ":")),
+            compress_type=zipfile.ZIP_DEFLATED,
+        )
+        for file_path in sorted((p for p in source_root.rglob("*") if p.is_file()), key=_package_sort_key):
+            rel_path = file_path.relative_to(source_root).as_posix()
+            compress_type = zipfile.ZIP_STORED if file_path.suffix.lower() == ".bin" else zipfile.ZIP_DEFLATED
+            zf.write(file_path, arcname=rel_path, compress_type=compress_type)
+
+
+def _find_karospace_package_loader_template() -> Optional[Path]:
+    candidates = [
+        Path(__file__).resolve().with_name("package_loader.html"),
+        Path(__file__).resolve().parent.parent / KAROSPACE_PACKAGE_LOADER_FILENAME,
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _write_karospace_package_loader(
+    *,
+    loader_path: Path,
+) -> Optional[Path]:
+    template_path = _find_karospace_package_loader_template()
+    if template_path is None:
+        return None
+    loader_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(template_path, loader_path)
+    return loader_path
+
+
+def _extract_embedded_viewer_data(html_text: str) -> dict:
+    match = re.search(
+        r'<script id="karospace-data" type="application/json">(.*?)</script>',
+        html_text,
+        re.DOTALL,
+    )
+    if not match:
+        raise ValueError("embedded karospace-data script not found in HTML")
+    return json.loads(match.group(1).replace("<\\/", "</"))
+
+
+def _extract_html_title(html_text: str) -> str:
+    match = re.search(r"<title>(.*?)</title>", html_text, re.DOTALL | re.IGNORECASE)
+    if not match:
+        return "KaroSpace"
+    return str(match.group(1)).strip() or "KaroSpace"
+
+
+def package_sidecar_viewer(
+    html_path: Union[str, Path],
+    *,
+    output_path: Optional[Union[str, Path]] = None,
+    gene_manifest_path: Optional[Union[str, Path]] = None,
+    gene_shard_dir: Optional[Union[str, Path]] = None,
+    loader_output_path: Optional[Union[str, Path]] = None,
+) -> str:
+    """
+    Package an existing sidecar viewer bundle into a `.karospace` archive.
+
+    Parameters
+    ----------
+    html_path : str or Path
+        Path to an existing KaroSpace HTML viewer generated with `gene_storage="sidecar"`.
+    output_path : str or Path, optional
+        Output `.karospace` path. Defaults to `<html stem>.karospace`.
+    gene_manifest_path : str or Path, optional
+        Actual filesystem path to the sidecar gene manifest JSON if it differs from the
+        path referenced in the HTML.
+    gene_shard_dir : str or Path, optional
+        Actual filesystem path to the sidecar shard directory if it differs from the
+        manifest stem directory.
+    loader_output_path : str or Path, optional
+        Optional output path for the companion `.loader.html` file. Defaults to
+        `<output stem>.loader.html`.
+
+    Returns
+    -------
+    str
+        Absolute path to the written `.karospace` package.
+    """
+    source_html_path = Path(html_path).expanduser().resolve()
+    if not source_html_path.exists():
+        raise FileNotFoundError(f"sidecar HTML not found: {source_html_path}")
+
+    print(f"  - reading existing viewer HTML: {source_html_path}")
+    html_text = source_html_path.read_text(encoding="utf-8")
+    data = _extract_embedded_viewer_data(html_text)
+    package_title = _extract_html_title(html_text)
+
+    gene_aux_url = str(data.get("gene_aux_url") or "").strip()
+    if not gene_aux_url:
+        raise ValueError("HTML viewer does not reference a sidecar gene manifest")
+
+    html_parent = source_html_path.parent
+    package_gene_manifest_rel = Path(gene_aux_url).as_posix()
+    actual_gene_manifest_path = (
+        Path(gene_manifest_path).expanduser().resolve()
+        if gene_manifest_path is not None
+        else (html_parent / package_gene_manifest_rel).resolve()
+    )
+    if not actual_gene_manifest_path.exists():
+        raise FileNotFoundError(f"sidecar gene manifest not found: {actual_gene_manifest_path}")
+
+    package_gene_shard_rel = Path(package_gene_manifest_rel).with_suffix("").as_posix()
+    actual_gene_shard_dir = (
+        Path(gene_shard_dir).expanduser().resolve()
+        if gene_shard_dir is not None
+        else (html_parent / package_gene_shard_rel).resolve()
+    )
+    if not actual_gene_shard_dir.exists():
+        raise FileNotFoundError(f"sidecar shard directory not found: {actual_gene_shard_dir}")
+
+    resolved_output_path = (
+        Path(output_path).expanduser().resolve()
+        if output_path is not None
+        else source_html_path.with_suffix(".karospace")
+    )
+    if resolved_output_path.suffix.lower() != ".karospace":
+        raise ValueError("output_path must end with .karospace")
+
+    resolved_loader_output_path = (
+        Path(loader_output_path).expanduser().resolve()
+        if loader_output_path is not None
+        else resolved_output_path.with_suffix(".loader.html")
+    )
+
+    n_sections = int(data.get("n_sections") or 0)
+    total_cells = int(data.get("total_cells") or 0)
+
+    print(f"  - resolved gene manifest: {actual_gene_manifest_path}")
+    print(f"  - resolved shard directory: {actual_gene_shard_dir}")
+    print(f"  - package title: {package_title}")
+    print(f"  - package target: {resolved_output_path}")
+    print(
+        f"  - packaging {n_sections} sections and {total_cells:,} cells "
+        f"from existing sidecar assets"
+    )
+
+    with tempfile.TemporaryDirectory(prefix="karospace-package-") as tmpdir:
+        source_root = Path(tmpdir)
+        print("  - staging package assets...")
+        entry_html = "index.html"
+        staged_entry_html = source_root / entry_html
+        staged_entry_html.write_text(html_text, encoding="utf-8")
+
+        staged_gene_manifest = source_root / package_gene_manifest_rel
+        staged_gene_manifest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(actual_gene_manifest_path, staged_gene_manifest)
+
+        staged_gene_shard_dir = source_root / package_gene_shard_rel
+        staged_gene_shard_dir.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(actual_gene_shard_dir, staged_gene_shard_dir, dirs_exist_ok=True)
+
+        print("  - writing .karospace archive...")
+        _write_karospace_package(
+            package_path=resolved_output_path,
+            source_root=source_root,
+            entry_html=entry_html,
+            gene_manifest_path=package_gene_manifest_rel,
+            gene_shard_dir=package_gene_shard_rel,
+            title=package_title,
+            n_sections=n_sections,
+            total_cells=total_cells,
+        )
+
+    print("  - writing local package loader...")
+    written_loader_path = _write_karospace_package_loader(
+        loader_path=resolved_loader_output_path,
+    )
+
+    print(f"Exported KaroSpace package to: {resolved_output_path}")
+    print(f"  - entry HTML: index.html (from {source_html_path.name})")
+    print(f"  - packaged gene manifest: {package_gene_manifest_rel}")
+    print(f"  - packaged shard directory: {package_gene_shard_rel}")
+    if written_loader_path is not None:
+        print(f"  - local package loader: {written_loader_path}")
+    else:
+        print(f"  - local package loader: unavailable (template not found)")
+    print(f"  - {n_sections} sections")
+    print(f"  - {total_cells:,} cells")
+
+    return str(resolved_output_path)
+
+
+def _select_top_variable_genes(adata, n: int) -> List[str]:
+    """Return up to n gene names ranked by expression variance across cells."""
+    X = adata.X
+    if hasattr(X, "toarray"):
+        # For sparse matrices compute variance without densifying the whole thing.
+        # Var(X) = E[X^2] - E[X]^2
+        mean_sq = np.asarray(X.power(2).mean(axis=0)).ravel()
+        sq_mean = np.asarray(X.mean(axis=0)).ravel() ** 2
+        variances = mean_sq - sq_mean
+    else:
+        variances = np.var(np.asarray(X, dtype=float), axis=0)
+    top_idx = np.argsort(variances)[::-1][:n]
+    return [adata.var_names[i] for i in top_idx]
+
+
+def _compute_cluster_gene_means(adata, genes: List[str], obs_col: str) -> Optional[dict]:
+    """Compute per-cluster and overall mean expression for each gene."""
+    if obs_col not in adata.obs.columns:
+        return None
+    col = adata.obs[obs_col]
+    if not hasattr(col, "cat"):
+        try:
+            col = col.astype("category")
+        except Exception:
+            return None
+    categories = [str(c) for c in col.cat.categories]
+    if not categories:
+        return None
+
+    X = adata[:, genes].X
+    if hasattr(X, "toarray"):
+        X = X.toarray()
+    X = np.asarray(X, dtype=float)
+
+    means = {}
+    col_vals = col.to_numpy()
+    for cat in categories:
+        mask = col_vals == cat
+        if mask.sum() == 0:
+            means[cat] = [0.0] * len(genes)
+        else:
+            means[cat] = np.round(X[mask].mean(axis=0), 4).tolist()
+
+    background = np.round(X.mean(axis=0), 4).tolist()
+    return {"categories": categories, "means": means, "background": background}
+
+
+def _compute_morans_i(adata, genes: List[str], n_genes: int = 200) -> list:
+    """Compute Moran's I spatial autocorrelation for the top variable genes.
+
+    Returns a list of {gene, I} dicts sorted descending by I value, or [] if
+    no spatial weight matrix is found in adata.obsp.
+
+    W is kept sparse throughout. All genes are processed in a single sparse
+    matmul (W @ Z), so cost is O(G * nnz) rather than O(G * N^2).
+    """
+    import scipy.sparse as sp
+
+    # Find spatial weight matrix — keep sparse
+    W = None
+    for key in ("spatial_connectivities", "connectivities", "neighbors", "neighbor_graph"):
+        if key in adata.obsp:
+            W = adata.obsp[key]
+            break
+    if W is None:
+        return []
+
+    if not sp.issparse(W):
+        W = sp.csr_matrix(W)
+    else:
+        W = W.tocsr().astype(float)
+
+    N = W.shape[0]
+
+    # Row-normalize in place using sparse diagonal scaling
+    row_sums = np.asarray(W.sum(axis=1)).ravel()
+    row_sums[row_sums == 0] = 1.0
+    W = sp.diags(1.0 / row_sums) @ W
+    S0 = float(W.sum())
+    if S0 == 0:
+        return []
+
+    # Select top variable genes and densify only those (N × G, manageable)
+    selected = _select_top_variable_genes(adata, n_genes)
+    selected = [g for g in selected if g in set(genes)]
+    if not selected:
+        return []
+
+    X = adata[:, selected].X
+    if hasattr(X, "toarray"):
+        X = X.toarray()
+    X = np.asarray(X, dtype=float)          # (N, G)
+
+    # Center each gene
+    Z = X - X.mean(axis=0)                  # (N, G)
+
+    # One sparse matmul for all genes: W @ Z  →  (N, G)
+    WZ = W.dot(Z)                            # sparse × dense = dense (N, G)
+
+    num = N * (Z * WZ).sum(axis=0)          # (G,)
+    denom = S0 * (Z * Z).sum(axis=0)        # (G,)
+
+    valid = denom > 0
+    I_vals = np.where(valid, num / np.where(valid, denom, 1.0), 0.0)
+    I_vals = np.clip(I_vals, -1.0, 1.0)
+
+    results = [
+        {"gene": gene, "I": round(float(I_vals[j]), 4)}
+        for j, gene in enumerate(selected)
+        if valid[j]
+    ]
+    results.sort(key=lambda d: d["I"], reverse=True)
+    return results
+
+
+def _compute_gene_correlations(adata, genes: List[str], top_n: int = 10) -> dict:
+    """For each gene, return the top_n most positively correlated genes."""
+    if not genes or top_n < 1 or len(genes) < 2:
+        return {gene: [] for gene in genes} if genes else {}
+    X = adata[:, genes].X
+    if hasattr(X, "toarray"):
+        X = X.toarray()
+    X = np.asarray(X, dtype=float)
+    corr = np.corrcoef(X.T)  # shape (n_genes, n_genes)
+    result = {}
+    for i, gene in enumerate(genes):
+        scores = corr[i].copy()
+        scores[i] = -2.0  # exclude self
+        top_idx = np.argsort(scores)[::-1][:top_n]
+        result[gene] = [
+            {"gene": genes[j], "r": round(float(corr[i, j]), 3)}
+            for j in top_idx
+            if j != i and corr[i, j] > 0
+        ]
+    return result
 
 
 def _estimate_auto_spot_size(dataset: SpatialDataset, min_panel_size: int) -> float:
@@ -93,6 +703,75 @@ def _resolve_spot_size(
     return float(value), False
 
 
+def _normalize_section_rotation(value: Union[int, float]) -> float:
+    angle = float(value)
+    if not np.isfinite(angle):
+        raise ValueError("section rotation angles must be finite numbers")
+    normalized = angle % 360.0
+    if np.isclose(normalized, 360.0):
+        normalized = 0.0
+    return float(normalized)
+
+
+def _json_sanitize_nonfinite(value):
+    """Recursively replace NaN/Inf values with None for strict JSON output."""
+    if isinstance(value, float):
+        return value if np.isfinite(value) else None
+    if isinstance(value, dict):
+        return {k: _json_sanitize_nonfinite(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_sanitize_nonfinite(v) for v in value]
+    if isinstance(value, tuple):
+        return [_json_sanitize_nonfinite(v) for v in value]
+    return value
+
+
+def _resolve_section_rotations(
+    dataset: SpatialDataset,
+    section_rotations: Optional[Mapping[str, Union[int, float]]],
+) -> Dict[str, float]:
+    if section_rotations is None:
+        return {}
+    if not isinstance(section_rotations, Mapping):
+        raise TypeError("section_rotations must be a mapping of section_id -> angle")
+
+    valid_ids = {section.section_id for section in dataset.sections}
+    resolved: Dict[str, float] = {}
+    unknown_ids = sorted(str(section_id) for section_id in section_rotations if str(section_id) not in valid_ids)
+    if unknown_ids:
+        raise ValueError(
+            "section_rotations contains unknown section_id values: " + ", ".join(unknown_ids)
+        )
+
+    for raw_section_id, raw_angle in section_rotations.items():
+        section_id = str(raw_section_id)
+        try:
+            resolved[section_id] = _normalize_section_rotation(raw_angle)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"section_rotations[{section_id!r}] must be a finite numeric angle"
+            ) from exc
+
+    return resolved
+
+
+def _resolve_marker_genes_groupby(
+    dataset: SpatialDataset,
+    color: str,
+    marker_genes_groupby: Optional[List[str]],
+) -> Optional[List[str]]:
+    if not marker_genes_groupby:
+        return marker_genes_groupby
+    resolved = [str(value) for value in marker_genes_groupby if str(value).strip()]
+    if color not in dataset.adata.obs.columns:
+        return resolved or None
+    if color in resolved:
+        return resolved or None
+    if pd.api.types.is_numeric_dtype(dataset.adata.obs[color]):
+        return resolved or None
+    return [str(color), *resolved]
+
+
 # Default color palettes
 DEFAULT_CATEGORICAL_PALETTE = [
     "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
@@ -123,6 +802,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             --muted-color: {muted_color};
             --hover-bg: {hover_bg};
             --graph-color: {graph_color};
+            --selection-outline-color: rgba(22, 22, 22, 0.42);
             --accent: #870052;
             --accent-strong: #4F0433;
             --accent-warm: #FF876F;
@@ -139,6 +819,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             --muted-color: #888888;
             --hover-bg: #3a3a3a;
             --graph-color: rgba(255, 255, 255, 0.12);
+            --selection-outline-color: rgba(255, 255, 255, 0.5);
         }}
         :root.light {{
             --background: #f5f5f5;
@@ -150,6 +831,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             --muted-color: #666666;
             --hover-bg: #f0f0f0;
             --graph-color: rgba(0, 0, 0, 0.12);
+            --selection-outline-color: rgba(22, 22, 22, 0.42);
         }}
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
         body {{
@@ -219,6 +901,172 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         select {{ min-width: 120px; }}
         input[type="text"] {{ width: 140px; }}
         select:focus, input:focus {{ outline: none; border-color: var(--accent-strong); box-shadow: 0 0 0 2px rgba(135, 0, 82, 0.15); }}
+        .gene-control-group {{
+            position: relative;
+            align-items: flex-start;
+        }}
+        .gene-input-shell {{
+            position: relative;
+            min-width: 180px;
+        }}
+        .gene-input-shell input[type="text"] {{
+            width: 180px;
+        }}
+        .gene-discovery-panel {{
+            position: absolute;
+            top: calc(100% + 6px);
+            left: 0;
+            width: min(360px, calc(100vw - 32px));
+            max-height: 420px;
+            overflow: auto;
+            padding: 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            background:
+                linear-gradient(180deg, rgba(255, 135, 111, 0.08), rgba(135, 0, 82, 0.03)),
+                var(--panel-bg);
+            box-shadow: 0 14px 36px rgba(0, 0, 0, 0.16);
+            display: none;
+            z-index: 40;
+        }}
+        .gene-discovery-panel.active {{
+            display: block;
+        }}
+        .gene-discovery-header {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 8px;
+        }}
+        .gene-discovery-title {{
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: var(--muted-color);
+        }}
+        .gene-discovery-actions {{
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }}
+        .gene-discovery-section + .gene-discovery-section {{
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid rgba(127, 127, 127, 0.18);
+        }}
+        .gene-discovery-label {{
+            font-size: 11px;
+            font-weight: 600;
+            margin-bottom: 6px;
+            color: var(--text-color);
+        }}
+        .gene-discovery-empty {{
+            font-size: 11px;
+            color: var(--muted-color);
+            line-height: 1.4;
+        }}
+        .gene-token-grid {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }}
+        .gene-token-btn {{
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 5px 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 999px;
+            background: var(--input-bg);
+            color: var(--text-color);
+            cursor: pointer;
+            font-size: 11px;
+            line-height: 1.2;
+            transition: background 0.2s, border-color 0.2s, transform 0.2s;
+        }}
+        .gene-token-btn:hover {{
+            background: var(--hover-bg);
+            border-color: var(--accent-strong);
+            transform: translateY(-1px);
+        }}
+        .gene-token-btn.active {{
+            border-color: var(--accent-strong);
+            background: rgba(135, 0, 82, 0.10);
+        }}
+        .gene-token-btn.search-active {{
+            box-shadow: 0 0 0 2px rgba(135, 0, 82, 0.18);
+        }}
+        .gene-token-btn.unloaded {{
+            border-style: dashed;
+        }}
+        .gene-token-btn.disabled {{
+            cursor: default;
+            opacity: 0.78;
+        }}
+        .gene-token-btn.disabled:hover {{
+            background: var(--input-bg);
+            border-color: var(--border-color);
+            transform: none;
+        }}
+        .gene-token-meta {{
+            font-size: 10px;
+            color: var(--muted-color);
+        }}
+        .gene-suggestion-group + .gene-suggestion-group {{
+            margin-top: 8px;
+        }}
+        .gene-suggestion-group-title {{
+            font-size: 10px;
+            color: var(--muted-color);
+            margin-bottom: 5px;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }}
+        .gene-panel-card {{
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 8px;
+            background: rgba(255, 255, 255, 0.04);
+        }}
+        .gene-panel-card + .gene-panel-card {{
+            margin-top: 8px;
+        }}
+        .gene-panel-header {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 6px;
+        }}
+        .gene-panel-name {{
+            font-size: 12px;
+            font-weight: 600;
+        }}
+        .gene-panel-actions {{
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }}
+        .gene-panel-btn {{
+            padding: 3px 7px;
+            border: 1px solid var(--border-color);
+            border-radius: 999px;
+            background: var(--input-bg);
+            color: var(--text-color);
+            cursor: pointer;
+            font-size: 10px;
+            transition: background 0.2s, border-color 0.2s;
+        }}
+        .gene-panel-btn:hover {{
+            background: var(--hover-bg);
+        }}
+        .gene-panel-genes {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }}
         .stats {{ font-size: 11px; color: var(--muted-color); }}
         .size-control {{
             display: inline-flex;
@@ -276,6 +1124,25 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             transition: background 0.3s, border-color 0.3s;
         }}
         .filter-bar:empty {{ display: none; }}
+        .overview-blend-panel {{
+            display: none;
+            padding: 6px 16px;
+            background: var(--header-bg);
+            border-bottom: 1px solid var(--border-color);
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            font-size: 11px;
+            transition: background 0.3s, border-color 0.3s;
+        }}
+        .overview-blend-panel.visible {{ display: flex; }}
+        .overview-blend-row {{ display: flex; align-items: center; gap: 4px; }}
+        .overview-blend-side {{
+            font-weight: 600;
+            min-width: 16px;
+            text-align: center;
+            color: var(--muted-color);
+        }}
         .filter-group {{ display: flex; align-items: center; gap: 4px; }}
         .filter-group label {{ font-size: 10px; color: var(--muted-color); text-transform: capitalize; }}
         .filter-chips {{ display: flex; gap: 3px; flex-wrap: wrap; }}
@@ -374,6 +1241,59 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             align-items: center;
             transition: background 0.3s, border-color 0.3s;
         }}
+        .section-header-main {{
+            flex: 1;
+            min-width: 0;
+        }}
+        .section-header-actions {{
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            flex-shrink: 0;
+        }}
+        .section-rotation-label {{
+            font-size: 8px;
+            color: var(--muted-color);
+            min-width: 54px;
+            text-align: right;
+        }}
+        .section-rotate-group {{
+            display: inline-flex;
+            align-items: center;
+            gap: 2px;
+        }}
+        .section-rotate-btn {{
+            min-width: 28px;
+            padding: 2px 4px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: var(--input-bg);
+            color: var(--text-color);
+            cursor: pointer;
+            font-size: 9px;
+            line-height: 1.2;
+            transition: background 0.2s, border-color 0.2s;
+        }}
+        .section-rotate-btn:hover {{
+            background: var(--hover-bg);
+        }}
+        .section-panel[draggable="true"] .section-header {{ cursor: grab; }}
+        .section-panel[draggable="true"] .section-header:active {{ cursor: grabbing; }}
+        .section-panel.drag-over {{ box-shadow: 0 0 0 2px var(--accent-color, #4a9eff); transform: translateY(-2px); }}
+        .section-panel.dragging {{ opacity: 0.4; }}
+        .section-hide-btn {{
+            background: none;
+            border: none;
+            color: var(--muted-color);
+            cursor: pointer;
+            font-size: 11px;
+            padding: 0 2px;
+            line-height: 1;
+            opacity: 0;
+            transition: opacity 0.15s, color 0.15s;
+        }}
+        .section-panel:hover .section-hide-btn {{ opacity: 0.6; }}
+        .section-hide-btn:hover {{ opacity: 1 !important; color: var(--text-color); }}
         .section-header .expand-icon {{ font-size: 10px; opacity: 0.5; }}
         .section-meta {{ font-size: 8px; color: var(--muted-color); margin-top: 1px; }}
         .section-canvas {{ display: block; width: 100%; aspect-ratio: 1; }}
@@ -394,7 +1314,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             border-left: none;
         }}
         .color-panel {{
-            width: 240px;
+            width: 300px;
             padding: 12px;
             background: var(--panel-bg);
             border-left: 1px solid var(--border-color);
@@ -435,11 +1355,38 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .color-tabs {{
             display: flex;
             gap: 6px;
+            flex-wrap: wrap;
+        }}
+        .insights-top-tabs {{
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 4px;
+        }}
+        .insights-top-tabs .color-tab {{
+            flex: 0 0 auto;
+            padding: 5px 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            overflow-wrap: normal;
+        }}
+        .insights-subtabs {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(62px, 1fr));
+            gap: 4px;
+        }}
+        .insights-subtabs .color-tab {{
+            flex: 0 0 auto;
         }}
         .color-tab {{
-            flex: 1;
+            flex: 1 1 96px;
+            min-width: 0;
             padding: 4px 6px;
             font-size: 10px;
+            line-height: 1.2;
+            white-space: normal;
+            overflow-wrap: anywhere;
+            text-align: center;
             border: 1px solid var(--border-color);
             border-radius: 4px;
             background: var(--input-bg);
@@ -513,6 +1460,38 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             color: var(--accent-strong);
             border-bottom-color: var(--accent-strong);
         }}
+        .info-shortcuts-table {{
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11px;
+        }}
+        .info-shortcuts-table th,
+        .info-shortcuts-table td {{
+            padding: 4px 0;
+            border-top: 1px solid var(--border-color);
+            text-align: left;
+            vertical-align: top;
+        }}
+        .info-shortcuts-table tr:first-child th,
+        .info-shortcuts-table tr:first-child td {{
+            border-top: none;
+            padding-top: 0;
+        }}
+        .info-shortcuts-key {{
+            width: 76px;
+            white-space: nowrap;
+            color: var(--muted-color);
+            font-variant-numeric: tabular-nums;
+        }}
+        .info-shortcuts-table kbd {{
+            display: inline-block;
+            padding: 1px 5px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: var(--input-bg);
+            color: var(--text-color);
+            font: inherit;
+        }}
         .info-popover {{
             position: absolute;
             top: calc(100% + 8px);
@@ -529,6 +1508,68 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         .info-popover.active {{
             display: block;
+        }}
+        .shortcuts-overlay {{
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 1400;
+            background: rgba(0, 0, 0, 0.58);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }}
+        .shortcuts-overlay.active {{
+            display: flex;
+        }}
+        .shortcuts-dialog {{
+            width: min(520px, calc(100vw - 32px));
+            max-height: min(78vh, 720px);
+            overflow: auto;
+            border: 1px solid var(--border-color);
+            border-radius: 14px;
+            background: var(--panel-bg);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.28);
+        }}
+        .shortcuts-dialog-header {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 14px 16px 10px;
+            border-bottom: 1px solid var(--border-color);
+        }}
+        .shortcuts-dialog-title {{
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+        }}
+        .shortcuts-dialog-subtitle {{
+            margin-top: 3px;
+            font-size: 11px;
+            color: var(--muted-color);
+        }}
+        .shortcuts-dialog-close {{
+            border: 1px solid var(--border-color);
+            border-radius: 999px;
+            background: var(--input-bg);
+            color: var(--text-color);
+            padding: 4px 9px;
+            font-size: 11px;
+            cursor: pointer;
+        }}
+        .shortcuts-dialog-close:hover {{
+            background: var(--hover-bg);
+        }}
+        .shortcuts-dialog-body {{
+            padding: 12px 16px 16px;
+        }}
+        .shortcuts-dialog-note {{
+            margin-top: 10px;
+            font-size: 11px;
+            color: var(--muted-color);
         }}
         .color-list {{
             display: flex;
@@ -558,6 +1599,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             display: flex;
             flex-direction: column;
             gap: 8px;
+            min-width: 0;
             font-size: 11px;
         }}
         .color-aggregation.collapsed {{
@@ -583,7 +1625,42 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             color: var(--text-color);
             font-size: 11px;
         }}
-        .marker-group-title {{ font-size: 11px; font-weight: 600; }}
+        .marker-group-title {{ font-size: 11px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; border-radius: 3px; padding: 1px 3px; margin: -1px -3px; }}
+        .marker-group-title:hover {{ background: var(--hover-bg); }}
+        .marker-group-title.is-spotlit {{ background: color-mix(in srgb, var(--accent-color, #4a9eff) 15%, transparent); }}
+        .marker-genes .gene-token-grid {{ gap: 4px; }}
+        .marker-genes .gene-token-btn {{
+            gap: 4px;
+            padding: 3px 6px;
+            font-size: 10px;
+        }}
+        .marker-genes .gene-token-meta {{ font-size: 9px; }}
+        .spatial-gene-row {{
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            min-width: 0;
+        }}
+        .spatial-gene-rank {{
+            flex: 0 0 24px;
+            font-size: 10px;
+            color: var(--muted-color);
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }}
+        .spatial-gene-row .gene-token-btn {{
+            flex: 1 1 auto;
+            min-width: 0;
+        }}
+        .spatial-gene-score {{
+            flex: 0 0 auto;
+            min-width: 52px;
+            font-size: 10px;
+            color: var(--muted-color);
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        }}
         .marker-genes-list {{
             font-size: 10px;
             color: var(--muted-color);
@@ -595,6 +1672,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             border-radius: 6px;
             background: rgba(135, 0, 82, 0.06);
             border: 1px solid var(--border-color);
+            min-width: 0;
+            overflow: hidden;
         }}
         .agg-group-title {{ font-weight: 600; margin-bottom: 4px; }}
         .agg-group-meta {{ font-size: 10px; color: var(--muted-color); margin-bottom: 4px; }}
@@ -604,6 +1683,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             gap: 6px;
             margin: 2px 0;
         }}
+        .agg-row[data-target-cat], .agg-row[data-agg-cat] {{ cursor: pointer; border-radius: 3px; padding: 1px 3px; margin: 2px -3px; }}
+        .agg-row[data-target-cat]:hover, .agg-row[data-agg-cat]:hover {{ background: var(--hover-bg); }}
+        .agg-row[data-target-cat].is-active, .agg-row[data-agg-cat].is-active {{ background: color-mix(in srgb, var(--accent-color, #4a9eff) 15%, transparent); }}
         .agg-dot {{
             width: 8px;
             height: 8px;
@@ -612,6 +1694,129 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         .agg-label {{ flex: 1; }}
         .agg-value {{ font-variant-numeric: tabular-nums; }}
+        .comparison-stack {{
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }}
+        .comparison-card {{
+            padding: 6px;
+            border-radius: 6px;
+            background: var(--input-bg);
+            border: 1px solid var(--border-color);
+            min-width: 0;
+        }}
+        .comparison-card-title {{
+            display: flex;
+            align-items: flex-start;
+            gap: 6px;
+            font-weight: 600;
+            margin-bottom: 4px;
+            min-width: 0;
+        }}
+        .gene-search-btn {{
+            flex: 0 0 auto;
+            min-width: 0;
+            padding: 2px 7px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: var(--input-bg);
+            color: var(--muted-color);
+            cursor: pointer;
+            font-size: 9px;
+            font-weight: 600;
+            line-height: 1.2;
+            white-space: nowrap;
+        }}
+        .gene-search-btn:hover {{
+            background: var(--hover-bg);
+            color: var(--text-color);
+        }}
+        .comparison-card-title span:last-child {{
+            min-width: 0;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+        }}
+        .comparison-metric-grid {{
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 6px 8px;
+        }}
+        .comparison-metric {{
+            min-width: 0;
+        }}
+        .comparison-metric-label {{
+            display: block;
+            font-size: 9px;
+            color: var(--muted-color);
+            margin-bottom: 2px;
+        }}
+        .comparison-metric-value {{
+            display: block;
+            font-variant-numeric: tabular-nums;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+        }}
+        .insight-subsection {{
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: var(--input-bg);
+            overflow: hidden;
+            margin-top: 8px;
+        }}
+        .insight-subsection:first-child {{
+            margin-top: 0;
+        }}
+        .insight-subsection-header {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 8px 10px;
+            cursor: pointer;
+            list-style: none;
+            user-select: none;
+        }}
+        .insight-subsection-header::-webkit-details-marker {{
+            display: none;
+        }}
+        .insight-subsection-title {{
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-color);
+            flex: 0 0 auto;
+        }}
+        .insight-subsection-summary {{
+            min-width: 0;
+            flex: 1 1 auto;
+            text-align: right;
+            font-size: 10px;
+            color: var(--muted-color);
+            overflow-wrap: anywhere;
+            word-break: break-word;
+        }}
+        .insight-subsection-header::after {{
+            content: '+';
+            flex: 0 0 auto;
+            width: 16px;
+            text-align: center;
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--muted-color);
+        }}
+        .insight-subsection[open] .insight-subsection-header::after {{
+            content: '−';
+        }}
+        .insight-subsection-body {{
+            border-top: 1px solid var(--border-color);
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }}
+        .insight-subsection-body .agg-group-meta:last-child {{
+            margin-bottom: 0;
+        }}
         .trend-table {{
             width: 100%;
             border-collapse: collapse;
@@ -622,69 +1827,467 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             padding: 4px 6px;
             border-bottom: 1px solid var(--border-color);
             font-variant-numeric: tabular-nums;
+            vertical-align: top;
         }}
         .trend-table th {{ color: var(--muted-color); font-weight: 600; }}
         .interaction-target {{
             display: flex;
-            align-items: center;
+            align-items: flex-start;
             gap: 6px;
+            min-width: 0;
+        }}
+        .interaction-target span:last-child {{
+            min-width: 0;
+            overflow-wrap: anywhere;
+            word-break: break-word;
         }}
         .interaction-markers {{
             font-size: 10px;
             color: var(--muted-color);
             line-height: 1.35;
         }}
+        .interaction-gene-link {{
+            cursor: pointer;
+            border-radius: 3px;
+            padding: 0 2px;
+        }}
+        .interaction-gene-link:hover {{
+            background: var(--hover-bg);
+            text-decoration: underline;
+            color: var(--text-color);
+        }}
+        .neighbor-view-controls {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            flex-wrap: wrap;
+        }}
+        .neighbor-view-buttons {{
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+        }}
+        .neighbor-view-buttons .legend-btn {{
+            flex: 0 0 auto;
+            min-width: 70px;
+        }}
+        .neighbor-control-panel {{
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: color-mix(in srgb, var(--bg-color) 18%, var(--input-bg));
+            padding: 8px 10px;
+            margin-bottom: 8px;
+        }}
+        .neighbor-control-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 8px 10px;
+            align-items: end;
+        }}
+        .neighbor-control-group {{
+            min-width: 0;
+        }}
+        .neighbor-control-group label {{
+            display: block;
+            font-size: 10px;
+            color: var(--muted-color);
+            margin-bottom: 4px;
+        }}
+        .neighbor-control-group select,
+        .neighbor-control-group input[type="range"] {{
+            width: 100%;
+        }}
+        .neighbor-control-hint {{
+            margin-top: 4px;
+            font-size: 9px;
+            color: var(--muted-color);
+            line-height: 1.3;
+        }}
+        .neighbor-visualization {{
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: var(--input-bg);
+            padding: 8px;
+        }}
+        .neighbor-visualization-toolbar {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 8px;
+        }}
+        .neighbor-visualization-toolbar .legend-btn {{
+            min-width: 0;
+        }}
+        .neighbor-visualization-toolbar .neighbor-view-note {{
+            margin: 0;
+        }}
+        .neighbor-zoom-controls {{
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-wrap: wrap;
+        }}
+        .neighbor-zoom-label {{
+            font-size: 10px;
+            color: var(--muted-color);
+            min-width: 42px;
+            text-align: center;
+            font-variant-numeric: tabular-nums;
+        }}
+        .neighbor-visualization-scroll {{
+            overflow: auto;
+            max-height: 440px;
+            border-radius: 6px;
+            background: color-mix(in srgb, var(--bg-color) 16%, transparent);
+            overscroll-behavior: contain;
+        }}
+        .neighbor-visualization-scroll.expanded {{
+            max-height: 680px;
+        }}
+        .neighbor-svg {{
+            width: 100%;
+            height: auto;
+            display: block;
+            margin: 0 auto;
+        }}
+        .neighbor-view-note {{
+            font-size: 10px;
+            color: var(--muted-color);
+            margin-top: 6px;
+            line-height: 1.35;
+        }}
+        .neighbor-view-note:first-child {{
+            margin-top: 0;
+            margin-bottom: 6px;
+        }}
+        .neighbor-detail-card {{
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: color-mix(in srgb, var(--bg-color) 20%, var(--input-bg));
+            padding: 8px 10px;
+            margin-bottom: 8px;
+        }}
+        .neighbor-detail-card.is-empty {{
+            color: var(--muted-color);
+        }}
+        .neighbor-detail-header {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-bottom: 4px;
+        }}
+        .neighbor-detail-title {{
+            font-size: 11px;
+            font-weight: 600;
+            line-height: 1.35;
+        }}
+        .neighbor-detail-chip {{
+            display: inline-flex;
+            align-items: center;
+            border-radius: 999px;
+            padding: 2px 6px;
+            font-size: 9px;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            background: rgba(17, 138, 178, 0.12);
+            color: var(--text-color);
+        }}
+        .neighbor-detail-meta {{
+            font-size: 10px;
+            color: var(--muted-color);
+            line-height: 1.45;
+        }}
+        .neighbor-detail-actions {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 8px;
+        }}
+        .neighbor-interactive {{
+            cursor: pointer;
+            transition: opacity 120ms ease, filter 120ms ease, transform 120ms ease;
+        }}
+        .neighbor-interactive.is-dimmed {{
+            opacity: 0.04;
+        }}
+        .neighbor-interactive.is-hovered,
+        .neighbor-interactive.is-selected {{
+            opacity: 1;
+        }}
+        .neighbor-interactive:focus-visible {{
+            outline: none;
+        }}
+        .neighbor-matrix-grid-line {{
+            stroke: color-mix(in srgb, var(--border-color) 88%, transparent);
+            stroke-width: 1;
+        }}
+        .neighbor-matrix-bubble {{
+            stroke: rgba(255, 255, 255, 0.45);
+            stroke-width: 1;
+        }}
+        .neighbor-matrix-bubble.is-hovered,
+        .neighbor-matrix-bubble.is-selected {{
+            stroke-width: 2.2;
+            filter: brightness(1.04);
+        }}
+        .neighbor-network-edge {{
+            fill: none;
+            stroke-linecap: round;
+        }}
+        .neighbor-network-edge.is-dimmed {{
+            stroke-opacity: 0.07;
+        }}
+        .neighbor-network-edge.is-related {{
+            stroke-opacity: 0.88;
+        }}
+        .neighbor-network-edge.is-hovered,
+        .neighbor-network-edge.is-selected {{
+            stroke-opacity: 1;
+            filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.28));
+        }}
+        .neighbor-network-node circle {{
+            stroke: rgba(255, 255, 255, 0.72);
+            stroke-width: 1.4;
+        }}
+        .neighbor-network-node.is-dimmed circle {{
+            opacity: 0.08;
+            filter: saturate(0.2);
+        }}
+        .neighbor-network-node.is-related circle {{
+            stroke: color-mix(in srgb, var(--text-color) 42%, white);
+            stroke-width: 3.4;
+            filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.38));
+        }}
+        .neighbor-network-node.is-hovered circle,
+        .neighbor-network-node.is-selected circle {{
+            stroke-width: 4.2;
+            filter: brightness(1.06) drop-shadow(0 0 10px rgba(255, 255, 255, 0.5));
+        }}
+        .neighbor-network-label {{
+            font-size: 10px;
+            fill: var(--text-color);
+            paint-order: stroke fill;
+            stroke: var(--input-bg);
+            stroke-width: 3.5px;
+            stroke-linejoin: round;
+        }}
+        .neighbor-network-node.is-dimmed .neighbor-network-label {{
+            opacity: 0.05;
+        }}
+        .neighbor-network-node.is-related .neighbor-network-label {{
+            font-weight: 700;
+            fill: color-mix(in srgb, var(--text-color) 92%, white);
+            opacity: 1;
+        }}
+        .neighbor-network-label.meta {{
+            font-size: 9px;
+            fill: var(--muted-color);
+        }}
+        .neighbor-network-node.is-related .neighbor-network-label.meta {{
+            fill: var(--text-color);
+        }}
+        .neighbor-axis-label {{
+            font-size: 10px;
+            fill: var(--text-color);
+        }}
+        .neighbor-axis-label.meta {{
+            font-size: 9px;
+            fill: var(--muted-color);
+        }}
+        .neighbor-axis-label-group.is-dimmed text {{
+            opacity: 0.28;
+        }}
+        .neighbor-axis-label-group.is-hovered text,
+        .neighbor-axis-label-group.is-selected text {{
+            font-weight: 700;
+        }}
+        .neighbor-chord-link {{
+            stroke: none;
+        }}
+        .neighbor-chord-link.is-dimmed {{
+            opacity: 0.08;
+        }}
+        .neighbor-chord-link.is-related {{
+            opacity: 0.9;
+            filter: brightness(1.14);
+        }}
+        .neighbor-chord-link.is-hovered,
+        .neighbor-chord-link.is-selected {{
+            filter: brightness(1.22);
+        }}
+        .neighbor-chord-arc {{
+            fill: none;
+            stroke-linecap: butt;
+        }}
+        .neighbor-chord-arc.is-dimmed {{
+            opacity: 0.24;
+        }}
+        .neighbor-chord-arc.is-related {{
+            filter: brightness(1.06);
+        }}
+        .neighbor-chord-arc.is-hovered,
+        .neighbor-chord-arc.is-selected {{
+            filter: brightness(1.14) drop-shadow(0 0 6px rgba(255,255,255,0.35));
+        }}
+        .neighbor-chord-legend {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 6px 10px;
+            margin-top: 8px;
+        }}
+        .neighbor-chord-legend-item {{
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 10px;
+            min-width: 0;
+        }}
+        .neighbor-chord-legend-item span:last-child {{
+            min-width: 0;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+        }}
+        .neighbor-chord-arc-label {{
+            font-size: 10px;
+            fill: var(--text-color);
+            paint-order: stroke fill;
+            stroke: var(--input-bg);
+            stroke-width: 3px;
+            stroke-linejoin: round;
+        }}
+        .neighbor-zscore-legend {{
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 10px;
+            color: var(--muted-color);
+            margin-top: 6px;
+            padding: 0 2px;
+        }}
+        .neighbor-zscore-gradient {{
+            flex: 1;
+            height: 7px;
+            border-radius: 4px;
+            background: linear-gradient(to right, rgba(17,138,178,0.85), rgba(145,151,161,0.4), rgba(193,18,31,0.85));
+        }}
 
-        /* Dotplot */
-        .dotplot-controls {{
+        .cluster-de-controls {{
             display: flex;
             flex-direction: column;
             gap: 8px;
         }}
-        .dotplot-grid {{
+        .cluster-de-select-row {{
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+        }}
+        .cluster-de-result {{
             border: 1px solid var(--border-color);
             border-radius: 8px;
             background: var(--input-bg);
             overflow: auto;
             max-height: 420px;
         }}
-        .dotplot-row {{
-            display: grid;
-            grid-template-columns: 180px repeat(var(--dotplot-cols, 1), 24px);
-            align-items: center;
-            gap: 6px;
+        .cluster-de-table {{
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+            font-size: 10px;
+        }}
+        .cluster-de-table th, .cluster-de-table td {{
+            text-align: left;
             padding: 6px 8px;
             border-bottom: 1px solid var(--border-color);
+            font-variant-numeric: tabular-nums;
+            vertical-align: top;
+            overflow-wrap: anywhere;
+            word-break: break-word;
         }}
-        .dotplot-row:last-child {{ border-bottom: none; }}
-        .dotplot-row.dotplot-header {{
+        .cluster-de-table th {{
             position: sticky;
             top: 0;
-            background: var(--panel-bg);
             z-index: 1;
-        }}
-        .dotplot-label {{
-            font-size: 10px;
-            color: var(--text-color);
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }}
-        .dotplot-gene {{
-            font-size: 9px;
+            background: var(--panel-bg);
             color: var(--muted-color);
-            text-align: center;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            font-weight: 600;
+        }}
+        .cluster-de-table tr:last-child td {{ border-bottom: none; }}
+        .cluster-de-gene-btn {{
+            padding: 0;
+            border: none;
+            background: none;
+            color: var(--accent-strong);
+            cursor: pointer;
+            font: inherit;
+            text-align: left;
+        }}
+        .cluster-de-gene-btn:hover {{ text-decoration: underline; }}
+        .cluster-de-meta {{
+            padding: 8px;
+            font-size: 10px;
+            color: var(--muted-color);
+            border-bottom: 1px solid var(--border-color);
+        }}
+        .volcano-container {{
+            position: relative;
+            padding: 8px 8px 4px;
+            border-bottom: 1px solid var(--border-color);
+        }}
+        .volcano-svg {{ display: block; overflow: visible; }}
+        .volcano-dot {{ cursor: pointer; }}
+        .volcano-dot:hover {{ stroke: var(--text-color); stroke-width: 1.5px; }}
+        .volcano-tooltip {{
+            position: absolute;
+            background: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 4px 7px;
+            font-size: 10px;
+            line-height: 1.5;
+            pointer-events: none;
             white-space: nowrap;
+            z-index: 10;
+            display: none;
+            color: var(--text-color);
+            box-shadow: 0 2px 6px rgba(0,0,0,0.15);
         }}
-        .dotplot-dot {{
-            width: 20px;
-            height: 20px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+        .volcano-axis-label {{ font-size: 9px; fill: var(--muted-color); font-family: inherit; }}
+        .volcano-threshold-line {{ stroke: var(--border-color); stroke-width: 1; stroke-dasharray: 3 3; }}
+        .samples-controls {{ display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }}
+        .samples-view-toggle {{ display: flex; gap: 4px; }}
+        .samples-chart-container {{ position: relative; overflow: auto; max-height: 440px; }}
+        .samples-svg {{ display: block; }}
+        .samples-tooltip {{
+            position: absolute;
+            background: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 4px 7px;
+            font-size: 10px;
+            pointer-events: none;
+            white-space: nowrap;
+            z-index: 10;
+            display: none;
+            color: var(--text-color);
+            box-shadow: 0 2px 6px rgba(0,0,0,0.15);
         }}
+        .samples-legend {{ display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 8px; }}
+        .samples-legend-item {{ display: flex; align-items: center; gap: 3px; font-size: 10px; color: var(--text-color); }}
+        .samples-legend-swatch {{ width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }}
+        .gene-distribution-summary {{ font-size: 11px; color: var(--muted-color); margin: 8px 0 6px; }}
+        .gene-distribution-table {{ width: 100%; border-collapse: collapse; font-size: 11px; }}
+        .gene-distribution-table th, .gene-distribution-table td {{ padding: 4px 6px; text-align: right; border-bottom: 1px solid var(--border-color); }}
+        .gene-distribution-table th:first-child, .gene-distribution-table td:first-child {{ text-align: left; }}
+        .gene-distribution-table th {{ cursor: pointer; user-select: none; color: var(--muted-color); font-weight: 600; }}
+        .gene-distribution-table th:hover {{ color: var(--text-color); }}
+        .gene-distribution-table tbody tr {{ cursor: pointer; }}
+        .gene-distribution-table tbody tr:hover {{ background: var(--hover-bg); }}
         .legend-title {{
             font-size: 13px;
             font-weight: 600;
@@ -880,8 +2483,29 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             align-items: center;
             transition: background 0.3s, border-color 0.3s;
         }}
+        .modal-header-actions {{
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }}
         .modal-header h2 {{ font-size: 15px; font-weight: 600; }}
         .modal-header .modal-meta {{ font-size: 11px; color: var(--muted-color); margin-left: 10px; }}
+        .modal-controls-toggle {{
+            padding: 4px 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 999px;
+            background: var(--panel-bg);
+            color: var(--text-color);
+            font-size: 10px;
+            letter-spacing: 0.03em;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: background 0.2s, border-color 0.2s, color 0.2s;
+        }}
+        .modal-controls-toggle:hover {{
+            background: var(--hover-bg);
+            border-color: var(--accent-strong);
+        }}
         .modal-close {{
             background: none;
             border: none;
@@ -893,8 +2517,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         .modal-close:hover {{ background: var(--hover-bg); }}
         .modal-body {{ flex: 1; display: flex; overflow: hidden; }}
-        .modal-canvas-container {{ flex: 1; position: relative; overflow: hidden; }}
-        .modal-canvas {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; }}
+        .modal-canvas-container {{ flex: 1; position: relative; overflow: hidden; background: var(--panel-bg); }}
+        .modal-canvas {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform-origin: 0 0; will-change: transform; }}
         .modal-controls {{
             position: absolute;
             bottom: 12px;
@@ -902,25 +2526,142 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             transform: translateX(-50%);
             display: flex;
             flex-wrap: wrap;
-            justify-content: center;
-            gap: 6px;
-            background: var(--header-bg);
-            padding: 6px 10px;
-            border-radius: 6px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-            transition: background 0.3s;
+            justify-content: flex-start;
+            align-items: stretch;
+            gap: 3px;
+            width: max-content;
+            max-width: min(960px, calc(100% - 72px));
+            padding: 3px 4px;
+            border: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
+            border-radius: 12px;
+            background: color-mix(in srgb, var(--header-bg) 90%, transparent);
+            backdrop-filter: blur(12px);
+            box-shadow: 0 10px 28px rgba(0,0,0,0.2);
+            transition: background 0.3s, border-color 0.3s, box-shadow 0.3s;
+        }}
+        .modal-controls.dragging {{
+            box-shadow: 0 14px 34px rgba(0,0,0,0.28);
+        }}
+        .modal-control-group {{
+            display: flex;
+            align-items: center;
+            gap: 3px;
+            padding: 2px 4px;
+            border: 1px solid color-mix(in srgb, var(--border-color) 76%, transparent);
+            border-radius: 8px;
+            background: color-mix(in srgb, var(--panel-bg) 92%, transparent);
+            min-width: 0;
+            cursor: grab;
+        }}
+        .modal-control-group-title {{
+            flex-shrink: 0;
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--muted-color);
+            cursor: inherit;
+            user-select: none;
+        }}
+        .modal-controls.dragging .modal-control-group,
+        .modal-controls.dragging .modal-control-group-title {{ cursor: grabbing; }}
+        .modal-control-group-body {{
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 3px;
+            min-width: 0;
         }}
         .modal-controls button {{
-            padding: 5px 10px;
+            min-height: 22px;
+            padding: 1px 7px;
             border: 1px solid var(--border-color);
-            border-radius: 4px;
+            border-radius: 999px;
             background: var(--input-bg);
             color: var(--text-color);
             cursor: pointer;
-            font-size: 12px;
-            transition: background 0.3s, border-color 0.3s, color 0.3s;
+            font-size: 11px;
+            font-weight: 600;
+            line-height: 1.4;
+            transition: background 0.3s, border-color 0.3s, color 0.3s, box-shadow 0.3s, opacity 0.3s;
         }}
         .modal-controls button:hover {{ background: var(--hover-bg); }}
+        .modal-controls button.modal-btn-primary {{
+            background: color-mix(in srgb, var(--accent-strong) 92%, var(--panel-bg));
+            border-color: color-mix(in srgb, var(--accent-strong) 94%, white 6%);
+            color: white;
+            box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-strong) 24%, transparent);
+        }}
+        .modal-controls button.modal-btn-primary:hover {{
+            background: color-mix(in srgb, var(--accent-strong) 100%, black 0%);
+        }}
+        .modal-controls button.modal-btn-muted {{
+            color: var(--muted-color);
+            border-color: color-mix(in srgb, var(--border-color) 62%, transparent);
+            background: color-mix(in srgb, var(--input-bg) 72%, transparent);
+            opacity: 0.86;
+        }}
+        .modal-controls button.modal-btn-muted:hover {{
+            color: var(--text-color);
+            opacity: 1;
+        }}
+        .modal-controls button.modal-btn-danger {{
+            color: color-mix(in srgb, #ff7b7b 72%, var(--text-color));
+            border-color: color-mix(in srgb, #ff7b7b 35%, var(--border-color));
+            background: color-mix(in srgb, #ff7b7b 10%, var(--input-bg));
+        }}
+        .modal-controls button.modal-btn-danger:hover {{
+            background: color-mix(in srgb, #ff7b7b 16%, var(--hover-bg));
+        }}
+        .modal-controls select {{
+            min-height: 22px;
+            padding: 1px 7px;
+            border: 1px solid var(--border-color);
+            border-radius: 999px;
+            background: var(--input-bg);
+            color: var(--text-color);
+            font-size: 11px;
+            line-height: 1.4;
+        }}
+        .modal-size-block {{
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }}
+        .modal-gene-view-block {{
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }}
+        .modal-gene-view-label {{
+            font-size: 10px;
+            color: var(--muted-color);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }}
+        .modal-size-value {{
+            min-width: 26px;
+            font-size: 10px;
+            font-variant-numeric: tabular-nums;
+            color: var(--text-color);
+        }}
+        .modal-controls.hidden {{ display: none; }}
+        @media (max-width: 960px) {{
+            .modal-controls {{
+                left: 12px;
+                right: 12px;
+                width: auto;
+                transform: none;
+            }}
+            .modal-control-group {{
+                width: 100%;
+                justify-content: space-between;
+            }}
+            .modal-control-group-body {{
+                justify-content: flex-end;
+                flex: 1;
+            }}
+        }}
         .modal-legend {{
             width: 180px;
             padding: 12px;
@@ -945,6 +2686,148 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             pointer-events: auto;
         }}
         .modal-blend-panel.visible {{ display: block; }}
+        .modal-gene-panel {{
+            position: absolute;
+            left: 12px;
+            bottom: 96px;
+            width: min(240px, calc(100% - 24px));
+            max-height: 280px;
+            padding: 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: color-mix(in srgb, var(--header-bg) 92%, transparent);
+            backdrop-filter: blur(6px);
+            box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
+            z-index: 6;
+            display: none;
+            pointer-events: auto;
+            overflow: hidden;
+        }}
+        .modal-gene-panel.visible {{
+            display: flex;
+            flex-direction: column;
+        }}
+        .modal-gene-panel-header {{
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
+        }}
+        .modal-gene-panel-title {{
+            flex: 1 1 auto;
+            min-width: 0;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: var(--muted-color);
+            font-weight: 700;
+        }}
+        .modal-gene-panel-count {{
+            flex: 0 0 auto;
+            font-size: 10px;
+            color: var(--muted-color);
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        }}
+        .modal-gene-panel-close {{
+            flex: 0 0 auto;
+            width: 20px;
+            height: 20px;
+            border: 1px solid var(--border-color);
+            border-radius: 999px;
+            background: var(--input-bg);
+            color: var(--muted-color);
+            cursor: pointer;
+            font-size: 12px;
+            line-height: 1;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s, border-color 0.2s, color 0.2s;
+        }}
+        .modal-gene-panel-close:hover {{
+            background: var(--hover-bg);
+            color: var(--text-color);
+        }}
+        .modal-gene-panel-body {{
+            margin-top: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            min-height: 0;
+            overflow: auto;
+        }}
+        .modal-gene-panel-empty {{
+            font-size: 11px;
+            line-height: 1.4;
+            color: var(--muted-color);
+        }}
+        .modal-gene-panel .gene-token-btn {{
+            width: 100%;
+            justify-content: flex-start;
+            border-radius: 10px;
+            padding: 6px 8px;
+            text-align: left;
+        }}
+        .modal-gene-panel-entry {{
+            display: flex;
+            align-items: stretch;
+            gap: 6px;
+            min-width: 0;
+        }}
+        .modal-gene-panel-entry .gene-token-btn {{
+            flex: 1 1 auto;
+            min-width: 0;
+        }}
+        .modal-gene-panel-entry .gene-search-btn {{
+            flex: 0 0 auto;
+            align-self: center;
+            padding: 3px 7px;
+            font-size: 9px;
+        }}
+        .modal-gene-panel .gene-token-btn.disabled {{
+            width: 100%;
+        }}
+        .modal-gene-panel-stack {{
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            width: 100%;
+            min-width: 0;
+        }}
+        .modal-gene-panel-main {{
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            width: 100%;
+            min-width: 0;
+        }}
+        .modal-gene-panel-gene {{
+            flex: 1 1 auto;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-weight: 600;
+        }}
+        .modal-gene-panel-score {{
+            flex: 0 0 auto;
+            font-size: 10px;
+            color: var(--muted-color);
+            font-variant-numeric: tabular-nums;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        }}
+        .modal-gene-panel-bar {{
+            width: 100%;
+            height: 4px;
+            border-radius: 999px;
+            background: color-mix(in srgb, var(--border-color) 55%, transparent);
+            overflow: hidden;
+        }}
+        .modal-gene-panel-bar-fill {{
+            height: 100%;
+            border-radius: inherit;
+            background: color-mix(in srgb, var(--accent-strong) 86%, white 14%);
+        }}
         .modal-blend-title {{
             font-size: 10px;
             text-transform: uppercase;
@@ -1014,6 +2897,35 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             white-space: pre-line;
             max-height: 180px;
             overflow: auto;
+        }}
+        .modal-blend-loading {{
+            display: none;
+            align-items: center;
+            gap: 7px;
+            margin: 6px 0 4px;
+            padding: 6px 8px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-color);
+            font-size: 10px;
+            line-height: 1.3;
+        }}
+        .modal-blend-loading.visible {{
+            display: flex;
+        }}
+        .modal-blend-loading::before {{
+            content: '';
+            width: 7px;
+            height: 7px;
+            border-radius: 999px;
+            background: var(--accent-strong);
+            animation: modalBlendPulse 1s ease-in-out infinite;
+            flex: 0 0 auto;
+        }}
+        @keyframes modalBlendPulse {{
+            0%, 100% {{ transform: scale(0.85); opacity: 0.45; }}
+            50% {{ transform: scale(1.15); opacity: 1; }}
         }}
         .modal-blend-summary {{
             color: var(--text-color);
@@ -1097,6 +3009,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             line-height: 1.3;
         }}
         .selection-summary-row + .selection-summary-row {{ margin-top: 2px; }}
+        .selection-summary-row[data-spotlight-cat] {{ cursor: pointer; border-radius: 3px; padding: 1px 3px; margin: 0 -3px; }}
+        .selection-summary-row[data-spotlight-cat]:hover {{ background: var(--hover-bg); }}
+        .selection-summary-row[data-spotlight-cat].is-active {{ background: color-mix(in srgb, var(--accent-color, #4a9eff) 15%, transparent); }}
         .selection-summary-label {{
             white-space: nowrap;
             overflow: hidden;
@@ -1126,6 +3041,220 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         .selection-summary-toggle:hover {{
             color: var(--accent);
+        }}
+        .selection-summary-expr {{
+            margin-top: 8px;
+            border-top: 1px solid var(--border-color);
+            padding-top: 6px;
+        }}
+        .selection-summary-expr-row {{
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            margin-bottom: 3px;
+        }}
+        .selection-summary-expr-gene {{
+            width: 80px;
+            flex-shrink: 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            font-size: 10px;
+        }}
+        .selection-summary-expr-gene[data-gene-activate] {{
+            cursor: pointer;
+            border-radius: 3px;
+            padding: 0 2px;
+            margin: -1px -2px;
+        }}
+        .selection-summary-expr-gene[data-gene-activate]:hover {{
+            background: var(--hover-bg);
+            text-decoration: underline;
+        }}
+        .selection-summary-expr-bars {{
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+        }}
+        .selection-summary-expr-bar {{
+            height: 4px;
+            border-radius: 2px;
+            min-width: 1px;
+        }}
+        .selection-summary-expr-bar.sel {{ background: var(--accent-strong); }}
+        .selection-summary-expr-bar.rest {{ background: var(--muted-color); opacity: 0.5; }}
+        .selection-summary-expr-bar.region-b {{ background: #4cc9f0; opacity: 0.85; }}
+        .selection-summary-expr-fc {{
+            width: 34px;
+            flex-shrink: 0;
+            text-align: right;
+            font-size: 10px;
+            font-variant-numeric: tabular-nums;
+            color: var(--muted-color);
+        }}
+        .selection-summary-compare-btn {{
+            margin-top: 6px;
+            width: 100%;
+            padding: 4px 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: var(--panel-bg);
+            color: var(--text-color);
+            cursor: pointer;
+            font-size: 11px;
+        }}
+        .selection-summary-compare-btn:hover {{ background: var(--hover-bg); }}
+        .selection-summary-actions {{
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            margin-top: 6px;
+        }}
+        .selection-summary-actions .selection-summary-compare-btn {{
+            margin-top: 0;
+        }}
+        .selection-summary-compare-header {{
+            display: flex;
+            gap: 4px;
+            margin-bottom: 4px;
+            font-size: 11px;
+            font-weight: 600;
+        }}
+        .selection-summary-compare-label {{
+            flex: 1;
+            text-align: center;
+            padding: 2px 4px;
+            border-radius: 3px;
+        }}
+        .selection-summary-compare-label.region-a {{ background: var(--accent-strong); color: #fff; }}
+        .selection-summary-compare-label.region-b {{ background: #4cc9f0; color: #000; }}
+        .selection-summary-compare-row {{
+            display: grid;
+            grid-template-columns: 1fr auto auto auto;
+            gap: 4px;
+            align-items: center;
+            font-size: 11px;
+            padding: 1px 0;
+        }}
+        .selection-summary-compare-row[data-spotlight-cat] {{ cursor: pointer; border-radius: 3px; padding: 1px 3px; margin: 0 -3px; }}
+        .selection-summary-compare-row[data-spotlight-cat]:hover {{ background: var(--hover-bg); }}
+        .selection-summary-compare-row[data-spotlight-cat].is-active {{ background: color-mix(in srgb, var(--accent-color, #4a9eff) 15%, transparent); }}
+        .selection-summary-compare-type {{ color: var(--text-color); font-weight: 500; }}
+        .selection-summary-compare-a {{ color: var(--accent-strong); font-variant-numeric: tabular-nums; }}
+        .selection-summary-compare-b {{ color: #4cc9f0; font-variant-numeric: tabular-nums; }}
+        .selection-summary-compare-sep {{ color: var(--muted-color); }}
+        .selection-query {{
+            margin-top: 8px;
+            padding-top: 6px;
+            border-top: 1px solid var(--border-color);
+        }}
+        .selection-query-toggle {{
+            width: 100%;
+            padding: 0;
+            border: none;
+            background: none;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            color: inherit;
+            cursor: pointer;
+            text-align: left;
+        }}
+        .selection-query-toggle-label {{
+            flex-shrink: 0;
+            padding: 2px 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 999px;
+            font-size: 10px;
+            color: var(--muted-color);
+            background: color-mix(in srgb, var(--header-bg) 80%, transparent);
+        }}
+        .selection-query-summary {{
+            margin-top: 2px;
+        }}
+        .selection-query-body {{
+            margin-top: 8px;
+        }}
+        .selection-query-help {{
+            margin-top: 0;
+        }}
+        .selection-query-examples {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 6px;
+            margin-bottom: 6px;
+        }}
+        .selection-query-example {{
+            padding: 4px 7px;
+            border: 1px solid var(--border-color);
+            border-radius: 999px;
+            background: color-mix(in srgb, var(--header-bg) 82%, transparent);
+            color: var(--text-color);
+            cursor: pointer;
+            font-size: 10px;
+            line-height: 1.25;
+        }}
+        .selection-query-example:hover {{
+            background: var(--hover-bg);
+            border-color: var(--accent-strong);
+            color: var(--accent-strong);
+        }}
+        .selection-query-example code {{
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            font-size: 10px;
+        }}
+        .selection-query-input {{
+            width: 100%;
+            min-height: 52px;
+            margin-top: 4px;
+            padding: 6px 7px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: var(--input-bg);
+            color: var(--text-color);
+            font-size: 11px;
+            line-height: 1.35;
+            resize: vertical;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        }}
+        .selection-query-actions {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 6px;
+        }}
+        .selection-query-actions .selection-summary-compare-btn {{
+            flex: 1 1 110px;
+            margin-top: 0;
+        }}
+        .selection-query-status {{
+            margin-top: 6px;
+            font-size: 10px;
+            line-height: 1.35;
+        }}
+        .selection-query-status.muted {{ color: var(--muted-color); }}
+        .selection-query-status.working {{ color: var(--accent-strong); }}
+        .selection-query-status.success {{ color: #2a9d8f; }}
+        .selection-query-status.error {{ color: #c1121f; }}
+        .annot-comp-row {{ margin-bottom: 8px; }}
+        .annot-comp-header {{ display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; margin-bottom: 3px; }}
+        .annot-comp-dot {{ width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0; }}
+        .annot-comp-count {{ color: var(--muted-color); font-weight: normal; margin-left: auto; }}
+        .annot-comp-bar-track {{ display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--border-color); }}
+        .annot-comp-segment {{ height: 100%; }}
+        .annot-comp-legend {{ display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; font-size: 10px; }}
+        .annot-comp-legend-item {{ display: flex; align-items: center; gap: 3px; color: var(--text-color); }}
+        .annot-expr-row {{ display: flex; align-items: center; gap: 6px; margin: 2px 0; }}
+        .annot-expr-bars {{ flex: 1; display: flex; flex-direction: column; gap: 1px; }}
+        .annot-expr-bar {{ height: 4px; border-radius: 2px; min-width: 1px; }}
+        .annot-de-controls {{
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 10px;
         }}
         .modal-annotation-panel {{
             position: absolute;
@@ -1526,6 +3655,48 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             color: rgba(245, 219, 231, 0.7);
             font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
         }}
+        .export-progress {{
+            position: fixed;
+            top: 14px;
+            right: 14px;
+            width: 280px;
+            padding: 12px 14px;
+            background: var(--panel-bg, #fff);
+            color: var(--text-color, #111);
+            border: 1px solid var(--border-color, #ccc);
+            border-radius: 8px;
+            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+            z-index: 2000;
+            font-size: 12px;
+            display: none;
+        }}
+        .export-progress.is-visible {{ display: block; }}
+        .export-progress-title {{ font-weight: 600; margin-bottom: 4px; }}
+        .export-progress-step {{ color: var(--muted-color, #666); margin-bottom: 8px; font-size: 11px; }}
+        .export-progress-bar-wrap {{ width: 100%; height: 6px; background: var(--input-bg, #eee); border-radius: 3px; overflow: hidden; }}
+        .export-progress-bar-fill {{ height: 100%; width: 0%; background: var(--accent-strong, #870052); transition: width 0.15s ease-out; }}
+        .export-progress-bar-fill.indeterminate {{
+            width: 30%;
+            background: linear-gradient(90deg, transparent, var(--accent-strong, #870052), transparent);
+            animation: export-indeterminate 1.4s infinite linear;
+        }}
+        @keyframes export-indeterminate {{
+            0% {{ transform: translateX(-100%); }}
+            100% {{ transform: translateX(333%); }}
+        }}
+        .export-progress-counter {{ margin-top: 6px; font-size: 10px; color: var(--muted-color, #666); }}
+        .export-progress-actions {{ display: flex; justify-content: flex-end; gap: 6px; margin-top: 10px; }}
+        .export-progress-cancel {{
+            padding: 3px 10px;
+            font-size: 11px;
+            border: 1px solid var(--border-color, #ccc);
+            border-radius: 4px;
+            background: var(--input-bg, #eee);
+            color: var(--text-color, #111);
+            cursor: pointer;
+        }}
+        .export-progress-cancel:hover {{ background: var(--hover-bg, #ddd); }}
+        .export-progress-cancel:disabled {{ opacity: 0.5; cursor: default; }}
     </style>
 </head>
 <body>
@@ -1551,7 +3722,25 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             <h1>{title}</h1>
             <button class="info-trigger" id="info-trigger" type="button" title="Viewer info" data-help="Open viewer notes with dataset context, control tips, and usage guidance.">Info</button>
             <div class="info-popover" id="info-popover" aria-hidden="true">
-                <div class="info-content">{viewer_info_html}</div>
+                <div class="info-content">
+                    {viewer_info_html}
+                    <div class="info-block">
+                        <div class="info-title">Keyboard Shortcuts</div>
+                        <table class="info-shortcuts-table">
+                            <tr><td class="info-shortcuts-key"><kbd>Esc</kbd></td><td>Close the modal, or close gene discovery if the modal is not open.</td></tr>
+                            <tr><td class="info-shortcuts-key"><kbd>?</kbd></td><td>Open the full keyboard shortcuts overlay.</td></tr>
+                            <tr><td class="info-shortcuts-key"><kbd>/</kbd></td><td>Focus the gene search input and open gene discovery.</td></tr>
+                            <tr><td class="info-shortcuts-key"><kbd>←</kbd> <kbd>→</kbd></td><td>Move to the previous or next section while the modal is open.</td></tr>
+                            <tr><td class="info-shortcuts-key"><kbd>T</kbd></td><td>Toggle theme.</td></tr>
+                            <tr><td class="info-shortcuts-key"><kbd>U</kbd></td><td>Toggle the UMAP panel.</td></tr>
+                            <tr><td class="info-shortcuts-key"><kbd>L</kbd></td><td>Toggle the legend panel.</td></tr>
+                            <tr><td class="info-shortcuts-key"><kbd>Space</kbd> + drag</td><td>Pan inside the modal even while Select or Annotate is active.</td></tr>
+                            <tr><td class="info-shortcuts-key"><kbd>F</kbd></td><td>Fit the current modal section to view.</td></tr>
+                            <tr><td class="info-shortcuts-key"><kbd>+</kbd> <kbd>=</kbd></td><td>Zoom in inside the modal.</td></tr>
+                            <tr><td class="info-shortcuts-key"><kbd>-</kbd></td><td>Zoom out inside the modal.</td></tr>
+                        </table>
+                    </div>
+                </div>
             </div>
         </div>
         <div class="controls">
@@ -1559,10 +3748,25 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 <label>Color:</label>
                 <select id="color-select"></select>
             </div>
-            <div class="control-group">
+            <div class="control-group" id="modality-control-group" style="display: none;">
+                <label>Modality:</label>
+                <select id="modality-select"></select>
+            </div>
+            <div class="control-group gene-control-group">
                 <label>Gene:</label>
-                <input type="text" id="gene-input" placeholder="e.g. Cd4, Gfap..." list="gene-list">
-                <datalist id="gene-list"></datalist>
+                <div class="gene-input-shell" id="gene-input-shell">
+                    <input type="text" id="gene-input" placeholder="e.g. Cd4, Gfap..." list="gene-list" autocomplete="off" spellcheck="false" aria-expanded="false" aria-controls="gene-discovery-panel">
+                    <datalist id="gene-list"></datalist>
+                    <div class="gene-discovery-panel" id="gene-discovery-panel" aria-hidden="true">
+                        <div class="gene-discovery-header">
+                            <div class="gene-discovery-title">Gene discovery</div>
+                            <div class="gene-discovery-actions">
+                                <button class="gene-panel-btn" id="gene-panel-new" type="button">New panel</button>
+                            </div>
+                        </div>
+                        <div id="gene-discovery-content"></div>
+                    </div>
+                </div>
             </div>
             <div class="control-group" id="expression-scale-section" style="display: none;">
                 <label>Scale:</label>
@@ -1571,8 +3775,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <span class="scale-sep">to</span>
                     <input type="number" id="expr-vmax" step="0.001" placeholder="max">
                     <button class="legend-btn" id="expr-auto" type="button">Auto (1-99%)</button>
+                    <select id="expr-colormap" title="Colormap used for gene expression and continuous metadata" style="font-size:11px; padding:3px 4px; border:1px solid var(--border-color); border-radius:4px; background:var(--input-bg); color:var(--text-color);"></select>
                 </div>
                 <div class="scale-hint" id="expr-scale-hint">Auto scale: 1-99 percentile.</div>
+            </div>
+            <div class="control-group" id="overview-gene-view-block" style="display: none;">
+                <label>Gene view:</label>
+                <select id="overview-gene-view-mode" title="Choose how active gene expression is rendered in the overview panels">
+                    <option value="cells">Cells</option>
+                    <option value="density">Density</option>
+                    <option value="both">Both</option>
+                </select>
             </div>
             <div class="control-group">
                 <label>Size:</label>
@@ -1582,29 +3795,41 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <button class="size-step" id="spot-size-inc" type="button">+</button>
                 </div>
             </div>
+            <button class="graph-toggle" id="show-hidden-sections-btn" title="Show all hidden sections" style="display: none;">
+                Show hidden
+            </button>
+            <button class="graph-toggle" id="annotations-overview-toggle" title="Show polygon annotations in the overview" style="display: none;">
+                Annotations
+            </button>
             <button class="umap-toggle" id="umap-toggle" title="Toggle UMAP view" data-help="Show or hide the UMAP panel for a global embedding view with shared selection tools." style="display: none;">
                 UMAP
             </button>
             <button class="legend-toggle active" id="legend-toggle" title="Toggle legend panel" data-help="Show or hide the legend panel with color keys, category toggles, and spotlight controls.">
                 Legend
             </button>
-            <button class="color-toggle" id="color-toggle" title="Toggle color explorer" data-help="Insights opens analysis tools for the current view: summary stats, neighbor patterns, and gene panels (dotplot and markers).">
+            <button class="color-toggle" id="color-toggle" title="Toggle insights panel" data-help="Insights opens Overview, Genes, Compare, and Neighbors views for the current dataset and selection state.">
                 Insights
             </button>
-            <button class="graph-toggle" id="graph-toggle" title="Toggle neighborhood graph" data-help="Overlay neighborhood graph edges to visualize local connectivity between cells." style="display: none;">
-                Graph
+            <button class="graph-toggle" id="overview-blend-toggle" title="Compare two variables side by side across all sections">
+                Split
             </button>
-            <button class="graph-toggle" id="neighbor-hover-toggle" title="Toggle neighbor rings on hover" data-help="When enabled, hovering a cell highlights its neighbors in concentric hop rings." style="display: none;">
-                Neighbors
-            </button>
-            <select id="neighbor-hop-select" title="Neighbor hop display" data-help="Choose how many neighbor hops are highlighted when hover-neighbor mode is enabled." style="display: none; min-width: 90px;">
-                <option value="1">1-hop</option>
-                <option value="2">2-hop</option>
-                <option value="3">3-hop</option>
-                <option value="all" selected>All hops</option>
-            </select>
             <button class="export-btn" id="screenshot-btn" title="Download screenshot" data-help="Download a PNG screenshot of the current main viewer layout.">
                 Screenshot
+            </button>
+            <select id="screenshot-res" title="Screenshot resolution multiplier" style="font-size:11px; padding:3px 2px; border:1px solid var(--border-color); border-radius:4px; background:var(--input-bg); color:var(--text-color);">
+                <option value="1">1x</option>
+                <option value="2" selected>2x</option>
+                <option value="4">4x</option>
+            </select>
+            <button class="export-btn" id="save-session-btn" title="Save current viewer state (rotations, annotations, color/gene, hidden categories, spotlight, samples view) to a JSON file">
+                Save session
+            </button>
+            <button class="export-btn" id="load-session-btn" title="Load a previously saved session JSON file">
+                Load session
+            </button>
+            <input type="file" id="load-session-input" accept="application/json,.json" style="display:none">
+            <button class="export-btn" id="export-data-btn" title="Export data as a .tar.gz bundle (obs.csv, var.csv, X.csv, spatial.csv, umap.csv + README) for rebuilding an AnnData object in Python">
+                Export data
             </button>
             <button class="theme-toggle" id="theme-toggle" title="Toggle dark/light mode" data-help="Switch between light and dark themes.">
                 <span id="theme-icon">{theme_icon}</span>
@@ -1614,6 +3839,29 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     </div>
 
     <div class="filter-bar" id="filter-bar"></div>
+    <div class="overview-blend-panel" id="overview-blend-panel">
+        <div class="overview-blend-row">
+            <span class="overview-blend-side">A</span>
+            <select id="overview-blend-a-kind"></select>
+            <select id="overview-blend-a-color"></select>
+            <select id="overview-blend-a-category"></select>
+            <input type="text" id="overview-blend-a-gene" list="overview-blend-a-gene-list" placeholder="Gene symbol" style="display:none;">
+            <datalist id="overview-blend-a-gene-list"></datalist>
+        </div>
+        <div class="overview-blend-row">
+            <span class="overview-blend-side">B</span>
+            <select id="overview-blend-b-kind"></select>
+            <select id="overview-blend-b-color"></select>
+            <select id="overview-blend-b-category"></select>
+            <input type="text" id="overview-blend-b-gene" list="overview-blend-b-gene-list" placeholder="Gene symbol" style="display:none;">
+            <datalist id="overview-blend-b-gene-list"></datalist>
+        </div>
+        <div class="overview-blend-row">
+            <span class="overview-blend-side">Split</span>
+            <span id="overview-blend-mix-label" style="font-size:10px;color:var(--muted-color);">A left 50% / B right 50%</span>
+            <input type="range" id="overview-blend-mix" min="0" max="100" step="1" value="50" style="width:100px;">
+        </div>
+    </div>
 
     <div class="main-container">
         <div class="content-column" id="content-column">
@@ -1640,15 +3888,41 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         </div>
                         <span id="umap-spot-size-label" style="font-size: 11px; min-width: 20px;">2</span>
                     </div>
-                    <div class="umap-selection-info" id="umap-selection-info">No cells selected</div>
-                    <div class="selection-summary umap-selection-summary" id="umap-selection-summary">
-                        <div class="selection-summary-meta">Draw a region with Magic Wand to inspect selected cells.</div>
-                    </div>
+                    <div class="umap-selection-info" id="umap-selection-info" style="display: none;">No cells selected</div>
+                    <div class="selection-summary umap-selection-summary" id="umap-selection-summary" style="display: none;"></div>
                 </div>
             </div>
         </div>
         <div class="color-panel collapsed" id="color-panel"></div>
         <div class="legend-container" id="legend"></div>
+    </div>
+
+    <div class="shortcuts-overlay" id="shortcuts-overlay" aria-hidden="true">
+        <div class="shortcuts-dialog" role="dialog" aria-modal="true" aria-labelledby="shortcuts-dialog-title">
+            <div class="shortcuts-dialog-header">
+                <div>
+                    <div class="shortcuts-dialog-title" id="shortcuts-dialog-title">Keyboard Shortcuts</div>
+                    <div class="shortcuts-dialog-subtitle">Quick viewer, modal, and navigation controls.</div>
+                </div>
+                <button class="shortcuts-dialog-close" id="shortcuts-dialog-close" type="button">Close</button>
+            </div>
+            <div class="shortcuts-dialog-body">
+                <table class="info-shortcuts-table">
+                    <tr><td class="info-shortcuts-key"><kbd>?</kbd></td><td>Open or close this shortcuts overlay.</td></tr>
+                    <tr><td class="info-shortcuts-key"><kbd>Esc</kbd></td><td>Close this overlay, then the modal, or close gene discovery if the modal is not open.</td></tr>
+                    <tr><td class="info-shortcuts-key"><kbd>/</kbd></td><td>Focus the gene search input and open gene discovery.</td></tr>
+                    <tr><td class="info-shortcuts-key"><kbd>←</kbd> <kbd>→</kbd></td><td>Move to the previous or next section while the modal is open.</td></tr>
+                    <tr><td class="info-shortcuts-key"><kbd>T</kbd></td><td>Toggle theme.</td></tr>
+                    <tr><td class="info-shortcuts-key"><kbd>U</kbd></td><td>Toggle the UMAP panel.</td></tr>
+                    <tr><td class="info-shortcuts-key"><kbd>L</kbd></td><td>Toggle the legend panel.</td></tr>
+                    <tr><td class="info-shortcuts-key"><kbd>Space</kbd> + drag</td><td>Pan inside the modal even while Select or Annotate is active.</td></tr>
+                    <tr><td class="info-shortcuts-key"><kbd>F</kbd></td><td>Fit the current modal section to view.</td></tr>
+                    <tr><td class="info-shortcuts-key"><kbd>+</kbd> <kbd>=</kbd></td><td>Zoom in inside the modal.</td></tr>
+                    <tr><td class="info-shortcuts-key"><kbd>-</kbd></td><td>Zoom out inside the modal.</td></tr>
+                </table>
+                <div class="shortcuts-dialog-note">Shortcuts stay inactive while typing in inputs, selects, or textareas.</div>
+            </div>
+        </div>
     </div>
 
     <div class="modal-overlay" id="modal">
@@ -1658,8 +3932,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <h2 id="modal-title">Section</h2>
                     <span class="modal-meta" id="modal-meta"></span>
                     <span class="zoom-info" id="zoom-info">100%</span>
+                    <span class="zoom-info" id="modal-rotation-info">Rot 0 deg</span>
                 </div>
-                <button class="modal-close" id="modal-close">&times;</button>
+                <div class="modal-header-actions">
+                    <button class="modal-controls-toggle" id="modal-controls-toggle" type="button">Hide tools</button>
+                    <button class="modal-close" id="modal-close">&times;</button>
+                </div>
             </div>
             <div class="modal-body">
                 <div class="modal-canvas-container" id="modal-canvas-container">
@@ -1668,18 +3946,25 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <div class="selection-summary modal-selection-summary" id="modal-selection-summary">
                         <div class="selection-summary-meta">Draw a region with Magic Wand to inspect selected cells.</div>
                     </div>
+                    <div class="modal-gene-panel" id="modal-gene-panel" aria-hidden="true">
+                        <div class="modal-gene-panel-header">
+                            <div class="modal-gene-panel-title">Genes in selection</div>
+                            <div class="modal-gene-panel-count" id="modal-gene-panel-count">0 cells</div>
+                            <button class="modal-gene-panel-close" id="modal-gene-panel-close" type="button" aria-label="Dismiss selection genes">×</button>
+                        </div>
+                        <div class="modal-gene-panel-body" id="modal-gene-panel-body"></div>
+                    </div>
                     <div class="modal-blend-panel" id="modal-blend-panel">
                         <div class="modal-blend-title">Variable Slider</div>
+                        <div class="modal-blend-loading" id="modal-blend-loading" role="status" aria-live="polite"></div>
                         <div class="modal-blend-row">
                             <span class="modal-blend-side">A</span>
-                            <select id="modal-blend-a-kind">
-                                <option value="cell">Cell type</option>
-                                <option value="gene">Gene</option>
-                            </select>
+                            <select id="modal-blend-a-kind"></select>
                             <div class="modal-blend-fields">
                                 <select id="modal-blend-a-color"></select>
                                 <select id="modal-blend-a-category"></select>
-                                <input type="text" id="modal-blend-a-gene" list="gene-list" placeholder="Gene symbol">
+                                <input type="text" id="modal-blend-a-gene" list="modal-blend-a-gene-list" placeholder="Gene symbol">
+                                <datalist id="modal-blend-a-gene-list"></datalist>
                             </div>
                         </div>
                         <div class="modal-blend-row modal-blend-scale-row" id="modal-blend-a-scale-row" style="display: none;">
@@ -1694,14 +3979,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         </div>
                         <div class="modal-blend-row">
                             <span class="modal-blend-side">B</span>
-                            <select id="modal-blend-b-kind">
-                                <option value="cell">Cell type</option>
-                                <option value="gene">Gene</option>
-                            </select>
+                            <select id="modal-blend-b-kind"></select>
                             <div class="modal-blend-fields">
                                 <select id="modal-blend-b-color"></select>
                                 <select id="modal-blend-b-category"></select>
-                                <input type="text" id="modal-blend-b-gene" list="gene-list" placeholder="Gene symbol">
+                                <input type="text" id="modal-blend-b-gene" list="modal-blend-b-gene-list" placeholder="Gene symbol">
+                                <datalist id="modal-blend-b-gene-list"></datalist>
                             </div>
                         </div>
                         <div class="modal-blend-row modal-blend-scale-row" id="modal-blend-b-scale-row" style="display: none;">
@@ -1733,31 +4016,72 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         </div>
                     </div>
                     <div class="modal-controls">
-                        <button id="zoom-in">+ Zoom</button>
-                        <button id="zoom-out">- Zoom</button>
-                        <button id="zoom-reset">Reset</button>
-                        <button class="graph-toggle" id="modal-blend-toggle" title="Split the view between two selected variables">Split</button>
-                        <button class="graph-toggle" id="modal-magic-wand-btn" title="Draw to select cells in this section">Magic Wand</button>
-                        <button class="graph-toggle" id="modal-annotate-btn" title="Draw persistent polygon annotations in this section">Annotate</button>
-                        <button class="graph-toggle" id="modal-screenshot-btn" title="Download screenshot of this sample view">Screenshot</button>
-                        <button class="graph-toggle" id="modal-clear-selection-btn" title="Clear selected cells">Clear selection</button>
-                        <button class="graph-toggle" id="modal-graph-toggle" title="Toggle neighborhood graph" style="display: none;">Graph</button>
-                        <button class="graph-toggle" id="modal-neighbor-hover-toggle" title="Toggle neighbor rings on hover" style="display: none;">Neighbors</button>
-                        <select id="modal-neighbor-hop-select" title="Neighbor hop display" style="display: none; min-width: 90px;">
-                            <option value="1">1-hop</option>
-                            <option value="2">2-hop</option>
-                            <option value="3">3-hop</option>
-                            <option value="all" selected>All hops</option>
-                        </select>
-                        <button class="graph-toggle" id="modal-type-toggle" title="Select a category by clicking a cell">Select type</button>
-                        <button class="graph-toggle" id="modal-type-clear" title="Clear selected type">Clear type</button>
-                        <span style="margin-left: 10px; font-size: 11px; color: {muted_color};">Size:</span>
-                        <div class="size-control">
-                            <button class="size-step" id="modal-spot-size-dec" type="button">−</button>
-                            <input type="range" id="modal-spot-size" min="0.01" max="5" step="0.01" value="{spot_size}" style="width: 80px;">
-                            <button class="size-step" id="modal-spot-size-inc" type="button">+</button>
+                        <div class="modal-control-group" data-modal-group="view">
+                            <div class="modal-control-group-title">View</div>
+                            <div class="modal-control-group-body">
+                                <button id="zoom-in" type="button" title="Zoom in">+</button>
+                                <button id="zoom-out" type="button" title="Zoom out">−</button>
+                                <button id="zoom-reset" type="button" title="Reset zoom and pan">Fit</button>
+                                <button id="modal-rotate-left" type="button" title="Rotate section −45°">↺</button>
+                                <button id="modal-rotate-right" type="button" title="Rotate section +45°">↻</button>
+                                <button id="modal-rotate-reset" type="button" title="Reset section rotation">0°</button>
+                            </div>
                         </div>
-                        <span id="modal-spot-size-label" style="font-size: 11px; min-width: 24px;">{spot_size}</span>
+                        <div class="modal-control-group" data-modal-group="tools">
+                            <div class="modal-control-group-title">Tools</div>
+                            <div class="modal-control-group-body">
+                                <button class="graph-toggle" id="modal-blend-toggle" type="button" title="Split the view between two selected variables">Split</button>
+                                <button class="graph-toggle" id="modal-magic-wand-btn" type="button" title="Draw to select cells in this section">Select</button>
+                                <button class="graph-toggle" id="modal-annotate-btn" type="button" title="Draw persistent polygon annotations in this section">Annotate</button>
+                                <button class="graph-toggle" id="modal-type-toggle" type="button" title="Select a category by clicking a cell">Pick type</button>
+                                <button class="graph-toggle" id="modal-type-clear" type="button" title="Clear selected type" hidden>Clear type</button>
+                            </div>
+                        </div>
+                        <div class="modal-control-group" data-modal-group="graph" hidden>
+                            <div class="modal-control-group-title">Graph</div>
+                            <div class="modal-control-group-body">
+                                <button class="graph-toggle" id="modal-graph-toggle" type="button" title="Toggle neighborhood graph">Graph</button>
+                                <button class="graph-toggle" id="modal-neighbor-hover-toggle" type="button" title="Toggle neighbor rings on hover">Neighbors</button>
+                                <select id="modal-neighbor-hop-select" title="Neighbor hop display" hidden>
+                                    <option value="1">1-hop</option>
+                                    <option value="2">2-hop</option>
+                                    <option value="3">3-hop</option>
+                                    <option value="all" selected>All hops</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="modal-control-group" data-modal-group="color">
+                            <div class="modal-control-group-title">Color by</div>
+                            <div class="modal-control-group-body">
+                                <select id="modal-color-select" title="Change the active color column (updates the whole viewer)"></select>
+                                <input type="text" id="modal-gene-input" list="gene-list" placeholder="Gene..." autocomplete="off" spellcheck="false" title="Type a gene name and press Enter to color by expression (updates the whole viewer)" style="max-width: 110px;">
+                                <button class="graph-toggle" id="modal-gene-clear" type="button" title="Clear active gene">Clear gene</button>
+                            </div>
+                        </div>
+                        <div class="modal-control-group" data-modal-group="actions">
+                            <div class="modal-control-group-title">Actions</div>
+                            <div class="modal-control-group-body">
+                                <button class="graph-toggle" id="modal-screenshot-btn" type="button" title="Download screenshot of this sample view">Screenshot</button>
+                                <button class="graph-toggle" id="modal-clear-selection-btn" type="button" title="Clear selected cells" hidden>Clear sel.</button>
+                                <button class="graph-toggle" id="modal-exit-subview-btn" type="button" title="Return to the full section view" hidden>Back view</button>
+                                <div class="modal-gene-view-block" id="modal-gene-view-block" hidden>
+                                    <span class="modal-gene-view-label">Gene view</span>
+                                    <select id="modal-gene-view-mode" title="Choose how active gene expression is rendered in the sample view">
+                                        <option value="cells">Cells</option>
+                                        <option value="density">Density</option>
+                                        <option value="both">Both</option>
+                                    </select>
+                                </div>
+                                <div class="modal-size-block">
+                                    <div class="size-control">
+                                        <button class="size-step" id="modal-spot-size-dec" type="button">−</button>
+                                        <input type="range" id="modal-spot-size" min="0.01" max="5" step="0.01" value="{spot_size}" style="width: 60px;">
+                                        <button class="size-step" id="modal-spot-size-inc" type="button">+</button>
+                                    </div>
+                                    <span class="modal-size-value" id="modal-spot-size-label">{spot_size}</span>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div class="modal-legend" id="modal-legend"></div>
@@ -1767,6 +4091,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     <div class="cell-tooltip" id="cell-tooltip"></div>
     <div class="help-tooltip" id="help-tooltip" aria-hidden="true"></div>
+    <div class="export-progress" id="export-progress" role="status" aria-live="polite">
+        <div class="export-progress-title" id="export-progress-title">Exporting data</div>
+        <div class="export-progress-step" id="export-progress-step">Preparing...</div>
+        <div class="export-progress-bar-wrap"><div class="export-progress-bar-fill indeterminate" id="export-progress-bar"></div></div>
+        <div class="export-progress-counter" id="export-progress-counter"></div>
+        <div class="export-progress-actions">
+            <button type="button" class="export-progress-cancel" id="export-progress-cancel">Cancel</button>
+        </div>
+    </div>
 
     <script>
     (function() {{
@@ -1814,13 +4147,26 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             showError(msg, LOADING_WARNING_ID);
             loadingWarningTimer = setTimeout(removeLoadingWarning, LOADING_WARNING_AUTO_DISMISS_MS);
         }}
+        function formatAsyncError(reason) {{
+            if (!reason) return 'Unknown async error';
+            if (typeof reason === 'string') return reason;
+            if (reason && typeof reason.message === 'string' && reason.message) return reason.message;
+            try {{
+                return String(reason);
+            }} catch (_) {{
+                return 'Unknown async error';
+            }}
+        }}
+        window.__karospaceShowLoadingWarning = showLoadingWarning;
         window.__karospaceRemoveLoadingWarning = removeLoadingWarning;
         window.__karospaceShowStartupError = showError;
         window.addEventListener('error', (e) => {{
             showError(`KaroSpace failed to start: ${{e.message || 'Unknown error'}} (open DevTools console).`);
         }});
         window.addEventListener('unhandledrejection', (e) => {{
-            showError('KaroSpace failed to start: Unhandled promise rejection (open DevTools console).');
+            const detail = formatAsyncError(e.reason);
+            console.error('Unhandled promise rejection:', e.reason);
+            showError(`KaroSpace async error: ${{detail}} (open DevTools console).`);
         }});
         // Fallback: never keep the loader up forever.
         setTimeout(() => {{
@@ -1837,20 +4183,334 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     <script id="karospace-data" type="application/json">{data_json}</script>
     <script>
     const DATA = JSON.parse(document.getElementById('karospace-data').textContent);
+    DATA.genes_meta = DATA.genes_meta || {{}};
+    DATA.gene_encodings = DATA.gene_encodings || {{}};
+    DATA.gene_value_encodings = DATA.gene_value_encodings || {{}};
     const PALETTE = {palette_json};
     const METADATA_LABELS = {metadata_labels_json};
     const OUTLINE_BY = {outline_by_json};
     const VIEWER_INFO_HTML = {viewer_info_html_json};
+    // Modality registry — RNA-only datasets keep an empty registry so legacy paths run unchanged.
+    const MODALITY_DESCRIPTORS = Array.isArray(DATA.modalities) ? DATA.modalities : [];
+    const FEATURES_BY_MODALITY = (DATA.features_by_modality && typeof DATA.features_by_modality === 'object')
+        ? DATA.features_by_modality
+        : {{}};
+    const DEFAULT_MODALITY_NAME = DATA.default_modality
+        || (MODALITY_DESCRIPTORS.find(d => d && d.is_default)?.name)
+        || (MODALITY_DESCRIPTORS[0]?.name)
+        || 'rna';
+    let CURRENT_MODALITY = DEFAULT_MODALITY_NAME;
+
+    function getActiveModalityDescriptor() {{
+        return MODALITY_DESCRIPTORS.find(d => d && d.name === CURRENT_MODALITY) || null;
+    }}
+    function getActiveFeatureList() {{
+        if (MODALITY_DESCRIPTORS.length && FEATURES_BY_MODALITY[CURRENT_MODALITY]) {{
+            return FEATURES_BY_MODALITY[CURRENT_MODALITY];
+        }}
+        return DATA.available_genes || [];
+    }}
+    function isActiveModalityIntensity() {{
+        const desc = getActiveModalityDescriptor();
+        return desc?.value_kind === 'intensity';
+    }}
+
+    // Rebuilt on modality switch. Initialized to the default modality (or DATA.available_genes for legacy datasets).
+    let AVAILABLE_GENE_SET = new Set(getActiveFeatureList());
+    let GENE_NAME_BY_LOWER = new Map(
+        getActiveFeatureList().map(gene => [String(gene).toLowerCase(), gene])
+    );
+    function rebuildActiveFeatureIndex() {{
+        const features = getActiveFeatureList();
+        AVAILABLE_GENE_SET = new Set(features);
+        GENE_NAME_BY_LOWER = new Map(features.map(gene => [String(gene).toLowerCase(), gene]));
+    }}
+    function getActiveFeatureSet() {{
+        return AVAILABLE_GENE_SET;
+    }}
+
+    // Per-modality cache of hydrated gene state. On switch we stash the current
+    // state and restore (or initialize) the new modality's slice.
+    const MODALITY_GENE_STATE = {{}};
+    function _snapshotModalityGeneState(name) {{
+        if (!name) return;
+        const sections = Array.isArray(DATA.sections) ? DATA.sections : [];
+        MODALITY_GENE_STATE[name] = {{
+            genes_meta: DATA.genes_meta || {{}},
+            gene_encodings: DATA.gene_encodings || {{}},
+            gene_value_encodings: DATA.gene_value_encodings || {{}},
+            sections: sections.map(s => ({{
+                genes: s.genes || {{}},
+                genes_sparse: s.genes_sparse || {{}},
+            }})),
+        }};
+    }}
+    function _restoreModalityGeneState(name) {{
+        const cached = MODALITY_GENE_STATE[name];
+        const sections = Array.isArray(DATA.sections) ? DATA.sections : [];
+        if (cached) {{
+            DATA.genes_meta = cached.genes_meta;
+            DATA.gene_encodings = cached.gene_encodings;
+            DATA.gene_value_encodings = cached.gene_value_encodings;
+            sections.forEach((s, i) => {{
+                s.genes = cached.sections[i]?.genes || {{}};
+                s.genes_sparse = cached.sections[i]?.genes_sparse || {{}};
+            }});
+        }} else {{
+            DATA.genes_meta = {{}};
+            DATA.gene_encodings = {{}};
+            DATA.gene_value_encodings = {{}};
+            sections.forEach(s => {{
+                s.genes = {{}};
+                s.genes_sparse = {{}};
+            }});
+        }}
+    }}
+    function getActiveModalityManifestEntry(manifest) {{
+        if (!manifest) return null;
+        const map = manifest.modalities;
+        if (map && typeof map === 'object' && map[CURRENT_MODALITY]) return map[CURRENT_MODALITY];
+        // Legacy v2/v3 manifests have no modalities map; only valid for default modality.
+        if (CURRENT_MODALITY === DEFAULT_MODALITY_NAME) return manifest;
+        return null;
+    }}
+    async function setActiveModality(name) {{
+        if (!name || name === CURRENT_MODALITY) return;
+        if (!FEATURES_BY_MODALITY[name] && name !== DEFAULT_MODALITY_NAME) {{
+            console.warn('Unknown modality:', name);
+            return;
+        }}
+        _snapshotModalityGeneState(CURRENT_MODALITY);
+        CURRENT_MODALITY = name;
+        _restoreModalityGeneState(CURRENT_MODALITY);
+        rebuildActiveFeatureIndex();
+        // Repopulate datalist used by every gene input.
+        const geneListEl = document.getElementById('gene-list');
+        if (geneListEl) {{
+            const fragment = document.createDocumentFragment();
+            for (const feat of getActiveFeatureList()) {{
+                const opt = document.createElement('option');
+                opt.value = feat;
+                fragment.appendChild(opt);
+            }}
+            geneListEl.replaceChildren(fragment);
+        }}
+        // Clear any active gene selection so cells don't render with a feature
+        // that doesn't exist in the new modality.
+        if (typeof activateViewerGene === 'function') {{
+            try {{ await activateViewerGene(''); }} catch (e) {{ console.warn(e); }}
+        }}
+        if (typeof renderGeneDiscoveryPanel === 'function') {{
+            try {{ renderGeneDiscoveryPanel(); }} catch (e) {{}}
+        }}
+    }}
 
     const USER_AGENT = navigator.userAgent || '';
     const IS_SAFARI = /Safari/i.test(USER_AGENT) &&
         !/Chrome|Chromium|Edg|OPR|CriOS|FxiOS|Android/i.test(USER_AGENT);
     const SAFARI_DPR_CAP = 1.0;
 
+    let screenshotDprOverride = null;
     function getRenderDpr() {{
+        if (screenshotDprOverride) return screenshotDprOverride;
         const dpr = window.devicePixelRatio || 1;
         if (IS_SAFARI) return Math.max(1, Math.min(dpr, SAFARI_DPR_CAP));
         return dpr;
+    }}
+
+    const ROTATION_STEP_DEG = 45;
+    const ROTATION_EPSILON = 1e-6;
+
+    function normalizeRotationDeg(value) {{
+        const numeric = Number(value);
+        if (!Number.isFinite(numeric)) return 0;
+        let normalized = numeric % 360;
+        if (normalized < 0) normalized += 360;
+        if (Math.abs(normalized - 360) < ROTATION_EPSILON) normalized = 0;
+        return normalized;
+    }}
+
+    function getSignedRotationDeg(value) {{
+        let signed = normalizeRotationDeg(value);
+        if (signed > 180) signed -= 360;
+        if (Math.abs(signed) < ROTATION_EPSILON) signed = 0;
+        return signed;
+    }}
+
+    function formatRotationAngle(value) {{
+        const signed = getSignedRotationDeg(value);
+        if (Math.abs(signed - Math.round(signed)) < ROTATION_EPSILON) {{
+            return String(Math.round(signed));
+        }}
+        return signed.toFixed(2).replace(/\.?0+$/, '');
+    }}
+
+    function formatRotationLabel(value) {{
+        return `Rot ${{formatRotationAngle(value)}} deg`;
+    }}
+
+    function getSectionRotationDeg(section) {{
+        if (!section) return 0;
+        const normalized = normalizeRotationDeg(section.rotation_deg ?? 0);
+        section.rotation_deg = normalized;
+        return normalized;
+    }}
+
+    function getSectionRotationMetrics(section) {{
+        return getSectionRotationMetricsWithBounds(section, null);
+    }}
+
+    function getSectionRotationMetricsWithBounds(section, boundsOverride = null) {{
+        const bounds = boundsOverride || ensureSectionBounds(section) || {{ xmin: 0, xmax: 0, ymin: 0, ymax: 0 }};
+        const dataCenterX = (bounds.xmin + bounds.xmax) / 2;
+        const dataCenterY = (bounds.ymin + bounds.ymax) / 2;
+        const halfWidth = Math.max((bounds.xmax - bounds.xmin) / 2, ROTATION_EPSILON);
+        const halfHeight = Math.max((bounds.ymax - bounds.ymin) / 2, ROTATION_EPSILON);
+        const angleDeg = getSectionRotationDeg(section);
+        const angleRad = angleDeg * Math.PI / 180;
+        const cos = Math.cos(angleRad);
+        const sin = Math.sin(angleRad);
+        const rotatedHalfWidth = Math.max(Math.abs(cos) * halfWidth + Math.abs(sin) * halfHeight, ROTATION_EPSILON);
+        const rotatedHalfHeight = Math.max(Math.abs(sin) * halfWidth + Math.abs(cos) * halfHeight, ROTATION_EPSILON);
+        return {{
+            angleDeg,
+            angleRad,
+            cos,
+            sin,
+            dataCenterX,
+            dataCenterY,
+            rotatedWidth: rotatedHalfWidth * 2,
+            rotatedHeight: rotatedHalfHeight * 2,
+        }};
+    }}
+
+    function createSectionViewTransform(section, options = {{}}) {{
+        if (!section) return null;
+        ensureSectionXY(section);
+        const width = Math.max(1, Number(options.width) || 0);
+        const height = Math.max(1, Number(options.height) || 0);
+        const padding = Math.max(0, Number(options.padding) || 0);
+        const zoom = Math.max(ROTATION_EPSILON, Number(options.zoom) || 1);
+        const panX = Number(options.panX) || 0;
+        const panY = Number(options.panY) || 0;
+        const boundsOverride = options.boundsOverride || null;
+        const metrics = getSectionRotationMetricsWithBounds(section, boundsOverride);
+        const fitWidth = Math.max(ROTATION_EPSILON, width - 2 * padding);
+        const fitHeight = Math.max(ROTATION_EPSILON, height - 2 * padding);
+        const baseScale = Math.min(
+            fitWidth / Math.max(metrics.rotatedWidth, ROTATION_EPSILON),
+            fitHeight / Math.max(metrics.rotatedHeight, ROTATION_EPSILON),
+        );
+        const scale = Math.max(ROTATION_EPSILON, baseScale * zoom);
+        const centerX = width / 2 + panX;
+        const centerY = height / 2 + panY;
+
+        const transform = {{
+            width,
+            height,
+            padding,
+            baseScale,
+            scale,
+            centerX,
+            centerY,
+            angleDeg: metrics.angleDeg,
+            angleRad: metrics.angleRad,
+            cos: metrics.cos,
+            sin: metrics.sin,
+            dataCenterX: metrics.dataCenterX,
+            dataCenterY: metrics.dataCenterY,
+            isModal: !!options.isModal,
+        }};
+
+        transform.dataToScreen = (x, y) => {{
+            const dx = x - transform.dataCenterX;
+            const dy = y - transform.dataCenterY;
+            const rotatedX = dx * transform.cos - dy * transform.sin;
+            const rotatedY = dx * transform.sin + dy * transform.cos;
+            return {{
+                x: transform.centerX + rotatedX * transform.scale,
+                y: transform.centerY - rotatedY * transform.scale,
+            }};
+        }};
+        transform.screenToData = (screenX, screenY) => {{
+            const rotatedX = (screenX - transform.centerX) / transform.scale;
+            const rotatedY = -(screenY - transform.centerY) / transform.scale;
+            return {{
+                x: transform.dataCenterX + rotatedX * transform.cos + rotatedY * transform.sin,
+                y: transform.dataCenterY - rotatedX * transform.sin + rotatedY * transform.cos,
+            }};
+        }};
+        transform.isPointVisible = (screenX, screenY, radius = 0) => {{
+            return !(
+                screenX < -radius ||
+                screenX > transform.width + radius ||
+                screenY < -radius ||
+                screenY > transform.height + radius
+            );
+        }};
+        return transform;
+    }}
+
+    function drawScalebar(ctx, transform, options = {{}}) {{
+        if (!showScalebar) return;
+        const unit = DATA.scalebar_unit || 'μm';
+        // transform.scale = screen pixels per data unit
+        const pxPerUnit = transform.scale;
+        if (!pxPerUnit || pxPerUnit <= 0) return;
+
+        const width = transform.width;
+        const height = transform.height;
+        const isCompact = !options.isModal;
+
+        // Pick a nice round scalebar length (target ~15-25% of canvas width)
+        const targetPx = width * (isCompact ? 0.2 : 0.15);
+        const targetUnits = targetPx / pxPerUnit;
+        const niceSteps = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000];
+        let barUnits = niceSteps[0];
+        for (const step of niceSteps) {{
+            if (step <= targetUnits * 2) barUnits = step;
+            if (step >= targetUnits) break;
+        }}
+        const barPx = barUnits * pxPerUnit;
+        if (barPx < 8 || barPx > width * 0.8) return;
+
+        const margin = isCompact ? 6 : 10;
+        const barHeight = isCompact ? 2.5 : 3;
+        const fontSize = isCompact ? 8 : 11;
+        const x = width - margin - barPx;
+        const y = height - margin - fontSize - 4;
+
+        ctx.save();
+        // Background pill
+        const bgPad = 4;
+        const label = `${{barUnits}} ${{unit}}`;
+        ctx.font = `${{fontSize}}px sans-serif`;
+        const textWidth = ctx.measureText(label).width;
+        const bgWidth = Math.max(barPx, textWidth) + bgPad * 2;
+        const bgX = width - margin - bgWidth;
+        const bgY = y - bgPad;
+        const bgH = fontSize + barHeight + 6 + bgPad * 2;
+        ctx.fillStyle = options.darkBg ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.7)';
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(bgX, bgY, bgWidth, bgH, 3);
+        else ctx.rect(bgX, bgY, bgWidth, bgH);
+        ctx.fill();
+
+        // Bar
+        ctx.fillStyle = options.darkBg ? '#ffffff' : '#000000';
+        ctx.globalAlpha = 0.85;
+        ctx.fillRect(x, y, barPx, barHeight);
+        // End caps
+        const capH = isCompact ? 4 : 6;
+        ctx.fillRect(x, y - (capH - barHeight) / 2, 1, capH);
+        ctx.fillRect(x + barPx - 1, y - (capH - barHeight) / 2, 1, capH);
+
+        // Label
+        ctx.globalAlpha = 0.9;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillText(label, x + barPx / 2, y + barHeight + 2);
+        ctx.restore();
     }}
 
     // Outline color overrides (used for course by default)
@@ -1886,19 +4546,29 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     // State
     let currentColor = DATA.initial_color;
     let currentGene = null;
+    let overviewGeneRenderMode = 'cells';
     const geneScaleOverrides = {{}};
     const geneScaleAuto = {{}};
     const GENE_SCALE_PMIN = 1;
     const GENE_SCALE_PMAX = 99;
     const GENE_SCALE_MAX_SAMPLES = 200000;
+    const GENE_DISCOVERY_MAX_RESULTS = 10;
+    const GENE_DISCOVERY_RECENT_LIMIT = 8;
+    const GENE_DISCOVERY_SUGGESTION_GROUP_LIMIT = 6;
+    const GENE_DISCOVERY_SUGGESTION_GENES_PER_GROUP = 4;
     let hiddenCategories = new Set();
     let linkedSpotlightEnabled = false;
     let spotlightPinnedCategory = null;
     let spotlightHoverCategory = null;
+    let neighborNetworkFocusCategories = null;
     let spotSize = {spot_size};
     let activeFilters = {{}};  // e.g. {{ course: new Set(['peak_I', 'peak_III']) }}
+    const hiddenSections = new Set();
     let currentTheme = '{initial_theme}';
     let showGraph = false;
+    let showOverviewAnnotations = false;
+    let showScalebar = true;
+    let cellDrawOrder = 'default';
     let hoverNeighbors = null;
     let neighborHoverEnabled = false;
     let neighborHopMode = 'all';
@@ -1910,15 +4580,77 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     ];
     const expandedAggGroups = new Set();
     const expandedNeighborGroups = new Set();
+    let neighborStatsView = 'table';
+    const neighborVisualizationState = {{
+        bubble: {{ zoom: 1.0, expanded: false }},
+        chord: {{ zoom: 1.0, expanded: false }},
+    }};
+    let neighborFocusMode = 'all';
+    let neighborMaxCategories = 12;
+    let neighborLabelMode = 'short';
+    let neighborNetworkMetric = 'zscore';
+    let neighborNetworkThresholdPercent = 22;
+    let neighborChordMetric = 'count';
+    let neighborChordThresholdPercent = 0;
+    let neighborChordOrder = 'strength';
+    let hoveredNeighborFocus = null;
+    let selectedNeighborFocus = null;
+    const comparisonCountsCache = new Map();
+    let celltypeTrendTarget = null;
     let interactionSourceCategory = null;
-    let dotplotRenderToken = 0;
+    let clusterDeGroupby = null;
+    let clusterDeSourceCategory = null;
+    let clusterDeReferenceCategory = null;
+    let groupDeSourceSpecValue = '';
+    let groupDeSourceValue = null;
+    let groupDeReferenceValue = null;
+    let groupDeRestrictSpecValue = '';
+    let groupDeRestrictValue = null;
+    let groupDeScope = 'all';
+    let groupDeTopN = 12;
+    let groupDeFullRunToken = 0;
+    let groupDeFullRun = null;
+    const groupDeFullCache = new Map();
+    let groupDeRenderToken = 0;
+    let groupDeRenderDepth = 0;
+    let samplesView = 'bars';
+    let samplesColorCol = '';
+    let samplesMetaSortBy = '';
+    let insightsTopLevelTab = 'overview';
+    let insightsOverviewTab = 'summary';
+    let insightsGenesTab = 'markers';
+    let insightsCompareTab = 'groups';
+    let insightsNeighborsTab = 'enrichment';
+    let geneDistributionGroupBy = '';
+    let geneDistributionSortKey = 'mean';
+    let geneDistributionSortDir = 'desc';
+    let geneDistributionRestrictBy = '';
+    let geneDistributionRestrictValue = '';
+    let geneAuxManifest = null;
+    let geneAuxManifestPromise = null;
+    const geneAuxShardCache = new Map();
+    const geneAuxShardPromises = new Map();
+    const geneAuxBinaryShardIndexCache = new Map();
+    const geneAuxBinaryShardIndexPromises = new Map();
+    const geneAuxBinaryShardBufferCache = new Map();
+    const geneAuxBinaryShardBufferPromises = new Map();
+    const modalBlendGeneLoads = new Set();
+    let geneAuxLoadingMessage = '';
+    let geneDiscoveryOpen = false;
+    let geneDiscoveryResults = [];
+    let geneDiscoveryActiveIndex = -1;
+    let recentGenes = [];
+    let savedGenePanels = [];
 
     // Modal state
     let modalSection = null;
     let modalZoom = 1;
     let modalPanX = 0, modalPanY = 0;
     let modalSpotSize = {spot_size};
+    let modalSpacePanActive = false;
+    let modalGeneRenderMode = 'cells';
     let isDragging = false;
+    let isSplitDragging = false;
     let dragStartX = 0, dragStartY = 0;
     let lastPanX = 0, lastPanY = 0;
     let modalPointerMoved = false;
@@ -1935,15 +4667,33 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let modalBlendEnabled = false;
     let modalBlendMix = 0.5;  // Split position from left: 0 = all B, 1 = all A
     let modalBlendMarkersCollapsed = true;
+    let modalControlsCollapsed = false;
+    let modalControlsCustomPosition = null;
+    let isDraggingModalControls = false;
+    let modalControlsDragOffsetX = 0;
+    let modalControlsDragOffsetY = 0;
     let modalAnnotationPanelCustomPosition = null;
     let isDraggingModalAnnotationPanel = false;
     let modalAnnotationPanelDragOffsetX = 0;
     let modalAnnotationPanelDragOffsetY = 0;
+    let modalRenderedView = null;
+    let modalInteractionCommitTimer = null;
+    let modalBlendRenderFrame = null;
+    let modalBlendRenderCache = null;
+    let modalGeneDensityCache = null;
+    let modalSubview = null;
     const BLEND_ALL_CATEGORIES = '__ALL__';
     let modalBlendSpec = {{
         a: {{ kind: 'cell', color: null, category: null, gene: '' }},
         b: {{ kind: 'cell', color: null, category: null, gene: '' }},
     }};
+    let overviewBlendEnabled = false;
+    let overviewBlendMix = 0.5;
+    let overviewBlendSpec = {{
+        a: {{ kind: 'cell', color: null, category: null, gene: '' }},
+        b: {{ kind: 'cell', color: null, category: null, gene: '' }},
+    }};
+
     const MODAL_ANNOTATION_COLORS = [
         '#ff7f50', '#2a9d8f', '#ffd166', '#ef476f', '#06d6a0',
         '#118ab2', '#f4a261', '#4cc9f0', '#e63946', '#43aa8b'
@@ -1971,9 +4721,734 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let isDrawingLasso = false;
     let lassoPath = [];  // Array of {{x, y}} points
     let selectedCells = new Set();  // Set of "sectionId:cellIdx" strings
+    let selectedCellsB = new Set();  // Second region for comparison
+    let lassoModeB = false;  // Next lasso draw fills region B
     let selectionSummaryColor = DATA.initial_color;
     let selectionSummaryExpanded = false;
+    const MAX_SELECTION_QUERY_MATCHES = 150000;
+    let selectionQueryExpanded = false;
+    let selectionQueryText = '';
+    let selectionQueryStatus = '';
+    let selectionQueryStatusKind = 'muted';
+    let selectionQueryRunning = false;
+    let selectionQueryRunToken = 0;
+    let modalGenePanelEntries = [];
+    let modalGenePanelState = null;
+    let modalGenePanelRequestToken = 0;
+    let annotationDeSourceId = null;
+    let annotationDeReferenceId = null;
+    const ANNOTATION_DE_TOP_N = 12;
+    let annotationDeTopN = ANNOTATION_DE_TOP_N;
+    let annotationDeFullRunToken = 0;
+    let annotationDeFullRun = null;
+    const annotationDeFullCache = new Map();
     const sectionById = new Map((DATA.sections || []).map(section => [section.id, section]));
+    const colorNameByLower = new Map((DATA.available_colors || []).map((name) => [String(name).toLowerCase(), String(name)]));
+    const sectionMetadataKeyByLower = new Map();
+    (DATA.sections || []).forEach((section) => {{
+        Object.keys(section?.metadata || {{}}).forEach((key) => {{
+            const token = String(key);
+            const lowered = token.toLowerCase();
+            if (!sectionMetadataKeyByLower.has(lowered)) {{
+                sectionMetadataKeyByLower.set(lowered, token);
+            }}
+        }});
+    }});
+
+    function updateSectionRotationIndicators(sectionId = null) {{
+        document.querySelectorAll('.section-panel').forEach((panel) => {{
+            if (sectionId && panel.dataset.sectionId !== sectionId) return;
+            const section = sectionById.get(panel.dataset.sectionId);
+            const label = panel.querySelector('[data-section-rotation-label]');
+            if (!section || !label) return;
+            label.textContent = formatRotationLabel(getSectionRotationDeg(section));
+        }});
+        const modalRotationInfo = document.getElementById('modal-rotation-info');
+        if (modalRotationInfo) {{
+            modalRotationInfo.textContent = modalSection
+                ? formatRotationLabel(getSectionRotationDeg(modalSection))
+                : 'Rot 0 deg';
+        }}
+    }}
+
+    function getSelectionIndicesForSection(sectionId, cells = selectedCells) {{
+        if (!sectionId || !cells || cells.size === 0) return null;
+        const indices = [];
+        let otherSectionFound = false;
+        cells.forEach((key) => {{
+            const sep = key.lastIndexOf(':');
+            if (sep <= 0) return;
+            const keySectionId = key.slice(0, sep);
+            const idx = Number(key.slice(sep + 1));
+            if (!Number.isInteger(idx) || idx < 0) return;
+            if (keySectionId !== sectionId) {{
+                otherSectionFound = true;
+                return;
+            }}
+            indices.push(idx);
+        }});
+        if (otherSectionFound || !indices.length) return null;
+        indices.sort((a, b) => a - b);
+        return indices;
+    }}
+
+    function expandSubviewBounds(bounds, referenceBounds = null) {{
+        if (!bounds) return null;
+        const ref = referenceBounds || bounds;
+        const spanX = Math.max(bounds.xmax - bounds.xmin, 0);
+        const spanY = Math.max(bounds.ymax - bounds.ymin, 0);
+        const refSpanX = Math.max(ref.xmax - ref.xmin, ROTATION_EPSILON);
+        const refSpanY = Math.max(ref.ymax - ref.ymin, ROTATION_EPSILON);
+        const padX = Math.max(spanX * 0.18, refSpanX * 0.01, ROTATION_EPSILON * 1000);
+        const padY = Math.max(spanY * 0.18, refSpanY * 0.01, ROTATION_EPSILON * 1000);
+        return {{
+            xmin: bounds.xmin - padX,
+            xmax: bounds.xmax + padX,
+            ymin: bounds.ymin - padY,
+            ymax: bounds.ymax + padY,
+        }};
+    }}
+
+    function getSectionBoundsFromIndices(section, indices) {{
+        if (!section || !Array.isArray(indices) || !indices.length) return null;
+        ensureSectionXY(section);
+        let xmin = Infinity;
+        let xmax = -Infinity;
+        let ymin = Infinity;
+        let ymax = -Infinity;
+        for (let k = 0; k < indices.length; k++) {{
+            const idx = indices[k];
+            const x = Number(section.x[idx]);
+            const y = Number(section.y[idx]);
+            if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+            if (x < xmin) xmin = x;
+            if (x > xmax) xmax = x;
+            if (y < ymin) ymin = y;
+            if (y > ymax) ymax = y;
+        }}
+        if (!Number.isFinite(xmin) || !Number.isFinite(xmax) || !Number.isFinite(ymin) || !Number.isFinite(ymax)) {{
+            return null;
+        }}
+        return {{ xmin, xmax, ymin, ymax }};
+    }}
+
+    function buildModalSubviewStateFromSelection(section = modalSection) {{
+        if (!section || selectedCellsB.size > 0 || lassoModeB) return null;
+        const indices = getSelectionIndicesForSection(section.id);
+        if (!indices || !indices.length) return null;
+        const bounds = getSectionBoundsFromIndices(section, indices);
+        if (!bounds) return null;
+        return {{
+            sectionId: section.id,
+            indices,
+            indexSet: new Set(indices),
+            bounds: expandSubviewBounds(bounds, ensureSectionBounds(section)),
+        }};
+    }}
+
+    function getModalSubviewRenderToken() {{
+        if (!modalSubview || !modalSubview.bounds) return '';
+        const bounds = modalSubview.bounds;
+        return [
+            modalSubview.sectionId,
+            modalSubview.indices.length,
+            bounds.xmin.toFixed(3),
+            bounds.xmax.toFixed(3),
+            bounds.ymin.toFixed(3),
+            bounds.ymax.toFixed(3),
+        ].join(':');
+    }}
+
+    function getModalActiveBounds() {{
+        if (!modalSection || !modalSubview || modalSubview.sectionId !== modalSection.id) return null;
+        return modalSubview.bounds || null;
+    }}
+
+    function getModalActiveCellIndexSet(sectionId = modalSection?.id) {{
+        if (!sectionId || !modalSubview || modalSubview.sectionId !== sectionId) return null;
+        return modalSubview.indexSet || null;
+    }}
+
+    function filterModalCandidateIndices(section, candidateIndices = null) {{
+        const activeIndexSet = getModalActiveCellIndexSet(section?.id);
+        if (!activeIndexSet) return candidateIndices;
+        if (!Array.isArray(candidateIndices)) return modalSubview?.indices ? modalSubview.indices.slice() : Array.from(activeIndexSet);
+        return candidateIndices.filter((idx) => activeIndexSet.has(idx));
+    }}
+
+    function updateModalHeader() {{
+        const titleEl = document.getElementById('modal-title');
+        const metaEl = document.getElementById('modal-meta');
+        if (!titleEl || !metaEl) return;
+        if (!modalSection) {{
+            titleEl.textContent = 'Section';
+            metaEl.textContent = '';
+            return;
+        }}
+        titleEl.textContent = modalSubview ? `${{modalSection.id}} • Focused view` : modalSection.id;
+        const metaParts = Object.entries(modalSection.metadata || {{}})
+            .map(([k, v]) => `${{formatMetadataLabel(k)}}: ${{v}}`);
+        if (modalSubview?.indices?.length) {{
+            metaParts.unshift(`Focused selection: ${{modalSubview.indices.length.toLocaleString()}} cells`);
+        }}
+        metaEl.textContent = metaParts.join(' | ');
+    }}
+
+    function activateModalSubviewFromSelection() {{
+        if (!modalSection) return false;
+        const nextSubview = buildModalSubviewStateFromSelection(modalSection);
+        if (!nextSubview) return false;
+        selectedCellsB.clear();
+        lassoModeB = false;
+        modalSubview = nextSubview;
+        modalZoom = 1;
+        modalPanX = 0;
+        modalPanY = 0;
+        invalidateModalRenderedView();
+        updateModalHeader();
+        updateSelectionInfo();
+        renderModalSection();
+        return true;
+    }}
+
+    function exitModalSubview() {{
+        if (!modalSubview) return false;
+        modalSubview = null;
+        modalZoom = 1;
+        modalPanX = 0;
+        modalPanY = 0;
+        invalidateModalRenderedView();
+        updateModalHeader();
+        updateSelectionInfo();
+        renderModalSection();
+        return true;
+    }}
+
+    function zoomModalToFit() {{
+        if (!modalSection) return;
+        modalZoom = 1;
+        modalPanX = 0;
+        modalPanY = 0;
+        renderModalSection();
+    }}
+
+    function toggleLegendPanel() {{
+        const legend = document.getElementById('legend');
+        const btn = document.getElementById('legend-toggle');
+        if (!legend || !btn) return;
+        legend.classList.toggle('collapsed');
+        btn.classList.toggle('active');
+        requestAnimationFrame(renderAllSections);
+    }}
+
+    function toggleInsightsPanel() {{
+        const colorToggle = document.getElementById('color-toggle');
+        const colorPanel = document.getElementById('color-panel');
+        if (!colorToggle || !colorPanel) return;
+        colorPanel.classList.toggle('collapsed');
+        colorToggle.classList.toggle('active');
+        if (!colorPanel.classList.contains('collapsed')) {{
+            renderActiveInsightsPanel();
+        }}
+        requestAnimationFrame(renderAllSections);
+    }}
+
+    function navigateModalSection(step) {{
+        if (!modalSection || !Array.isArray(DATA.sections) || !DATA.sections.length) return false;
+        const currentIndex = DATA.sections.findIndex((section) => section.id === modalSection.id);
+        if (currentIndex < 0) return false;
+        const nextIndex = currentIndex + Number(step || 0);
+        if (nextIndex < 0 || nextIndex >= DATA.sections.length) return false;
+        openModal(DATA.sections[nextIndex].id);
+        return true;
+    }}
+
+    function isEditableKeyboardTarget(target) {{
+        if (!target || !(target instanceof Element)) return false;
+        if (target.closest('input, textarea, select')) return true;
+        if (target.closest('[contenteditable="true"]')) return true;
+        return !!target.isContentEditable;
+    }}
+
+    function isActionableKeyboardTarget(target) {{
+        if (!target || !(target instanceof Element)) return false;
+        return !!target.closest('button, a, summary, [role="button"]');
+    }}
+
+    function setShortcutsOverlayOpen(open) {{
+        const overlay = document.getElementById('shortcuts-overlay');
+        if (!overlay) return;
+        overlay.classList.toggle('active', !!open);
+        overlay.setAttribute('aria-hidden', open ? 'false' : 'true');
+        if (open) {{
+            const infoPopover = document.getElementById('info-popover');
+            if (infoPopover?.classList.contains('active')) {{
+                infoPopover.classList.remove('active');
+                infoPopover.setAttribute('aria-hidden', 'true');
+            }}
+        }}
+    }}
+
+    function toggleShortcutsOverlay() {{
+        const overlay = document.getElementById('shortcuts-overlay');
+        if (!overlay) return;
+        setShortcutsOverlayOpen(!overlay.classList.contains('active'));
+    }}
+
+    function initShortcutsOverlay() {{
+        const overlay = document.getElementById('shortcuts-overlay');
+        const closeBtn = document.getElementById('shortcuts-dialog-close');
+        if (!overlay) return;
+        closeBtn?.addEventListener('click', () => {{
+            setShortcutsOverlayOpen(false);
+        }});
+        overlay.addEventListener('click', (event) => {{
+            if (event.target === overlay) {{
+                setShortcutsOverlayOpen(false);
+            }}
+        }});
+    }}
+
+    function initKeyboardShortcuts() {{
+        document.addEventListener('keydown', (event) => {{
+            if (event.defaultPrevented) return;
+            if (event.metaKey || event.ctrlKey || event.altKey) return;
+            if (isEditableKeyboardTarget(event.target)) return;
+
+            const key = event.key;
+            const isSpaceKey = event.code === 'Space' || key === ' ' || key === 'Spacebar';
+
+            if (isSpaceKey) {{
+                if (!modalSection || isActionableKeyboardTarget(event.target)) return;
+                modalSpacePanActive = true;
+                updateModalCanvasCursor?.();
+                event.preventDefault();
+                return;
+            }}
+
+            if (key === 'Escape') {{
+                const shortcutsOverlay = document.getElementById('shortcuts-overlay');
+                if (shortcutsOverlay?.classList.contains('active')) {{
+                    event.preventDefault();
+                    setShortcutsOverlayOpen(false);
+                    return;
+                }}
+                if (modalSection) {{
+                    event.preventDefault();
+                    closeModal();
+                    return;
+                }}
+                if (geneDiscoveryOpen) {{
+                    event.preventDefault();
+                    setGeneDiscoveryOpen(false);
+                    return;
+                }}
+                const hasActiveHighlight = (neighborNetworkFocusCategories && neighborNetworkFocusCategories.size > 0) ||
+                    (linkedSpotlightEnabled && spotlightPinnedCategory);
+                if (hasActiveHighlight) {{
+                    event.preventDefault();
+                    neighborNetworkFocusCategories = null;
+                    spotlightPinnedCategory = null;
+                    spotlightHoverCategory = null;
+                    linkedSpotlightEnabled = false;
+                    updateNeighborFocusResetButton();
+                    updateAllLegendSpotlightClasses();
+                    rerenderForSpotlightChange();
+                    return;
+                }}
+                return;
+            }}
+
+            if (key === '?') {{
+                event.preventDefault();
+                toggleShortcutsOverlay();
+                return;
+            }}
+
+            if (key === '/') {{
+                const geneInput = document.getElementById('gene-input');
+                if (!geneInput) return;
+                event.preventDefault();
+                geneInput.focus();
+                geneInput.select?.();
+                setGeneDiscoveryOpen(true);
+                renderGeneDiscoveryPanel();
+                return;
+            }}
+
+            if (key === 'ArrowLeft') {{
+                if (!modalSection) return;
+                event.preventDefault();
+                navigateModalSection(-1);
+                return;
+            }}
+
+            if (key === 'ArrowRight') {{
+                if (!modalSection) return;
+                event.preventDefault();
+                navigateModalSection(1);
+                return;
+            }}
+
+            if (key === 't' || key === 'T') {{
+                event.preventDefault();
+                toggleTheme();
+                return;
+            }}
+
+            if (key === 'u' || key === 'U') {{
+                if (!DATA.has_umap) return;
+                event.preventDefault();
+                toggleUMAP();
+                return;
+            }}
+
+            if (key === 'l' || key === 'L') {{
+                event.preventDefault();
+                toggleLegendPanel();
+                return;
+            }}
+
+            if (key === 'f' || key === 'F') {{
+                if (!modalSection) return;
+                event.preventDefault();
+                zoomModalToFit();
+                return;
+            }}
+
+            if (key === '+' || key === '=') {{
+                if (!modalSection) return;
+                event.preventDefault();
+                modalZoom = Math.min(modalZoom * 1.5, 20);
+                renderModalSection();
+                return;
+            }}
+
+            if (key === '-') {{
+                if (!modalSection) return;
+                event.preventDefault();
+                modalZoom = Math.max(modalZoom / 1.5, 0.1);
+                renderModalSection();
+            }}
+        }});
+        document.addEventListener('keyup', (event) => {{
+            const key = event.key;
+            const isSpaceKey = event.code === 'Space' || key === ' ' || key === 'Spacebar';
+            if (!isSpaceKey) return;
+            if (!modalSpacePanActive) return;
+            modalSpacePanActive = false;
+            updateModalCanvasCursor?.();
+            event.preventDefault();
+        }});
+        window.addEventListener('blur', () => {{
+            if (!modalSpacePanActive) return;
+            modalSpacePanActive = false;
+            updateModalCanvasCursor?.();
+        }});
+    }}
+
+    function setModalButtonPriority(button, priority = 'default') {{
+        if (!button) return;
+        button.classList.remove('modal-btn-primary', 'modal-btn-muted', 'modal-btn-danger');
+        if (priority === 'primary') {{
+            button.classList.add('modal-btn-primary');
+        }} else if (priority === 'muted') {{
+            button.classList.add('modal-btn-muted');
+        }} else if (priority === 'danger') {{
+            button.classList.add('modal-btn-danger');
+        }}
+    }}
+
+    function setModalControlsCollapsed(collapsed) {{
+        modalControlsCollapsed = !!collapsed;
+        const controls = document.querySelector('#modal .modal-controls');
+        if (controls) controls.classList.toggle('hidden', modalControlsCollapsed);
+        const toggle = document.getElementById('modal-controls-toggle');
+        if (toggle) toggle.textContent = modalControlsCollapsed ? 'Show tools' : 'Hide tools';
+        if (modalSection) {{
+            layoutModalControls();
+            layoutModalAnnotationPanel();
+        }}
+    }}
+
+    function getModalControlsBounds() {{
+        const container = document.getElementById('modal-canvas-container');
+        const controls = container?.querySelector('.modal-controls');
+        if (!container || !controls) return null;
+        const containerRect = container.getBoundingClientRect();
+        if (containerRect.width <= 0 || containerRect.height <= 0) return null;
+        const margin = 8;
+        const controlsWidth = controls.offsetWidth || Math.min(920, Math.max(220, containerRect.width - margin * 2));
+        const controlsHeight = controls.offsetHeight || 72;
+        return {{
+            minX: margin,
+            maxX: Math.max(margin, containerRect.width - controlsWidth - margin),
+            minY: margin,
+            maxY: Math.max(margin, containerRect.height - controlsHeight - margin),
+        }};
+    }}
+
+    function clampModalControlsPosition(x, y) {{
+        const bounds = getModalControlsBounds();
+        if (!bounds) return {{ x, y }};
+        return {{
+            x: Math.min(bounds.maxX, Math.max(bounds.minX, x)),
+            y: Math.min(bounds.maxY, Math.max(bounds.minY, y)),
+        }};
+    }}
+
+    function applyModalControlsPosition(position) {{
+        const controls = document.querySelector('#modal .modal-controls');
+        if (!controls) return;
+        if (!position) {{
+            controls.style.left = '50%';
+            controls.style.right = '';
+            controls.style.top = '';
+            controls.style.bottom = '12px';
+            controls.style.transform = 'translateX(-50%)';
+            return;
+        }}
+        controls.style.left = `${{position.x}}px`;
+        controls.style.top = `${{position.y}}px`;
+        controls.style.right = 'auto';
+        controls.style.bottom = 'auto';
+        controls.style.transform = 'none';
+    }}
+
+    function layoutModalControls(forceReset = false) {{
+        const controls = document.querySelector('#modal .modal-controls');
+        if (!controls) return;
+        if (forceReset) modalControlsCustomPosition = null;
+        const bounds = getModalControlsBounds();
+        if (!bounds) return;
+        if (modalControlsCollapsed) return;
+        if (modalControlsCustomPosition) {{
+            modalControlsCustomPosition = clampModalControlsPosition(
+                modalControlsCustomPosition.x,
+                modalControlsCustomPosition.y
+            );
+            applyModalControlsPosition(modalControlsCustomPosition);
+            return;
+        }}
+        applyModalControlsPosition(null);
+    }}
+
+    function initModalControlsDragging() {{
+        const controls = document.querySelector('#modal .modal-controls');
+        const container = document.getElementById('modal-canvas-container');
+        if (!controls || !container) return;
+
+        const stopDragging = () => {{
+            if (!isDraggingModalControls) return;
+            isDraggingModalControls = false;
+            controls.classList.remove('dragging');
+        }};
+
+        controls.addEventListener('mousedown', (e) => {{
+            if (e.button !== 0 || modalControlsCollapsed) return;
+            const target = e.target;
+            if (!target || !(target instanceof Element)) return;
+            if (target.closest('button, select, input, option, .size-control')) return;
+            const group = target.closest('.modal-control-group');
+            if (!group) return;
+            const containerRect = container.getBoundingClientRect();
+            const controlsRect = controls.getBoundingClientRect();
+            const next = clampModalControlsPosition(
+                controlsRect.left - containerRect.left,
+                controlsRect.top - containerRect.top
+            );
+            modalControlsCustomPosition = next;
+            applyModalControlsPosition(next);
+            modalControlsDragOffsetX = e.clientX - controlsRect.left;
+            modalControlsDragOffsetY = e.clientY - controlsRect.top;
+            isDraggingModalControls = true;
+            controls.classList.add('dragging');
+            e.preventDefault();
+        }});
+
+        document.addEventListener('mousemove', (e) => {{
+            if (!isDraggingModalControls) return;
+            const containerRect = container.getBoundingClientRect();
+            const next = clampModalControlsPosition(
+                e.clientX - containerRect.left - modalControlsDragOffsetX,
+                e.clientY - containerRect.top - modalControlsDragOffsetY
+            );
+            modalControlsCustomPosition = next;
+            applyModalControlsPosition(next);
+            layoutModalAnnotationPanel();
+        }});
+
+        document.addEventListener('mouseup', stopDragging);
+        window.addEventListener('blur', stopDragging);
+    }}
+
+    function updateModalToolbarState() {{
+        const controls = document.querySelector('#modal .modal-controls');
+        if (!controls) return;
+
+        const fitBtn = document.getElementById('zoom-reset');
+        const zoomInBtn = document.getElementById('zoom-in');
+        const zoomOutBtn = document.getElementById('zoom-out');
+        const rotateLeftBtn = document.getElementById('modal-rotate-left');
+        const rotateRightBtn = document.getElementById('modal-rotate-right');
+        const rotateResetBtn = document.getElementById('modal-rotate-reset');
+        const splitBtn = document.getElementById('modal-blend-toggle');
+        const selectBtn = document.getElementById('modal-magic-wand-btn');
+        const annotateBtn = document.getElementById('modal-annotate-btn');
+        const pickTypeBtn = document.getElementById('modal-type-toggle');
+        const clearTypeBtn = document.getElementById('modal-type-clear');
+        const screenshotBtn = document.getElementById('modal-screenshot-btn');
+        const clearSelectionBtn = document.getElementById('modal-clear-selection-btn');
+        if (clearSelectionBtn) clearSelectionBtn.hidden = selectedCells.size === 0;
+        const exitSubviewBtn = document.getElementById('modal-exit-subview-btn');
+        if (exitSubviewBtn) exitSubviewBtn.hidden = !modalSubview;
+        const geneViewBlock = document.getElementById('modal-gene-view-block');
+        const geneViewModeSelect = document.getElementById('modal-gene-view-mode');
+
+        const graphGroup = controls.querySelector('[data-modal-group="graph"]');
+        if (graphGroup) graphGroup.hidden = !DATA.has_neighbors;
+
+        const typeToggleBtn = document.getElementById('modal-type-toggle');
+        const typeClearBtn = document.getElementById('modal-type-clear');
+        const config = getColorConfig();
+        const blendActive = !!getModalBlendRuntimes(modalSection);
+        const typeSelectionDisabled = !modalSection || config.is_continuous || blendActive || modalAnnotationModeActive;
+        if (typeSelectionDisabled) {{
+            modalSelectedCategory = null;
+            modalTypeSelectEnabled = false;
+        }} else if (modalSelectedCategory && !config.categories?.includes(modalSelectedCategory)) {{
+            modalSelectedCategory = null;
+        }}
+        if (typeToggleBtn) {{
+            typeToggleBtn.disabled = typeSelectionDisabled;
+            typeToggleBtn.classList.toggle('active', modalTypeSelectEnabled && !typeSelectionDisabled);
+        }}
+        if (typeClearBtn) {{
+            typeClearBtn.disabled = typeSelectionDisabled;
+            typeClearBtn.hidden = typeSelectionDisabled || !modalSelectedCategory;
+        }}
+
+        const modalGraphBtn = document.getElementById('modal-graph-toggle');
+        const modalNeighborBtn = document.getElementById('modal-neighbor-hover-toggle');
+        const modalHopSelect = document.getElementById('modal-neighbor-hop-select');
+        if (modalGraphBtn) modalGraphBtn.hidden = !DATA.has_neighbors;
+        if (modalNeighborBtn) modalNeighborBtn.hidden = !DATA.has_neighbors;
+        if (modalHopSelect) {{
+            const showHopSelect = DATA.has_neighbors && neighborHoverEnabled;
+            modalHopSelect.hidden = !showHopSelect;
+            modalHopSelect.disabled = !showHopSelect;
+        }}
+
+        const showGeneViewBlock = !!modalSection && !!currentGene && !blendActive;
+        if (geneViewBlock) geneViewBlock.hidden = !showGeneViewBlock;
+        if (geneViewModeSelect) {{
+            geneViewModeSelect.disabled = !showGeneViewBlock;
+            geneViewModeSelect.value = modalGeneRenderMode;
+        }}
+
+        [
+            fitBtn,
+            zoomInBtn,
+            zoomOutBtn,
+            rotateLeftBtn,
+            rotateRightBtn,
+            rotateResetBtn,
+            splitBtn,
+            selectBtn,
+            annotateBtn,
+            pickTypeBtn,
+            clearTypeBtn,
+            screenshotBtn,
+            clearSelectionBtn,
+            exitSubviewBtn,
+            modalGraphBtn,
+            modalNeighborBtn,
+        ].forEach((btn) => setModalButtonPriority(btn));
+
+        [rotateLeftBtn, rotateRightBtn, rotateResetBtn, screenshotBtn, modalGraphBtn, modalNeighborBtn].forEach((btn) => {{
+            setModalButtonPriority(btn, 'muted');
+        }});
+
+        if (clearSelectionBtn && !clearSelectionBtn.hidden) {{
+            setModalButtonPriority(clearSelectionBtn, 'danger');
+        }}
+        if (typeClearBtn && !typeClearBtn.hidden) {{
+            setModalButtonPriority(typeClearBtn, 'muted');
+        }}
+
+        if (exitSubviewBtn && !exitSubviewBtn.hidden) {{
+            setModalButtonPriority(exitSubviewBtn, 'primary');
+        }} else if (modalAnnotationModeActive) {{
+            setModalButtonPriority(annotateBtn, 'primary');
+            [selectBtn, splitBtn, pickTypeBtn].forEach((btn) => setModalButtonPriority(btn, 'muted'));
+            setModalButtonPriority(fitBtn, 'muted');
+        }} else if (modalMagicWandActive) {{
+            setModalButtonPriority(selectBtn, 'primary');
+            [annotateBtn, splitBtn, pickTypeBtn].forEach((btn) => setModalButtonPriority(btn, 'muted'));
+            setModalButtonPriority(fitBtn, 'muted');
+        }} else if (modalTypeSelectEnabled && !typeSelectionDisabled) {{
+            setModalButtonPriority(pickTypeBtn, 'primary');
+            setModalButtonPriority(splitBtn, 'muted');
+        }} else if (blendActive) {{
+            setModalButtonPriority(splitBtn, 'primary');
+            setModalButtonPriority(fitBtn, 'muted');
+            setModalButtonPriority(pickTypeBtn, 'muted');
+        }} else {{
+            setModalButtonPriority(fitBtn, 'primary');
+            setModalButtonPriority(splitBtn, 'muted');
+        }}
+
+        if (modalSection) {{
+            layoutModalControls();
+            layoutModalAnnotationPanel();
+        }}
+    }}
+
+    function rotateSectionBy(sectionId, deltaDeg) {{
+        const section = sectionById.get(sectionId);
+        if (!section) return;
+        section.rotation_deg = normalizeRotationDeg(getSectionRotationDeg(section) + deltaDeg);
+        updateSectionRotationIndicators(sectionId);
+        renderAllSections();
+        if (modalSection && modalSection.id === sectionId) renderModalSection();
+    }}
+
+    function resetSectionRotation(sectionId) {{
+        const section = sectionById.get(sectionId);
+        if (!section) return;
+        section.rotation_deg = 0;
+        updateSectionRotationIndicators(sectionId);
+        renderAllSections();
+        if (modalSection && modalSection.id === sectionId) renderModalSection();
+    }}
+
+    function createViewerStorage() {{
+        try {{
+            const storage = window.localStorage;
+            if (!storage) throw new Error('localStorage unavailable');
+            const probeKey = '__karospace_storage_probe__';
+            storage.setItem(probeKey, '1');
+            storage.removeItem(probeKey);
+            return storage;
+        }} catch (error) {{
+            console.warn('Persistent browser storage unavailable; using in-memory fallback.', error);
+            const memoryStorage = new Map();
+            return {{
+                getItem(key) {{
+                    const storageKey = String(key);
+                    return memoryStorage.has(storageKey) ? memoryStorage.get(storageKey) : null;
+                }},
+                setItem(key, value) {{
+                    memoryStorage.set(String(key), String(value));
+                }},
+                removeItem(key) {{
+                    memoryStorage.delete(String(key));
+                }},
+            }};
+        }}
+    }}
+
+    const VIEWER_STORAGE = createViewerStorage();
 
     // Theme toggle
     function toggleTheme() {{
@@ -1981,7 +5456,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         document.documentElement.classList.remove('light', 'dark');
         document.documentElement.classList.add(currentTheme);
         document.getElementById('theme-icon').textContent = currentTheme === 'dark' ? '☀️' : '🌙';
-        localStorage.setItem('spatial-viewer-theme', currentTheme);
+        VIEWER_STORAGE.setItem('spatial-viewer-theme', currentTheme);
         // Re-render canvases with new background
         renderAllSections();
         if (modalSection) renderModalSection();
@@ -1990,7 +5465,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function initTheme() {{
         // Check for saved preference or use initial theme
-        const saved = localStorage.getItem('spatial-viewer-theme');
+        const saved = VIEWER_STORAGE.getItem('spatial-viewer-theme');
         if (saved && (saved === 'light' || saved === 'dark')) {{
             currentTheme = saved;
         }}
@@ -2040,6 +5515,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         URL.revokeObjectURL(url);
     }}
 
+    function downloadTextFile(text, filename, mimeType = 'text/plain;charset=utf-8') {{
+        const blob = new Blob([String(text ?? '')], {{ type: mimeType }});
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+    }}
+
     function replaceCanvasesWithImages(root) {{
         const originals = document.querySelectorAll('canvas');
         const clones = root.querySelectorAll('canvas');
@@ -2058,20 +5545,85 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }});
     }}
 
+    function getScreenshotResolution() {{
+        const el = document.getElementById('screenshot-res');
+        return Math.max(1, parseInt(el?.value || '2', 10));
+    }}
+
     function screenshotFullPage() {{
-        const name = `spatial-viewer-${{getScreenshotTimestamp()}}.png`;
-        ensureHtml2CanvasLoaded()
-            .then(() => html2canvas(document.body, {{
-                backgroundColor: null,
-                scale: getRenderDpr(),
-                useCORS: true
-            }}))
-            .then(canvas => {{
-                downloadCanvasImage(canvas, name);
-            }})
-            .catch(() => {{
-                alert('Screenshot failed (offline? blocked CDN?).');
-            }});
+        const multiplier = getScreenshotResolution();
+        const name = `spatial-viewer-${{getScreenshotTimestamp()}}${{multiplier > 1 ? `-${{multiplier}}x` : ''}}.png`;
+        const grid = document.getElementById('grid');
+        const panels = Array.from(grid.querySelectorAll('.section-panel')).filter(
+            p => !p.classList.contains('filtered-out')
+        );
+        if (panels.length === 0) {{
+            alert('No visible sections to screenshot.');
+            return;
+        }}
+
+        // Re-render sections at higher resolution in-place, then composite
+        screenshotDprOverride = (window.devicePixelRatio || 1) * multiplier;
+        panels.forEach(panel => {{
+            const sectionId = panel.dataset.sectionId || '';
+            const section = sectionById.get(sectionId);
+            const sectionCanvas = panel.querySelector('canvas');
+            if (section && sectionCanvas) renderSection(section, sectionCanvas);
+        }});
+
+        // Compute grid layout from CSS
+        const gridStyle = getComputedStyle(grid);
+        const colWidths = gridStyle.gridTemplateColumns.split(/\s+/).filter(Boolean);
+        const cols = colWidths.length || 1;
+        const rows = Math.ceil(panels.length / cols);
+        const gap = parseInt(gridStyle.gap || gridStyle.gridGap || '8', 10) || 8;
+        const firstCanvas = panels[0].querySelector('canvas');
+        const cellW = firstCanvas?.getBoundingClientRect().width || 200;
+        const cellH = firstCanvas?.getBoundingClientRect().height || 200;
+        const headerH = 18 * multiplier;
+        const gapScaled = gap * multiplier;
+        const cellWScaled = cellW * multiplier;
+        const cellHScaled = cellH * multiplier;
+        const totalW = cols * cellWScaled + (cols - 1) * gapScaled;
+        const totalH = rows * (cellHScaled + headerH) + (rows - 1) * gapScaled;
+
+        const composite = document.createElement('canvas');
+        composite.width = Math.round(totalW);
+        composite.height = Math.round(totalH);
+        const cctx = composite.getContext('2d');
+        cctx.fillStyle = getPanelBg();
+        cctx.fillRect(0, 0, totalW, totalH);
+
+        panels.forEach((panel, idx) => {{
+            const col = idx % cols;
+            const row = Math.floor(idx / cols);
+            const ox = col * (cellWScaled + gapScaled);
+            const oy = row * (cellHScaled + headerH + gapScaled);
+
+            // Draw section title
+            const sectionId = panel.dataset.sectionId || '';
+            cctx.fillStyle = currentTheme === 'dark' ? '#e0e0e0' : '#333333';
+            cctx.font = `${{10 * multiplier}}px sans-serif`;
+            cctx.textBaseline = 'top';
+            cctx.fillText(sectionId, ox, oy);
+
+            // Draw the high-res section canvas
+            const sectionCanvas = panel.querySelector('canvas');
+            if (sectionCanvas) {{
+                cctx.drawImage(sectionCanvas, ox, oy + headerH, cellWScaled, cellHScaled);
+            }}
+        }});
+
+        // Restore normal rendering
+        screenshotDprOverride = null;
+        panels.forEach(panel => {{
+            const sectionId = panel.dataset.sectionId || '';
+            const section = sectionById.get(sectionId);
+            const sectionCanvas = panel.querySelector('canvas');
+            if (section && sectionCanvas) renderSection(section, sectionCanvas);
+        }});
+
+        downloadCanvasImage(composite, name);
     }}
 
     function sanitizeFilenamePart(value) {{
@@ -2090,34 +5642,162 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             alert('Sample canvas not available.');
             return;
         }}
+        const multiplier = getScreenshotResolution();
         const sectionName = sanitizeFilenamePart(modalSection.id);
-        const name = `spatial-viewer-${{sectionName}}-${{getScreenshotTimestamp()}}.png`;
-        downloadCanvasImage(canvas, name);
+        const name = `spatial-viewer-${{sectionName}}-${{getScreenshotTimestamp()}}${{multiplier > 1 ? `-${{multiplier}}x` : ''}}.png`;
+        if (multiplier > 1) {{
+            // Temporarily override DPR for high-res render
+            screenshotDprOverride = getRenderDpr() * multiplier;
+            renderModalSectionExact();
+            downloadCanvasImage(canvas, name);
+            screenshotDprOverride = null;
+            renderModalSectionExact();
+        }} else {{
+            downloadCanvasImage(canvas, name);
+        }}
     }}
 
     // Color utilities
-    function magmaRgb(t) {{
-        const colors = [
-            [0.001, 0.000, 0.015], [0.092, 0.047, 0.256], [0.235, 0.073, 0.386],
-            [0.388, 0.100, 0.451], [0.531, 0.136, 0.430], [0.651, 0.188, 0.392],
-            [0.741, 0.259, 0.331], [0.813, 0.354, 0.255], [0.870, 0.477, 0.171],
-            [0.918, 0.624, 0.110], [0.987, 0.855, 0.185]
-        ];
-        const idx = Math.min(Math.floor(t * 10), 9);
-        const frac = (t * 10) - idx;
-        const c1 = colors[idx], c2 = colors[idx + 1];
+    const EXPRESSION_COLORMAPS = {{
+        magma: {{
+            label: 'Magma',
+            stops: [
+                [0.001, 0.000, 0.015], [0.092, 0.047, 0.256], [0.235, 0.073, 0.386],
+                [0.388, 0.100, 0.451], [0.531, 0.136, 0.430], [0.651, 0.188, 0.392],
+                [0.741, 0.259, 0.331], [0.813, 0.354, 0.255], [0.870, 0.477, 0.171],
+                [0.918, 0.624, 0.110], [0.987, 0.855, 0.185],
+            ],
+        }},
+        viridis: {{
+            label: 'Viridis',
+            stops: [
+                [0.267, 0.005, 0.329], [0.283, 0.141, 0.458], [0.254, 0.265, 0.530],
+                [0.207, 0.372, 0.553], [0.164, 0.471, 0.558], [0.128, 0.567, 0.551],
+                [0.135, 0.659, 0.518], [0.267, 0.749, 0.441], [0.478, 0.821, 0.318],
+                [0.741, 0.873, 0.150], [0.993, 0.906, 0.144],
+            ],
+        }},
+        plasma: {{
+            label: 'Plasma',
+            stops: [
+                [0.050, 0.030, 0.528], [0.244, 0.014, 0.608], [0.417, 0.001, 0.658],
+                [0.577, 0.021, 0.632], [0.710, 0.169, 0.538], [0.817, 0.302, 0.441],
+                [0.898, 0.437, 0.347], [0.952, 0.583, 0.253], [0.979, 0.744, 0.157],
+                [0.989, 0.912, 0.142], [0.940, 0.975, 0.131],
+            ],
+        }},
+        inferno: {{
+            label: 'Inferno',
+            stops: [
+                [0.001, 0.000, 0.014], [0.088, 0.043, 0.243], [0.233, 0.059, 0.437],
+                [0.385, 0.087, 0.433], [0.524, 0.147, 0.401], [0.655, 0.212, 0.357],
+                [0.779, 0.294, 0.298], [0.883, 0.391, 0.221], [0.963, 0.519, 0.126],
+                [0.988, 0.687, 0.072], [0.988, 0.998, 0.645],
+            ],
+        }},
+        turbo: {{
+            label: 'Turbo',
+            stops: [
+                [0.190, 0.070, 0.230], [0.230, 0.300, 0.750], [0.220, 0.600, 0.990],
+                [0.100, 0.850, 0.780], [0.360, 0.970, 0.460], [0.720, 0.960, 0.160],
+                [0.970, 0.800, 0.190], [0.990, 0.550, 0.240], [0.900, 0.270, 0.140],
+                [0.700, 0.020, 0.150], [0.480, 0.010, 0.110],
+            ],
+        }},
+        cividis: {{
+            label: 'Cividis',
+            stops: [
+                [0.000, 0.136, 0.303], [0.000, 0.207, 0.395], [0.093, 0.279, 0.449],
+                [0.193, 0.350, 0.454], [0.277, 0.420, 0.459], [0.357, 0.490, 0.472],
+                [0.444, 0.561, 0.479], [0.547, 0.629, 0.470], [0.664, 0.693, 0.437],
+                [0.790, 0.758, 0.380], [0.995, 0.909, 0.218],
+            ],
+        }},
+        blues: {{
+            label: 'Blues (light mode)',
+            stops: [
+                [0.969, 0.984, 1.000], [0.870, 0.922, 0.969], [0.776, 0.859, 0.937],
+                [0.620, 0.793, 0.882], [0.420, 0.682, 0.839], [0.259, 0.573, 0.776],
+                [0.129, 0.443, 0.710], [0.031, 0.318, 0.612], [0.031, 0.271, 0.529],
+                [0.008, 0.191, 0.404], [0.008, 0.133, 0.286],
+            ],
+        }},
+        reds: {{
+            label: 'Reds (light mode)',
+            stops: [
+                [1.000, 0.961, 0.941], [0.996, 0.878, 0.824], [0.988, 0.733, 0.631],
+                [0.988, 0.573, 0.447], [0.984, 0.416, 0.290], [0.937, 0.231, 0.173],
+                [0.796, 0.094, 0.114], [0.647, 0.059, 0.082], [0.529, 0.059, 0.082],
+                [0.404, 0.000, 0.051], [0.263, 0.000, 0.000],
+            ],
+        }},
+        greys: {{
+            label: 'Greys (light mode)',
+            stops: [
+                [1.000, 1.000, 1.000], [0.941, 0.941, 0.941], [0.851, 0.851, 0.851],
+                [0.741, 0.741, 0.741], [0.588, 0.588, 0.588], [0.451, 0.451, 0.451],
+                [0.321, 0.321, 0.321], [0.224, 0.224, 0.224], [0.145, 0.145, 0.145],
+                [0.078, 0.078, 0.078], [0.000, 0.000, 0.000],
+            ],
+        }},
+    }};
+
+    const EXPRESSION_COLORMAP_STORAGE_KEY = 'karospace-expression-colormap-v1:' + (location.pathname || '');
+    let expressionColormapName = 'magma';
+    try {{
+        const stored = localStorage.getItem(EXPRESSION_COLORMAP_STORAGE_KEY);
+        if (stored && EXPRESSION_COLORMAPS[stored]) expressionColormapName = stored;
+    }} catch (_) {{}}
+
+    function sampleColormapStops(stops, t) {{
+        const n = stops.length - 1;
+        const tt = Math.max(0, Math.min(1, t));
+        const idx = Math.min(Math.floor(tt * n), n - 1);
+        const frac = (tt * n) - idx;
+        const c1 = stops[idx], c2 = stops[idx + 1];
         const r = c1[0] + frac * (c2[0] - c1[0]);
         const g = c1[1] + frac * (c2[1] - c1[1]);
         const b = c1[2] + frac * (c2[2] - c1[2]);
         return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
     }}
 
-    function magma(t) {{
-        const rgb = magmaRgb(t);
+    function expressionRgb(t) {{
+        const cmap = EXPRESSION_COLORMAPS[expressionColormapName] || EXPRESSION_COLORMAPS.magma;
+        return sampleColormapStops(cmap.stops, t);
+    }}
+
+    function expressionColor(t) {{
+        const rgb = expressionRgb(t);
         return `rgb(${{rgb[0]}}, ${{rgb[1]}}, ${{rgb[2]}})`;
     }}
 
-    function getCategoryColor(idx) {{ return PALETTE[idx % PALETTE.length]; }}
+    // Backward-compatible aliases; use expressionColor/expressionRgb in new code.
+    const magmaRgb = expressionRgb;
+    const magma = expressionColor;
+
+    function setExpressionColormap(name) {{
+        if (!EXPRESSION_COLORMAPS[name]) return false;
+        if (name === expressionColormapName) return false;
+        expressionColormapName = name;
+        try {{ localStorage.setItem(EXPRESSION_COLORMAP_STORAGE_KEY, name); }} catch (_) {{}}
+        invalidateGeneDensityCaches();
+        renderLegend('legend');
+        renderLegend('modal-legend');
+        renderAllSections();
+        if (typeof modalSection !== 'undefined' && modalSection) renderModalSection();
+        if (typeof umapVisible !== 'undefined' && umapVisible) renderUMAP();
+        renderActiveInsightsPanel();
+        return true;
+    }}
+
+    function getCategoryColor(idx, colorCol) {{
+        if (colorCol) {{
+            const meta = DATA.colors_meta && DATA.colors_meta[colorCol];
+            const pal = meta && meta.palette;
+            if (pal && idx >= 0 && idx < pal.length) return pal[idx];
+        }}
+        return PALETTE[idx % PALETTE.length];
+    }}
 
     const cssColorRgbCache = new Map();
     function cssColorToRgb(color) {{
@@ -2177,8 +5857,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return value.toFixed(3);
     }}
 
-    function getGeneScaleRange(gene) {{
-        const base = DATA.genes_meta?.[gene] || {{}};
+    function getGeneScaleRange(gene, modality = null) {{
+        const targetModality = modality || CURRENT_MODALITY;
+        const isCurrent = targetModality === CURRENT_MODALITY;
+        const manifest = isCurrent ? DATA : (MODALITY_GENE_STATE[targetModality] || DATA);
+        const base = manifest.genes_meta?.[gene] || {{}};
+        
         const autoScale = geneScaleAuto[gene];
         const overrideScale = geneScaleOverrides[gene];
         let vmin = Number.isFinite(overrideScale?.vmin) ? overrideScale.vmin
@@ -2212,7 +5896,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 vmax: scale.vmax
             }};
         }}
-        return DATA.colors_meta[currentColor] || {{ is_continuous: false, categories: [], vmin: 0, vmax: 1 }};
+        const base = DATA.colors_meta[currentColor] || {{ is_continuous: false, categories: [], vmin: 0, vmax: 1 }};
+        return Object.assign({{}}, base, {{ colorCol: currentColor }});
     }}
 
     function getLinkedSpotlightCategory(config = getColorConfig()) {{
@@ -2231,15 +5916,35 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!legend) return;
         const config = getColorConfig();
         const activeSpotlight = getLinkedSpotlightCategory(config);
+        const hasNeighborFocus = neighborNetworkFocusCategories && neighborNetworkFocusCategories.size > 0;
         legend.querySelectorAll('.legend-item').forEach(item => {{
             const cat = item.dataset.category;
-            const isSpotlight = !!activeSpotlight && cat === activeSpotlight;
-            const isDimmed = !!activeSpotlight && cat !== activeSpotlight;
+            let isSpotlight, isDimmed;
+            if (hasNeighborFocus) {{
+                isSpotlight = neighborNetworkFocusCategories.has(cat);
+                isDimmed = !neighborNetworkFocusCategories.has(cat);
+            }} else {{
+                isSpotlight = !!activeSpotlight && cat === activeSpotlight;
+                isDimmed = !!activeSpotlight && cat !== activeSpotlight;
+            }}
             item.classList.toggle('spotlight', isSpotlight);
             item.classList.toggle('dimmed', isDimmed);
         }});
         const toggleBtn = document.getElementById(`${{targetId}}-spotlight-toggle`);
         if (toggleBtn) toggleBtn.classList.toggle('active', linkedSpotlightEnabled);
+    }}
+
+    function updateNeighborFocusResetButton() {{
+        const btn = document.getElementById('neighbor-focus-reset');
+        if (btn) btn.style.display = (neighborNetworkFocusCategories && neighborNetworkFocusCategories.size > 0) ? '' : 'none';
+    }}
+
+    function clearNeighborNetworkFocus() {{
+        neighborNetworkFocusCategories = null;
+        selectedNeighborFocus = null;
+        updateNeighborFocusResetButton();
+        updateAllLegendSpotlightClasses();
+        rerenderForSpotlightChange();
     }}
 
     function updateAllLegendSpotlightClasses() {{
@@ -2254,6 +5959,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function rerenderForExpressionScaleChange() {{
+        invalidateGeneDensityCaches();
         updateExpressionScaleUI();
         renderLegend('legend');
         renderLegend('modal-legend');
@@ -2268,17 +5974,26 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return value.toFixed(2);
     }}
 
-    function computeGenePercentiles(gene, pmin = GENE_SCALE_PMIN, pmax = GENE_SCALE_PMAX) {{
+    function computeGenePercentiles(gene, pmin = GENE_SCALE_PMIN, pmax = GENE_SCALE_PMAX, modality = null) {{
+        const targetModality = modality || CURRENT_MODALITY;
+        const isCurrent = targetModality === CURRENT_MODALITY;
+        
+        let sectionsSource = DATA.sections || [];
+        if (!isCurrent && MODALITY_GENE_STATE[targetModality]) {{
+            sectionsSource = MODALITY_GENE_STATE[targetModality].sections;
+        }}
+
         const samples = [];
         let seenNonZero = 0;
         let totalCells = 0;
         let totalNonZero = 0;
-        DATA.sections.forEach(section => {{
+        sectionsSource.forEach((section, idx) => {{
+            const nCells = isCurrent ? (section.n_cells ?? section.x?.length ?? 0) : (DATA.sections[idx]?.n_cells ?? DATA.sections[idx]?.x?.length ?? 0);
+            
             const sparse = section.genes_sparse?.[gene];
             if (sparse && typeof sparse.vb64 === 'string') {{
-                const sectionCells = section.n_cells ?? section.x?.length ?? 0;
                 const vals = base64ToFloat32Array(sparse.vb64);
-                totalCells += sectionCells;
+                totalCells += nCells;
                 totalNonZero += vals.length;
                 for (let i = 0; i < vals.length; i++) {{
                     const v = vals[i];
@@ -2294,8 +6009,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 return;
             }}
             if (sparse && Array.isArray(sparse.v)) {{
-                const sectionCells = section.n_cells ?? section.x?.length ?? 0;
-                totalCells += sectionCells;
+                totalCells += nCells;
                 totalNonZero += Array.isArray(sparse.i) ? sparse.i.length : sparse.v.length;
                 for (let i = 0; i < sparse.v.length; i++) {{
                     const v = sparse.v[i];
@@ -2313,7 +6027,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
             const vals = section.genes?.[gene];
             if (!vals) return;
-            totalCells += vals.length;
+            totalCells += nCells;
             for (let i = 0; i < vals.length; i++) {{
                 const v = vals[i];
                 if (v === null || v === undefined || Number.isNaN(v)) continue;
@@ -2375,6 +6089,27 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return new Uint32Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength / 4));
     }}
 
+    function base64ToUint16Array(b64) {{
+        const bytes = base64ToBytes(b64);
+        return new Uint16Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength / 2));
+    }}
+
+    function base64ToUint8Array(b64) {{
+        const bytes = base64ToBytes(b64);
+        return new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    }}
+
+    function decodeQuantizedValues(qvals, qmin, qmax, maxCode) {{
+        const resolvedMin = Number.isFinite(Number(qmin)) ? Number(qmin) : 0;
+        const resolvedMax = Number.isFinite(Number(qmax)) ? Number(qmax) : resolvedMin;
+        const scale = resolvedMax > resolvedMin ? (resolvedMax - resolvedMin) / Number(maxCode) : 0;
+        const arr = new Float32Array(qvals.length);
+        for (let i = 0; i < qvals.length; i++) {{
+            arr[i] = scale > 0 ? (resolvedMin + qvals[i] * scale) : resolvedMin;
+        }}
+        return arr;
+    }}
+
     function hydratePackedSections() {{
         // Keep initial load fast: don't eagerly base64-decode large arrays here.
         // Decode on-demand when a section is rendered (grid/modal/UMAP).
@@ -2382,8 +6117,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         DATA.sections.forEach(section => {{
             if (!section.colors) section.colors = {{}};
             if (!section.colors_b64) section.colors_b64 = {{}};
+            if (!section.proportions_b64) section.proportions_b64 = {{}};
             if (!section._colorCache) section._colorCache = {{}};
+            if (!section._propCache) section._propCache = {{}};
             if (!section._edgesCache) section._edgesCache = null;
+            section.rotation_deg = normalizeRotationDeg(section.rotation_deg ?? 0);
         }});
     }}
 
@@ -2398,8 +6136,169 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             delete section.yb64;
         }}
         if (section.x === null || section.x === undefined) section.x = [];
-        if (section.y === null || section.y === undefined) section.y = [];
+       if (section.y === null || section.y === undefined) section.y = [];
         return true;
+    }}
+
+    function ensureSectionBounds(section) {{
+        if (!section) return null;
+        if (
+            section.bounds &&
+            Number.isFinite(section.bounds.xmin) &&
+            Number.isFinite(section.bounds.xmax) &&
+            Number.isFinite(section.bounds.ymin) &&
+            Number.isFinite(section.bounds.ymax)
+        ) {{
+            return section.bounds;
+        }}
+        ensureSectionXY(section);
+        let xmin = Infinity;
+        let xmax = -Infinity;
+        let ymin = Infinity;
+        let ymax = -Infinity;
+        const n = Math.min(section.x.length, section.y.length);
+        for (let i = 0; i < n; i++) {{
+            const x = Number(section.x[i]);
+            const y = Number(section.y[i]);
+            if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+            if (x < xmin) xmin = x;
+            if (x > xmax) xmax = x;
+            if (y < ymin) ymin = y;
+            if (y > ymax) ymax = y;
+        }}
+        if (!Number.isFinite(xmin) || !Number.isFinite(xmax) || !Number.isFinite(ymin) || !Number.isFinite(ymax)) {{
+            section.bounds = {{ xmin: 0, xmax: 0, ymin: 0, ymax: 0 }};
+            return section.bounds;
+        }}
+        section.bounds = {{ xmin, xmax, ymin, ymax }};
+        return section.bounds;
+    }}
+
+    function clampNumber(value, minValue, maxValue) {{
+        return Math.min(maxValue, Math.max(minValue, value));
+    }}
+
+    function ensureSectionSpatialIndex(section) {{
+        if (!section) return null;
+        if (section._spatialIndex) return section._spatialIndex;
+        ensureSectionXY(section);
+        const bounds = ensureSectionBounds(section);
+        if (!bounds) return null;
+
+        const n = Math.min(section.x.length, section.y.length);
+        const width = Math.max(bounds.xmax - bounds.xmin, ROTATION_EPSILON);
+        const height = Math.max(bounds.ymax - bounds.ymin, ROTATION_EPSILON);
+        const targetPointsPerBucket = 192;
+        const targetBuckets = Math.max(16, Math.ceil(n / targetPointsPerBucket));
+        const aspect = width / height;
+        const cols = clampNumber(Math.round(Math.sqrt(targetBuckets * aspect)), 4, 256);
+        const rows = clampNumber(Math.round(targetBuckets / Math.max(cols, 1)), 4, 256);
+        const cellWidth = Math.max(width / cols, ROTATION_EPSILON);
+        const cellHeight = Math.max(height / rows, ROTATION_EPSILON);
+        const invCellWidth = 1 / cellWidth;
+        const invCellHeight = 1 / cellHeight;
+        const buckets = new Map();
+
+        for (let i = 0; i < n; i++) {{
+            const x = Number(section.x[i]);
+            const y = Number(section.y[i]);
+            if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+            const col = clampNumber(Math.floor((x - bounds.xmin) * invCellWidth), 0, cols - 1);
+            const row = clampNumber(Math.floor((y - bounds.ymin) * invCellHeight), 0, rows - 1);
+            const key = row * cols + col;
+            let bucket = buckets.get(key);
+            if (!bucket) {{
+                bucket = [];
+                buckets.set(key, bucket);
+            }}
+            bucket.push(i);
+        }}
+
+        section._spatialIndex = {{
+            xmin: bounds.xmin,
+            xmax: bounds.xmax,
+            ymin: bounds.ymin,
+            ymax: bounds.ymax,
+            cols,
+            rows,
+            invCellWidth,
+            invCellHeight,
+            buckets,
+        }};
+        return section._spatialIndex;
+    }}
+
+    function getBoundsFromPoints(points) {{
+        if (!Array.isArray(points) || points.length === 0) return null;
+        let xmin = Infinity;
+        let xmax = -Infinity;
+        let ymin = Infinity;
+        let ymax = -Infinity;
+        for (let i = 0; i < points.length; i++) {{
+            const point = points[i];
+            const x = Number(point?.x);
+            const y = Number(point?.y);
+            if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+            if (x < xmin) xmin = x;
+            if (x > xmax) xmax = x;
+            if (y < ymin) ymin = y;
+            if (y > ymax) ymax = y;
+        }}
+        if (!Number.isFinite(xmin) || !Number.isFinite(xmax) || !Number.isFinite(ymin) || !Number.isFinite(ymax)) {{
+            return null;
+        }}
+        return {{ xmin, xmax, ymin, ymax }};
+    }}
+
+    function getDataBoundsFromScreenRect(transform, left, top, right, bottom) {{
+        if (!transform) return null;
+        const points = [
+            transform.screenToData(left, top),
+            transform.screenToData(right, top),
+            transform.screenToData(left, bottom),
+            transform.screenToData(right, bottom),
+        ];
+        return getBoundsFromPoints(points);
+    }}
+
+    function querySectionSpatialIndex(section, bbox) {{
+        if (!section || !bbox) return null;
+        const index = ensureSectionSpatialIndex(section);
+        if (!index) return null;
+        if (
+            bbox.xmax < index.xmin || bbox.xmin > index.xmax ||
+            bbox.ymax < index.ymin || bbox.ymin > index.ymax
+        ) {{
+            return [];
+        }}
+
+        const minCol = clampNumber(Math.floor((bbox.xmin - index.xmin) * index.invCellWidth), 0, index.cols - 1);
+        const maxCol = clampNumber(Math.floor((bbox.xmax - index.xmin) * index.invCellWidth), 0, index.cols - 1);
+        const minRow = clampNumber(Math.floor((bbox.ymin - index.ymin) * index.invCellHeight), 0, index.rows - 1);
+        const maxRow = clampNumber(Math.floor((bbox.ymax - index.ymin) * index.invCellHeight), 0, index.rows - 1);
+        const matches = [];
+        for (let row = minRow; row <= maxRow; row++) {{
+            for (let col = minCol; col <= maxCol; col++) {{
+                const bucket = index.buckets.get(row * index.cols + col);
+                if (!bucket || !bucket.length) continue;
+                for (let i = 0; i < bucket.length; i++) {{
+                    matches.push(bucket[i]);
+                }}
+            }}
+        }}
+        return matches;
+    }}
+
+    function getSectionVisibleScreenCandidates(section, transform, padding = 0) {{
+        if (!section || !transform) return null;
+        const bbox = getDataBoundsFromScreenRect(
+            transform,
+            -padding,
+            -padding,
+            transform.width + padding,
+            transform.height + padding,
+        );
+        return querySectionSpatialIndex(section, bbox);
     }}
 
     function ensureSectionUMAP(section) {{
@@ -2413,6 +6312,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             delete section.umap_yb64;
         }}
         return true;
+    }}
+
+    function getSectionUMAPPoint(section, index) {{
+        if (!section || !section.umap_x || !section.umap_y) return null;
+        const x = Number(section.umap_x[index]);
+        const y = Number(section.umap_y[index]);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+        return {{ x, y }};
     }}
 
     function ensureSectionObsIndices(section) {{
@@ -2446,20 +6353,129 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return decoded;
     }}
 
-    function getSectionGeneValues(section, gene) {{
-        const dense = section.genes?.[gene];
+    // Lazy decode proportion matrix (N x K) for a deconvolution color column.
+    // Returns {{ matrix: Float32Array(N*K), k }} or null if unavailable.
+    function getSectionProportions(section, name) {{
+        if (!section || !name) return null;
+        const slot = section.proportions_b64?.[name];
+        if (!slot || typeof slot.b64 !== 'string') return null;
+        section._propCache = section._propCache || {{}};
+        if (section._propCache[name]) return section._propCache[name];
+        const k = Number(slot.k) || 0;
+        if (k <= 0) return null;
+        const matrix = base64ToFloat32Array(slot.b64);
+        const entry = {{ matrix, k }};
+        section._propCache[name] = entry;
+        return entry;
+    }}
+
+    // Draw a pie chart at (cx, cy) with radius r using K wedges.
+    // props is a Float32Array of length K, hiddenMask is a Uint8Array of length K (1 = hide).
+    // Wedges below MIN_WEDGE are skipped. Hidden wedges renormalize to remainder.
+    function drawProportionsPie(ctx, cx, cy, r, props, k, hiddenMask, paletteCss) {{
+        let total = 0;
+        for (let j = 0; j < k; j++) {{
+            if (hiddenMask && hiddenMask[j]) continue;
+            const v = props[j];
+            if (v > 0) total += v;
+        }}
+        if (total <= 0) return false;
+        const inv = 1 / total;
+        const TWO_PI = Math.PI * 2;
+        const MIN_WEDGE = 0.001; // skip wedges smaller than 0.1%
+        let a0 = -Math.PI / 2; // start at top
+        for (let j = 0; j < k; j++) {{
+            if (hiddenMask && hiddenMask[j]) continue;
+            const frac = props[j] * inv;
+            if (!(frac > MIN_WEDGE)) continue;
+            const a1 = a0 + frac * TWO_PI;
+            ctx.fillStyle = paletteCss[j];
+            ctx.beginPath();
+            // Single wedge: when a wedge covers everything, draw a circle to avoid the radius-line seam.
+            if (frac >= 0.9999) {{
+                ctx.arc(cx, cy, r, 0, TWO_PI);
+            }} else {{
+                ctx.moveTo(cx, cy);
+                ctx.arc(cx, cy, r, a0, a1);
+                ctx.closePath();
+            }}
+            ctx.fill();
+            a0 = a1;
+        }}
+        return true;
+    }}
+
+    // Build a CSS palette array of length k for the categories of a proportions config.
+    function getProportionsPaletteCss(config) {{
+        const k = (config && config.categories) ? config.categories.length : 0;
+        const palette = new Array(k);
+        for (let j = 0; j < k; j++) palette[j] = getCategoryColor(j);
+        return palette;
+    }}
+
+    function getProportionsHiddenMask(config) {{
+        const cats = (config && config.categories) || [];
+        if (!hiddenCategories || hiddenCategories.size === 0) return null;
+        const mask = new Uint8Array(cats.length);
+        let any = 0;
+        for (let j = 0; j < cats.length; j++) {{
+            if (hiddenCategories.has(cats[j])) {{ mask[j] = 1; any = 1; }}
+        }}
+        return any ? mask : null;
+    }}
+
+    function getSectionGeneValues(section, gene, modality = null) {{
+        const targetModality = modality || CURRENT_MODALITY;
+        const isCurrent = targetModality === CURRENT_MODALITY;
+        
+        let sectionSource = section;
+        let manifestSource = DATA;
+
+        if (!isCurrent && MODALITY_GENE_STATE[targetModality]) {{
+            const cachedMod = MODALITY_GENE_STATE[targetModality];
+            const sectionIdx = DATA.sections.indexOf(section);
+            if (sectionIdx >= 0 && cachedMod.sections[sectionIdx]) {{
+                sectionSource = cachedMod.sections[sectionIdx];
+                manifestSource = cachedMod;
+            }}
+        }}
+
+        const dense = sectionSource.genes?.[gene];
         if (dense) return dense;
 
-        const sparse = section.genes_sparse?.[gene];
+        const sparse = sectionSource.genes_sparse?.[gene];
         if (!sparse) return null;
 
-        const key = `${{section.id}}::${{gene}}`;
+        const key = `${{section.id}}::${{targetModality}}::${{gene}}`;
         const cached = geneDenseCache.get(key);
         if (cached) return cached;
 
         const n = section.n_cells ?? section.x?.length ?? 0;
         const arr = new Float32Array(n);
-        if (typeof sparse.ib64 === 'string' && typeof sparse.vb64 === 'string') {{
+        const geneMeta = manifestSource.genes_meta?.[gene] || null;
+        if (typeof sparse.ib64 === 'string' && typeof sparse.vq16b64 === 'string') {{
+            const idxs = base64ToUint32Array(sparse.ib64);
+            const vals = base64ToUint16Array(sparse.vq16b64);
+            const m = Math.min(idxs.length, vals.length);
+            const qmin = Number(geneMeta?.vmin ?? 0);
+            const qmax = Number(geneMeta?.vmax ?? qmin);
+            const scale = qmax > qmin ? (qmax - qmin) / 65535.0 : 0;
+            for (let k = 0; k < m; k++) {{
+                const idx = idxs[k];
+                if (idx < n) arr[idx] = scale > 0 ? (qmin + vals[k] * scale) : qmin;
+            }}
+        }} else if (typeof sparse.ib64 === 'string' && typeof sparse.vq8b64 === 'string') {{
+            const idxs = base64ToUint32Array(sparse.ib64);
+            const vals = base64ToUint8Array(sparse.vq8b64);
+            const m = Math.min(idxs.length, vals.length);
+            const qmin = Number(geneMeta?.vmin ?? 0);
+            const qmax = Number(geneMeta?.vmax ?? qmin);
+            const scale = qmax > qmin ? (qmax - qmin) / 255.0 : 0;
+            for (let k = 0; k < m; k++) {{
+                const idx = idxs[k];
+                if (idx < n) arr[idx] = scale > 0 ? (qmin + vals[k] * scale) : qmin;
+            }}
+        }} else if (typeof sparse.ib64 === 'string' && typeof sparse.vb64 === 'string') {{
             const idxs = base64ToUint32Array(sparse.ib64);
             const vals = base64ToFloat32Array(sparse.vb64);
             const m = Math.min(idxs.length, vals.length);
@@ -2467,7 +6483,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const idx = idxs[k];
                 if (idx < n) arr[idx] = vals[k];
             }}
-        }} else if (Array.isArray(sparse.i) && Array.isArray(sparse.v)) {{
+        }} else if (
+            (Array.isArray(sparse.i) || ArrayBuffer.isView(sparse.i)) &&
+            (Array.isArray(sparse.v) || ArrayBuffer.isView(sparse.v))
+        ) {{
             const m = Math.min(sparse.i.length, sparse.v.length);
             for (let k = 0; k < m; k++) {{
                 const idx = sparse.i[k];
@@ -2476,7 +6495,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }} else {{
             return null;
         }}
-        if (Array.isArray(sparse.nan)) {{
+        if (Array.isArray(sparse.nan) || ArrayBuffer.isView(sparse.nan)) {{
             for (let k = 0; k < sparse.nan.length; k++) {{
                 const idx = sparse.nan[k];
                 if (idx >= 0 && idx < n) arr[idx] = NaN;
@@ -2486,10 +6505,888 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return arr;
     }}
 
-    function ensureGeneAutoScale(gene) {{
+    function decodeDenseSidecarSection(sectionEntry) {{
+        if (!sectionEntry) return null;
+        let arr = null;
+        if (typeof sectionEntry.dq16b64 === 'string') {{
+            const qvals = base64ToUint16Array(sectionEntry.dq16b64);
+            arr = decodeQuantizedValues(qvals, sectionEntry.qmin, sectionEntry.qmax, 65535);
+        }} else if (typeof sectionEntry.dq8b64 === 'string') {{
+            const qvals = base64ToUint8Array(sectionEntry.dq8b64);
+            arr = decodeQuantizedValues(qvals, sectionEntry.qmin, sectionEntry.qmax, 255);
+        }} else if (typeof sectionEntry.db64 === 'string') {{
+            arr = base64ToFloat32Array(sectionEntry.db64);
+        }}
+        if (!arr) return null;
+        if (Array.isArray(sectionEntry.nan)) {{
+            for (let k = 0; k < sectionEntry.nan.length; k++) {{
+                const idx = sectionEntry.nan[k];
+                if (idx >= 0 && idx < arr.length) arr[idx] = NaN;
+            }}
+        }}
+        return arr;
+    }}
+
+    function setGeneLoadingState(isLoading, message = '') {{
+        geneAuxLoadingMessage = isLoading ? (message || 'Loading gene expression…') : '';
+        const geneInput = document.getElementById('gene-input');
+        if (geneInput) {{
+            geneInput.disabled = !!isLoading;
+            if (isLoading) {{
+                geneInput.dataset.prevPlaceholder = geneInput.placeholder || '';
+                geneInput.placeholder = geneAuxLoadingMessage;
+            }} else if (geneInput.dataset.prevPlaceholder !== undefined) {{
+                geneInput.placeholder = geneInput.dataset.prevPlaceholder || 'e.g. Cd4, Gfap...';
+                delete geneInput.dataset.prevPlaceholder;
+            }}
+        }}
+        ['modal-blend-a-gene', 'modal-blend-b-gene'].forEach((id) => {{
+            const control = document.getElementById(id);
+            if (control) control.disabled = !!isLoading;
+        }});
+        const modalBlendLoading = document.getElementById('modal-blend-loading');
+        if (modalBlendLoading) {{
+            if (isLoading) {{
+                modalBlendLoading.textContent = geneAuxLoadingMessage;
+                modalBlendLoading.classList.add('visible');
+            }} else {{
+                modalBlendLoading.textContent = '';
+                modalBlendLoading.classList.remove('visible');
+            }}
+        }}
+    }}
+
+    function hydrateGeneFromAux(gene, auxData, modality = null) {{
+        const targetModality = modality || CURRENT_MODALITY;
+        const isCurrent = targetModality === CURRENT_MODALITY;
+        
+        const geneEntry = auxData?.genes?.[gene];
+        const manifest = geneAuxManifest;
+        const map = manifest?.modalities;
+        const modalityEntry = (map && map[targetModality]) ? map[targetModality] : (targetModality === DEFAULT_MODALITY_NAME ? manifest : null);
+
+        const geneMeta = auxData?.genes_meta?.[gene]
+            || modalityEntry?.genes_meta?.[gene]
+            || manifest?.genes_meta?.[gene];
+        if (!geneEntry || !geneMeta) return false;
+
+        let targetManifest = DATA;
+        let targetSections = DATA.sections || [];
+
+        if (!isCurrent) {{
+            if (!MODALITY_GENE_STATE[targetModality]) {{
+                MODALITY_GENE_STATE[targetModality] = {{
+                    genes_meta: {{}},
+                    gene_encodings: {{}},
+                    gene_value_encodings: {{}},
+                    sections: (DATA.sections || []).map(() => ({{ genes: {{}}, genes_sparse: {{}} }})),
+                }};
+            }}
+            targetManifest = MODALITY_GENE_STATE[targetModality];
+            targetSections = targetManifest.sections;
+        }}
+
+        targetManifest.genes_meta[gene] = geneMeta;
+        const encoding = auxData?.gene_encodings?.[gene]
+            || modalityEntry?.gene_encodings?.[gene]
+            || manifest?.gene_encodings?.[gene];
+        if (encoding) {{
+            targetManifest.gene_encodings[gene] = encoding;
+        }}
+        const valueEncoding = auxData?.gene_value_encodings?.[gene]
+            || modalityEntry?.gene_value_encodings?.[gene]
+            || manifest?.gene_value_encodings?.[gene];
+        if (valueEncoding) {{
+            targetManifest.gene_value_encodings[gene] = valueEncoding;
+        }}
+
+        targetSections.forEach((section, i) => {{
+            const sectionId = isCurrent ? section.id : (DATA.sections[i]?.id);
+            const sectionEntry = geneEntry.sections?.[sectionId];
+            if (!sectionEntry) return;
+            section.genes = section.genes || {{}};
+            section.genes_sparse = section.genes_sparse || {{}};
+            if (typeof sectionEntry.db64 === 'string' || typeof sectionEntry.dq16b64 === 'string' || typeof sectionEntry.dq8b64 === 'string') {{
+                const denseValues = decodeDenseSidecarSection({{
+                    ...sectionEntry,
+                    qmin: geneMeta?.vmin,
+                    qmax: geneMeta?.vmax,
+                }});
+                if (!denseValues) return;
+                section.genes[gene] = denseValues;
+                if (section.genes_sparse[gene]) delete section.genes_sparse[gene];
+            }} else if (Array.isArray(sectionEntry.dense)) {{
+                section.genes[gene] = sectionEntry.dense;
+                if (section.genes_sparse[gene]) delete section.genes_sparse[gene];
+            }} else if (sectionEntry.sparse) {{
+                section.genes_sparse[gene] = sectionEntry.sparse;
+                if (section.genes[gene]) delete section.genes[gene];
+            }}
+        }});
+        return true;
+    }}
+
+    function getGeneAuxSidecarFormat(manifest = null) {{
+        const resolved = manifest || geneAuxManifest;
+        return resolved?.gene_sidecar_format || 'json-v2';
+    }}
+
+    function getPackageSession() {{
+        return window.__karospacePackageSession || null;
+    }}
+
+    function parseBinaryShardIndexBuffer(buffer) {{
+        if (!(buffer instanceof ArrayBuffer) || buffer.byteLength < 16) return null;
+        const view = new DataView(buffer);
+        const magic = String.fromCharCode(
+            view.getUint8(0),
+            view.getUint8(1),
+            view.getUint8(2),
+            view.getUint8(3)
+        );
+        if (magic !== 'KSB1') {{
+            throw new Error('Unsupported binary gene shard format');
+        }}
+        const version = view.getUint16(4, true);
+        if (version !== 1) {{
+            throw new Error(`Unsupported binary gene shard version: ${{version}}`);
+        }}
+        const geneCount = view.getUint32(8, true);
+        const decoder = new TextDecoder('utf-8');
+        const entries = Object.create(null);
+        let offset = 16;
+        for (let index = 0; index < geneCount; index++) {{
+            if (offset + 2 > buffer.byteLength) return null;
+            const nameLength = view.getUint16(offset, true);
+            offset += 2;
+            if (offset + nameLength + 18 > buffer.byteLength) return null;
+            const geneName = decoder.decode(new Uint8Array(buffer, offset, nameLength));
+            offset += nameLength;
+            const payloadKind = view.getUint8(offset);
+            offset += 1;
+            offset += 1;
+            const payloadOffset = Number(view.getBigUint64(offset, true));
+            offset += 8;
+            const payloadLength = Number(view.getBigUint64(offset, true));
+            offset += 8;
+            entries[geneName] = {{ payloadKind, payloadOffset, payloadLength }};
+        }}
+        return {{ entries, indexBytes: offset }};
+    }}
+
+    async function loadBinaryShardWholeBuffer(shardUrl) {{
+        if (geneAuxBinaryShardBufferCache.has(shardUrl)) return geneAuxBinaryShardBufferCache.get(shardUrl);
+        if (geneAuxBinaryShardBufferPromises.has(shardUrl)) return geneAuxBinaryShardBufferPromises.get(shardUrl);
+        const promise = fetch(shardUrl, {{ credentials: 'same-origin' }})
+            .then((response) => {{
+                if (!response.ok) {{
+                    throw new Error(`HTTP ${{response.status}} while loading binary gene shard`);
+                }}
+                return response.arrayBuffer();
+            }})
+            .then((buffer) => {{
+                geneAuxBinaryShardBufferCache.set(shardUrl, buffer);
+                return buffer;
+            }})
+            .catch((error) => {{
+                geneAuxBinaryShardBufferPromises.delete(shardUrl);
+                throw error;
+            }});
+        geneAuxBinaryShardBufferPromises.set(shardUrl, promise);
+        return promise;
+    }}
+
+    async function loadBinaryShardIndex(shardUrl) {{
+        if (geneAuxBinaryShardIndexCache.has(shardUrl)) return geneAuxBinaryShardIndexCache.get(shardUrl);
+        if (geneAuxBinaryShardIndexPromises.has(shardUrl)) return geneAuxBinaryShardIndexPromises.get(shardUrl);
+
+        const promise = (async () => {{
+            const session = getPackageSession();
+            if (window.__karospacePackageMode && session && typeof session.readRange === 'function' && session.supportsRange?.(shardUrl)) {{
+                const stat = session.stat?.(shardUrl) || null;
+                const maxBytes = Math.max(16, Number(stat?.uncompressedSize || 262144));
+                let prefixBytes = Math.min(maxBytes, 262144);
+                while (prefixBytes <= maxBytes) {{
+                    const buffer = await session.readRange(shardUrl, 0, prefixBytes);
+                    const parsed = parseBinaryShardIndexBuffer(buffer);
+                    if (parsed) {{
+                        const info = {{ ...parsed, rangeCapable: true, buffer: null }};
+                        geneAuxBinaryShardIndexCache.set(shardUrl, info);
+                        return info;
+                    }}
+                    if (prefixBytes === maxBytes) break;
+                    prefixBytes = Math.min(maxBytes, prefixBytes * 2);
+                }}
+                throw new Error('Binary gene shard index could not be parsed from package range reads');
+            }}
+
+            const buffer = await loadBinaryShardWholeBuffer(shardUrl);
+            const parsed = parseBinaryShardIndexBuffer(buffer);
+            if (!parsed) {{
+                throw new Error('Binary gene shard index could not be parsed');
+            }}
+            const info = {{ ...parsed, rangeCapable: false, buffer }};
+            geneAuxBinaryShardIndexCache.set(shardUrl, info);
+            return info;
+        }})().catch((error) => {{
+            geneAuxBinaryShardIndexPromises.delete(shardUrl);
+            throw error;
+        }});
+
+        geneAuxBinaryShardIndexPromises.set(shardUrl, promise);
+        return promise;
+    }}
+
+    async function readBinaryGenePayload(shardUrl, gene, indexInfo = null) {{
+        const resolvedIndex = indexInfo || await loadBinaryShardIndex(shardUrl);
+        const entry = resolvedIndex?.entries?.[gene];
+        if (!entry) return null;
+        if (resolvedIndex.buffer) {{
+            return resolvedIndex.buffer.slice(entry.payloadOffset, entry.payloadOffset + entry.payloadLength);
+        }}
+        if (resolvedIndex.rangeCapable) {{
+            const session = getPackageSession();
+            if (session && typeof session.readRange === 'function') {{
+                return session.readRange(shardUrl, entry.payloadOffset, entry.payloadOffset + entry.payloadLength);
+            }}
+        }}
+        const buffer = await loadBinaryShardWholeBuffer(shardUrl);
+        return buffer.slice(entry.payloadOffset, entry.payloadOffset + entry.payloadLength);
+    }}
+
+    async function preloadBinaryShardBuffer(shardUrl, indexInfo) {{
+        if (!indexInfo || indexInfo.buffer) return;
+        const session = getPackageSession();
+        if (!session) return;
+        try {{
+            const stat = session.stat?.(shardUrl);
+            if (stat && stat.uncompressedSize > 0) {{
+                indexInfo.buffer = await session.readRange(shardUrl, 0, stat.uncompressedSize);
+            }}
+        }} catch (e) {{
+            // Fall back to per-gene range reads
+        }}
+    }}
+
+    function parseBinaryGenePayload(buffer, sectionOrder, geneMeta = null) {{
+        if (!(buffer instanceof ArrayBuffer)) return null;
+        if (!Array.isArray(sectionOrder) || !sectionOrder.length) {{
+            throw new Error('Binary gene sidecar manifest is missing section_order');
+        }}
+        if (buffer.byteLength < 4) {{
+            throw new Error('Binary gene payload is truncated');
+        }}
+        const view = new DataView(buffer);
+        let offset = 0;
+        const sectionCount = view.getUint32(offset, true);
+        offset += 4;
+        const sections = {{}};
+        for (let i = 0; i < sectionCount; i++) {{
+            if (offset + 16 > buffer.byteLength) {{
+                throw new Error('Binary gene payload section header is truncated');
+            }}
+            const sectionIndex = view.getUint16(offset, true);
+            offset += 2;
+            const sectionEncoding = view.getUint8(offset);
+            offset += 1;
+            offset += 1;
+            const cellCount = view.getUint32(offset, true);
+            offset += 4;
+            const nnz = view.getUint32(offset, true);
+            offset += 4;
+            const nanCount = view.getUint32(offset, true);
+            offset += 4;
+            const sectionId = sectionOrder[sectionIndex];
+            if (!sectionId) {{
+                throw new Error(`Binary gene payload references unknown section index ${{sectionIndex}}`);
+            }}
+
+            if (sectionEncoding === 0) {{
+                sections[sectionId] = {{ sparse: {{ i: new Uint32Array(0), v: new Float32Array(0), nan: new Uint32Array(0) }} }};
+                continue;
+            }}
+
+            if (sectionEncoding === 1 || sectionEncoding === 3) {{
+                const valueBytes = sectionEncoding === 1 ? cellCount : cellCount * 2;
+                if (offset + valueBytes + (nanCount * 4) > buffer.byteLength) {{
+                    throw new Error('Binary dense gene payload is truncated');
+                }}
+                const valuesBuffer = buffer.slice(offset, offset + valueBytes);
+                offset += valueBytes;
+                const values = sectionEncoding === 1
+                    ? decodeQuantizedValues(new Uint8Array(valuesBuffer), geneMeta?.vmin, geneMeta?.vmax, 255)
+                    : decodeQuantizedValues(new Uint16Array(valuesBuffer), geneMeta?.vmin, geneMeta?.vmax, 65535);
+                const nanBuffer = buffer.slice(offset, offset + (nanCount * 4));
+                const nanIdxs = nanCount ? new Uint32Array(nanBuffer) : new Uint32Array(0);
+                offset += nanCount * 4;
+                for (let k = 0; k < nanIdxs.length; k++) {{
+                    const idx = nanIdxs[k];
+                    if (idx < values.length) values[idx] = NaN;
+                }}
+                sections[sectionId] = {{ dense: values }};
+                continue;
+            }}
+
+            if (sectionEncoding === 2 || sectionEncoding === 4) {{
+                const indexBytes = nnz * 4;
+                const valueBytes = sectionEncoding === 2 ? nnz : nnz * 2;
+                const totalBytes = indexBytes + valueBytes + (nanCount * 4);
+                if (offset + totalBytes > buffer.byteLength) {{
+                    throw new Error('Binary sparse gene payload is truncated');
+                }}
+                const idxBuffer = buffer.slice(offset, offset + indexBytes);
+                const idxs = nnz ? new Uint32Array(idxBuffer) : new Uint32Array(0);
+                offset += indexBytes;
+                const valueBuffer = buffer.slice(offset, offset + valueBytes);
+                offset += valueBytes;
+                const values = sectionEncoding === 2
+                    ? decodeQuantizedValues(new Uint8Array(valueBuffer), geneMeta?.vmin, geneMeta?.vmax, 255)
+                    : decodeQuantizedValues(new Uint16Array(valueBuffer), geneMeta?.vmin, geneMeta?.vmax, 65535);
+                const nanBuffer = buffer.slice(offset, offset + (nanCount * 4));
+                const nanIdxs = nanCount ? new Uint32Array(nanBuffer) : new Uint32Array(0);
+                offset += nanCount * 4;
+                sections[sectionId] = {{ sparse: {{ i: idxs, v: values, nan: nanIdxs }} }};
+                continue;
+            }}
+
+            throw new Error(`Unsupported binary section encoding: ${{sectionEncoding}}`);
+        }}
+        return {{ sections }};
+    }}
+
+    function hydrateGeneFromBinary(gene, geneEntry, modality = null) {{
+        const targetModality = modality || CURRENT_MODALITY;
+        const isCurrent = targetModality === CURRENT_MODALITY;
+        
+        const manifest = geneAuxManifest;
+        const map = manifest?.modalities;
+        const modalityEntry = (map && map[targetModality]) ? map[targetModality] : (targetModality === DEFAULT_MODALITY_NAME ? manifest : null);
+        
+        const geneMeta = modalityEntry?.genes_meta?.[gene] || manifest?.genes_meta?.[gene];
+        if (!geneEntry || !geneMeta) return false;
+
+        let targetManifest = DATA;
+        let targetSections = DATA.sections || [];
+
+        if (!isCurrent) {{
+            if (!MODALITY_GENE_STATE[targetModality]) {{
+                // Initialize if missing
+                MODALITY_GENE_STATE[targetModality] = {{
+                    genes_meta: {{}},
+                    gene_encodings: {{}},
+                    gene_value_encodings: {{}},
+                    sections: (DATA.sections || []).map(() => ({{ genes: {{}}, genes_sparse: {{}} }})),
+                }};
+            }}
+            targetManifest = MODALITY_GENE_STATE[targetModality];
+            targetSections = targetManifest.sections;
+        }}
+
+        targetManifest.genes_meta[gene] = geneMeta;
+        const encoding = modalityEntry?.gene_encodings?.[gene] || manifest?.gene_encodings?.[gene];
+        if (encoding) {{
+            targetManifest.gene_encodings[gene] = encoding;
+        }}
+        const valueEncoding = modalityEntry?.gene_value_encodings?.[gene] || manifest?.gene_value_encodings?.[gene];
+        if (valueEncoding) {{
+            targetManifest.gene_value_encodings[gene] = valueEncoding;
+        }}
+
+        targetSections.forEach((section, i) => {{
+            const sectionId = isCurrent ? section.id : (DATA.sections[i]?.id);
+            const sectionEntry = geneEntry?.sections?.[sectionId];
+            if (!sectionEntry) return;
+            section.genes = section.genes || {{}};
+            section.genes_sparse = section.genes_sparse || {{}};
+            if (sectionEntry.dense) {{
+                section.genes[gene] = sectionEntry.dense;
+                if (section.genes_sparse[gene]) delete section.genes_sparse[gene];
+            }} else if (sectionEntry.sparse) {{
+                section.genes_sparse[gene] = sectionEntry.sparse;
+                if (section.genes[gene]) delete section.genes[gene];
+            }}
+        }});
+        return true;
+    }}
+
+    async function loadGeneAuxManifest() {{
+        if (geneAuxManifest) return geneAuxManifest;
+        if (geneAuxManifestPromise) return geneAuxManifestPromise;
+        if (!DATA.gene_aux_url) return null;
+        if (window.location.protocol === 'file:' && !window.__karospacePackageMode) {{
+            window.__karospaceShowStartupError?.(
+                'This viewer was exported with sidecar gene loading. Open it over HTTP(S) to load additional genes.'
+            );
+            return null;
+        }}
+
+        setGeneLoadingState(true, 'Loading gene manifest…');
+        window.__karospaceShowLoadingWarning?.('Loading gene sidecar manifest…');
+        geneAuxManifestPromise = fetch(DATA.gene_aux_url, {{ credentials: 'same-origin' }})
+            .then((response) => {{
+                if (!response.ok) {{
+                    throw new Error(`HTTP ${{response.status}} while loading gene sidecar manifest`);
+                }}
+                return response.json();
+            }})
+            .then((payload) => {{
+                const format = payload?.format;
+                if (!payload || (format !== 'karospace-gene-sidecar-manifest-v2' && format !== 'karospace-gene-sidecar-manifest-v3' && format !== 'karospace-gene-sidecar-manifest-v4')) {{
+                    throw new Error('Unsupported gene sidecar manifest format');
+                }}
+                if (getGeneAuxSidecarFormat(payload) === 'binary-v1' && !Array.isArray(payload.section_order)) {{
+                    throw new Error('Binary gene sidecar manifest is missing section_order');
+                }}
+                geneAuxManifest = payload;
+                return payload;
+            }})
+            .catch((error) => {{
+                console.error('Failed to load gene sidecar manifest:', error);
+                window.__karospaceShowStartupError?.(
+                    `Failed to load auxiliary gene data: ${{error?.message || 'Unknown error'}}`
+                );
+                geneAuxManifestPromise = null;
+                return null;
+            }})
+            .finally(() => {{
+                setGeneLoadingState(false);
+                window.__karospaceRemoveLoadingWarning?.();
+            }});
+        return geneAuxManifestPromise;
+    }}
+
+    async function loadGeneAuxShard(shardUrl) {{
+        if (!shardUrl) return null;
+        if (geneAuxShardCache.has(shardUrl)) return geneAuxShardCache.get(shardUrl);
+        if (geneAuxShardPromises.has(shardUrl)) return geneAuxShardPromises.get(shardUrl);
+
+        setGeneLoadingState(true, 'Loading gene expression…');
+        window.__karospaceShowLoadingWarning?.('Loading requested gene expression…');
+        const promise = fetch(shardUrl, {{ credentials: 'same-origin' }})
+            .then((response) => {{
+                if (!response.ok) {{
+                    throw new Error(`HTTP ${{response.status}} while loading gene shard`);
+                }}
+                return response.json();
+            }})
+            .then((payload) => {{
+                if (!payload || payload.format !== 'karospace-gene-sidecar-shard-v2') {{
+                    throw new Error('Unsupported gene sidecar shard format');
+                }}
+                geneAuxShardCache.set(shardUrl, payload);
+                return payload;
+            }})
+            .catch((error) => {{
+                console.error('Failed to load gene shard:', error);
+                window.__karospaceShowStartupError?.(
+                    `Failed to load requested gene data: ${{error?.message || 'Unknown error'}}`
+                );
+                geneAuxShardPromises.delete(shardUrl);
+                return null;
+            }})
+            .finally(() => {{
+                setGeneLoadingState(false);
+                window.__karospaceRemoveLoadingWarning?.();
+            }});
+        geneAuxShardPromises.set(shardUrl, promise);
+        return promise;
+    }}
+
+    async function ensureGeneAvailable(gene, options = {{}}) {{
+        const token = String(gene || '').trim();
+        const showErrors = options.showErrors !== false;
+        const targetModality = options.modality || CURRENT_MODALITY;
+        const isCurrent = targetModality === CURRENT_MODALITY;
+
+        if (!token) return false;
+        
+        // Check if already in current DATA or MODALITY_GENE_STATE
+        const currentMeta = (isCurrent || (targetModality === 'gene' && CURRENT_MODALITY === 'rna'))
+            ? DATA.genes_meta
+            : (MODALITY_GENE_STATE[targetModality]?.genes_meta);
+        if (currentMeta && currentMeta[token]) return true;
+
+        if (!AVAILABLE_GENE_SET.has(token) && isCurrent) {{
+            if (showErrors) {{
+                alert(`Gene "${{token}}" was not found in this dataset.`);
+            }}
+            return false;
+        }}
+        const manifest = await loadGeneAuxManifest();
+        if (!manifest) return false;
+        
+        const map = manifest.modalities;
+        const modalityEntry = (map && map[targetModality]) ? map[targetModality] : (targetModality === DEFAULT_MODALITY_NAME ? manifest : null);
+        
+        const shardUrl = modalityEntry?.gene_to_shard?.[token] ?? manifest?.gene_to_shard?.[token];
+        if (!shardUrl) {{
+            if (showErrors) {{
+                alert(`Gene "${{token}}" is listed in the dataset but was not indexed in the auxiliary manifest.`);
+            }}
+            return false;
+        }}
+        const sectionOrder = modalityEntry?.section_order || manifest.section_order || [];
+        const geneMeta = modalityEntry?.genes_meta?.[token] ?? manifest?.genes_meta?.[token] ?? null;
+        let hydrated = false;
+        if (getGeneAuxSidecarFormat(manifest) === 'binary-v1') {{
+            try {{
+                const payloadBuffer = await readBinaryGenePayload(shardUrl, token);
+                if (!payloadBuffer) return false;
+                const geneEntry = parseBinaryGenePayload(payloadBuffer, sectionOrder, geneMeta);
+                hydrated = hydrateGeneFromBinary(token, geneEntry, targetModality);
+            }} catch (error) {{
+                console.error('Failed to load binary gene payload:', error);
+                if (showErrors) {{
+                    window.__karospaceShowStartupError?.(
+                        `Failed to load requested gene data: ${{error?.message || 'Unknown error'}}`
+                    );
+                }}
+                return false;
+            }}
+        }} else {{
+            const shardData = await loadGeneAuxShard(shardUrl);
+            if (!shardData) return false;
+            hydrated = hydrateGeneFromAux(token, shardData, targetModality);
+        }}
+        if (!hydrated && showErrors) {{
+            alert(`Gene "${{token}}" is listed in the dataset but was not found in the auxiliary gene file.`);
+        }}
+        return hydrated;
+    }}
+
+    async function runAsyncUIAction(label, fn) {{
+        try {{
+            return await fn();
+        }} catch (error) {{
+            console.error(`${{label}} failed`, error);
+            const detail = (error && error.message) ? error.message : String(error);
+            window.__karospaceShowStartupError?.(`${{label}} failed: ${{detail}} (open DevTools console).`);
+            return null;
+        }}
+    }}
+
+    function requestModalBlendGene(gene, modality = null) {{
+        const targetModality = modality || CURRENT_MODALITY;
+        const token = String(gene || '').trim();
+        const key = `${{targetModality}}::${{token}}`;
+        if (!token || modalBlendGeneLoads.has(key)) return;
+        
+        const meta = (targetModality === CURRENT_MODALITY || (targetModality === 'gene' && CURRENT_MODALITY === 'rna'))
+            ? DATA.genes_meta
+            : (MODALITY_GENE_STATE[targetModality]?.genes_meta);
+        if (meta && meta[token]) return;
+
+        modalBlendGeneLoads.add(key);
+        runAsyncUIAction(`Modal split gene load (${{token}})`, async () => {{
+            const ok = await ensureGeneAvailable(token, {{ showErrors: false, modality: targetModality }});
+            if (ok) {{
+                ensureGeneAutoScale(token, targetModality);
+                renderLegend('modal-legend');
+                if (modalSection) renderModalSection();
+            }}
+        }}).finally(() => {{
+            modalBlendGeneLoads.delete(key);
+        }});
+    }}
+
+    function setGeneDiscoveryOpen(isOpen) {{
+        geneDiscoveryOpen = !!isOpen;
+        const panel = document.getElementById('gene-discovery-panel');
+        const input = document.getElementById('gene-input');
+        if (panel) {{
+            panel.classList.toggle('active', geneDiscoveryOpen);
+            panel.setAttribute('aria-hidden', geneDiscoveryOpen ? 'false' : 'true');
+        }}
+        if (input) {{
+            if (!geneDiscoveryOpen) {{
+                input.value = currentGene || '';
+            }}
+            input.setAttribute('aria-expanded', geneDiscoveryOpen ? 'true' : 'false');
+        }}
+    }}
+
+    function renderGeneTokenButton(gene, options = {{}}) {{
+        const rawToken = String(gene || '').trim();
+        const token = resolveCanonicalGeneName(rawToken);
+        if (!token && options.allowUnknown !== true) return '';
+        const label = token || rawToken;
+        if (!label) return '';
+        const canActivate = !!token;
+        const classes = ['gene-token-btn'];
+        if (options.isActive) classes.push('active');
+        if (options.isSearchActive) classes.push('search-active');
+        if (!canActivate) classes.push('disabled');
+        else if (!DATA.genes_meta?.[token]) classes.push('unloaded');
+        const showMeta = options.showMeta !== false;
+        const metaLabel = options.metaLabel !== undefined
+            ? options.metaLabel
+            : (!canActivate ? 'name only' : (DATA.genes_meta?.[token] ? 'loaded' : 'sidecar'));
+        const metaHtml = showMeta && metaLabel
+            ? `<span class="gene-token-meta">${{escapeHtml(metaLabel)}}</span>`
+            : '';
+        return `
+            <button
+                type="button"
+                class="${{classes.join(' ')}}"
+                ${{canActivate ? `data-gene-activate="${{escapeHtml(token)}}"` : ''}}
+                title="${{escapeHtml(options.title || label)}}"
+                ${{canActivate ? '' : 'disabled'}}
+            >
+                <span>${{escapeHtml(label)}}</span>
+                ${{metaHtml}}
+            </button>
+        `;
+    }}
+
+    function renderGeneGoogleSearchButton(gene, options = {{}}) {{
+        const label = String(gene || '').trim();
+        if (!label) return '';
+        const query = options.query || `${{label}} gene`;
+        return `
+            <button
+                type="button"
+                class="gene-search-btn"
+                data-gene-google-search="${{escapeHtml(query)}}"
+                title="${{escapeHtml(options.title || `Search Google for ${{label}}`)}}"
+            >
+                Google
+            </button>
+        `;
+    }}
+
+    function bindGeneActivateButtons(container, rerenderFn = null) {{
+        if (!container) return;
+        container.querySelectorAll('[data-gene-activate]').forEach((btn) => {{
+            btn.addEventListener('click', async () => {{
+                const gene = btn.getAttribute('data-gene-activate') || '';
+                if (!gene) return;
+                const ok = await activateViewerGene(gene, {{ showErrors: true }});
+                if (ok && typeof rerenderFn === 'function') rerenderFn();
+            }});
+        }});
+    }}
+
+    function bindGeneGoogleSearchButtons(container) {{
+        if (!container) return;
+        container.querySelectorAll('[data-gene-google-search]').forEach((btn) => {{
+            btn.addEventListener('click', () => {{
+                const query = btn.getAttribute('data-gene-google-search') || '';
+                if (!query) return;
+                const url = `https://www.google.com/search?q=${{encodeURIComponent(query)}}`;
+                window.open(url, '_blank', 'noopener,noreferrer');
+            }});
+        }});
+    }}
+
+    function renderGeneDiscoveryPanel() {{
+        const content = document.getElementById('gene-discovery-content');
+        const input = document.getElementById('gene-input');
+        if (!content || !input) return;
+
+        const query = String(input.value || '').trim();
+        geneDiscoveryResults = getGeneSearchResults(query);
+        if (!geneDiscoveryResults.length) {{
+            geneDiscoveryActiveIndex = -1;
+        }} else if (geneDiscoveryActiveIndex < 0 || geneDiscoveryActiveIndex >= geneDiscoveryResults.length) {{
+            geneDiscoveryActiveIndex = 0;
+        }}
+
+        const sections = [];
+        if (query) {{
+            const searchRows = geneDiscoveryResults.length
+                ? `<div class="gene-token-grid">${{geneDiscoveryResults.map((gene, idx) => renderGeneTokenButton(gene, {{
+                    isActive: gene === currentGene,
+                    isSearchActive: idx === geneDiscoveryActiveIndex,
+                    title: 'Load gene into the viewer',
+                }})).join('')}}</div>`
+                : `<div class="gene-discovery-empty">No genes matched "${{escapeHtml(query)}}". Try a shorter token or browse suggestions.</div>`;
+            sections.push(`
+                <div class="gene-discovery-section">
+                    <div class="gene-discovery-label">Search results</div>
+                    ${{searchRows}}
+                </div>
+            `);
+        }}
+
+        const recentRows = recentGenes.length
+            ? `<div class="gene-token-grid">${{recentGenes.map((gene) => renderGeneTokenButton(gene, {{
+                isActive: gene === currentGene,
+                title: 'Recently viewed gene',
+            }})).join('')}}</div>`
+            : '<div class="gene-discovery-empty">Recent genes will appear here after you load them.</div>';
+        sections.push(`
+            <div class="gene-discovery-section">
+                <div class="gene-discovery-label">Recent genes</div>
+                ${{recentRows}}
+            </div>
+        `);
+
+        if (currentGene && DATA.gene_correlations?.[currentGene]?.length) {{
+            const corrData = DATA.gene_correlations[currentGene];
+            const corrRows = `<div class="gene-token-grid">${{corrData.map(({{gene, r}}) =>
+                renderGeneTokenButton(gene, {{
+                    isActive: gene === currentGene,
+                    metaLabel: `r=${{r.toFixed(2)}}`,
+                    title: `Pearson r = ${{r.toFixed(2)}} with ${{escapeHtml(currentGene)}}`,
+                }})
+            ).join('')}}</div>`;
+            sections.push(`
+                <div class="gene-discovery-section">
+                    <div class="gene-discovery-label">Correlated with ${{escapeHtml(currentGene)}}</div>
+                    ${{corrRows}}
+                </div>
+            `);
+        }}
+
+        if (DATA.spatial_variable_genes?.length) {{
+            const topSVG = DATA.spatial_variable_genes.slice(0, 12);
+            const svgRows = `<div class="gene-token-grid">${{topSVG.map((item) =>
+                renderGeneTokenButton(item.gene, {{
+                    isActive: item.gene === currentGene,
+                    metaLabel: `I=${{item.I.toFixed(2)}}`,
+                    title: `Moran's I = ${{item.I.toFixed(4)}}`,
+                }})
+            ).join('')}}</div>`;
+            sections.push(`
+                <div class="gene-discovery-section">
+                    <div class="gene-discovery-label">Spatially variable genes</div>
+                    ${{svgRows}}
+                </div>
+            `);
+        }}
+
+        const suggestionInfo = getGeneSuggestionGroups();
+        const suggestionRows = suggestionInfo.groups.length
+            ? suggestionInfo.groups.map(group => `
+                <div class="gene-suggestion-group">
+                    <div class="gene-suggestion-group-title">${{escapeHtml(group.category)}}</div>
+                    <div class="gene-token-grid">
+                        ${{group.genes.map((gene) => renderGeneTokenButton(gene, {{
+                            isActive: gene === currentGene,
+                            title: `Suggested marker for ${{group.category}}`,
+                        }})).join('')}}
+                    </div>
+                </div>
+            `).join('')
+            : `<div class="gene-discovery-empty">${{escapeHtml(suggestionInfo.subtitle || 'No suggestions available.')}}</div>`;
+        const hiddenSuggestionNote = suggestionInfo.hiddenCount > 0
+            ? `<div class="gene-discovery-empty" style="margin-top: 6px;">+${{suggestionInfo.hiddenCount}} more categories available in Insights → Markers.</div>`
+            : '';
+        sections.push(`
+            <div class="gene-discovery-section">
+                <div class="gene-discovery-label">${{escapeHtml(suggestionInfo.title)}}</div>
+                ${{suggestionRows}}
+                ${{hiddenSuggestionNote}}
+            </div>
+        `);
+
+        const panelRows = savedGenePanels.length
+            ? savedGenePanels.map((panel) => `
+                <div class="gene-panel-card">
+                    <div class="gene-panel-header">
+                        <div class="gene-panel-name">${{escapeHtml(panel.name)}}</div>
+                        <div class="gene-panel-actions">
+                            <button type="button" class="gene-panel-btn" data-gene-panel-add="${{escapeHtml(panel.name)}}" title="Add the current gene to this panel">+ current</button>
+                            <button type="button" class="gene-panel-btn" data-gene-panel-delete="${{escapeHtml(panel.name)}}" title="Delete this panel">Delete</button>
+                        </div>
+                    </div>
+                    <div class="gene-panel-genes">
+                        ${{panel.genes.length
+                            ? panel.genes.map((gene) => renderGeneTokenButton(gene, {{
+                                isActive: gene === currentGene,
+                                title: `Load ${{gene}} from ${{panel.name}}`,
+                            }})).join('')
+                            : '<div class="gene-discovery-empty">Panel is empty. Use + current to add a gene.</div>'
+                        }}
+                    </div>
+                </div>
+            `).join('')
+            : '<div class="gene-discovery-empty">No saved panels yet. Create one from the current active gene or an exact gene in the input.</div>';
+        sections.push(`
+            <div class="gene-discovery-section">
+                <div class="gene-discovery-label">Saved panels</div>
+                ${{panelRows}}
+            </div>
+        `);
+
+        content.innerHTML = sections.join('');
+    }}
+
+    async function activateViewerGene(gene, options = {{}}) {{
+        const rawToken = String(gene || '').trim();
+        const token = resolveCanonicalGeneName(rawToken);
+        const showErrors = options.showErrors !== false;
+        const geneInput = document.getElementById('gene-input');
+
+        if (!rawToken) {{
+            currentGene = null;
+            invalidateGeneDensityCaches();
+            hiddenCategories.clear();
+            if (geneInput) geneInput.value = '';
+            const modalGeneInputEl = document.getElementById('modal-gene-input');
+            if (modalGeneInputEl) modalGeneInputEl.value = '';
+            updateExpressionScaleUI();
+            renderLegend('legend');
+            renderLegend('modal-legend');
+            renderAllSections();
+            if (modalSection) renderModalSection();
+            if (umapVisible) renderUMAP();
+            updateSelectionInfo();
+            recentGenes = loadRecentGenes();
+            savedGenePanels = loadSavedGenePanels();
+            renderGeneDiscoveryPanel();
+            renderActiveInsightsPanel();
+            return true;
+        }}
+
+        if (!token) {{
+            if (showErrors) {{
+                alert(`Gene "${{rawToken}}" was not found in this dataset.`);
+            }}
+            renderGeneDiscoveryPanel();
+            return false;
+        }}
+
+        if (geneInput) geneInput.value = token;
+        const modalGeneInputEl = document.getElementById('modal-gene-input');
+        if (modalGeneInputEl) modalGeneInputEl.value = token;
+        const ok = await runAsyncUIAction('Gene selection', async () => {{
+            if (!(await ensureGeneAvailable(token, {{ showErrors }}))) {{
+                return false;
+            }}
+            currentGene = token;
+            geneDenseCache.clear();
+            invalidateGeneDensityCaches();
+            modalSelectedCategory = null;
+            modalTypeSelectEnabled = false;
+            hiddenCategories.clear();
+            ensureGeneAutoScale(currentGene);
+            updateExpressionScaleUI();
+            renderLegend('legend');
+            renderLegend('modal-legend');
+            renderAllSections();
+            if (modalSection) renderModalSection();
+            if (umapVisible) renderUMAP();
+            updateSelectionInfo();
+            return true;
+        }});
+        if (ok) {{
+            recordRecentGene(token);
+            geneDiscoveryResults = [];
+            geneDiscoveryActiveIndex = -1;
+            renderGeneDiscoveryPanel();
+            setGeneDiscoveryOpen(false);
+            renderActiveInsightsPanel();
+            return true;
+        }}
+        renderGeneDiscoveryPanel();
+        return false;
+    }}
+
+    function ensureGeneAutoScale(gene, modality = null) {{
         if (!gene) return;
         if (!geneScaleAuto[gene]) {{
-            const autoScale = computeGenePercentiles(gene);
+            const autoScale = computeGenePercentiles(gene, GENE_SCALE_PMIN, GENE_SCALE_PMAX, modality);
             if (autoScale) geneScaleAuto[gene] = autoScale;
         }}
     }}
@@ -2500,6 +7397,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const vmaxInput = document.getElementById('expr-vmax');
         const hint = document.getElementById('expr-scale-hint');
         if (!section || !vminInput || !vmaxInput || !hint) return;
+        updateOverviewGeneViewState();
         if (!currentGene) {{
             section.style.display = 'none';
             return;
@@ -2527,34 +7425,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const genes = [];
         parts.forEach(g => {{
             if (seen.has(g)) return;
-            if (DATA.genes_meta && DATA.genes_meta[g]) {{
+            if (AVAILABLE_GENE_SET.has(g)) {{
                 seen.add(g);
                 genes.push(g);
             }}
         }});
         return genes;
-    }}
-
-    function autocompleteDotplotGeneToken(inputEl) {{
-        if (!inputEl) return false;
-        const value = inputEl.value || '';
-        const cursor = Number.isFinite(inputEl.selectionStart) ? inputEl.selectionStart : value.length;
-        const left = value.slice(0, cursor);
-        const right = value.slice(cursor);
-        const tokenMatch = left.match(/^(.*?)([^,\s]*)$/);
-        if (!tokenMatch) return false;
-        const prefix = tokenMatch[1] || '';
-        const token = tokenMatch[2] || '';
-        if (!token) return false;
-
-        const lower = token.toLowerCase();
-        const match = (DATA.available_genes || []).find(g => g.toLowerCase().startsWith(lower));
-        if (!match || match === token) return false;
-
-        inputEl.value = `${{prefix}}${{match}}${{right}}`;
-        const nextCursor = (prefix + match).length;
-        inputEl.setSelectionRange(nextCursor, nextCursor);
-        return true;
     }}
 
     function getCategoricalColorColumns() {{
@@ -2566,15 +7442,129 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return cols;
     }}
 
+    function setSelectOptions(selectEl, values, selectedValue) {{
+        if (!selectEl) return;
+        selectEl.innerHTML = '';
+        values.forEach((entry) => {{
+            const value = (entry && typeof entry === 'object') ? entry.value : entry;
+            const label = (entry && typeof entry === 'object') ? (entry.label ?? entry.value) : entry;
+            const opt = document.createElement('option');
+            opt.value = value;
+            opt.textContent = label;
+            selectEl.appendChild(opt);
+        }});
+        if (selectedValue !== undefined && selectedValue !== null) {{
+            selectEl.value = selectedValue;
+        }}
+    }}
+
     function getCategoriesForColorColumn(colorCol) {{
         const meta = DATA.colors_meta?.[colorCol];
         if (!meta || meta.is_continuous || !Array.isArray(meta.categories)) return [];
         return meta.categories;
     }}
 
+    function encodeGroupDESourceSpec(spec) {{
+        if (!spec || !spec.kind || !spec.column) return '';
+        return `${{spec.kind}}::${{spec.column}}`;
+    }}
+
+    function decodeGroupDESourceSpec(value) {{
+        const raw = String(value || '');
+        const sep = raw.indexOf('::');
+        if (sep <= 0) return null;
+        const kind = raw.slice(0, sep);
+        const column = raw.slice(sep + 2);
+        if (!column || (kind !== 'metadata' && kind !== 'annotation')) return null;
+        return {{ kind, column }};
+    }}
+
+    function formatGroupDESourceSpecLabel(spec) {{
+        if (!spec) return 'Unknown';
+        const suffix = spec.kind === 'metadata' ? 'section metadata' : 'cell annotation';
+        return `${{formatMetadataLabel(spec.column)}} (${{suffix}})`;
+    }}
+
+    function getCategoricalValueNameFromRaw(meta, raw) {{
+        if (!meta || meta.is_continuous || !Array.isArray(meta.categories) || !Number.isFinite(raw)) return null;
+        const catIdx = Math.round(raw);
+        if (!Number.isInteger(catIdx) || catIdx < 0 || catIdx >= meta.categories.length) return null;
+        const catName = meta.categories[catIdx];
+        return catName === null || catName === undefined ? null : String(catName);
+    }}
+
+    function getCategoricalValueNameForColorColumn(section, colorCol, cellIdx) {{
+        const meta = DATA.colors_meta?.[colorCol];
+        if (!meta || meta.is_continuous || !Array.isArray(meta.categories)) return null;
+        const values = getSectionColorValues(section, colorCol);
+        if (!values || cellIdx < 0 || cellIdx >= values.length) return null;
+        return getCategoricalValueNameFromRaw(meta, values[cellIdx]);
+    }}
+
+    function getGroupDESourceSpecs() {{
+        const metadataSpecs = Object.entries(DATA.metadata_filters || {{}})
+            .filter(([, values]) => Array.isArray(values) && values.length > 0)
+            .map(([column]) => ({{ kind: 'metadata', column }}));
+        const annotationSpecs = getCategoricalColorColumns().map((column) => ({{ kind: 'annotation', column }}));
+        return metadataSpecs.concat(annotationSpecs);
+    }}
+
+    function getPreferredGroupDESourceSpecValue(specs = getGroupDESourceSpecs()) {{
+        const encoded = specs.map((spec) => encodeGroupDESourceSpec(spec));
+        const metadataColumns = specs.filter((spec) => spec.kind === 'metadata').map((spec) => spec.column);
+        const preferredPatterns = [
+            /^sample$/i,
+            /^sample_id$/i,
+            /sample/i,
+            /^slide$/i,
+            /^section$/i,
+            /^fov$/i,
+            /library/i,
+            /donor/i,
+            /disease/i,
+            /condition/i,
+        ];
+        for (const pattern of preferredPatterns) {{
+            const match = metadataColumns.find((column) => pattern.test(String(column)));
+            if (match) return encodeGroupDESourceSpec({{ kind: 'metadata', column: match }});
+        }}
+        if (encoded.includes(encodeGroupDESourceSpec({{ kind: 'annotation', column: currentColor }}))) {{
+            return encodeGroupDESourceSpec({{ kind: 'annotation', column: currentColor }});
+        }}
+        return encoded[0] || '';
+    }}
+
+    function getGroupDEValuesForSpec(spec) {{
+        if (!spec) return [];
+        if (spec.kind === 'metadata') {{
+            return Array.isArray(DATA.metadata_filters?.[spec.column]) ? DATA.metadata_filters[spec.column].map((value) => String(value)) : [];
+        }}
+        return getCategoriesForColorColumn(spec.column).map((value) => String(value));
+    }}
+
+    function formatGroupDEValueLabel(spec, value) {{
+        return `${{formatMetadataLabel(spec?.column || 'group')}} = ${{String(value ?? '')}}`;
+    }}
+
+    function getActiveFiltersSignature() {{
+        const entries = Object.entries(activeFilters || {{}})
+            .map(([key, values]) => [String(key), Array.from(values || []).map((value) => String(value)).sort()]);
+        entries.sort((a, b) => a[0].localeCompare(b[0]));
+        return entries
+            .map(([key, values]) => `${{key}}=${{values.join('|')}}`)
+            .join(';;');
+    }}
+
     function getModalBlendVariableLabel(spec) {{
         if (!spec) return 'Unknown';
-        if (spec.kind === 'gene') return spec.gene ? `Gene: ${{spec.gene}}` : 'Gene';
+        if (spec.kind !== 'cell') {{
+            const modName = spec.kind;
+            const modDesc = MODALITY_DESCRIPTORS.find(m => m.name === modName);
+            const modLabel = modDesc?.label || (modName === 'gene' ? 'Gene' : modName);
+            const isGene = ['RNA', 'rna', 'Gene', 'gene'].includes(modLabel);
+            const featureLabel = isGene ? 'Gene' : modLabel;
+            return spec.gene ? `${{featureLabel}}: ${{spec.gene}}` : featureLabel;
+        }}
         const colLabel = spec.color ? formatMetadataLabel(spec.color) : 'Cell type';
         if (spec.category === BLEND_ALL_CATEGORIES) return `${{colLabel}}: All`;
         return spec.category ? `${{colLabel}}: ${{spec.category}}` : colLabel;
@@ -2584,13 +7574,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const spec = modalBlendSpec?.[side];
         if (!spec) return null;
         const sideLabel = side === 'a' ? 'A (left)' : 'B (right)';
-        if (spec.kind === 'gene') {{
-            const geneLabel = spec.gene ? `Gene: ${{spec.gene}}` : 'Gene';
-            const scale = getGeneScaleRange(spec.gene);
+        
+        if (spec.kind !== 'cell') {{
+            const modName = spec.kind;
+            const modDesc = MODALITY_DESCRIPTORS.find(m => m.name === modName);
+            const modLabel = modDesc?.label || (modName === 'gene' ? 'Gene' : modName);
+            const isGene = ['RNA', 'rna', 'Gene', 'gene'].includes(modLabel);
+            const featureTypeLabel = isGene ? 'Gene' : modLabel;
+            const featureLabel = spec.gene ? `${{featureTypeLabel}}: ${{spec.gene}}` : featureTypeLabel;
+            
+            const scale = getGeneScaleRange(spec.gene, modName);
             return {{
                 side,
                 sideLabel,
-                label: geneLabel,
+                label: featureLabel,
                 detail: `Expression (${{formatScaleNumber(scale.vmin)}} to ${{formatScaleNumber(scale.vmax)}})`,
                 swatchClass: 'split-legend-swatch-bar',
                 swatchBackground: `linear-gradient(90deg, ${{magma(0)}}, ${{magma(0.5)}}, ${{magma(1)}})`,
@@ -2603,7 +7600,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const colLabel = colorCol ? formatMetadataLabel(colorCol) : 'Cell type';
         const categoryEntries = categories.map((cat, idx) => ({{
             label: cat,
-            color: getCategoryColor(idx),
+            color: getCategoryColor(idx, colorCol),
         }}));
         if (spec.category && spec.category !== BLEND_ALL_CATEGORIES) {{
             const catIdx = categories.indexOf(spec.category);
@@ -2614,7 +7611,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     label: `${{colLabel}}: ${{spec.category}}`,
                     detail: 'Selected category',
                     swatchClass: 'split-legend-swatch-dot',
-                    swatchBackground: getCategoryColor(catIdx),
+                    swatchBackground: getCategoryColor(catIdx, colorCol),
                     categories: [categoryEntries[catIdx]],
                 }};
             }}
@@ -2622,7 +7619,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         const gradientStops = categories
             .slice(0, 5)
-            .map((_, idx) => getCategoryColor(idx));
+            .map((_, idx) => getCategoryColor(idx, colorCol));
         return {{
             side,
             sideLabel,
@@ -2638,12 +7635,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function getModalBlendRuntime(section, spec) {{
         if (!section || !spec) return null;
-        if (spec.kind === 'gene') {{
+        
+        if (spec.kind !== 'cell') {{
             const gene = (spec.gene || '').trim();
-            if (!gene || !DATA.genes_meta?.[gene]) return null;
-            const values = getSectionGeneValues(section, gene);
+            if (!gene) return null;
+            
+            const modName = spec.kind;
+            const meta = (modName === CURRENT_MODALITY || (modName === 'gene' && CURRENT_MODALITY === 'rna'))
+                ? DATA.genes_meta
+                : (MODALITY_GENE_STATE[modName]?.genes_meta);
+            
+            if (!meta || !meta[gene]) {{
+                requestModalBlendGene(gene, modName);
+                return null;
+            }}
+            const values = getSectionGeneValues(section, gene, modName);
             if (!values) return null;
-            const scale = getGeneScaleRange(gene);
+            const scale = getGeneScaleRange(gene, modName);
             return {{ kind: 'gene', values, vmin: scale.vmin, vmax: scale.vmax }};
         }}
 
@@ -2656,7 +7664,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             return {{
                 kind: 'cell-all',
                 values,
-                paletteRgb: categories.map((_, idx) => cssColorToRgb(getCategoryColor(idx))),
+                paletteRgb: categories.map((_, idx) => cssColorToRgb(getCategoryColor(idx, colorCol))),
             }};
         }}
         const catIdx = categories.indexOf(spec.category);
@@ -2665,7 +7673,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             kind: 'cell',
             values,
             catIdx,
-            activeRgb: cssColorToRgb(getCategoryColor(catIdx)),
+            activeRgb: cssColorToRgb(getCategoryColor(catIdx, colorCol)),
             inactiveRgb: [176, 176, 176],
         }};
     }}
@@ -2676,6 +7684,29 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const b = getModalBlendRuntime(section, modalBlendSpec.b);
         if (!a || !b) return null;
         return {{ a, b }};
+    }}
+
+    function getOverviewBlendRuntimes(section) {{
+        if (!overviewBlendEnabled || !section) return null;
+        const a = getModalBlendRuntime(section, overviewBlendSpec.a);
+        const b = getModalBlendRuntime(section, overviewBlendSpec.b);
+        if (!a || !b) return null;
+        return {{ a, b }};
+    }}
+
+    function requestOverviewBlendGene(gene) {{
+        const token = String(gene || '').trim();
+        if (!token || DATA.genes_meta?.[token] || modalBlendGeneLoads.has(token)) return;
+        modalBlendGeneLoads.add(token);
+        runAsyncUIAction(`Overview split gene load (${{token}})`, async () => {{
+            const ok = await ensureGeneAvailable(token, {{ showErrors: false }});
+            if (ok) {{
+                ensureGeneAutoScale(token);
+                renderAllSections();
+            }}
+        }}).finally(() => {{
+            modalBlendGeneLoads.delete(token);
+        }});
     }}
 
     function getModalBlendCellRgb(runtime, idx) {{
@@ -2695,204 +7726,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return magmaRgb(t);
     }}
 
-    function updateDotplotAggregateValueOptions() {{
-        const aggSelect = document.getElementById('dotplot-aggregate-by');
-        const valueWrap = document.getElementById('dotplot-aggregate-value-wrap');
-        const valueSelect = document.getElementById('dotplot-aggregate-value');
-        if (!aggSelect || !valueWrap || !valueSelect) return;
-        const key = aggSelect.value;
-        if (!key) {{
-            valueWrap.style.display = 'none';
-            valueSelect.innerHTML = '';
-            return;
-        }}
-        const values = (DATA.metadata_filters && DATA.metadata_filters[key]) ? DATA.metadata_filters[key] : [];
-        valueWrap.style.display = 'block';
-        const opts = ['<option value="__ALL__">All</option>']
-            .concat(values.map(v => `<option value="${{v}}">${{v}}</option>`));
-        valueSelect.innerHTML = opts.join('');
-    }}
-
-    function renderDotplot() {{
-        const status = document.getElementById('dotplot-status');
-        const grid = document.getElementById('dotplot-grid');
-        const groupbySelect = document.getElementById('dotplot-groupby');
-        const genesInput = document.getElementById('dotplot-genes');
-        const aggSelect = document.getElementById('dotplot-aggregate-by');
-        const aggValueSelect = document.getElementById('dotplot-aggregate-value');
-        if (!status || !grid || !groupbySelect || !genesInput || !aggSelect) return;
-
-        const groupbyColor = groupbySelect.value;
-        if (!groupbyColor) {{
-            status.textContent = 'Pick a categorical color to group by.';
-            grid.innerHTML = '';
-            return;
-        }}
-        const meta = DATA.colors_meta?.[groupbyColor];
-        if (!meta || meta.is_continuous || !Array.isArray(meta.categories)) {{
-            status.textContent = 'Dotplot requires a categorical color column.';
-            grid.innerHTML = '';
-            return;
-        }}
-
-        const genes = parseGeneList(genesInput.value);
-        if (genes.length === 0) {{
-            status.textContent = 'Enter one or more genes (comma-separated).';
-            grid.innerHTML = '';
-            return;
-        }}
-
-        const aggKey = aggSelect.value || '';
-        const aggValue = (aggKey && aggValueSelect) ? (aggValueSelect.value || '__ALL__') : '__ALL__';
-        const aggLabel = aggKey ? `${{formatMetadataLabel(aggKey)}}=${{aggValue}}` : 'All sections';
-
-        dotplotRenderToken += 1;
-        const token = dotplotRenderToken;
-        status.textContent = `Computing dotplot (${{groupbyColor}}, genes=${{genes.length}}, ${{aggLabel}})…`;
-        grid.innerHTML = '';
-
-        setTimeout(() => {{
-            if (token !== dotplotRenderToken) return;
-
-            const categories = meta.categories;
-            const k = categories.length;
-
-            // Eligible sections + pre-count totals per category once.
-            const eligible = [];
-            const totals = new Uint32Array(k);
-            for (let s = 0; s < DATA.sections.length; s++) {{
-                if (token !== dotplotRenderToken) return;
-                const section = DATA.sections[s];
-                if (!sectionPassesFilter(section)) continue;
-                if (aggKey) {{
-                    const val = section.metadata?.[aggKey] || 'unknown';
-                    if (aggValue !== '__ALL__' && val !== aggValue) continue;
-                }}
-                const groupVals = getSectionColorValues(section, groupbyColor);
-                if (!groupVals || !groupVals.length) continue;
-                eligible.push({{ section, groupVals }});
-                for (let i = 0; i < groupVals.length; i++) {{
-                    const gv = groupVals[i];
-                    if (gv === null || gv === undefined || Number.isNaN(gv)) continue;
-                    const ci = Math.round(gv);
-                    if (ci >= 0 && ci < k) totals[ci] += 1;
-                }}
-            }}
-
-            if (eligible.length === 0) {{
-                status.textContent = 'No sections match the current filters.';
-                return;
-            }}
-
-            const sums = genes.map(() => new Float64Array(k));
-            const nnz = genes.map(() => new Uint32Array(k));
-            let usedDenseFallback = false;
-
-            for (let g = 0; g < genes.length; g++) {{
-                if (token !== dotplotRenderToken) return;
-                const gene = genes[g];
-                for (let e = 0; e < eligible.length; e++) {{
-                    const {{ section, groupVals }} = eligible[e];
-                    const sparse = section.genes_sparse?.[gene];
-                    if (sparse) {{
-                        if (typeof sparse.ib64 === 'string' && typeof sparse.vb64 === 'string') {{
-                            const idxs = base64ToUint32Array(sparse.ib64);
-                            const vals = base64ToFloat32Array(sparse.vb64);
-                            const m = Math.min(idxs.length, vals.length);
-                            for (let j = 0; j < m; j++) {{
-                                const idx = idxs[j];
-                                if (idx >= groupVals.length) continue;
-                                const gv = groupVals[idx];
-                                if (!Number.isFinite(gv)) continue;
-                                const ci = Math.round(gv);
-                                if (ci < 0 || ci >= k) continue;
-                                const v = vals[j];
-                                if (!Number.isFinite(v) || v === 0) continue;
-                                sums[g][ci] += v;
-                                nnz[g][ci] += 1;
-                            }}
-                            continue;
-                        }}
-                        if (Array.isArray(sparse.i) && Array.isArray(sparse.v)) {{
-                            const m = Math.min(sparse.i.length, sparse.v.length);
-                            for (let j = 0; j < m; j++) {{
-                                const idx = sparse.i[j];
-                                if (idx === null || idx === undefined) continue;
-                                if (idx < 0 || idx >= groupVals.length) continue;
-                                const gv = groupVals[idx];
-                                if (!Number.isFinite(gv)) continue;
-                                const ci = Math.round(gv);
-                                if (ci < 0 || ci >= k) continue;
-                                const v = sparse.v[j];
-                                if (!Number.isFinite(v) || v === 0) continue;
-                                sums[g][ci] += v;
-                                nnz[g][ci] += 1;
-                            }}
-                            continue;
-                        }}
-                    }}
-
-                    const dense = section.genes?.[gene];
-                    if (dense && dense.length) {{
-                        usedDenseFallback = true;
-                        const n = Math.min(dense.length, groupVals.length);
-                        for (let i = 0; i < n; i++) {{
-                            const v = dense[i];
-                            if (!Number.isFinite(v) || v === 0) continue;
-                            const gv = groupVals[i];
-                            if (!Number.isFinite(gv)) continue;
-                            const ci = Math.round(gv);
-                            if (ci < 0 || ci >= k) continue;
-                            sums[g][ci] += v;
-                            nnz[g][ci] += 1;
-                        }}
-                    }}
-                }}
-            }}
-
-            if (token !== dotplotRenderToken) return;
-            grid.style.setProperty('--dotplot-cols', String(genes.length));
-            const header = `
-                <div class="dotplot-row dotplot-header">
-                    <div class="dotplot-label">Cell type</div>
-                    ${{genes.map(g => `<div class="dotplot-gene" title="${{g}}">${{g}}</div>`).join('')}}
-                </div>
-            `;
-
-            const rows = categories.map((cat, ci) => {{
-                const total = totals[ci];
-                const cells = genes.map((gene, gi) => {{
-                    if (!total) return `<div class="dotplot-dot" title="No cells"></div>`;
-                    const mean = sums[gi][ci] / total;
-                    const frac = nnz[gi][ci] / total;
-                    const vmax = (DATA.genes_meta?.[gene]?.vmax ?? 0) || 0;
-                    const tRaw = vmax > 0 ? (mean / vmax) : 0;
-                    const t = Math.max(0, Math.min(1, tRaw));
-                    const color = magma(0.1 + 0.9 * t);
-                    const r = Math.max(0.5, Math.min(8, 8 * Math.sqrt(frac)));
-                    const title = `${{gene}} · mean=${{mean.toFixed(3)}} · %expr=${{(frac*100).toFixed(1)}} · n=${{total.toLocaleString()}}`;
-                    return `
-                        <div class="dotplot-dot" title="${{title}}">
-                            <svg width="20" height="20" viewBox="0 0 20 20">
-                                <circle cx="10" cy="10" r="${{r}}" fill="${{color}}" stroke="rgba(0,0,0,0.10)" stroke-width="1"></circle>
-                            </svg>
-                        </div>
-                    `;
-                }}).join('');
-                return `
-                    <div class="dotplot-row">
-                        <div class="dotplot-label" title="${{cat}}">${{cat}}</div>
-                        ${{cells}}
-                    </div>
-                `;
-            }}).join('');
-
-            grid.innerHTML = header + rows;
-            const denseNote = usedDenseFallback ? ' (some genes were dense; may be slower)' : '';
-            status.textContent = `Dotplot ready (${{eligible.length}} sections, ${{aggLabel}})${{denseNote}}.`;
-        }}, 0);
-    }}
-
     // Get values for a section
     function getSectionValues(section) {{
         if (currentGene) {{
@@ -2903,14 +7736,93 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return colVals || [];
     }}
 
+    function isMissingDisplayValue(value) {{
+        return value === null || value === undefined || Number.isNaN(value);
+    }}
+
+    function getCategoricalValueInfo(config, value) {{
+        if (!config || config.is_continuous || !Number.isFinite(value)) return null;
+        const categories = Array.isArray(config.categories) ? config.categories : [];
+        const catIdx = Math.round(value);
+        if (!Number.isInteger(catIdx) || catIdx < 0 || catIdx >= categories.length) return null;
+        const catName = categories[catIdx];
+        if (catName === null || catName === undefined) return null;
+        return {{ catIdx, catName }};
+    }}
+
     // Check if section passes filters
     function sectionPassesFilter(section) {{
+        if (hiddenSections.has(section.id)) return false;
         for (const [key, values] of Object.entries(activeFilters)) {{
             if (values.size === 0) continue;
             const sectionVal = section.metadata[key];
             if (!sectionVal || !values.has(sectionVal)) return false;
         }}
         return true;
+    }}
+
+    function getFilteredSections() {{
+        return (DATA.sections || []).filter((section) => sectionPassesFilter(section));
+    }}
+
+    function hideSection(sectionId) {{
+        hiddenSections.add(sectionId);
+        updateHiddenSectionsUI();
+        applyMetadataFilters();
+    }}
+
+    function showAllSections() {{
+        hiddenSections.clear();
+        updateHiddenSectionsUI();
+        applyMetadataFilters();
+    }}
+
+    function updateHiddenSectionsUI() {{
+        const btn = document.getElementById('show-hidden-sections-btn');
+        if (!btn) return;
+        if (hiddenSections.size > 0) {{
+            btn.style.display = '';
+            btn.textContent = `Show hidden (${{hiddenSections.size}})`;
+        }} else {{
+            btn.style.display = 'none';
+        }}
+    }}
+
+    function cellKeyPassesCurrentFilters(key) {{
+        if (!key) return false;
+        const sep = key.lastIndexOf(':');
+        if (sep <= 0) return false;
+        const sectionId = key.slice(0, sep);
+        const section = sectionById.get(sectionId);
+        return !!section && sectionPassesFilter(section);
+    }}
+
+    function trimSelectionSetToFilteredSections(cells) {{
+        if (!cells || cells.size === 0) return false;
+        let changed = false;
+        Array.from(cells).forEach((key) => {{
+            if (cellKeyPassesCurrentFilters(key)) return;
+            cells.delete(key);
+            changed = true;
+        }});
+        return changed;
+    }}
+
+    function trimSelectionsToFilteredSections() {{
+        const changedA = trimSelectionSetToFilteredSections(selectedCells);
+        const changedB = trimSelectionSetToFilteredSections(selectedCellsB);
+        if ((changedA || changedB) && selectedCells.size === 0 && selectedCellsB.size === 0) {{
+            hideModalGeneDiscoveryPanel();
+        }}
+        return changedA || changedB;
+    }}
+
+    function applyMetadataFilters() {{
+        trimSelectionsToFilteredSections();
+        updateSelectionInfo();
+        renderAllSections();
+        if (umapVisible) renderUMAP();
+        if (modalSection) renderModalSection();
     }}
 
     // Get current panel background color from CSS variable
@@ -2921,6 +7833,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function getGraphColor() {{
         const color = getComputedStyle(document.documentElement).getPropertyValue('--graph-color').trim();
         return color || 'rgba(0, 0, 0, 0.12)';
+    }}
+
+    function getSelectionOutlineColor() {{
+        const color = getComputedStyle(document.documentElement).getPropertyValue('--selection-outline-color').trim();
+        return color || 'rgba(22, 22, 22, 0.42)';
     }}
 
     function getSectionAdjacency(section) {{
@@ -3005,6 +7922,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         let rings = hoverNeighbors.rings || [];
         const centerIdx = hoverNeighbors.centerIdx;
         if (centerIdx === null || centerIdx === undefined) return;
+        const activeIndexSet = getModalActiveCellIndexSet(section.id);
+        if (activeIndexSet && !activeIndexSet.has(centerIdx)) return;
 
         const config = getColorConfig();
         const values = getSectionValues(section);
@@ -3014,8 +7933,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             rings = rings[hopIdx] ? [rings[hopIdx]] : [];
         }}
 
-        const xCenter = transform.centerX + (section.x[centerIdx] - transform.dataCenterX) * transform.scale;
-        const yCenter = transform.centerY - (section.y[centerIdx] - transform.dataCenterY) * transform.scale;
+        const centerPoint = transform.dataToScreen(section.x[centerIdx], section.y[centerIdx]);
+        const xCenter = centerPoint.x;
+        const yCenter = centerPoint.y;
 
         ctx.save();
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
@@ -3029,17 +7949,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ctx.strokeStyle = color;
             ctx.lineWidth = Math.max(1, adjustedSpotSize * 0.25);
             ring.forEach(cellIdx => {{
+                if (activeIndexSet && !activeIndexSet.has(cellIdx)) return;
                 const val = values[cellIdx];
-                if (val === null || val === undefined) return;
+                if (isMissingDisplayValue(val)) return;
                 if (!config.is_continuous) {{
-                    const catIdx = Math.round(val);
-                    const catName = config.categories[catIdx];
-                    if (hiddenCategories.has(catName)) return;
+                    const catInfo = getCategoricalValueInfo(config, val);
+                    if (!catInfo || hiddenCategories.has(catInfo.catName)) return;
                 }}
-                const x = transform.centerX + (section.x[cellIdx] - transform.dataCenterX) * transform.scale;
-                const y = transform.centerY - (section.y[cellIdx] - transform.dataCenterY) * transform.scale;
-                if (x < -adjustedSpotSize || x > transform.width + adjustedSpotSize ||
-                    y < -adjustedSpotSize || y > transform.height + adjustedSpotSize) return;
+                const point = transform.dataToScreen(section.x[cellIdx], section.y[cellIdx]);
+                const x = point.x;
+                const y = point.y;
+                if (!transform.isPointVisible(x, y, adjustedSpotSize)) return;
                 ctx.beginPath();
                 ctx.arc(x, y, adjustedSpotSize + 1 + idx, 0, Math.PI * 2);
                 ctx.stroke();
@@ -3053,17 +7973,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ctx.globalAlpha = 0.8;
             ctx.beginPath();
             ring.forEach(cellIdx => {{
+                if (activeIndexSet && !activeIndexSet.has(cellIdx)) return;
                 const val = values[cellIdx];
-                if (val === null || val === undefined) return;
+                if (isMissingDisplayValue(val)) return;
                 if (!config.is_continuous) {{
-                    const catIdx = Math.round(val);
-                    const catName = config.categories[catIdx];
-                    if (hiddenCategories.has(catName)) return;
+                    const catInfo = getCategoricalValueInfo(config, val);
+                    if (!catInfo || hiddenCategories.has(catInfo.catName)) return;
                 }}
-                const x = transform.centerX + (section.x[cellIdx] - transform.dataCenterX) * transform.scale;
-                const y = transform.centerY - (section.y[cellIdx] - transform.dataCenterY) * transform.scale;
-                if (x < -adjustedSpotSize || x > transform.width + adjustedSpotSize ||
-                    y < -adjustedSpotSize || y > transform.height + adjustedSpotSize) return;
+                const point = transform.dataToScreen(section.x[cellIdx], section.y[cellIdx]);
+                const x = point.x;
+                const y = point.y;
+                if (!transform.isPointVisible(x, y, adjustedSpotSize)) return;
                 ctx.moveTo(xCenter, yCenter);
                 ctx.lineTo(x, y);
             }});
@@ -3107,15 +8027,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return fallbackCols.length ? fallbackCols[0] : null;
     }}
 
-    function computeSelectionSummary() {{
+    function computeSelectionSummary(cells = selectedCells) {{
         const summary = {{
-            total: selectedCells.size,
+            total: cells.size,
             sections: [],
             typeColumn: null,
             types: [],
             missingTypeValues: 0,
+            _cells: cells,
         }};
-        if (selectedCells.size === 0) return summary;
+        if (cells.size === 0) return summary;
 
         const sectionCounts = new Map();
         const typeColumn = getSelectionSummaryColorColumn();
@@ -3124,7 +8045,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const typeMeta = typeColumn ? DATA.colors_meta?.[typeColumn] : null;
         const typeCategories = Array.isArray(typeMeta?.categories) ? typeMeta.categories : null;
 
-        selectedCells.forEach((key) => {{
+        cells.forEach((key) => {{
             const sep = key.lastIndexOf(':');
             if (sep <= 0) return;
             const sectionId = key.slice(0, sep);
@@ -3156,9 +8077,1551 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return summary;
     }}
 
-    function renderSelectionSummaryHtml(summary) {{
+    function computeSelectionMeanExpression(summary) {{
+        // Prefer cluster-means lookup: covers all genes including sidecar ones.
+        const clusterMeansData = DATA.cluster_gene_means;
+        if (clusterMeansData && summary?.typeColumn) {{
+            const colData = clusterMeansData.columns?.[summary.typeColumn];
+            if (colData && summary.types.length) {{
+                const genes = clusterMeansData.genes;
+                const n = genes.length;
+                const selMeans = new Float64Array(n);
+                const totalSelected = summary.total - summary.missingTypeValues;
+                if (totalSelected > 0) {{
+                    for (const [cat, count] of summary.types) {{
+                        const catMeans = colData.means[cat];
+                        if (!catMeans) continue;
+                        const weight = count / totalSelected;
+                        for (let i = 0; i < n; i++) {{
+                            selMeans[i] += catMeans[i] * weight;
+                        }}
+                    }}
+                }}
+                const bgMeans = colData.background;
+                const result = genes.map((gene, i) => ({{
+                    gene,
+                    meanSel: selMeans[i],
+                    meanRest: bgMeans[i],
+                }}));
+                result.sort((a, b) => b.meanSel - a.meanSel);
+                return result;
+            }}
+        }}
+
+        // Fallback: compute directly from loaded gene vectors (exact, embedded genes only).
+        const loadedGenes = Object.keys(DATA.genes_meta || {{}});
+        if (!loadedGenes.length || !summary.total) return [];
+        // Rebuild cell set from summary sections for O(1) lookup
+        const cellSetKeys = summary._cells || selectedCells;
+        const result = [];
+        for (const gene of loadedGenes) {{
+            let selSum = 0, selCount = 0, restSum = 0, restCount = 0;
+            for (const section of (DATA.sections || [])) {{
+                const vals = getSectionGeneValues(section, gene);
+                if (!vals) continue;
+                for (let i = 0; i < vals.length; i++) {{
+                    const v = vals[i] ?? 0;
+                    if (cellSetKeys.has(`${{section.id}}:${{i}}`)) {{
+                        selSum += v; selCount++;
+                    }} else {{
+                        restSum += v; restCount++;
+                    }}
+                }}
+            }}
+            const meanSel = selCount > 0 ? selSum / selCount : 0;
+            const meanRest = restCount > 0 ? restSum / restCount : 0;
+            result.push({{ gene, meanSel, meanRest }});
+        }}
+        result.sort((a, b) => b.meanSel - a.meanSel);
+        return result;
+    }}
+
+    function getLoadedGenesForSection(section) {{
+        if (!section) return [];
+        return Array.from(new Set([
+            ...Object.keys(section.genes || {{}}),
+            ...Object.keys(section.genes_sparse || {{}}),
+        ])).sort((a, b) => a.localeCompare(b));
+    }}
+
+    function getModalSelectionTypeSummary(section, selectedCellIndices) {{
+        if (!section || !Array.isArray(selectedCellIndices) || !selectedCellIndices.length) return null;
+        const colorCol = getSelectionSummaryColorColumn();
+        const categories = getCategoriesForColorColumn(colorCol);
+        if (!colorCol || !categories.length) return null;
+        const values = getSectionColorValues(section, colorCol);
+        if (!values) return null;
+
+        const counts = new Map();
+        let validCount = 0;
+        selectedCellIndices.forEach((idx) => {{
+            if (!Number.isInteger(idx) || idx < 0 || idx >= values.length) return;
+            const raw = values[idx];
+            if (!Number.isFinite(raw)) return;
+            const catIdx = Math.round(raw);
+            const category = categories[catIdx];
+            if (category === undefined) return;
+            counts.set(category, (counts.get(category) || 0) + 1);
+            validCount += 1;
+        }});
+
+        if (!counts.size || validCount === 0) return null;
+        const entries = Array.from(counts.entries())
+            .map(([category, count]) => ({{
+                category: String(category),
+                count,
+                weight: count / validCount,
+            }}))
+            .sort((a, b) => b.count - a.count || a.category.localeCompare(b.category));
+        return {{ colorCol, entries }};
+    }}
+
+    function scoreModalSelectionMarkerGenes(section, selectedCellIndices) {{
+        const typeSummary = getModalSelectionTypeSummary(section, selectedCellIndices);
+        if (!typeSummary) return [];
+        const byColor = (DATA.marker_genes || {{}})[typeSummary.colorCol];
+        if (!byColor || typeof byColor !== 'object') return [];
+
+        const ranked = new Map();
+        typeSummary.entries.forEach((entry) => {{
+            const genes = getMarkerGenesForColorCategory(typeSummary.colorCol, entry.category);
+            genes.forEach((rawGene, rankIdx) => {{
+                const token = resolveCanonicalGeneName(rawGene) || (AVAILABLE_GENE_SET.has(String(rawGene || '').trim()) ? String(rawGene || '').trim() : null);
+                if (!token) return;
+                const key = token.toLowerCase();
+                const next = ranked.get(key) || {{
+                    gene: token,
+                    markerScore: 0,
+                    exprScore: null,
+                    meanIn: null,
+                    meanOut: null,
+                }};
+                next.markerScore += entry.weight / (rankIdx + 1);
+                ranked.set(key, next);
+            }});
+        }});
+
+        return Array.from(ranked.values()).sort((a, b) => {{
+            if (a.markerScore !== b.markerScore) return b.markerScore - a.markerScore;
+            return a.gene.localeCompare(b.gene);
+        }});
+    }}
+
+    function scoreLoadedGenesForModalSelection(section, selectedCellIndices) {{
+        if (!section || !Array.isArray(selectedCellIndices) || !selectedCellIndices.length) return [];
+        const loadedGenes = getLoadedGenesForSection(section);
+        if (!loadedGenes.length) return [];
+        const selectedSet = new Set(selectedCellIndices);
+        const scored = [];
+        const epsilon = 1e-6;
+
+        loadedGenes.forEach((gene) => {{
+            const values = getSectionGeneValues(section, gene);
+            if (!values || !values.length) return;
+            let sumIn = 0;
+            let sumOut = 0;
+            let countIn = 0;
+            let countOut = 0;
+            for (let i = 0; i < values.length; i++) {{
+                const value = values[i];
+                if (!Number.isFinite(value)) continue;
+                if (selectedSet.has(i)) {{
+                    sumIn += value;
+                    countIn += 1;
+                }} else {{
+                    sumOut += value;
+                    countOut += 1;
+                }}
+            }}
+            if (countIn === 0) return;
+            const meanIn = sumIn / countIn;
+            const meanOut = countOut > 0 ? (sumOut / countOut) : 0;
+            if (!(meanIn > 0)) return;
+            const exprScore = meanIn / (meanOut + epsilon);
+            scored.push({{
+                gene,
+                markerScore: 0,
+                exprScore,
+                meanIn,
+                meanOut,
+            }});
+        }});
+
+        return scored.sort((a, b) => {{
+            if (a.exprScore !== b.exprScore) return b.exprScore - a.exprScore;
+            if (a.meanIn !== b.meanIn) return b.meanIn - a.meanIn;
+            return a.gene.localeCompare(b.gene);
+        }});
+    }}
+
+    function mergeModalGeneDiscoveryEntries(markerEntries, expressionEntries, limit = 30) {{
+        const merged = new Map();
+        const addEntry = (entry) => {{
+            if (!entry || !entry.gene) return;
+            const key = String(entry.gene).toLowerCase();
+            const next = merged.get(key) || {{
+                gene: entry.gene,
+                markerScore: 0,
+                exprScore: null,
+                meanIn: null,
+                meanOut: null,
+            }};
+            next.markerScore = Math.max(next.markerScore || 0, Number(entry.markerScore || 0));
+            if (Number.isFinite(entry.exprScore)) next.exprScore = Number(entry.exprScore);
+            if (Number.isFinite(entry.meanIn)) next.meanIn = Number(entry.meanIn);
+            if (Number.isFinite(entry.meanOut)) next.meanOut = Number(entry.meanOut);
+            merged.set(key, next);
+        }};
+
+        (Array.isArray(markerEntries) ? markerEntries : []).forEach(addEntry);
+        (Array.isArray(expressionEntries) ? expressionEntries : []).forEach(addEntry);
+
+        const entries = Array.from(merged.values()).map((entry) => {{
+            const markerComponent = Number(entry.markerScore || 0) * 6;
+            const exprComponent = Number.isFinite(entry.exprScore)
+                ? Math.max(0, Math.log2(Math.max(entry.exprScore, 1e-6)))
+                : 0;
+            return {{
+                ...entry,
+                combinedScore: markerComponent + exprComponent,
+            }};
+        }}).sort((a, b) => {{
+            if (a.combinedScore !== b.combinedScore) return b.combinedScore - a.combinedScore;
+            const aExpr = Number.isFinite(a.exprScore) ? a.exprScore : -Infinity;
+            const bExpr = Number.isFinite(b.exprScore) ? b.exprScore : -Infinity;
+            if (aExpr !== bExpr) return bExpr - aExpr;
+            if (a.markerScore !== b.markerScore) return b.markerScore - a.markerScore;
+            return a.gene.localeCompare(b.gene);
+        }});
+
+        const maxScore = entries.length ? Math.max(entries[0].combinedScore, 1e-6) : 1;
+        return entries.slice(0, Math.max(1, Number(limit) || 30)).map((entry) => ({{
+            ...entry,
+            barPct: Math.max(10, Math.round((entry.combinedScore / maxScore) * 100)),
+        }}));
+    }}
+
+    function formatModalGeneDiscoveryEntryScore(entry) {{
+        const hasExpr = Number.isFinite(entry?.exprScore);
+        const hasMarker = Number(entry?.markerScore || 0) > 0;
+        if (hasExpr && hasMarker) return `${{entry.exprScore.toFixed(entry.exprScore >= 10 ? 1 : 2)}}× · marker`;
+        if (hasExpr) return `${{entry.exprScore.toFixed(entry.exprScore >= 10 ? 1 : 2)}}×`;
+        if (hasMarker) return 'marker';
+        return '';
+    }}
+
+    function renderModalGeneDiscoveryPanel() {{
+        const panel = document.getElementById('modal-gene-panel');
+        const countEl = document.getElementById('modal-gene-panel-count');
+        const body = document.getElementById('modal-gene-panel-body');
+        if (!panel || !countEl || !body) return;
+        if (!modalGenePanelState) {{
+            panel.classList.remove('visible');
+            panel.setAttribute('aria-hidden', 'true');
+            countEl.textContent = '0 cells';
+            body.innerHTML = '';
+            return;
+        }}
+
+        const count = Number(modalGenePanelState.cellCount || 0);
+        const entries = Array.isArray(modalGenePanelEntries) ? modalGenePanelEntries : [];
+        countEl.textContent = `${{count.toLocaleString()}} cells`;
+        if (!entries.length) {{
+            body.innerHTML = `<div class="modal-gene-panel-empty">${{escapeHtml(modalGenePanelState.message || 'Load a gene first to rank by expression')}}</div>`;
+        }} else {{
+            body.innerHTML = entries.map((entry) => {{
+                const scoreLabel = formatModalGeneDiscoveryEntryScore(entry);
+                const titleParts = [`Load ${{entry.gene}} into the viewer`];
+                if (Number.isFinite(entry.exprScore)) titleParts.push(`enrichment ${{entry.exprScore.toFixed(3)}}x`);
+                if (Number(entry.markerScore || 0) > 0) titleParts.push('marker-supported');
+                return `
+                    <div class="modal-gene-panel-entry">
+                        <button
+                            type="button"
+                            class="gene-token-btn${{entry.gene === currentGene ? ' active' : ''}}"
+                            data-gene-activate="${{escapeHtml(entry.gene)}}"
+                            title="${{escapeHtml(titleParts.join(' · '))}}"
+                        >
+                            <span class="modal-gene-panel-stack">
+                                <span class="modal-gene-panel-main">
+                                    <span class="modal-gene-panel-gene">${{escapeHtml(entry.gene)}}</span>
+                                    <span class="modal-gene-panel-score">${{escapeHtml(scoreLabel)}}</span>
+                                </span>
+                                <span class="modal-gene-panel-bar">
+                                    <span class="modal-gene-panel-bar-fill" style="width:${{Math.max(0, Math.min(100, entry.barPct || 0))}}%"></span>
+                                </span>
+                            </span>
+                        </button>
+                        ${{renderGeneGoogleSearchButton(entry.gene, {{
+                            title: 'Search Google for this selection gene',
+                        }})}}
+                    </div>
+                `;
+            }}).join('');
+            bindGeneActivateButtons(body, () => renderModalGeneDiscoveryPanel());
+            bindGeneGoogleSearchButtons(body);
+        }}
+        panel.classList.add('visible');
+        panel.setAttribute('aria-hidden', 'false');
+    }}
+
+    function hideModalGeneDiscoveryPanel() {{
+        modalGenePanelRequestToken += 1;
+        modalGenePanelEntries = [];
+        modalGenePanelState = null;
+        renderModalGeneDiscoveryPanel();
+    }}
+
+    function showModalGeneDiscoveryPanel(sectionId, selectedCellIndices) {{
+        const section = sectionById.get(sectionId);
+        const indices = Array.isArray(selectedCellIndices)
+            ? selectedCellIndices.filter((idx) => Number.isInteger(idx) && idx >= 0)
+            : [];
+        if (!section || !indices.length) {{
+            hideModalGeneDiscoveryPanel();
+            return;
+        }}
+
+        modalGenePanelRequestToken += 1;
+        const requestToken = modalGenePanelRequestToken;
+        const markerEntries = scoreModalSelectionMarkerGenes(section, indices);
+        const loadedGenes = getLoadedGenesForSection(section);
+        modalGenePanelState = {{
+            sectionId,
+            cellCount: indices.length,
+            message: markerEntries.length
+                ? ''
+                : (loadedGenes.length ? 'Ranking loaded genes…' : 'Load a gene first to rank by expression'),
+        }};
+        modalGenePanelEntries = mergeModalGeneDiscoveryEntries(markerEntries, [], 30);
+        renderModalGeneDiscoveryPanel();
+
+        if (!loadedGenes.length) return;
+        window.setTimeout(() => {{
+            if (requestToken !== modalGenePanelRequestToken) return;
+            const expressionEntries = scoreLoadedGenesForModalSelection(section, indices);
+            modalGenePanelEntries = mergeModalGeneDiscoveryEntries(markerEntries, expressionEntries, 30);
+            if (!modalGenePanelEntries.length && !markerEntries.length) {{
+                modalGenePanelState = {{
+                    ...modalGenePanelState,
+                    message: 'No enriched genes found among loaded genes.',
+                }};
+            }}
+            renderModalGeneDiscoveryPanel();
+        }}, 0);
+    }}
+
+    function getAnnotationCellSet(annotation) {{
+        const cells = new Set();
+        if (!annotation || !annotation.sectionId) return cells;
+        (annotation.localCellIndices || []).forEach((idx) => {{
+            if (Number.isInteger(idx) && idx >= 0) {{
+                cells.add(`${{annotation.sectionId}}:${{idx}}`);
+            }}
+        }});
+        return cells;
+    }}
+
+    function getAnnotationDisplayLabel(annotation) {{
+        if (!annotation) return 'Unknown annotation';
+        const label = String(annotation.label || `Annotation ${{annotation.id}}`).trim();
+        const sectionLabel = annotation.sectionId ? ` · ${{annotation.sectionId}}` : '';
+        return `${{label || `Annotation ${{annotation.id}}`}}${{sectionLabel}}`;
+    }}
+
+    function normalizeCellGroupSectionEntry(sectionId, indices = null) {{
+        const section = sectionById.get(sectionId);
+        if (!section) return null;
+        if (indices === null) {{
+            const count = Number(section.n_cells ?? section.x?.length ?? 0);
+            return count > 0 ? {{ sectionId, indices: null, indexSet: null, count }} : null;
+        }}
+        const filtered = (indices || []).filter((idx) => Number.isInteger(idx) && idx >= 0);
+        if (!filtered.length) return null;
+        // indexSet built lazily via ensureCellGroupIndexSet to avoid OOM on large groups
+        return {{
+            sectionId,
+            indices: filtered,
+            indexSet: null,
+            count: filtered.length,
+        }};
+    }}
+
+    function ensureCellGroupIndexSet(entry) {{
+        if (!entry) return null;
+        if (!entry.indexSet && entry.indices) {{
+            entry.indexSet = new Set(entry.indices);
+        }}
+        return entry.indexSet;
+    }}
+
+    function buildCellSetGroup(meta = {{}}, sectionEntries = []) {{
+        const sections = (sectionEntries || []).filter((entry) => !!entry);
+        const nCells = sections.reduce((sum, entry) => sum + Number(entry.count || 0), 0);
+        return {{
+            key: String(meta.key || ''),
+            label: String(meta.label || meta.description || 'Group'),
+            description: String(meta.description || meta.label || 'Group'),
+            sourceSpec: meta.sourceSpec || null,
+            sourceValue: meta.sourceValue ?? null,
+            restrictSpec: meta.restrictSpec || null,
+            restrictValue: meta.restrictValue ?? null,
+            scope: meta.scope === 'visible' ? 'visible' : 'all',
+            sections,
+            nCells,
+        }};
+    }}
+
+    function buildSingleSectionCellGroup(sectionId, indices, meta = {{}}) {{
+        const entry = normalizeCellGroupSectionEntry(sectionId, indices);
+        if (!entry) {{
+            return buildCellSetGroup(meta, []);
+        }}
+        return buildCellSetGroup(meta, [entry]);
+    }}
+
+    function matchGroupDESpec(section, cellIdx, spec, expectedValue, sectionValues = null) {{
+        if (!spec) return true;
+        const targetValue = String(expectedValue ?? '');
+        if (spec.kind === 'metadata') {{
+            return String(section?.metadata?.[spec.column] ?? '') === targetValue;
+        }}
+        const meta = DATA.colors_meta?.[spec.column];
+        if (!meta || meta.is_continuous || !Array.isArray(meta.categories)) return false;
+        const values = sectionValues || getSectionColorValues(section, spec.column);
+        if (!values || cellIdx < 0 || cellIdx >= values.length) return false;
+        return getCategoricalValueNameFromRaw(meta, values[cellIdx]) === targetValue;
+    }}
+
+    function buildGroupDELabel(spec, value, restrictSpec = null, restrictValue = null, scope = 'all') {{
+        const parts = [formatGroupDEValueLabel(spec, value)];
+        if (restrictSpec && restrictValue !== null && restrictValue !== undefined && restrictValue !== '') {{
+            parts.push(`within ${{formatGroupDEValueLabel(restrictSpec, restrictValue)}}`);
+        }}
+        if (scope === 'visible') {{
+            parts.push('current metadata filters');
+        }}
+        return parts.join(' • ');
+    }}
+
+    function buildGroupDEKey(spec, value, restrictSpec = null, restrictValue = null, scope = 'all') {{
+        const parts = [
+            encodeGroupDESourceSpec(spec),
+            String(value ?? ''),
+            encodeGroupDESourceSpec(restrictSpec),
+            String(restrictValue ?? ''),
+            scope === 'visible' ? 'visible' : 'all',
+        ];
+        if (scope === 'visible') {{
+            parts.push(getActiveFiltersSignature());
+        }}
+        return parts.join('::');
+    }}
+
+    function buildGroupDECellSet(spec, value, options = {{}}) {{
+        if (!spec || value === null || value === undefined || value === '') return null;
+        const restrictSpec = options.restrictSpec || null;
+        const hasRestriction = !!(restrictSpec && options.restrictValue !== null && options.restrictValue !== undefined && options.restrictValue !== '');
+        const restrictValue = hasRestriction ? String(options.restrictValue) : null;
+        const scope = options.scope === 'visible' ? 'visible' : 'all';
+        const sections = [];
+
+        (DATA.sections || []).forEach((section) => {{
+            if (scope === 'visible' && !sectionPassesFilter(section)) return;
+            if (spec.kind === 'metadata' && !matchGroupDESpec(section, -1, spec, value)) return;
+            if (hasRestriction && restrictSpec.kind === 'metadata' && !matchGroupDESpec(section, -1, restrictSpec, restrictValue)) return;
+
+            if (spec.kind === 'metadata' && (!hasRestriction || restrictSpec.kind === 'metadata')) {{
+                const entry = normalizeCellGroupSectionEntry(section.id, null);
+                if (entry) sections.push(entry);
+                return;
+            }}
+
+            const sourceValues = spec.kind === 'annotation' ? getSectionColorValues(section, spec.column) : null;
+            const sourceMeta = spec.kind === 'annotation' ? DATA.colors_meta?.[spec.column] : null;
+            const restrictValues = hasRestriction && restrictSpec.kind === 'annotation'
+                ? getSectionColorValues(section, restrictSpec.column)
+                : null;
+            const restrictMeta = hasRestriction && restrictSpec.kind === 'annotation'
+                ? DATA.colors_meta?.[restrictSpec.column]
+                : null;
+            const nCells = Number(section.n_cells ?? sourceValues?.length ?? restrictValues?.length ?? section.x?.length ?? 0);
+            if (!(nCells > 0)) return;
+            const matched = [];
+            for (let cellIdx = 0; cellIdx < nCells; cellIdx++) {{
+                let include = true;
+                if (spec.kind === 'annotation') {{
+                    include = getCategoricalValueNameFromRaw(sourceMeta, sourceValues?.[cellIdx]) === String(value);
+                }}
+                if (include && hasRestriction && restrictSpec.kind === 'annotation') {{
+                    include = getCategoricalValueNameFromRaw(restrictMeta, restrictValues?.[cellIdx]) === restrictValue;
+                }}
+                if (include) matched.push(cellIdx);
+            }}
+            const entry = normalizeCellGroupSectionEntry(section.id, matched);
+            if (entry) sections.push(entry);
+        }});
+
+        return buildCellSetGroup({{
+            key: buildGroupDEKey(spec, value, restrictSpec, restrictValue, scope),
+            label: buildGroupDELabel(spec, value, restrictSpec, restrictValue, scope),
+            description: buildGroupDELabel(spec, value, restrictSpec, restrictValue, scope),
+            sourceSpec: spec,
+            sourceValue: String(value),
+            restrictSpec: restrictSpec || null,
+            restrictValue,
+            scope,
+        }}, sections);
+    }}
+
+    function buildDEEntryFromStats(gene, statsA, statsB, nA, nB) {{
+        if (!gene || !statsA || !statsB || !(nA > 0) || !(nB > 0)) return null;
+        const meanA = statsA.sum / nA;
+        const meanB = statsB.sum / nB;
+        const varA = nA > 1 ? Math.max(0, (statsA.sumSq - (statsA.sum * statsA.sum) / nA) / (nA - 1)) : 0;
+        const varB = nB > 1 ? Math.max(0, (statsB.sumSq - (statsB.sum * statsB.sum) / nB) / (nB - 1)) : 0;
+        const pctA = statsA.nnz / nA;
+        const pctB = statsB.nnz / nB;
+        const denominator = Math.sqrt((varA / Math.max(1, nA)) + (varB / Math.max(1, nB)) + 1e-12);
+        const score = denominator > 0 ? (meanA - meanB) / denominator : (meanA - meanB);
+        const log2fc = Math.log2((meanA + 1e-6) / (meanB + 1e-6));
+        if (!(log2fc > 0 || score > 0 || pctA > pctB)) return null;
+        return {{
+            gene,
+            meanA,
+            meanB,
+            pctA,
+            pctB,
+            log2fc,
+            score,
+        }};
+    }}
+
+    function sortCellSetDEResults(results) {{
+        results.sort((a, b) => {{
+            const scoreDiff = (b.score - a.score);
+            if (Math.abs(scoreDiff) > 1e-9) return scoreDiff;
+            const fcDiff = (b.log2fc - a.log2fc);
+            if (Math.abs(fcDiff) > 1e-9) return fcDiff;
+            const pctDiff = ((b.pctA - b.pctB) - (a.pctA - a.pctB));
+            if (Math.abs(pctDiff) > 1e-9) return pctDiff > 0 ? 1 : -1;
+            return a.gene.localeCompare(b.gene);
+        }});
+        return results;
+    }}
+
+    function computeQuickStatsForGroupGene(group, gene) {{
+        if (!group || !gene || !Array.isArray(group.sections) || !group.sections.length) return null;
+        const stats = {{ sum: 0, sumSq: 0, nnz: 0 }};
+        for (let s = 0; s < group.sections.length; s++) {{
+            const sectionGroup = group.sections[s];
+            const section = sectionById.get(sectionGroup.sectionId);
+            if (!section) continue;
+            const values = getSectionGeneValues(section, gene);
+            if (!values) return null;
+            if (sectionGroup.indices === null) {{
+                for (let i = 0; i < values.length; i++) {{
+                    const value = Number(values[i] ?? 0);
+                    if (!Number.isFinite(value)) continue;
+                    stats.sum += value;
+                    stats.sumSq += value * value;
+                    if (value > 0) stats.nnz += 1;
+                }}
+                continue;
+            }}
+            const indices = sectionGroup.indices || [];
+            for (let i = 0; i < indices.length; i++) {{
+                const idx = indices[i];
+                const value = Number(values[idx] ?? 0);
+                if (!Number.isFinite(value)) continue;
+                stats.sum += value;
+                stats.sumSq += value * value;
+                if (value > 0) stats.nnz += 1;
+            }}
+        }}
+        return stats;
+    }}
+
+    function computeCellSetDE(groupA, groupB, options = {{}}) {{
+        const topN = Math.max(1, Number(options.topN) || groupDeTopN || 12);
+        if (!groupA || !groupB) {{
+            return {{ available: false, reason: 'missing_groups', results: [] }};
+        }}
+        if (groupA.key && groupA.key === groupB.key) {{
+            return {{ available: false, reason: 'same_group', nA: groupA.nCells || 0, nB: groupB.nCells || 0, results: [] }};
+        }}
+        if (!(groupA.nCells > 0) || !(groupB.nCells > 0)) {{
+            return {{
+                available: false,
+                reason: 'empty_group',
+                nA: Number(groupA.nCells || 0),
+                nB: Number(groupB.nCells || 0),
+                results: [],
+            }};
+        }}
+
+        const loadedGenes = Object.keys(DATA.genes_meta || {{}}).sort((a, b) => a.localeCompare(b));
+        const totalGenes = Array.isArray(DATA.available_genes) ? DATA.available_genes.length : loadedGenes.length;
+        if (!loadedGenes.length) {{
+            return {{
+                available: false,
+                reason: 'no_loaded_genes',
+                nA: Number(groupA.nCells || 0),
+                nB: Number(groupB.nCells || 0),
+                loadedGeneCount: 0,
+                totalGeneCount: totalGenes,
+                results: [],
+            }};
+        }}
+
+        const results = [];
+        loadedGenes.forEach((gene) => {{
+            const statsA = computeQuickStatsForGroupGene(groupA, gene);
+            const statsB = computeQuickStatsForGroupGene(groupB, gene);
+            const entry = buildDEEntryFromStats(gene, statsA, statsB, groupA.nCells, groupB.nCells);
+            if (entry) results.push(entry);
+        }});
+
+        sortCellSetDEResults(results);
+        return {{
+            available: true,
+            reason: null,
+            nA: Number(groupA.nCells || 0),
+            nB: Number(groupB.nCells || 0),
+            loadedGeneCount: loadedGenes.length,
+            totalGeneCount: totalGenes,
+            results: results.slice(0, topN),
+        }};
+    }}
+
+    function cancelGroupDEFullRun() {{
+        groupDeFullRunToken += 1;
+        groupDeFullRun = null;
+    }}
+
+    function getGroupDECacheKey(groupA, groupB) {{
+        if (!groupA || !groupB) return '';
+        return `${{groupA.key}}::${{groupB.key}}`;
+    }}
+
+    function computeGroupStatsFromSidecarGeneEntry(geneEntry, group, geneMeta = null) {{
+        const combined = {{ sum: 0, sumSq: 0, nnz: 0 }};
+        if (!group || !Array.isArray(group.sections) || !group.sections.length) return combined;
+        group.sections.forEach((sectionGroup) => {{
+            const sectionEntry = geneEntry?.sections?.[sectionGroup.sectionId] || null;
+            const stats = computeRegionStatsFromSectionEntry(
+                sectionEntry,
+                sectionGroup.indices,
+                ensureCellGroupIndexSet(sectionGroup),
+                geneMeta
+            );
+            combined.sum += Number(stats.sum || 0);
+            combined.sumSq += Number(stats.sumSq || 0);
+            combined.nnz += Number(stats.nnz || 0);
+        }});
+        return combined;
+    }}
+
+    function computeCellSetDEFromSidecarGeneEntry(gene, geneEntry, groupA, groupB) {{
+        const geneMeta = geneAuxManifest?.genes_meta?.[gene] || DATA.genes_meta?.[gene] || null;
+        const statsA = computeGroupStatsFromSidecarGeneEntry(geneEntry, groupA, geneMeta);
+        const statsB = computeGroupStatsFromSidecarGeneEntry(geneEntry, groupB, geneMeta);
+        return buildDEEntryFromStats(gene, statsA, statsB, Number(groupA?.nCells || 0), Number(groupB?.nCells || 0));
+    }}
+
+    async function runFullCellSetDE(groupA, groupB, options = {{}}) {{
+        const manifest = await loadGeneAuxManifest();
+        if (!manifest) {{
+            throw new Error('Failed to load the gene sidecar manifest.');
+        }}
+
+        const shardEntries = Object.entries(manifest.shards || {{}});
+        const sidecarFormat = getGeneAuxSidecarFormat(manifest);
+        const totalGenes = shardEntries.reduce((sum, [, genes]) => sum + (Array.isArray(genes) ? genes.length : 0), 0);
+        const isCancelled = typeof options.isCancelled === 'function' ? options.isCancelled : () => false;
+        const onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
+        const results = [];
+        let completedGenes = 0;
+
+        for (let shardIdx = 0; shardIdx < shardEntries.length; shardIdx++) {{
+            if (isCancelled()) return null;
+            const [shardUrl, shardGenes] = shardEntries[shardIdx];
+            if (sidecarFormat === 'binary-v1') {{
+                const indexInfo = await loadBinaryShardIndex(shardUrl);
+                if (isCancelled()) return null;
+                await preloadBinaryShardBuffer(shardUrl, indexInfo);
+                if (isCancelled()) return null;
+                const genesInShard = Array.isArray(shardGenes) ? shardGenes : Object.keys(indexInfo?.entries || {{}});
+                for (let geneIdx = 0; geneIdx < genesInShard.length; geneIdx++) {{
+                    if (isCancelled()) return null;
+                    const gene = genesInShard[geneIdx];
+                    try {{
+                        const payloadBuffer = await readBinaryGenePayload(shardUrl, gene, indexInfo);
+                        if (!payloadBuffer) continue;
+                        const geneEntry = parseBinaryGenePayload(
+                            payloadBuffer,
+                            manifest.section_order || [],
+                            manifest?.genes_meta?.[gene] || null
+                        );
+                        const entry = computeCellSetDEFromSidecarGeneEntry(gene, geneEntry, groupA, groupB);
+                        if (entry) results.push(entry);
+                    }} catch (geneError) {{
+                        console.warn(`Group DE: skipping gene ${{gene}} due to error:`, geneError);
+                    }}
+                }}
+                completedGenes += genesInShard.length;
+            }} else {{
+                const shardPayload = await fetchGeneAuxShardForAnalysis(shardUrl);
+                if (isCancelled()) return null;
+                const genesPayload = shardPayload?.genes || {{}};
+                Object.entries(genesPayload).forEach(([gene, geneEntry]) => {{
+                    const entry = computeCellSetDEFromSidecarGeneEntry(gene, geneEntry, groupA, groupB);
+                    if (entry) results.push(entry);
+                }});
+                completedGenes += Array.isArray(shardGenes) ? shardGenes.length : Object.keys(genesPayload).length;
+            }}
+
+            if (onProgress) {{
+                onProgress({{
+                    completedShards: shardIdx + 1,
+                    totalShards: shardEntries.length,
+                    completedGenes: Math.min(totalGenes, completedGenes),
+                    totalGenes,
+                }});
+            }}
+            await new Promise((resolve) => window.setTimeout(resolve, 0));
+        }}
+
+        sortCellSetDEResults(results);
+        return {{
+            available: true,
+            nA: Number(groupA?.nCells || 0),
+            nB: Number(groupB?.nCells || 0),
+            loadedGeneCount: totalGenes,
+            totalGeneCount: totalGenes,
+            results,
+            completedAt: Date.now(),
+            mode: 'full-sidecar',
+        }};
+    }}
+
+    function syncAnnotationDEState(annotations = modalAnnotations) {{
+        const available = (annotations || []).filter((annotation) => Number.isFinite(Number(annotation?.id)));
+        const availableIds = available.map((annotation) => Number(annotation.id));
+        if (!availableIds.length) {{
+            annotationDeSourceId = null;
+            annotationDeReferenceId = null;
+            return {{ annotations: available, source: null, reference: null }};
+        }}
+
+        if (!availableIds.includes(annotationDeSourceId)) {{
+            annotationDeSourceId = availableIds[0];
+        }}
+        if (
+            !availableIds.includes(annotationDeReferenceId) ||
+            annotationDeReferenceId === annotationDeSourceId
+        ) {{
+            annotationDeReferenceId = availableIds.find((id) => id !== annotationDeSourceId) || null;
+        }}
+
+        const source = available.find((annotation) => Number(annotation.id) === annotationDeSourceId) || null;
+        const reference = available.find((annotation) => Number(annotation.id) === annotationDeReferenceId) || null;
+        return {{ annotations: available, source, reference }};
+    }}
+
+    function computeRegionAnnotationDE(annotationA, annotationB, options = {{}}) {{
+        const topN = Math.max(1, Number(options.topN) || ANNOTATION_DE_TOP_N);
+        if (!annotationA || !annotationB) {{
+            return {{ available: false, reason: 'missing_annotations', results: [] }};
+        }}
+        if (Number(annotationA.id) === Number(annotationB.id)) {{
+            return {{ available: false, reason: 'same_annotation', results: [] }};
+        }}
+
+        const sectionA = sectionById.get(annotationA.sectionId);
+        const sectionB = sectionById.get(annotationB.sectionId);
+        const indicesA = Array.from(new Set((annotationA.localCellIndices || []).filter((idx) => Number.isInteger(idx) && idx >= 0)));
+        const indicesB = Array.from(new Set((annotationB.localCellIndices || []).filter((idx) => Number.isInteger(idx) && idx >= 0)));
+        if (!sectionA || !sectionB || !indicesA.length || !indicesB.length) {{
+            return {{
+                available: false,
+                reason: 'empty_region',
+                nA: indicesA.length,
+                nB: indicesB.length,
+                results: [],
+            }};
+        }}
+
+        const loadedGenes = Object.keys(DATA.genes_meta || {{}}).sort((a, b) => a.localeCompare(b));
+        const totalGenes = Array.isArray(DATA.available_genes) ? DATA.available_genes.length : loadedGenes.length;
+        if (!loadedGenes.length) {{
+            return {{
+                available: false,
+                reason: 'no_loaded_genes',
+                nA: indicesA.length,
+                nB: indicesB.length,
+                loadedGeneCount: 0,
+                totalGeneCount: totalGenes,
+                results: [],
+            }};
+        }}
+
+        const sameSection = annotationA.sectionId === annotationB.sectionId;
+        const results = [];
+        const eps = 1e-6;
+
+        loadedGenes.forEach((gene) => {{
+            const valsA = getSectionGeneValues(sectionA, gene);
+            const valsB = sameSection ? valsA : getSectionGeneValues(sectionB, gene);
+            if (!valsA || !valsB) return;
+
+            let sumA = 0;
+            let sumSqA = 0;
+            let nnzA = 0;
+            for (let i = 0; i < indicesA.length; i++) {{
+                const idx = indicesA[i];
+                const value = Number(valsA[idx] ?? 0);
+                if (!Number.isFinite(value)) continue;
+                sumA += value;
+                sumSqA += value * value;
+                if (value > 0) nnzA += 1;
+            }}
+
+            let sumB = 0;
+            let sumSqB = 0;
+            let nnzB = 0;
+            for (let i = 0; i < indicesB.length; i++) {{
+                const idx = indicesB[i];
+                const value = Number(valsB[idx] ?? 0);
+                if (!Number.isFinite(value)) continue;
+                sumB += value;
+                sumSqB += value * value;
+                if (value > 0) nnzB += 1;
+            }}
+
+            const nA = indicesA.length;
+            const nB = indicesB.length;
+            if (!nA || !nB) return;
+
+            const meanA = sumA / nA;
+            const meanB = sumB / nB;
+            const varA = nA > 1 ? Math.max(0, (sumSqA - (sumA * sumA) / nA) / (nA - 1)) : 0;
+            const varB = nB > 1 ? Math.max(0, (sumSqB - (sumB * sumB) / nB) / (nB - 1)) : 0;
+            const pctA = nnzA / nA;
+            const pctB = nnzB / nB;
+            const denominator = Math.sqrt((varA / Math.max(1, nA)) + (varB / Math.max(1, nB)) + 1e-12);
+            const score = denominator > 0 ? (meanA - meanB) / denominator : (meanA - meanB);
+            const log2fc = Math.log2((meanA + eps) / (meanB + eps));
+            if (!(log2fc > 0 || score > 0 || pctA > pctB)) return;
+
+            results.push({{
+                gene,
+                meanA,
+                meanB,
+                pctA,
+                pctB,
+                log2fc,
+                score,
+            }});
+        }});
+
+        results.sort((a, b) => {{
+            const scoreDiff = (b.score - a.score);
+            if (Math.abs(scoreDiff) > 1e-9) return scoreDiff;
+            const fcDiff = (b.log2fc - a.log2fc);
+            if (Math.abs(fcDiff) > 1e-9) return fcDiff;
+            const pctDiff = ((b.pctA - b.pctB) - (a.pctA - a.pctB));
+            if (Math.abs(pctDiff) > 1e-9) return pctDiff > 0 ? 1 : -1;
+            return a.gene.localeCompare(b.gene);
+        }});
+
+        return {{
+            available: true,
+            reason: null,
+            nA: indicesA.length,
+            nB: indicesB.length,
+            loadedGeneCount: loadedGenes.length,
+            totalGeneCount: totalGenes,
+            results: results.slice(0, topN),
+        }};
+    }}
+
+    function getAnnotationDECacheKey(annotationA, annotationB) {{
+        if (!annotationA || !annotationB) return '';
+        return `${{Number(annotationA.id)}}::${{Number(annotationB.id)}}`;
+    }}
+
+    function invalidateAnnotationDEState(clearCache = true) {{
+        cancelAnnotationFullDERun();
+        if (clearCache) annotationDeFullCache.clear();
+    }}
+
+    function cancelAnnotationFullDERun() {{
+        annotationDeFullRunToken += 1;
+        annotationDeFullRun = null;
+    }}
+
+    function resolveViewerRelativeUrl(path) {{
+        if (!path) return '';
+        if (window.__karospacePackageMode) {{
+            return String(path);
+        }}
+        try {{
+            return new URL(String(path), window.location.href).href;
+        }} catch (_error) {{
+            return String(path);
+        }}
+    }}
+
+    async function fetchGeneAuxShardForAnalysis(shardUrl) {{
+        const resolvedUrl = resolveViewerRelativeUrl(shardUrl);
+        const response = await fetch(resolvedUrl, {{ credentials: 'same-origin' }});
+        if (!response.ok) {{
+            throw new Error(`HTTP ${{response.status}} while loading gene shard`);
+        }}
+        const payload = await response.json();
+        if (!payload || payload.format !== 'karospace-gene-sidecar-shard-v2') {{
+            throw new Error('Unsupported gene sidecar shard format');
+        }}
+        return payload;
+    }}
+
+    function computeRegionStatsFromSectionEntry(sectionEntry, selectedIndices, selectedIndexSet, geneMeta = null) {{
+        const result = {{ sum: 0, sumSq: 0, nnz: 0 }};
+        const useAllCells = selectedIndices === null;
+        if (!sectionEntry || (!useAllCells && !selectedIndices?.length)) return result;
+
+        if (typeof sectionEntry.db64 === 'string' || typeof sectionEntry.dq16b64 === 'string' || typeof sectionEntry.dq8b64 === 'string') {{
+            const dense = decodeDenseSidecarSection({{
+                ...sectionEntry,
+                qmin: geneMeta?.vmin,
+                qmax: geneMeta?.vmax,
+            }});
+            if (!dense) return result;
+            if (useAllCells) {{
+                for (let idx = 0; idx < dense.length; idx++) {{
+                    const value = Number(dense[idx]);
+                    if (!Number.isFinite(value)) continue;
+                    result.sum += value;
+                    result.sumSq += value * value;
+                    if (value > 0) result.nnz += 1;
+                }}
+            }} else {{
+                for (let i = 0; i < selectedIndices.length; i++) {{
+                    const idx = selectedIndices[i];
+                    const value = Number(dense[idx]);
+                    if (!Number.isFinite(value)) continue;
+                    result.sum += value;
+                    result.sumSq += value * value;
+                    if (value > 0) result.nnz += 1;
+                }}
+            }}
+            return result;
+        }}
+
+        if (Array.isArray(sectionEntry.dense) || ArrayBuffer.isView(sectionEntry.dense)) {{
+            if (useAllCells) {{
+                for (let idx = 0; idx < sectionEntry.dense.length; idx++) {{
+                    const value = Number(sectionEntry.dense[idx]);
+                    if (!Number.isFinite(value)) continue;
+                    result.sum += value;
+                    result.sumSq += value * value;
+                    if (value > 0) result.nnz += 1;
+                }}
+            }} else {{
+                for (let i = 0; i < selectedIndices.length; i++) {{
+                    const idx = selectedIndices[i];
+                    const value = Number(sectionEntry.dense[idx]);
+                    if (!Number.isFinite(value)) continue;
+                    result.sum += value;
+                    result.sumSq += value * value;
+                    if (value > 0) result.nnz += 1;
+                }}
+            }}
+            return result;
+        }}
+
+        const sparse = sectionEntry.sparse;
+        if (!sparse || (!useAllCells && (!selectedIndexSet || !selectedIndexSet.size))) return result;
+
+        let idxs = null;
+        let vals = null;
+        if (typeof sparse.ib64 === 'string' && typeof sparse.vq16b64 === 'string') {{
+            idxs = base64ToUint32Array(sparse.ib64);
+            vals = decodeQuantizedValues(
+                base64ToUint16Array(sparse.vq16b64),
+                geneMeta?.vmin,
+                geneMeta?.vmax,
+                65535
+            );
+        }} else if (typeof sparse.ib64 === 'string' && typeof sparse.vq8b64 === 'string') {{
+            idxs = base64ToUint32Array(sparse.ib64);
+            vals = decodeQuantizedValues(
+                base64ToUint8Array(sparse.vq8b64),
+                geneMeta?.vmin,
+                geneMeta?.vmax,
+                255
+            );
+        }} else if (typeof sparse.ib64 === 'string' && typeof sparse.vb64 === 'string') {{
+            idxs = base64ToUint32Array(sparse.ib64);
+            vals = base64ToFloat32Array(sparse.vb64);
+        }} else if (
+            (Array.isArray(sparse.i) || ArrayBuffer.isView(sparse.i)) &&
+            (Array.isArray(sparse.v) || ArrayBuffer.isView(sparse.v))
+        ) {{
+            idxs = sparse.i;
+            vals = sparse.v;
+        }}
+        if (!idxs || !vals) return result;
+
+        const m = Math.min(idxs.length, vals.length);
+        for (let i = 0; i < m; i++) {{
+            const idx = Number(idxs[i]);
+            if (!useAllCells && !selectedIndexSet.has(idx)) continue;
+            const value = Number(vals[i]);
+            if (!Number.isFinite(value) || value === 0) continue;
+            result.sum += value;
+            result.sumSq += value * value;
+            result.nnz += 1;
+        }}
+        return result;
+    }}
+
+    function computeRegionAnnotationDEFromSidecarGeneEntry(gene, geneEntry, regionA, regionB) {{
+        const sectionEntryA = geneEntry?.sections?.[regionA.sectionId] || null;
+        const sectionEntryB = geneEntry?.sections?.[regionB.sectionId] || null;
+        const geneMeta = geneAuxManifest?.genes_meta?.[gene] || DATA.genes_meta?.[gene] || null;
+
+        const statsA = computeRegionStatsFromSectionEntry(sectionEntryA, regionA.indices, regionA.indexSet, geneMeta);
+        const statsB = computeRegionStatsFromSectionEntry(sectionEntryB, regionB.indices, regionB.indexSet, geneMeta);
+        const nA = regionA.indices.length;
+        const nB = regionB.indices.length;
+        if (!nA || !nB) return null;
+
+        const meanA = statsA.sum / nA;
+        const meanB = statsB.sum / nB;
+        const varA = nA > 1 ? Math.max(0, (statsA.sumSq - (statsA.sum * statsA.sum) / nA) / (nA - 1)) : 0;
+        const varB = nB > 1 ? Math.max(0, (statsB.sumSq - (statsB.sum * statsB.sum) / nB) / (nB - 1)) : 0;
+        const pctA = statsA.nnz / nA;
+        const pctB = statsB.nnz / nB;
+        const denominator = Math.sqrt((varA / Math.max(1, nA)) + (varB / Math.max(1, nB)) + 1e-12);
+        const score = denominator > 0 ? (meanA - meanB) / denominator : (meanA - meanB);
+        const log2fc = Math.log2((meanA + 1e-6) / (meanB + 1e-6));
+        if (!(log2fc > 0 || score > 0 || pctA > pctB)) return null;
+
+        return {{
+            gene,
+            meanA,
+            meanB,
+            pctA,
+            pctB,
+            log2fc,
+            score,
+        }};
+    }}
+
+    async function runFullRegionAnnotationDE(annotationA, annotationB) {{
+        if (!annotationA || !annotationB || !DATA.gene_aux_url) return;
+        const manifest = await loadGeneAuxManifest();
+        if (!manifest) {{
+            annotationDeFullRun = {{
+                running: false,
+                key: getAnnotationDECacheKey(annotationA, annotationB),
+                error: 'Failed to load the gene sidecar manifest.',
+            }};
+            renderAnnotationComparison();
+            return;
+        }}
+
+        const key = getAnnotationDECacheKey(annotationA, annotationB);
+        const token = ++annotationDeFullRunToken;
+        const shardEntries = Object.entries(manifest.shards || {{}});
+        const sidecarFormat = getGeneAuxSidecarFormat(manifest);
+        const totalGenes = shardEntries.reduce((sum, [, genes]) => sum + (Array.isArray(genes) ? genes.length : 0), 0);
+        annotationDeFullRun = {{
+            token,
+            key,
+            running: true,
+            completedShards: 0,
+            totalShards: shardEntries.length,
+            completedGenes: 0,
+            totalGenes,
+            error: null,
+        }};
+        renderAnnotationComparison();
+
+        const regionA = {{
+            sectionId: annotationA.sectionId,
+            indices: Array.from(new Set((annotationA.localCellIndices || []).filter((idx) => Number.isInteger(idx) && idx >= 0))),
+        }};
+        const regionB = {{
+            sectionId: annotationB.sectionId,
+            indices: Array.from(new Set((annotationB.localCellIndices || []).filter((idx) => Number.isInteger(idx) && idx >= 0))),
+        }};
+        regionA.indexSet = new Set(regionA.indices);
+        regionB.indexSet = new Set(regionB.indices);
+
+        const results = [];
+        try {{
+            for (let shardIdx = 0; shardIdx < shardEntries.length; shardIdx++) {{
+                if (annotationDeFullRunToken !== token) return;
+                const [shardUrl, shardGenes] = shardEntries[shardIdx];
+                if (sidecarFormat === 'binary-v1') {{
+                    const indexInfo = await loadBinaryShardIndex(shardUrl);
+                    if (annotationDeFullRunToken !== token) return;
+                    await preloadBinaryShardBuffer(shardUrl, indexInfo);
+                    if (annotationDeFullRunToken !== token) return;
+                    const genesInShard = Array.isArray(shardGenes) ? shardGenes : Object.keys(indexInfo?.entries || {{}});
+                    for (let geneIdx = 0; geneIdx < genesInShard.length; geneIdx++) {{
+                        const gene = genesInShard[geneIdx];
+                        try {{
+                            const payloadBuffer = await readBinaryGenePayload(shardUrl, gene, indexInfo);
+                            if (!payloadBuffer) continue;
+                            const geneEntry = parseBinaryGenePayload(
+                                payloadBuffer,
+                                manifest.section_order || [],
+                                manifest?.genes_meta?.[gene] || null
+                            );
+                            const result = computeRegionAnnotationDEFromSidecarGeneEntry(gene, geneEntry, regionA, regionB);
+                            if (result) results.push(result);
+                        }} catch (geneError) {{
+                            console.warn(`Annotation DE: skipping gene ${{gene}} due to error:`, geneError);
+                        }}
+                    }}
+                }} else {{
+                    const shardPayload = await fetchGeneAuxShardForAnalysis(shardUrl);
+                    if (annotationDeFullRunToken !== token) return;
+
+                    const genesPayload = shardPayload?.genes || {{}};
+                    Object.entries(genesPayload).forEach(([gene, geneEntry]) => {{
+                        const result = computeRegionAnnotationDEFromSidecarGeneEntry(gene, geneEntry, regionA, regionB);
+                        if (result) results.push(result);
+                    }});
+                }}
+
+                if (annotationDeFullRunToken !== token) return;
+                annotationDeFullRun = {{
+                    ...annotationDeFullRun,
+                    token,
+                    key,
+                    running: true,
+                    completedShards: shardIdx + 1,
+                    totalShards: shardEntries.length,
+                    completedGenes: Math.min(totalGenes, (annotationDeFullRun?.completedGenes || 0) + (Array.isArray(shardGenes) ? shardGenes.length : 0)),
+                    totalGenes,
+                    error: null,
+                }};
+                renderAnnotationComparison();
+                await new Promise((resolve) => window.setTimeout(resolve, 0));
+            }}
+
+            if (annotationDeFullRunToken !== token) return;
+            results.sort((a, b) => {{
+                const scoreDiff = (b.score - a.score);
+                if (Math.abs(scoreDiff) > 1e-9) return scoreDiff;
+                const fcDiff = (b.log2fc - a.log2fc);
+                if (Math.abs(fcDiff) > 1e-9) return fcDiff;
+                const pctDiff = ((b.pctA - b.pctB) - (a.pctA - a.pctB));
+                if (Math.abs(pctDiff) > 1e-9) return pctDiff > 0 ? 1 : -1;
+                return a.gene.localeCompare(b.gene);
+            }});
+
+            annotationDeFullCache.set(key, {{
+                available: true,
+                sourceId: Number(annotationA.id),
+                referenceId: Number(annotationB.id),
+                nA: regionA.indices.length,
+                nB: regionB.indices.length,
+                loadedGeneCount: totalGenes,
+                totalGeneCount: totalGenes,
+                results,
+                completedAt: Date.now(),
+                mode: 'full-sidecar',
+            }});
+            annotationDeFullRun = null;
+            renderAnnotationComparison();
+        }} catch (error) {{
+            if (annotationDeFullRunToken !== token) return;
+            annotationDeFullRun = {{
+                token,
+                key,
+                running: false,
+                completedShards: annotationDeFullRun?.completedShards || 0,
+                totalShards: shardEntries.length,
+                completedGenes: annotationDeFullRun?.completedGenes || 0,
+                totalGenes,
+                error: error?.message || 'Unknown error',
+            }};
+            renderAnnotationComparison();
+        }}
+    }}
+
+    function getAnnotationDEExportState(annotationA, annotationB, quickResult = null) {{
+        if (!annotationA || !annotationB) return null;
+        const pairKey = getAnnotationDECacheKey(annotationA, annotationB);
+        const fullCached = pairKey ? annotationDeFullCache.get(pairKey) : null;
+        if (fullCached?.available) {{
+            return {{ mode: 'full-sidecar', result: fullCached }};
+        }}
+        if (quickResult?.available) {{
+            return {{ mode: 'quick-loaded-genes', result: quickResult }};
+        }}
+        return null;
+    }}
+
+    function buildAnnotationDEReport(annotationA, annotationB, exportState) {{
+        if (!annotationA || !annotationB || !exportState?.result) return null;
+        const result = exportState.result;
+        const topN = Math.max(1, Number(annotationDeTopN) || ANNOTATION_DE_TOP_N);
+        const exportedGenes = (result.results || []).slice(0, topN).map((entry, index) => ({{
+            rank: index + 1,
+            gene: entry.gene,
+            log2fc_a_vs_b: entry.log2fc,
+            score: entry.score,
+            pct_expr_a: entry.pctA,
+            pct_expr_b: entry.pctB,
+            mean_a: entry.meanA,
+            mean_b: entry.meanB,
+        }}));
+        return {{
+            format: 'karospace-region-de-report-v1',
+            exported_at: new Date().toISOString(),
+            result_mode: exportState.mode,
+            color_column: currentColor || null,
+            top_genes_requested: topN,
+            region_a: {{
+                id: Number(annotationA.id),
+                label: annotationA.label || `Annotation ${{annotationA.id}}`,
+                section_id: annotationA.sectionId || null,
+                n_cells: Number(result.nA || annotationA.localCellIndices?.length || 0),
+                color: annotationA.color || getAnnotationColorById(annotationA.id),
+                created_at: annotationA.createdAt || null,
+            }},
+            region_b: {{
+                id: Number(annotationB.id),
+                label: annotationB.label || `Annotation ${{annotationB.id}}`,
+                section_id: annotationB.sectionId || null,
+                n_cells: Number(result.nB || annotationB.localCellIndices?.length || 0),
+                color: annotationB.color || getAnnotationColorById(annotationB.id),
+                created_at: annotationB.createdAt || null,
+            }},
+            stats: {{
+                loaded_gene_count: Number(result.loadedGeneCount || 0),
+                total_gene_count: Number(result.totalGeneCount || result.loadedGeneCount || 0),
+                total_hits_available: Array.isArray(result.results) ? result.results.length : 0,
+                genes_exported: exportedGenes.length,
+            }},
+            genes: exportedGenes,
+        }};
+    }}
+
+    function exportAnnotationDEReport(annotationA, annotationB, exportState) {{
+        const report = buildAnnotationDEReport(annotationA, annotationB, exportState);
+        if (!report) {{
+            alert('No region DE result is available to export yet.');
+            return;
+        }}
+        const sourceLabel = sanitizeFilenamePart(annotationA.label || `annotation-${{annotationA.id}}`);
+        const referenceLabel = sanitizeFilenamePart(annotationB.label || `annotation-${{annotationB.id}}`);
+        const filename = `karospace-region-de-${{sourceLabel}}-vs-${{referenceLabel}}-${{getScreenshotTimestamp()}}.json`;
+        downloadJsonFile(report, filename);
+    }}
+
+    function escapeCsvCell(value) {{
+        if (value === null || value === undefined) return '';
+        const text = String(value);
+        if (/[",\\n\\r]/.test(text)) {{
+            return `"${{text.replace(/"/g, '""')}}"`;
+        }}
+        return text;
+    }}
+
+    function buildAnnotationDECsv(annotationA, annotationB, exportState) {{
+        const report = buildAnnotationDEReport(annotationA, annotationB, exportState);
+        if (!report) return '';
+        const rows = [];
+        rows.push([
+            'rank',
+            'gene',
+            'log2fc_a_vs_b',
+            'score',
+            'pct_expr_a',
+            'pct_expr_b',
+            'mean_a',
+            'mean_b',
+            'result_mode',
+            'color_column',
+            'region_a_id',
+            'region_a_label',
+            'region_a_section_id',
+            'region_a_n_cells',
+            'region_b_id',
+            'region_b_label',
+            'region_b_section_id',
+            'region_b_n_cells',
+            'loaded_gene_count',
+            'total_gene_count',
+            'exported_at',
+        ]);
+        (report.genes || []).forEach((entry) => {{
+            rows.push([
+                entry.rank,
+                entry.gene,
+                entry.log2fc_a_vs_b,
+                entry.score,
+                entry.pct_expr_a,
+                entry.pct_expr_b,
+                entry.mean_a,
+                entry.mean_b,
+                report.result_mode,
+                report.color_column,
+                report.region_a?.id,
+                report.region_a?.label,
+                report.region_a?.section_id,
+                report.region_a?.n_cells,
+                report.region_b?.id,
+                report.region_b?.label,
+                report.region_b?.section_id,
+                report.region_b?.n_cells,
+                report.stats?.loaded_gene_count,
+                report.stats?.total_gene_count,
+                report.exported_at,
+            ]);
+        }});
+        return rows
+            .map((row) => row.map((value) => escapeCsvCell(value)).join(','))
+            .join('\\n');
+    }}
+
+    function exportAnnotationDECsv(annotationA, annotationB, exportState) {{
+        const csvText = buildAnnotationDECsv(annotationA, annotationB, exportState);
+        if (!csvText) {{
+            alert('No region DE result is available to export yet.');
+            return;
+        }}
+        const sourceLabel = sanitizeFilenamePart(annotationA.label || `annotation-${{annotationA.id}}`);
+        const referenceLabel = sanitizeFilenamePart(annotationB.label || `annotation-${{annotationB.id}}`);
+        const filename = `karospace-region-de-${{sourceLabel}}-vs-${{referenceLabel}}-${{getScreenshotTimestamp()}}.csv`;
+        downloadTextFile(csvText, filename, 'text/csv;charset=utf-8');
+    }}
+
+    function formatSelectionQueryLiteral(value) {{
+        if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+        if (typeof value === 'boolean') return value ? 'true' : 'false';
+        const text = String(value ?? '');
+        if (/^[A-Za-z_][A-Za-z0-9_.:-]*$/.test(text)) return text;
+        return JSON.stringify(text);
+    }}
+
+    function getSelectionQueryPreviewText(maxLength = 72) {{
+        const text = String(selectionQueryText || '').trim();
+        if (!text) return '';
+        if (text.length <= maxLength) return text;
+        return `${{text.slice(0, Math.max(0, maxLength - 1))}}…`;
+    }}
+
+    function getSelectionQueryExamplePresets() {{
+        const examples = [];
+        const seen = new Set();
+        const addExample = (query) => {{
+            const text = String(query || '').trim();
+            if (!text || seen.has(text)) return;
+            seen.add(text);
+            examples.push(text);
+        }};
+
+        let categoryColumn = '';
+        let categoryValue = null;
+        for (const colorName of (DATA.available_colors || [])) {{
+            const meta = DATA.colors_meta?.[colorName];
+            if (!meta || meta.is_continuous || !Array.isArray(meta.categories) || !meta.categories.length) continue;
+            const firstCategory = meta.categories.find((value) => String(value ?? '').trim().length > 0);
+            if (firstCategory === undefined) continue;
+            categoryColumn = colorName;
+            categoryValue = firstCategory;
+            break;
+        }}
+
+        const firstGene = (DATA.available_genes || []).find((gene) => String(gene || '').trim().length > 0) || '';
+        let geneThreshold = 1;
+        if (firstGene) {{
+            const vmax = Number(DATA.genes_meta?.[firstGene]?.vmax);
+            if (Number.isFinite(vmax) && vmax > 0) {{
+                geneThreshold = Math.max(0.5, Math.round(vmax * 0.25 * 10) / 10);
+            }}
+        }}
+
+        let sectionKey = '';
+        let sectionValue = null;
+        for (const key of sectionMetadataKeyByLower.values()) {{
+            const match = (DATA.sections || [])
+                .map((section) => section?.metadata?.[key])
+                .find((value) => value !== undefined && value !== null && String(value).trim().length > 0);
+            if (match === undefined) continue;
+            sectionKey = key;
+            sectionValue = match;
+            break;
+        }}
+
+        if (categoryColumn && categoryValue !== null && firstGene) {{
+            addExample(
+                `${{categoryColumn}} == ${{formatSelectionQueryLiteral(categoryValue)}} and ` +
+                `${{firstGene}} > ${{formatSelectionQueryLiteral(geneThreshold)}}`
+            );
+        }}
+        if (categoryColumn && categoryValue !== null) {{
+            addExample(`${{categoryColumn}} == ${{formatSelectionQueryLiteral(categoryValue)}}`);
+        }}
+        if (firstGene) {{
+            addExample(`${{firstGene}} > ${{formatSelectionQueryLiteral(geneThreshold)}}`);
+        }}
+        if (sectionKey && sectionValue !== null) {{
+            addExample(
+                `section(${{formatSelectionQueryLiteral(sectionKey)}}) == ` +
+                `${{formatSelectionQueryLiteral(sectionValue)}}`
+            );
+        }}
+        if (!examples.length) {{
+            addExample('cell_type == astrocyte and Gfap > 2');
+        }}
+        return examples.slice(0, 3);
+    }}
+
+    function getSelectionQueryPlaceholder() {{
+        return getSelectionQueryExamplePresets()[0] || 'cell_type == astrocyte and Gfap > 2';
+    }}
+
+    function renderSelectionQueryPanelHtml() {{
+        const expanded = selectionQueryExpanded;
+        const examples = getSelectionQueryExamplePresets();
+        const preview = getSelectionQueryPreviewText();
+        const summaryHtml = expanded
+            ? 'Use a simple rule with annotations, genes, or section metadata.'
+            : selectionQueryStatus
+                ? escapeHtml(selectionQueryStatus)
+                : preview
+                    ? `Current query: <code>${{escapeHtml(preview)}}</code>`
+                    : 'Find cells by annotation, gene value, or section metadata.';
+        return `
+            <div class="selection-query">
+                <button class="selection-query-toggle" type="button" data-selection-query-toggle aria-expanded="${{expanded ? 'true' : 'false'}}">
+                    <span class="selection-summary-title">Find cells</span>
+                    <span class="selection-query-toggle-label">${{expanded ? 'Hide' : 'Show'}}</span>
+                </button>
+                <div class="selection-summary-meta selection-query-summary">${{summaryHtml}}</div>
+                ${{expanded ? `
+                    <div class="selection-query-body">
+                        ${{examples.length ? `
+                            <div class="selection-summary-meta selection-query-help">Click an example to fill the box, then edit it.</div>
+                            <div class="selection-query-examples">
+                                ${{examples.map((query) => `
+                                    <button
+                                        class="selection-query-example"
+                                        type="button"
+                                        data-selection-query-example="${{escapeHtml(query)}}"
+                                    ><code>${{escapeHtml(query)}}</code></button>
+                                `).join('')}}
+                            </div>
+                        ` : ''}}
+                        <textarea
+                            class="selection-query-input"
+                            data-selection-query-input
+                            rows="2"
+                            placeholder="${{escapeHtml(getSelectionQueryPlaceholder())}}"
+                        >${{escapeHtml(selectionQueryText)}}</textarea>
+                        <div class="selection-query-actions">
+                            <button class="selection-summary-compare-btn" type="button" data-selection-query-run${{selectionQueryRunning ? ' disabled' : ''}}>
+                                ${{selectionQueryRunning ? 'Running…' : 'Replace selection'}}
+                            </button>
+                            <button class="selection-summary-compare-btn" type="button" data-selection-query-add${{selectionQueryRunning ? ' disabled' : ''}}>
+                                ${{selectionQueryRunning ? 'Working…' : 'Add to selection'}}
+                            </button>
+                            <button class="selection-summary-compare-btn" type="button" data-selection-query-clear${{selectionQueryRunning ? ' disabled' : ''}}>
+                                Clear
+                            </button>
+                        </div>
+                        <div class="${{getSelectionQueryStatusClassName()}}" data-selection-query-status${{selectionQueryStatus ? '' : ' hidden'}}>
+                            ${{escapeHtml(selectionQueryStatus || '')}}
+                        </div>
+                        <div class="selection-summary-meta">
+                            Most columns and genes work as bare names. Use <code>obs(...)</code>, <code>gene(...)</code>,
+                            or <code>section(...)</code> only when needed. Press Ctrl/Cmd+Enter to run.
+                        </div>
+                    </div>
+                ` : ''}}
+            </div>
+        `;
+    }}
+
+    function renderSelectionComparisonHtml(summaryA) {{
+        const summaryB = computeSelectionSummary(selectedCellsB);
+        let html = `<div class="selection-summary-compare-header">
+            <span class="selection-summary-compare-label region-a">Region A (${{summaryA.total.toLocaleString()}} cells)</span>
+            <span class="selection-summary-compare-label region-b">Region B (${{summaryB.total.toLocaleString()}} cells)</span>
+        </div>`;
+
+        // Cell type breakdown side-by-side
+        if (summaryA.typeColumn && (summaryA.types.length || summaryB.types.length)) {{
+            html += `<div class="selection-summary-title">Cell types: A vs B</div>`;
+            const allTypes = new Set([
+                ...summaryA.types.map(([t]) => t),
+                ...summaryB.types.map(([t]) => t),
+            ]);
+            const mapA = new Map(summaryA.types);
+            const mapB = new Map(summaryB.types);
+            for (const label of allTypes) {{
+                const cA = mapA.get(label) || 0;
+                const cB = mapB.get(label) || 0;
+                const pA = summaryA.total > 0 ? Math.round(100 * cA / summaryA.total) : 0;
+                const pB = summaryB.total > 0 ? Math.round(100 * cB / summaryB.total) : 0;
+                const isActive = linkedSpotlightEnabled && spotlightPinnedCategory === label;
+                html += `<div class="selection-summary-compare-row${{isActive ? ' is-active' : ''}}" data-spotlight-cat="${{escapeHtml(label)}}" title="Click to spotlight ${{escapeHtml(label)}} in the viewer">
+                    <span class="selection-summary-compare-type">${{escapeHtml(label)}}</span>
+                    <span class="selection-summary-compare-a">${{cA.toLocaleString()}} (${{pA}}%)</span>
+                    <span class="selection-summary-compare-sep">|</span>
+                    <span class="selection-summary-compare-b">${{cB.toLocaleString()}} (${{pB}}%)</span>
+                </div>`;
+            }}
+        }}
+
+        // Gene expression A vs B
+        const exprA = computeSelectionMeanExpression(summaryA);
+        const exprB = computeSelectionMeanExpression(summaryB);
+        if (exprA.length && exprB.length) {{
+            const mapB = new Map(exprB.map(e => [e.gene, e.meanSel]));
+            const top = exprA.slice(0, 6);
+            const vmax = Math.max(top[0].meanSel || 1, ...top.map(e => mapB.get(e.gene) || 0));
+            html += '<div class="selection-summary-expr">';
+            html += '<div class="selection-summary-title">Gene expression: A (pink) vs B (blue)</div>';
+            top.forEach(({{gene, meanSel}}) => {{
+                const meanB = mapB.get(gene) || 0;
+                const pA = Math.round(100 * meanSel / vmax);
+                const pB = Math.round(100 * meanB / vmax);
+                const fc = meanB > 0 ? (meanSel / meanB).toFixed(1) + 'x' : '—';
+                html += `<div class="selection-summary-expr-row">
+                    <span class="selection-summary-expr-gene" data-gene-activate="${{escapeHtml(gene)}}" title="Load ${{escapeHtml(gene)}} into the viewer">${{escapeHtml(gene)}}</span>
+                    <div class="selection-summary-expr-bars">
+                        <div class="selection-summary-expr-bar sel" style="width:${{pA}}%"></div>
+                        <div class="selection-summary-expr-bar region-b" style="width:${{pB}}%"></div>
+                    </div>
+                    <span class="selection-summary-expr-fc">${{fc}}</span>
+                </div>`;
+            }});
+            html += '</div>';
+        }}
+
+        html += '<button class="selection-summary-compare-btn" type="button" id="lasso-clear-b-btn">Clear Region B</button>';
+        return html + renderSelectionQueryPanelHtml();
+    }}
+
+    function renderSelectionSummaryHtml(summary, options = {{}}) {{
         if (!summary || summary.total === 0) {{
-            return '<div class="selection-summary-meta">Draw a region with Magic Wand to inspect selected cells.</div>';
+            return '<div class="selection-summary-meta">Draw a region with Magic Wand to inspect selected cells.</div>' + renderSelectionQueryPanelHtml();
+        }}
+
+        // Comparison mode: two regions drawn
+        if (selectedCellsB.size > 0) {{
+            return renderSelectionComparisonHtml(summary);
         }}
 
         const topSections = summary.sections.slice(0, 3).map(([sid, count]) => `${{sid}} (${{count.toLocaleString()}})`);
@@ -3174,7 +9637,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const topTypes = selectionSummaryExpanded ? summary.types : summary.types.slice(0, visibleLimit);
             html += `<div class="selection-summary-title">Counts by ${{formatMetadataLabel(summary.typeColumn)}}</div>`;
             topTypes.forEach(([label, count]) => {{
-                html += `<div class="selection-summary-row"><span class="selection-summary-label">${{label}}</span><span class="selection-summary-count">${{count.toLocaleString()}}</span></div>`;
+                const isActive = linkedSpotlightEnabled && spotlightPinnedCategory === label;
+                html += `<div class="selection-summary-row${{isActive ? ' is-active' : ''}}" data-spotlight-cat="${{escapeHtml(label)}}" title="Click to spotlight ${{escapeHtml(label)}} in the viewer"><span class="selection-summary-label">${{label}}</span><span class="selection-summary-count">${{count.toLocaleString()}}</span></div>`;
             }});
             if (summary.types.length > visibleLimit) {{
                 if (!selectionSummaryExpanded) {{
@@ -3190,11 +9654,76 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             html += '<div class="selection-summary-meta">No categorical annotation is available for type counts.</div>';
         }}
 
-        return html;
+        const exprData = computeSelectionMeanExpression(summary);
+        if (exprData.length) {{
+            const top = exprData.slice(0, 6);
+            const vmax = top[0].meanSel || 1;
+            html += '<div class="selection-summary-expr">';
+            html += '<div class="selection-summary-title">Mean expression — selection (pink) vs rest (grey)</div>';
+            top.forEach(({{gene, meanSel, meanRest}}) => {{
+                const pctSel = Math.round(100 * meanSel / vmax);
+                const pctRest = Math.round(100 * meanRest / vmax);
+                const fc = meanRest > 0 ? (meanSel / meanRest).toFixed(1) + 'x' : '—';
+                html += `<div class="selection-summary-expr-row">
+                    <span class="selection-summary-expr-gene" data-gene-activate="${{escapeHtml(gene)}}" title="Load ${{escapeHtml(gene)}} into the viewer">${{escapeHtml(gene)}}</span>
+                    <div class="selection-summary-expr-bars">
+                        <div class="selection-summary-expr-bar sel" style="width:${{pctSel}}%"></div>
+                        <div class="selection-summary-expr-bar rest" style="width:${{pctRest}}%"></div>
+                    </div>
+                    <span class="selection-summary-expr-fc">${{fc}}</span>
+                </div>`;
+            }});
+            html += '</div>';
+        }}
+
+        const actionButtons = [];
+        const allowFocusSubview = !!options.allowFocusSubview && !modalSubview;
+        const canFocusSubview = allowFocusSubview && modalSection && !!buildModalSubviewStateFromSelection(modalSection);
+        if (canFocusSubview) {{
+            actionButtons.push('<button class="selection-summary-compare-btn" type="button" id="selection-focus-subview-btn">Open focused view</button>');
+        }}
+        if (options.allowGenePanel && modalSection && summary.total > 0) {{
+            actionButtons.push(
+                `<button class="selection-summary-compare-btn" type="button" id="selection-show-genes-btn">${{
+                    modalGenePanelState ? 'Hide genes' : 'Genes in selection'
+                }}</button>`
+            );
+        }}
+
+        // Compare region button (only when no B yet and lasso mode is available)
+        if (!lassoModeB && !modalSubview) {{
+            actionButtons.push('<button class="selection-summary-compare-btn" type="button" id="lasso-compare-region-btn">Compare region</button>');
+        }} else if (lassoModeB) {{
+            html += '<div class="selection-summary-meta">Draw Region B with Magic Wand…</div>';
+        }}
+        if (modalSubview) {{
+            html += '<div class="selection-summary-meta">Focused view active. Use Back view to return to the full section.</div>';
+        }}
+        if (actionButtons.length) {{
+            html += `<div class="selection-summary-actions">${{actionButtons.join('')}}</div>`;
+        }}
+
+        return html + renderSelectionQueryPanelHtml();
     }}
 
     function bindSelectionSummaryInteractions(container) {{
         if (!container) return;
+        bindGeneActivateButtons(container, updateSelectionInfo);
+        container.querySelectorAll('[data-spotlight-cat]').forEach(row => {{
+            row.addEventListener('click', (e) => {{
+                e.preventDefault();
+                e.stopPropagation();
+                const cat = row.getAttribute('data-spotlight-cat');
+                if (!cat) return;
+                linkedSpotlightEnabled = true;
+                neighborNetworkFocusCategories = null;
+                spotlightPinnedCategory = spotlightPinnedCategory === cat ? null : cat;
+                spotlightHoverCategory = null;
+                updateAllLegendSpotlightClasses();
+                rerenderForSpotlightChange();
+                updateSelectionInfo();
+            }});
+        }});
         if (!container.dataset.scrollBound) {{
             // Prevent wheel/touch events from bubbling to canvas zoom handlers.
             container.addEventListener('wheel', (e) => {{
@@ -3213,6 +9742,118 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 updateSelectionInfo();
             }});
         }});
+        const queryToggle = container.querySelector('[data-selection-query-toggle]');
+        if (queryToggle) {{
+            queryToggle.addEventListener('click', (e) => {{
+                e.preventDefault();
+                e.stopPropagation();
+                selectionQueryExpanded = !selectionQueryExpanded;
+                updateSelectionInfo();
+            }});
+        }}
+        const compareBtn = container.querySelector('#lasso-compare-region-btn');
+        if (compareBtn) {{
+            compareBtn.addEventListener('click', (e) => {{
+                e.preventDefault();
+                e.stopPropagation();
+                lassoModeB = true;
+                updateSelectionInfo();
+            }});
+        }}
+        const focusSubviewBtn = container.querySelector('#selection-focus-subview-btn');
+        if (focusSubviewBtn) {{
+            focusSubviewBtn.addEventListener('click', (e) => {{
+                e.preventDefault();
+                e.stopPropagation();
+                activateModalSubviewFromSelection();
+            }});
+        }}
+        const showGenesBtn = container.querySelector('#selection-show-genes-btn');
+        if (showGenesBtn) {{
+            showGenesBtn.addEventListener('click', (e) => {{
+                e.preventDefault();
+                e.stopPropagation();
+                if (!modalSection) return;
+                if (modalGenePanelState) {{
+                    hideModalGeneDiscoveryPanel();
+                    updateSelectionInfo();
+                    return;
+                }}
+                const selectedIndices = getSelectionIndicesForSection(modalSection.id);
+                if (!selectedIndices || !selectedIndices.length) return;
+                showModalGeneDiscoveryPanel(modalSection.id, selectedIndices);
+                updateSelectionInfo();
+            }});
+        }}
+        const clearBBtn = container.querySelector('#lasso-clear-b-btn');
+        if (clearBBtn) {{
+            clearBBtn.addEventListener('click', (e) => {{
+                e.preventDefault();
+                e.stopPropagation();
+                selectedCellsB.clear();
+                lassoModeB = false;
+                updateSelectionInfo();
+            }});
+        }}
+        const queryInput = container.querySelector('[data-selection-query-input]');
+        if (queryInput) {{
+            queryInput.addEventListener('input', () => {{
+                selectionQueryText = queryInput.value;
+            }});
+            queryInput.addEventListener('keydown', (e) => {{
+                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {{
+                    e.preventDefault();
+                    e.stopPropagation();
+                    void runSelectionQuery('replace');
+                }}
+            }});
+        }}
+        const runQueryBtn = container.querySelector('[data-selection-query-run]');
+        if (runQueryBtn) {{
+            runQueryBtn.addEventListener('click', (e) => {{
+                e.preventDefault();
+                e.stopPropagation();
+                selectionQueryExpanded = true;
+                if (queryInput) selectionQueryText = queryInput.value;
+                void runSelectionQuery('replace');
+            }});
+        }}
+        const addQueryBtn = container.querySelector('[data-selection-query-add]');
+        if (addQueryBtn) {{
+            addQueryBtn.addEventListener('click', (e) => {{
+                e.preventDefault();
+                e.stopPropagation();
+                selectionQueryExpanded = true;
+                if (queryInput) selectionQueryText = queryInput.value;
+                void runSelectionQuery('add');
+            }});
+        }}
+        const clearQueryBtn = container.querySelector('[data-selection-query-clear]');
+        if (clearQueryBtn) {{
+            clearQueryBtn.addEventListener('click', (e) => {{
+                e.preventDefault();
+                e.stopPropagation();
+                selectionQueryText = '';
+                selectionQueryStatus = '';
+                selectionQueryStatusKind = 'muted';
+                syncSelectionQueryUi();
+            }});
+        }}
+        container.querySelectorAll('[data-selection-query-example]').forEach((btn) => {{
+            btn.addEventListener('click', (e) => {{
+                e.preventDefault();
+                e.stopPropagation();
+                selectionQueryExpanded = true;
+                selectionQueryText = btn.getAttribute('data-selection-query-example') || '';
+                syncSelectionQueryUi();
+                const input = container.querySelector('[data-selection-query-input]');
+                if (input) {{
+                    input.focus();
+                    input.setSelectionRange(selectionQueryText.length, selectionQueryText.length);
+                }}
+            }});
+        }});
+        syncSelectionQueryUi();
     }}
 
     // UMAP rendering
@@ -3249,7 +9890,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const config = getColorConfig();
         const adjustedSpotSize = Math.max(0.25, umapSpotSize * umapZoom * 0.5);
         const activeSpotlight = getLinkedSpotlightCategory(config);
-        const hasSpotlight = !!activeSpotlight;
+        const hasNeighborFocusUMAP = neighborNetworkFocusCategories && neighborNetworkFocusCategories.size > 0;
+        const hasSpotlight = !!activeSpotlight || hasNeighborFocusUMAP;
+        const filteredSections = getFilteredSections();
 
         // Check if any categories are hidden
         const hasHidden = hiddenCategories.size > 0 && !config.is_continuous;
@@ -3258,21 +9901,22 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (hasHidden) {{
             ctx.fillStyle = '#888888';
             ctx.globalAlpha = 0.2;
-            DATA.sections.forEach(section => {{
+            filteredSections.forEach(section => {{
                 ensureSectionUMAP(section);
                 if (!section.umap_x || !section.umap_y) return;
                 const values = getSectionValues(section);
 
                 for (let i = 0; i < section.umap_x.length; i++) {{
                     const val = values[i];
-                    if (val === null || val === undefined) continue;
+                    if (isMissingDisplayValue(val)) continue;
 
-                    const catIdx = Math.round(val);
-                    const catName = config.categories[catIdx];
-                    if (!hiddenCategories.has(catName)) continue; // Only draw hidden cells in first pass
+                    const catInfo = getCategoricalValueInfo(config, val);
+                    if (!catInfo || !hiddenCategories.has(catInfo.catName)) continue; // Only draw hidden cells in first pass
 
-                    const x = centerX + (section.umap_x[i] - dataCenterX) * scale;
-                    const y = centerY - (section.umap_y[i] - dataCenterY) * scale;
+                    const point = getSectionUMAPPoint(section, i);
+                    if (!point) continue;
+                    const x = centerX + (point.x - dataCenterX) * scale;
+                    const y = centerY - (point.y - dataCenterY) * scale;
 
                     if (x < -adjustedSpotSize || x > width + adjustedSpotSize ||
                         y < -adjustedSpotSize || y > height + adjustedSpotSize) continue;
@@ -3286,7 +9930,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
 
         // Second pass: draw visible categories with full color
-        DATA.sections.forEach(section => {{
+        filteredSections.forEach(section => {{
             ensureSectionUMAP(section);
             if (!section.umap_x || !section.umap_y) return;
 
@@ -3294,17 +9938,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
             for (let i = 0; i < section.umap_x.length; i++) {{
                 const val = values[i];
-                if (val === null || val === undefined) continue;
+                if (isMissingDisplayValue(val)) continue;
 
                 // Skip hidden categories (they were drawn in first pass)
+                let catInfo = null;
                 if (!config.is_continuous) {{
-                    const catIdx = Math.round(val);
-                    const catName = config.categories[catIdx];
-                    if (hiddenCategories.has(catName)) continue;
+                    catInfo = getCategoricalValueInfo(config, val);
+                    if (!catInfo || hiddenCategories.has(catInfo.catName)) continue;
                 }}
 
-                const x = centerX + (section.umap_x[i] - dataCenterX) * scale;
-                const y = centerY - (section.umap_y[i] - dataCenterY) * scale;
+                const point = getSectionUMAPPoint(section, i);
+                if (!point) continue;
+                const x = centerX + (point.x - dataCenterX) * scale;
+                const y = centerY - (point.y - dataCenterY) * scale;
 
                 // Skip if outside canvas
                 if (x < -adjustedSpotSize || x > width + adjustedSpotSize ||
@@ -3316,10 +9962,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     const t = (val - config.vmin) / (config.vmax - config.vmin);
                     color = magma(Math.max(0, Math.min(1, t)));
                 }} else {{
-                    const catIdx = Math.round(val);
-                    const catName = config.categories[catIdx];
-                    isSpotlightCategory = hasSpotlight && catName === activeSpotlight;
-                    color = getCategoryColor(catIdx);
+                    isSpotlightCategory = (hasSpotlight && catInfo.catName === activeSpotlight) ||
+                                          (hasNeighborFocusUMAP && neighborNetworkFocusCategories.has(catInfo.catName));
+                    color = getCategoryColor(catInfo.catIdx, config.colorCol);
                 }}
 
                 if (hasSpotlight && !isSpotlightCategory) {{
@@ -3335,8 +9980,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
                 // Draw selection highlight
                 if (isCellSelected(section.id, i)) {{
-                    ctx.strokeStyle = '#ffd700';
-                    ctx.lineWidth = 2;
+                    ctx.strokeStyle = getSelectionOutlineColor();
+                    ctx.lineWidth = Math.max(0.85, adjustedSpotSize * 0.18);
                     ctx.stroke();
                 }}
             }}
@@ -3382,12 +10027,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const dataCenterY = (bounds.ymin + bounds.ymax) / 2;
 
         const config = getColorConfig();
+        const filteredSections = getFilteredSections();
 
-        // Clear previous selection or add to it (could add shift-key support later)
-        selectedCells.clear();
+        // Collect cells inside the lasso
+        const newCells = new Set();
 
         // Check all cells in all sections
-        DATA.sections.forEach(section => {{
+        filteredSections.forEach(section => {{
             ensureSectionUMAP(section);
             if (!section.umap_x || !section.umap_y) return;
 
@@ -3395,23 +10041,33 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
             for (let i = 0; i < section.umap_x.length; i++) {{
                 const val = values[i];
-                if (val === null || val === undefined) continue;
+                if (isMissingDisplayValue(val)) continue;
 
                 // Skip hidden categories
                 if (!config.is_continuous) {{
-                    const catIdx = Math.round(val);
-                    const catName = config.categories[catIdx];
-                    if (hiddenCategories.has(catName)) continue;
+                    const catInfo = getCategoricalValueInfo(config, val);
+                    if (!catInfo || hiddenCategories.has(catInfo.catName)) continue;
                 }}
 
-                const x = centerX + (section.umap_x[i] - dataCenterX) * scale;
-                const y = centerY - (section.umap_y[i] - dataCenterY) * scale;
+                const point = getSectionUMAPPoint(section, i);
+                if (!point) continue;
+                const x = centerX + (point.x - dataCenterX) * scale;
+                const y = centerY - (point.y - dataCenterY) * scale;
 
                 if (pointInPolygon(x, y, lassoPath)) {{
-                    selectedCells.add(`${{section.id}}:${{i}}`);
+                    newCells.add(`${{section.id}}:${{i}}`);
                 }}
             }}
         }});
+
+        if (lassoModeB) {{
+            selectedCellsB = newCells;
+            lassoModeB = false;
+        }} else {{
+            selectedCells = newCells;
+            selectedCellsB.clear();
+            hideModalGeneDiscoveryPanel();
+        }}
 
         selectionSummaryExpanded = false;
         updateSelectionInfo();
@@ -3429,36 +10085,1073 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             .replace(/'/g, '&#39;');
     }}
 
+    function getViewerScopedStorageKey(name) {{
+        const scope = `${{window.location.origin || 'file://'}}${{window.location.pathname || ''}}`;
+        return `karospace:${{name}}:${{scope}}`;
+    }}
+
+    const GENE_RECENTS_STORAGE_KEY = getViewerScopedStorageKey('gene-recents');
+    const GENE_PANELS_STORAGE_KEY = getViewerScopedStorageKey('gene-panels');
+
+    function readViewerJsonStorage(key, fallback) {{
+        try {{
+            const raw = VIEWER_STORAGE.getItem(key);
+            if (!raw) return fallback;
+            return JSON.parse(raw);
+        }} catch (error) {{
+            console.warn('Failed to read local storage key', key, error);
+            return fallback;
+        }}
+    }}
+
+    function writeViewerJsonStorage(key, value) {{
+        try {{
+            VIEWER_STORAGE.setItem(key, JSON.stringify(value));
+            return true;
+        }} catch (error) {{
+            console.warn('Failed to write local storage key', key, error);
+            return false;
+        }}
+    }}
+
+    function resolveCanonicalGeneName(token) {{
+        const text = String(token || '').trim();
+        if (!text) return '';
+        if (AVAILABLE_GENE_SET.has(text)) return text;
+        return GENE_NAME_BY_LOWER.get(text.toLowerCase()) || '';
+    }}
+
+    function resolveCanonicalColorName(token) {{
+        const text = String(token || '').trim();
+        if (!text) return '';
+        return colorNameByLower.get(text.toLowerCase()) || '';
+    }}
+
+    function resolveCanonicalSectionMetadataKey(token) {{
+        const text = String(token || '').trim();
+        if (!text) return '';
+        return sectionMetadataKeyByLower.get(text.toLowerCase()) || '';
+    }}
+
+    function tokenizeSelectionQuery(input) {{
+        const text = String(input || '');
+        const tokens = [];
+        let i = 0;
+
+        const readEscapedString = (quote) => {{
+            let value = '';
+            i += 1;
+            while (i < text.length) {{
+                const ch = text[i];
+                if (ch === '\\\\') {{
+                    const next = text[i + 1];
+                    if (next === undefined) break;
+                    if (next === 'n') value += '\\n';
+                    else if (next === 't') value += '\\t';
+                    else value += next;
+                    i += 2;
+                    continue;
+                }}
+                if (ch === quote) {{
+                    i += 1;
+                    return value;
+                }}
+                value += ch;
+                i += 1;
+            }}
+            throw new Error('Unterminated string literal.');
+        }};
+
+        while (i < text.length) {{
+            const ch = text[i];
+            if (/\\s/.test(ch)) {{
+                i += 1;
+                continue;
+            }}
+            if (ch === '"' || ch === "'") {{
+                const start = i;
+                const value = readEscapedString(ch);
+                tokens.push({{ type: 'string', value, pos: start }});
+                continue;
+            }}
+            const numberMatch = text.slice(i).match(/^(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?/);
+            if (numberMatch) {{
+                tokens.push({{
+                    type: 'number',
+                    value: Number(numberMatch[0]),
+                    raw: numberMatch[0],
+                    pos: i,
+                }});
+                i += numberMatch[0].length;
+                continue;
+            }}
+            const twoChar = text.slice(i, i + 2);
+            if (['==', '!=', '>=', '<='].includes(twoChar)) {{
+                tokens.push({{ type: 'operator', value: twoChar, pos: i }});
+                i += 2;
+                continue;
+            }}
+            if (['>', '<', '(', ')', '[', ']', ','].includes(ch)) {{
+                tokens.push({{
+                    type: ['(', ')', '[', ']', ','].includes(ch) ? 'punct' : 'operator',
+                    value: ch,
+                    pos: i,
+                }});
+                i += 1;
+                continue;
+            }}
+            if (/[A-Za-z_]/.test(ch)) {{
+                let j = i + 1;
+                while (j < text.length && /[A-Za-z0-9_.:-]/.test(text[j])) j += 1;
+                const raw = text.slice(i, j);
+                const lower = raw.toLowerCase();
+                if (['and', 'or', 'not', 'in', 'true', 'false'].includes(lower)) {{
+                    tokens.push({{ type: 'keyword', value: lower, raw, pos: i }});
+                }} else {{
+                    tokens.push({{ type: 'identifier', value: raw, pos: i }});
+                }}
+                i = j;
+                continue;
+            }}
+            throw new Error(`Unexpected token "${{ch}}" at position ${{i + 1}}.`);
+        }}
+        tokens.push({{ type: 'eof', value: '', pos: text.length }});
+        return tokens;
+    }}
+
+    function parseSelectionQuery(input) {{
+        const tokens = tokenizeSelectionQuery(input);
+        let idx = 0;
+
+        const peek = () => tokens[idx];
+        const consume = (type = null, value = null) => {{
+            const token = peek();
+            if (type && token.type !== type) {{
+                throw new Error(`Expected ${{type}} at position ${{token.pos + 1}}, found "${{token.value || token.type}}".`);
+            }}
+            if (value && token.value !== value) {{
+                throw new Error(`Expected "${{value}}" at position ${{token.pos + 1}}, found "${{token.value || token.type}}".`);
+            }}
+            idx += 1;
+            return token;
+        }};
+        const match = (type, value = null) => {{
+            const token = peek();
+            if (token.type !== type) return false;
+            if (value !== null && token.value !== value) return false;
+            idx += 1;
+            return true;
+        }};
+
+        const parsePrimary = () => {{
+            const token = peek();
+            if (token.type === 'number') {{
+                consume('number');
+                return {{ type: 'number', value: token.value }};
+            }}
+            if (token.type === 'string') {{
+                consume('string');
+                return {{ type: 'string', value: token.value }};
+            }}
+            if (token.type === 'keyword' && (token.value === 'true' || token.value === 'false')) {{
+                consume('keyword');
+                return {{ type: 'boolean', value: token.value === 'true' }};
+            }}
+            if (token.type === 'identifier') {{
+                consume('identifier');
+                if (match('punct', '(')) {{
+                    const args = [];
+                    if (!match('punct', ')')) {{
+                        do {{
+                            args.push(parseExpression());
+                        }} while (match('punct', ','));
+                        consume('punct', ')');
+                    }}
+                    return {{ type: 'call', name: token.value, args }};
+                }}
+                return {{ type: 'symbol', value: token.value }};
+            }}
+            if (match('punct', '(')) {{
+                const expr = parseExpression();
+                consume('punct', ')');
+                return expr;
+            }}
+            if (match('punct', '[')) {{
+                const items = [];
+                if (!match('punct', ']')) {{
+                    do {{
+                        items.push(parseExpression());
+                    }} while (match('punct', ','));
+                    consume('punct', ']');
+                }}
+                return {{ type: 'array', items }};
+            }}
+            throw new Error(`Unexpected token "${{token.value || token.type}}" at position ${{token.pos + 1}}.`);
+        }};
+
+        const parseComparison = () => {{
+            let node = parsePrimary();
+            const token = peek();
+            if (token.type === 'operator' && ['==', '!=', '>', '>=', '<', '<='].includes(token.value)) {{
+                consume('operator');
+                node = {{
+                    type: 'binary',
+                    op: token.value,
+                    left: node,
+                    right: parsePrimary(),
+                }};
+            }} else if (token.type === 'keyword' && token.value === 'in') {{
+                consume('keyword', 'in');
+                node = {{
+                    type: 'binary',
+                    op: 'in',
+                    left: node,
+                    right: parsePrimary(),
+                }};
+            }}
+            return node;
+        }};
+
+        const parseNot = () => {{
+            if (match('keyword', 'not')) {{
+                return {{ type: 'unary', op: 'not', expr: parseNot() }};
+            }}
+            return parseComparison();
+        }};
+
+        const parseAnd = () => {{
+            let node = parseNot();
+            while (match('keyword', 'and')) {{
+                node = {{ type: 'binary', op: 'and', left: node, right: parseNot() }};
+            }}
+            return node;
+        }};
+
+        const parseExpression = () => {{
+            let node = parseAnd();
+            while (match('keyword', 'or')) {{
+                node = {{ type: 'binary', op: 'or', left: node, right: parseAnd() }};
+            }}
+            return node;
+        }};
+
+        const ast = parseExpression();
+        consume('eof');
+        return ast;
+    }}
+
+    function getSelectionQueryFieldName(node, label) {{
+        if (!node) throw new Error(`${{label}} expects a field name.`);
+        if (node.type === 'string' || node.type === 'symbol') {{
+            const text = String(node.value || '').trim();
+            if (text) return text;
+        }}
+        throw new Error(`${{label}} expects a quoted name or simple identifier.`);
+    }}
+
+    function normalizeSelectionQueryCall(node) {{
+        const fnName = String(node?.name || '').trim().toLowerCase();
+        const args = Array.isArray(node?.args) ? node.args : [];
+        if (args.length !== 1) {{
+            throw new Error(`${{fnName || 'Query function'}} expects exactly one argument.`);
+        }}
+        const rawName = getSelectionQueryFieldName(args[0], `${{fnName}}()`);
+        if (fnName === 'obs' || fnName === 'col' || fnName === 'color') {{
+            const colorName = resolveCanonicalColorName(rawName);
+            if (!colorName) throw new Error(`Unknown obs column "${{rawName}}".`);
+            return {{ type: 'ref', kind: 'obs', name: colorName }};
+        }}
+        if (fnName === 'gene') {{
+            const geneName = resolveCanonicalGeneName(rawName);
+            if (!geneName) throw new Error(`Unknown gene "${{rawName}}".`);
+            return {{ type: 'ref', kind: 'gene', name: geneName }};
+        }}
+        if (fnName === 'section' || fnName === 'meta') {{
+            const key = resolveCanonicalSectionMetadataKey(rawName);
+            if (!key) throw new Error(`Unknown section metadata field "${{rawName}}".`);
+            return {{ type: 'ref', kind: 'section', name: key }};
+        }}
+        throw new Error(`Unknown query function "${{node.name}}". Use obs(...), gene(...), or section(...).`);
+    }}
+
+    function normalizeSelectionQuerySymbol(text) {{
+        const raw = String(text || '').trim();
+        if (!raw) return {{ type: 'string', value: '' }};
+        const colorName = resolveCanonicalColorName(raw);
+        if (colorName) return {{ type: 'ref', kind: 'obs', name: colorName }};
+        const metadataKey = resolveCanonicalSectionMetadataKey(raw);
+        if (metadataKey) return {{ type: 'ref', kind: 'section', name: metadataKey }};
+        const geneName = resolveCanonicalGeneName(raw);
+        if (geneName) return {{ type: 'ref', kind: 'gene', name: geneName }};
+        return {{ type: 'string', value: raw }};
+    }}
+
+    function normalizeSelectionQueryAst(node) {{
+        if (!node || typeof node !== 'object') return node;
+        if (node.type === 'call') return normalizeSelectionQueryCall(node);
+        if (node.type === 'symbol') return normalizeSelectionQuerySymbol(node.value);
+        if (node.type === 'array') {{
+            return {{
+                type: 'array',
+                items: (node.items || []).map((item) => normalizeSelectionQueryAst(item)),
+            }};
+        }}
+        if (node.type === 'unary') {{
+            return {{
+                type: 'unary',
+                op: node.op,
+                expr: normalizeSelectionQueryAst(node.expr),
+            }};
+        }}
+        if (node.type === 'binary') {{
+            return {{
+                type: 'binary',
+                op: node.op,
+                left: normalizeSelectionQueryAst(node.left),
+                right: normalizeSelectionQueryAst(node.right),
+            }};
+        }}
+        return node;
+    }}
+
+    function collectSelectionQueryRefs(node, refs = {{ genes: new Set() }}) {{
+        if (!node || typeof node !== 'object') return refs;
+        if (node.type === 'ref' && node.kind === 'gene' && node.name) {{
+            refs.genes.add(node.name);
+            return refs;
+        }}
+        if (node.type === 'array') {{
+            (node.items || []).forEach((item) => collectSelectionQueryRefs(item, refs));
+            return refs;
+        }}
+        if (node.type === 'unary') return collectSelectionQueryRefs(node.expr, refs);
+        if (node.type === 'binary') {{
+            collectSelectionQueryRefs(node.left, refs);
+            collectSelectionQueryRefs(node.right, refs);
+        }}
+        return refs;
+    }}
+
+    function getSelectionQueryRefValue(section, cellIdx, ref) {{
+        if (!section || !ref) return null;
+        if (ref.kind === 'section') {{
+            const value = section.metadata?.[ref.name];
+            return value === undefined ? null : value;
+        }}
+        if (ref.kind === 'obs') {{
+            const values = getSectionColorValues(section, ref.name);
+            if (!values || cellIdx < 0 || cellIdx >= values.length) return null;
+            const raw = values[cellIdx];
+            if (!Number.isFinite(raw)) return null;
+            const meta = DATA.colors_meta?.[ref.name];
+            if (meta && !meta.is_continuous && Array.isArray(meta.categories)) {{
+                const catIdx = Math.round(raw);
+                return meta.categories[catIdx] ?? null;
+            }}
+            return Number(raw);
+        }}
+        if (ref.kind === 'gene') {{
+            const values = getSectionGeneValues(section, ref.name);
+            if (!values || cellIdx < 0 || cellIdx >= values.length) return null;
+            const raw = Number(values[cellIdx]);
+            return Number.isFinite(raw) ? raw : 0;
+        }}
+        return null;
+    }}
+
+    function selectionQueryValuesEqual(left, right) {{
+        if (left === null || left === undefined || right === null || right === undefined) {{
+            return left === right;
+        }}
+        if (typeof left === 'boolean' || typeof right === 'boolean') {{
+            return Boolean(left) === Boolean(right);
+        }}
+        if (Number.isFinite(left) && Number.isFinite(right)) {{
+            return Math.abs(Number(left) - Number(right)) < 1e-9;
+        }}
+        return String(left).trim().toLowerCase() === String(right).trim().toLowerCase();
+    }}
+
+    function toSelectionQueryBoolean(value) {{
+        if (Array.isArray(value)) return value.length > 0;
+        if (value === null || value === undefined) return false;
+        if (typeof value === 'boolean') return value;
+        if (typeof value === 'number') return Number.isFinite(value) && value !== 0;
+        return String(value).trim().length > 0;
+    }}
+
+    function evaluateSelectionQueryNode(node, section, cellIdx) {{
+        if (!node) return null;
+        if (node.type === 'number' || node.type === 'string' || node.type === 'boolean') {{
+            return node.value;
+        }}
+        if (node.type === 'array') {{
+            return (node.items || []).map((item) => evaluateSelectionQueryNode(item, section, cellIdx));
+        }}
+        if (node.type === 'ref') {{
+            return getSelectionQueryRefValue(section, cellIdx, node);
+        }}
+        if (node.type === 'unary' && node.op === 'not') {{
+            return !toSelectionQueryBoolean(evaluateSelectionQueryNode(node.expr, section, cellIdx));
+        }}
+        if (node.type === 'binary') {{
+            if (node.op === 'and') {{
+                return toSelectionQueryBoolean(evaluateSelectionQueryNode(node.left, section, cellIdx))
+                    && toSelectionQueryBoolean(evaluateSelectionQueryNode(node.right, section, cellIdx));
+            }}
+            if (node.op === 'or') {{
+                return toSelectionQueryBoolean(evaluateSelectionQueryNode(node.left, section, cellIdx))
+                    || toSelectionQueryBoolean(evaluateSelectionQueryNode(node.right, section, cellIdx));
+            }}
+            const left = evaluateSelectionQueryNode(node.left, section, cellIdx);
+            const right = evaluateSelectionQueryNode(node.right, section, cellIdx);
+            if (node.op === '==') return selectionQueryValuesEqual(left, right);
+            if (node.op === '!=') return !selectionQueryValuesEqual(left, right);
+            if (node.op === 'in') {{
+                if (!Array.isArray(right)) {{
+                    throw new Error('Operator "in" expects a list on the right side, e.g. sample_id in ["S1", "S2"].');
+                }}
+                return right.some((item) => selectionQueryValuesEqual(left, item));
+            }}
+            if (left === null || left === undefined || right === null || right === undefined) return false;
+            const leftNum = Number(left);
+            const rightNum = Number(right);
+            if (!Number.isFinite(leftNum) || !Number.isFinite(rightNum)) {{
+                throw new Error(`Operator "${{node.op}}" requires numeric values.`);
+            }}
+            if (node.op === '>') return leftNum > rightNum;
+            if (node.op === '>=') return leftNum >= rightNum;
+            if (node.op === '<') return leftNum < rightNum;
+            if (node.op === '<=') return leftNum <= rightNum;
+        }}
+        throw new Error('Unsupported query expression.');
+    }}
+
+    function getSelectionQueryStatusClassName() {{
+        const kind = selectionQueryStatusKind || 'muted';
+        return `selection-query-status ${{kind}}`;
+    }}
+
+    function syncSelectionQueryUi() {{
+        document.querySelectorAll('[data-selection-query-input]').forEach((input) => {{
+            if (document.activeElement !== input) input.value = selectionQueryText;
+            input.disabled = selectionQueryRunning;
+        }});
+        document.querySelectorAll('[data-selection-query-run]').forEach((btn) => {{
+            btn.disabled = selectionQueryRunning;
+            btn.textContent = selectionQueryRunning ? 'Running…' : 'Replace selection';
+        }});
+        document.querySelectorAll('[data-selection-query-add]').forEach((btn) => {{
+            btn.disabled = selectionQueryRunning;
+            btn.textContent = selectionQueryRunning ? 'Working…' : 'Add to selection';
+        }});
+        document.querySelectorAll('[data-selection-query-clear]').forEach((btn) => {{
+            btn.disabled = selectionQueryRunning;
+        }});
+        document.querySelectorAll('[data-selection-query-status]').forEach((statusEl) => {{
+            statusEl.className = getSelectionQueryStatusClassName();
+            statusEl.textContent = selectionQueryStatus || '';
+            statusEl.hidden = !selectionQueryStatus;
+        }});
+    }}
+
+    async function runSelectionQuery(mode = 'replace') {{
+        const query = String(selectionQueryText || '').trim();
+        selectionQueryExpanded = true;
+        if (!query) {{
+            selectionQueryStatus = 'Type a query first.';
+            selectionQueryStatusKind = 'error';
+            syncSelectionQueryUi();
+            return false;
+        }}
+
+        const runToken = ++selectionQueryRunToken;
+        selectionQueryRunning = true;
+        selectionQueryStatus = 'Parsing query…';
+        selectionQueryStatusKind = 'working';
+        syncSelectionQueryUi();
+
+        try {{
+            const parsed = parseSelectionQuery(query);
+            const normalized = normalizeSelectionQueryAst(parsed);
+            const refs = collectSelectionQueryRefs(normalized);
+            const genes = Array.from(refs.genes);
+            for (let i = 0; i < genes.length; i++) {{
+                if (runToken !== selectionQueryRunToken) return false;
+                const gene = genes[i];
+                selectionQueryStatus = genes.length === 1
+                    ? `Loading gene ${{gene}}…`
+                    : `Loading gene ${{i + 1}}/${{genes.length}}: ${{gene}}…`;
+                syncSelectionQueryUi();
+                const ok = await ensureGeneAvailable(gene, {{ showErrors: false }});
+                if (!ok) throw new Error(`Failed to load gene "${{gene}}".`);
+            }}
+
+            const nextSelection = mode === 'add' ? new Set(selectedCells) : new Set();
+            const sections = DATA.sections || [];
+            let matchedCount = 0;
+            let addedCount = 0;
+            let matchedSections = 0;
+            const chunkSize = 20000;
+
+            for (let sIdx = 0; sIdx < sections.length; sIdx++) {{
+                if (runToken !== selectionQueryRunToken) return false;
+                const section = sections[sIdx];
+                const cellCount = Number(section?.n_cells || section?.x?.length || 0);
+                if (!(cellCount > 0)) continue;
+                selectionQueryStatus = `Scanning ${{section.id}} (${{sIdx + 1}}/${{sections.length}})…`;
+                syncSelectionQueryUi();
+                let sectionMatches = 0;
+
+                for (let start = 0; start < cellCount; start += chunkSize) {{
+                    const end = Math.min(cellCount, start + chunkSize);
+                    for (let i = start; i < end; i++) {{
+                        if (!toSelectionQueryBoolean(evaluateSelectionQueryNode(normalized, section, i))) continue;
+                        matchedCount += 1;
+                        sectionMatches += 1;
+                        const key = `${{section.id}}:${{i}}`;
+                        if (!nextSelection.has(key)) {{
+                            nextSelection.add(key);
+                            addedCount += 1;
+                            if (nextSelection.size > MAX_SELECTION_QUERY_MATCHES) {{
+                                throw new Error(
+                                    `Query would select more than ${{MAX_SELECTION_QUERY_MATCHES.toLocaleString()}} cells. Refine the query first.`
+                                );
+                            }}
+                        }}
+                    }}
+                    if (end < cellCount) {{
+                        await new Promise((resolve) => window.setTimeout(resolve, 0));
+                        if (runToken !== selectionQueryRunToken) return false;
+                    }}
+                }}
+                if (sectionMatches > 0) matchedSections += 1;
+                if (sIdx < sections.length - 1) {{
+                    await new Promise((resolve) => window.setTimeout(resolve, 0));
+                }}
+            }}
+
+            selectedCells = nextSelection;
+            selectedCellsB.clear();
+            lassoModeB = false;
+            selectionSummaryExpanded = false;
+            hideModalGeneDiscoveryPanel();
+
+            if (matchedCount === 0) {{
+                selectionQueryStatus = 'No cells matched the query.';
+                selectionQueryStatusKind = 'muted';
+            }} else if (mode === 'add') {{
+                selectionQueryStatus =
+                    `Added ${{addedCount.toLocaleString()}} cells from ${{matchedCount.toLocaleString()}} matches across ` +
+                    `${{matchedSections.toLocaleString()}} section${{matchedSections === 1 ? '' : 's'}}.`;
+                selectionQueryStatusKind = 'success';
+            }} else {{
+                selectionQueryStatus =
+                    `Selected ${{matchedCount.toLocaleString()}} cells across ` +
+                    `${{matchedSections.toLocaleString()}} section${{matchedSections === 1 ? '' : 's'}}.`;
+                selectionQueryStatusKind = 'success';
+            }}
+
+            updateSelectionInfo();
+            renderAllSections();
+            if (umapVisible) renderUMAP();
+            if (modalSection) renderModalSection();
+            return true;
+        }} catch (error) {{
+            if (runToken !== selectionQueryRunToken) return false;
+            selectionQueryStatus = error?.message || 'Query failed.';
+            selectionQueryStatusKind = 'error';
+            syncSelectionQueryUi();
+            return false;
+        }} finally {{
+            if (runToken === selectionQueryRunToken) {{
+                selectionQueryRunning = false;
+                syncSelectionQueryUi();
+            }}
+        }}
+    }}
+
+    function loadRecentGenes() {{
+        const stored = readViewerJsonStorage(GENE_RECENTS_STORAGE_KEY, []);
+        if (!Array.isArray(stored)) return [];
+        return stored
+            .map(resolveCanonicalGeneName)
+            .filter(Boolean)
+            .slice(0, GENE_DISCOVERY_RECENT_LIMIT);
+    }}
+
+    function persistRecentGenes() {{
+        writeViewerJsonStorage(GENE_RECENTS_STORAGE_KEY, recentGenes);
+    }}
+
+    function recordRecentGene(gene) {{
+        const token = resolveCanonicalGeneName(gene);
+        if (!token) return;
+        recentGenes = [token, ...recentGenes.filter(item => item !== token)].slice(0, GENE_DISCOVERY_RECENT_LIMIT);
+        persistRecentGenes();
+    }}
+
+    function loadSavedGenePanels() {{
+        const stored = readViewerJsonStorage(GENE_PANELS_STORAGE_KEY, []);
+        if (!Array.isArray(stored)) return [];
+        return stored
+            .map((entry) => {{
+                const name = String(entry?.name || '').trim();
+                const genes = Array.isArray(entry?.genes)
+                    ? entry.genes.map(resolveCanonicalGeneName).filter(Boolean)
+                    : [];
+                if (!name) return null;
+                return {{ name, genes: [...new Set(genes)] }};
+            }})
+            .filter(Boolean);
+    }}
+
+    function persistSavedGenePanels() {{
+        writeViewerJsonStorage(GENE_PANELS_STORAGE_KEY, savedGenePanels);
+    }}
+
+    function getGenePanelSeedToken() {{
+        const fromCurrent = resolveCanonicalGeneName(currentGene);
+        if (fromCurrent) return fromCurrent;
+        const geneInput = document.getElementById('gene-input');
+        return resolveCanonicalGeneName(geneInput?.value || '');
+    }}
+
+    function upsertSavedGenePanel(panelName, gene = '') {{
+        const normalizedName = String(panelName || '').trim();
+        if (!normalizedName) return false;
+        const geneToken = resolveCanonicalGeneName(gene);
+        const existingIndex = savedGenePanels.findIndex(
+            panel => panel.name.toLowerCase() === normalizedName.toLowerCase()
+        );
+        if (existingIndex >= 0) {{
+            if (geneToken && !savedGenePanels[existingIndex].genes.includes(geneToken)) {{
+                savedGenePanels[existingIndex].genes.push(geneToken);
+            }}
+            savedGenePanels[existingIndex].name = normalizedName;
+        }} else {{
+            savedGenePanels.push({{
+                name: normalizedName,
+                genes: geneToken ? [geneToken] : [],
+            }});
+        }}
+        persistSavedGenePanels();
+        return true;
+    }}
+
+    function deleteSavedGenePanel(panelName) {{
+        const normalizedName = String(panelName || '').trim().toLowerCase();
+        if (!normalizedName) return;
+        savedGenePanels = savedGenePanels.filter(panel => panel.name.toLowerCase() !== normalizedName);
+        persistSavedGenePanels();
+    }}
+
+    function fuzzyGeneMatchScore(candidate, query) {{
+        const haystack = String(candidate || '').toLowerCase();
+        const needle = String(query || '').toLowerCase();
+        if (!needle) return null;
+        if (haystack === needle) return {{ bucket: 0, score: 0 }};
+        if (haystack.startsWith(needle)) return {{ bucket: 1, score: haystack.length - needle.length }};
+        const substringIndex = haystack.indexOf(needle);
+        if (substringIndex >= 0) {{
+            return {{ bucket: 2, score: substringIndex * 100 + (haystack.length - needle.length) }};
+        }}
+
+        let cursor = 0;
+        let penalty = 0;
+        for (let i = 0; i < needle.length; i++) {{
+            const next = haystack.indexOf(needle[i], cursor);
+            if (next < 0) return null;
+            penalty += Math.max(0, next - cursor);
+            cursor = next + 1;
+        }}
+        return {{ bucket: 3, score: penalty + Math.max(0, haystack.length - needle.length) }};
+    }}
+
+    function getGeneSearchResults(query, limit = GENE_DISCOVERY_MAX_RESULTS) {{
+        const token = String(query || '').trim();
+        if (!token) return [];
+        return getActiveFeatureList()
+            .map((gene) => {{
+                const match = fuzzyGeneMatchScore(gene, token);
+                if (!match) return null;
+                return {{
+                    gene,
+                    bucket: match.bucket,
+                    score: match.score,
+                    loaded: !!DATA.genes_meta?.[gene],
+                }};
+            }})
+            .filter(Boolean)
+            .sort((a, b) => {{
+                if (a.bucket !== b.bucket) return a.bucket - b.bucket;
+                if (a.score !== b.score) return a.score - b.score;
+                if (a.loaded !== b.loaded) return a.loaded ? -1 : 1;
+                if (a.gene.length !== b.gene.length) return a.gene.length - b.gene.length;
+                return a.gene.localeCompare(b.gene);
+            }})
+            .slice(0, Math.max(1, Number(limit) || GENE_DISCOVERY_MAX_RESULTS))
+            .map(entry => entry.gene);
+    }}
+
+    function getAvailableMarkerGeneColors() {{
+        return Object.entries(DATA.marker_genes || {{}})
+            .filter(([, groups]) => groups && typeof groups === 'object' && Object.keys(groups).length > 0)
+            .map(([color]) => color)
+            .sort((a, b) => a.localeCompare(b));
+    }}
+
+    function getMarkerGenesForColorCategory(colorCol, category) {{
+        if (!colorCol || category === null || category === undefined || category === BLEND_ALL_CATEGORIES) return [];
+        const byColor = (DATA.marker_genes || {{}})[colorCol];
+        if (!byColor || typeof byColor !== 'object') return [];
+        if (Array.isArray(byColor[category])) return byColor[category];
+        const catKey = String(category);
+        if (Array.isArray(byColor[catKey])) return byColor[catKey];
+        const matchedKey = Object.keys(byColor).find(k => String(k).toLowerCase() === catKey.toLowerCase());
+        if (matchedKey && Array.isArray(byColor[matchedKey])) return byColor[matchedKey];
+        return [];
+    }}
+
+    function getAvailableComparisonColors() {{
+        const withDE = new Set(Object.keys(DATA.cluster_de || {{}}));
+        return getCategoricalColorColumns().sort((a, b) => {{
+            const aHas = withDE.has(a), bHas = withDE.has(b);
+            if (aHas !== bHas) return bHas - aHas;
+            return a.localeCompare(b);
+        }});
+    }}
+
+    function getClusterDECategories(colorCol) {{
+        if (!colorCol) return [];
+        const fromMeta = getCategoriesForColorColumn(colorCol).map(value => String(value));
+        const fromData = Object.keys((DATA.cluster_de || {{}})[colorCol] || {{}});
+        return Array.from(new Set([...fromMeta, ...fromData]));
+    }}
+
+    function normalizeGeneEntries(genes, limit = 0) {{
+        const seen = new Set();
+        const entries = [];
+        (Array.isArray(genes) ? genes : []).forEach((gene) => {{
+            const raw = String(gene || '').trim();
+            if (!raw) return;
+            const canonical = resolveCanonicalGeneName(raw);
+            const key = (canonical || raw).toLowerCase();
+            if (seen.has(key)) return;
+            seen.add(key);
+            entries.push({{ raw, canonical }});
+        }});
+        return limit > 0 ? entries.slice(0, limit) : entries;
+    }}
+
+    function getMarkerGeneEntries(colorCol, category, limit = 0) {{
+        return normalizeGeneEntries(getMarkerGenesForColorCategory(colorCol, category), limit);
+    }}
+
+    function getMarkerOverlapEntries(colorCol, sourceCategory, referenceCategory, limit = 0) {{
+        const sourceEntries = getMarkerGeneEntries(colorCol, sourceCategory, 0);
+        const sourceMap = new Map();
+        sourceEntries.forEach((entry) => {{
+            sourceMap.set((entry.canonical || entry.raw).toLowerCase(), entry);
+        }});
+        const overlap = [];
+        const seen = new Set();
+        getMarkerGeneEntries(colorCol, referenceCategory, 0).forEach((entry) => {{
+            const key = (entry.canonical || entry.raw).toLowerCase();
+            if (!sourceMap.has(key) || seen.has(key)) return;
+            seen.add(key);
+            overlap.push(sourceMap.get(key));
+        }});
+        return limit > 0 ? overlap.slice(0, limit) : overlap;
+    }}
+
+    function getCategoryCountsForColor(colorCol) {{
+        const key = String(colorCol || '').trim();
+        if (!key) return null;
+        if (comparisonCountsCache.has(key)) return comparisonCountsCache.get(key);
+
+        const categories = getCategoriesForColorColumn(key).map(value => String(value));
+        if (!categories.length) {{
+            comparisonCountsCache.set(key, null);
+            return null;
+        }}
+
+        const counts = Object.fromEntries(categories.map((category) => [category, 0]));
+        let total = 0;
+        DATA.sections.forEach((section) => {{
+            const values = getSectionColorValues(section, key);
+            if (!values) return;
+            for (let i = 0; i < values.length; i++) {{
+                const value = values[i];
+                if (value === null || value === undefined || Number.isNaN(value)) continue;
+                const idx = Math.round(value);
+                const category = categories[idx];
+                if (category === undefined) continue;
+                counts[category] = (counts[category] || 0) + 1;
+                total += 1;
+            }}
+        }});
+
+        const result = {{ categories, counts, total }};
+        comparisonCountsCache.set(key, result);
+        return result;
+    }}
+
+    function getCategoryColorForValue(colorCol, category) {{
+        const categories = getCategoriesForColorColumn(colorCol).map(value => String(value));
+        const idx = categories.indexOf(String(category));
+        return idx >= 0 ? getCategoryColor(idx, colorCol) : '#999';
+    }}
+
+    function getNeighborPairSummary(colorCol, sourceCategory, targetCategory) {{
+        const stats = (DATA.neighbor_stats || {{}})[colorCol];
+        if (!stats || !stats.counts || !stats.categories) return null;
+        const categories = (stats.categories || []).map(category => String(category));
+        const sourceIdx = categories.indexOf(String(sourceCategory));
+        const targetIdx = categories.indexOf(String(targetCategory));
+        if (sourceIdx < 0 || targetIdx < 0) return null;
+
+        const row = Array.isArray(stats.counts[sourceIdx]) ? stats.counts[sourceIdx] : [];
+        const total = row.reduce((sum, value) => sum + (Number.isFinite(value) ? value : 0), 0);
+        const count = Number(row[targetIdx] ?? 0);
+        const z = (stats.zscore && stats.zscore[sourceIdx] && Number.isFinite(stats.zscore[sourceIdx][targetIdx]))
+            ? Number(stats.zscore[sourceIdx][targetIdx])
+            : null;
+        return {{
+            sourceCategory: String(sourceCategory),
+            targetCategory: String(targetCategory),
+            count,
+            total,
+            pct: total > 0 ? (count / total) * 100 : 0,
+            z,
+            nCells: Number(stats.n_cells?.[sourceIdx] ?? NaN),
+            meanDegree: Number(stats.mean_degree?.[sourceIdx] ?? NaN),
+            permN: Number(stats.perm_n ?? 0),
+        }};
+    }}
+
+    function getInteractionPairSummary(colorCol, sourceCategory, targetCategory) {{
+        const colorData = (DATA.interaction_markers || {{}})[colorCol] || {{}};
+        const result = (colorData[String(sourceCategory)] || {{}})[String(targetCategory)];
+        if (!result) return null;
+        return {{
+            sourceCategory: String(sourceCategory),
+            targetCategory: String(targetCategory),
+            result,
+            genes: normalizeGeneEntries(result.genes || [], 4),
+        }};
+    }}
+
+    function getPairwiseClusterDEResult(colorCol, sourceCategory, referenceCategory) {{
+        return (((DATA.cluster_de || {{}})[colorCol] || {{}})[sourceCategory] || {{}})[referenceCategory] || null;
+    }}
+
+    function getGeneSuggestionGroups() {{
+        const config = getColorConfig();
+        if (!config || config.is_continuous) {{
+            return {{
+                title: 'Suggestions unavailable',
+                subtitle: 'Switch to a categorical color to use marker-based suggestions.',
+                groups: [],
+                hiddenCount: 0,
+            }};
+        }}
+
+        const markersByColor = (DATA.marker_genes || {{}})[currentColor];
+        if (!markersByColor || typeof markersByColor !== 'object') {{
+            const availableColors = getAvailableMarkerGeneColors();
+            const availableLabel = availableColors.length
+                ? ` Available for: ${{availableColors.join(', ')}}.`
+                : ' No marker genes are embedded in this viewer.';
+            return {{
+                title: `Suggested from ${{formatMetadataLabel(currentColor)}}`,
+                subtitle: `No marker genes are available for the active color.${{availableLabel}}`,
+                groups: [],
+                hiddenCount: 0,
+            }};
+        }}
+
+        const categoryOrder = (config.categories || Object.keys(markersByColor)).map(cat => String(cat));
+        const groups = categoryOrder
+            .map((category) => {{
+                const genes = getMarkerGenesForColorCategory(currentColor, category)
+                    .map(resolveCanonicalGeneName)
+                    .filter(Boolean)
+                    .slice(0, GENE_DISCOVERY_SUGGESTION_GENES_PER_GROUP);
+                if (!genes.length) return null;
+                return {{ category, genes }};
+            }})
+            .filter(Boolean);
+
+        return {{
+            title: `Suggested from ${{formatMetadataLabel(currentColor)}}`,
+            subtitle: groups.length ? '' : 'No marker genes are available for the active color.',
+            groups: groups.slice(0, GENE_DISCOVERY_SUGGESTION_GROUP_LIMIT),
+            hiddenCount: Math.max(0, groups.length - GENE_DISCOVERY_SUGGESTION_GROUP_LIMIT),
+        }};
+    }}
+
     function getModalViewTransform(rect) {{
         if (!modalSection || !rect) return null;
-        const bounds = modalSection.bounds;
-        const dataWidth = bounds.xmax - bounds.xmin;
-        const dataHeight = bounds.ymax - bounds.ymin;
-        const baseScale = Math.min((rect.width - 40) / dataWidth, (rect.height - 40) / dataHeight);
-        const scale = baseScale * modalZoom;
-        return {{
+        return createSectionViewTransform(modalSection, {{
             width: rect.width,
             height: rect.height,
-            scale,
-            centerX: rect.width / 2 + modalPanX,
-            centerY: rect.height / 2 + modalPanY,
-            dataCenterX: (bounds.xmin + bounds.xmax) / 2,
-            dataCenterY: (bounds.ymin + bounds.ymax) / 2,
+            padding: 20,
+            zoom: modalZoom,
+            panX: modalPanX,
+            panY: modalPanY,
+            isModal: true,
+            boundsOverride: getModalActiveBounds(),
+        }});
+    }}
+
+    function updateModalViewportInfo(transform = null) {{
+        const zoomInfo = document.getElementById('zoom-info');
+        if (zoomInfo) zoomInfo.textContent = `${{Math.round(modalZoom * 100)}}%`;
+        const rotationInfo = document.getElementById('modal-rotation-info');
+        if (rotationInfo) {{
+            const angleDeg = transform ? transform.angleDeg : (modalSection ? getSectionRotationDeg(modalSection) : 0);
+            rotationInfo.textContent = formatRotationLabel(angleDeg);
+        }}
+    }}
+
+    function clearModalInteractionCommitTimer() {{
+        if (modalInteractionCommitTimer !== null) {{
+            window.clearTimeout(modalInteractionCommitTimer);
+            modalInteractionCommitTimer = null;
+        }}
+    }}
+
+    function scheduleModalBlendRender() {{
+        if (!modalSection) return;
+        if (modalBlendRenderFrame !== null) return;
+        modalBlendRenderFrame = window.requestAnimationFrame(() => {{
+            modalBlendRenderFrame = null;
+            if (!renderModalBlendFromCache()) {{
+                renderModalSection();
+            }}
+        }});
+    }}
+
+    function updateModalBlendLabels() {{
+        if (modalBlendMixLabel) {{
+            const pctA = Math.round(modalBlendMix * 100);
+            const pctB = 100 - pctA;
+            modalBlendMixLabel.textContent = `A left ${{pctA}}% • B right ${{pctB}}%`;
+        }}
+        if (modalBlendMeta) {{
+            const summary = `${{getModalBlendVariableLabel(modalBlendSpec.a)}} \u2194 ${{getModalBlendVariableLabel(modalBlendSpec.b)}}`;
+            const aMarkers = getModalBlendMarkerHtml('a');
+            const bMarkers = getModalBlendMarkerHtml('b');
+            const markerBlocks = [aMarkers, bMarkers].filter(Boolean);
+            const hasMarkers = markerBlocks.length > 0;
+            const toggleLabel = modalBlendMarkersCollapsed ? 'Show marker genes' : 'Hide marker genes';
+            modalBlendMeta.innerHTML = [
+                `<div class="modal-blend-summary">${{escapeHtml(summary)}}</div>`,
+                hasMarkers
+                    ? `<button type="button" class="modal-blend-markers-toggle" id="modal-blend-markers-toggle" aria-expanded="${{modalBlendMarkersCollapsed ? 'false' : 'true'}}">${{toggleLabel}}</button>`
+                    : '',
+                hasMarkers
+                    ? `<div class="modal-blend-markers ${{modalBlendMarkersCollapsed ? 'collapsed' : ''}}">${{markerBlocks.join('')}}</div>`
+                    : '',
+            ].join('');
+            const markersToggle = document.getElementById('modal-blend-markers-toggle');
+            markersToggle?.addEventListener('click', () => {{
+                modalBlendMarkersCollapsed = !modalBlendMarkersCollapsed;
+                updateModalBlendLabels();
+            }});
+        }}
+    }}
+
+    function clearModalInteractionPreview() {{
+        const canvas = document.getElementById('modal-canvas');
+        if (!canvas) return;
+        canvas.style.transform = '';
+        canvas.style.transformOrigin = '0 0';
+    }}
+
+    function cacheModalRenderedView(rect, transform) {{
+        if (!modalSection || !rect || !transform) {{
+            modalRenderedView = null;
+            return;
+        }}
+        modalRenderedView = {{
+            sectionId: modalSection.id,
+            width: rect.width,
+            height: rect.height,
+            dpr: getRenderDpr(),
+            centerX: transform.centerX,
+            centerY: transform.centerY,
+            scale: transform.scale,
+            angleDeg: transform.angleDeg,
+            subviewToken: getModalSubviewRenderToken(),
         }};
+    }}
+
+    function invalidateModalRenderedView() {{
+        clearModalInteractionCommitTimer();
+        if (modalBlendRenderFrame !== null) {{
+            window.cancelAnimationFrame(modalBlendRenderFrame);
+            modalBlendRenderFrame = null;
+        }}
+        clearModalInteractionPreview();
+        modalRenderedView = null;
+        modalBlendRenderCache = null;
+        modalGeneDensityCache = null;
+    }}
+
+    function invalidateGeneDensityCaches() {{
+        modalGeneDensityCache = null;
+        (DATA.sections || []).forEach((section) => {{
+            if (section) section._geneDensityCache = null;
+        }});
+    }}
+
+    function applyModalInteractionPreview() {{
+        if (!modalSection || !modalRenderedView) return false;
+        const canvas = document.getElementById('modal-canvas');
+        const container = document.getElementById('modal-canvas-container');
+        if (!canvas || !container) return false;
+        const rect = container.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return false;
+
+        const rendered = modalRenderedView;
+        if (rendered.sectionId !== modalSection.id) return false;
+        if ((rendered.subviewToken || '') !== getModalSubviewRenderToken()) return false;
+        if (Math.abs(rendered.width - rect.width) > 0.5 || Math.abs(rendered.height - rect.height) > 0.5) return false;
+        if (Math.abs(rendered.dpr - getRenderDpr()) > 0.01) return false;
+
+        const transform = getModalViewTransform(rect);
+        if (!transform) return false;
+        if (Math.abs(rendered.angleDeg - transform.angleDeg) > ROTATION_EPSILON) return false;
+        if (!Number.isFinite(rendered.scale) || rendered.scale <= 0) return false;
+
+        const scaleRatio = transform.scale / rendered.scale;
+        if (!Number.isFinite(scaleRatio) || scaleRatio <= 0) return false;
+
+        const translateX = transform.centerX - scaleRatio * rendered.centerX;
+        const translateY = transform.centerY - scaleRatio * rendered.centerY;
+        canvas.style.transformOrigin = '0 0';
+        canvas.style.transform = `matrix(${{scaleRatio}}, 0, 0, ${{scaleRatio}}, ${{translateX}}, ${{translateY}})`;
+        updateModalViewportInfo(transform);
+        return true;
+    }}
+
+    function scheduleModalInteractionCommit(delayMs = 120) {{
+        clearModalInteractionCommitTimer();
+        if (!modalSection) return;
+        modalInteractionCommitTimer = window.setTimeout(() => {{
+            modalInteractionCommitTimer = null;
+            renderModalSection();
+        }}, Math.max(0, Number(delayMs) || 0));
     }}
 
     function screenPointToModalData(x, y, transform) {{
-        return {{
-            x: transform.dataCenterX + (x - transform.centerX) / transform.scale,
-            y: transform.dataCenterY - (y - transform.centerY) / transform.scale,
-        }};
+        return transform.screenToData(x, y);
     }}
 
     function modalDataPointToScreen(x, y, transform) {{
-        return {{
-            x: transform.centerX + (x - transform.dataCenterX) * transform.scale,
-            y: transform.centerY - (y - transform.dataCenterY) * transform.scale,
-        }};
+        return transform.dataToScreen(x, y);
     }}
 
     function getAnnotationColorById(id) {{
@@ -3480,9 +11173,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         ensureSectionXY(section);
         ensureSectionObsIndices(section);
 
+        const polygonBounds = getBoundsFromPoints(polygonData);
+        const candidateIndices = polygonBounds ? querySectionSpatialIndex(section, polygonBounds) : null;
         const localIndices = [];
         const globalIndices = [];
-        for (let i = 0; i < section.x.length; i++) {{
+        const nCandidates = candidateIndices ? candidateIndices.length : section.x.length;
+        for (let k = 0; k < nCandidates; k++) {{
+            const i = candidateIndices ? candidateIndices[k] : k;
             const x = section.x[i];
             const y = section.y[i];
             if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
@@ -3499,9 +11196,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function createModalAnnotationFromPath() {{
         if (!modalSection || modalAnnotationPath.length < 3) return false;
-        const canvas = document.getElementById('modal-canvas');
-        if (!canvas) return false;
-        const rect = canvas.getBoundingClientRect();
+        const container = document.getElementById('modal-canvas-container');
+        if (!container) return false;
+        const rect = container.getBoundingClientRect();
         const transform = getModalViewTransform(rect);
         if (!transform) return false;
 
@@ -3520,26 +11217,57 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }};
         modalAnnotations.push(annotation);
         renderModalAnnotationPanel();
+        updateAnnotationComparisonTabVisibility();
+        updateOverviewAnnotationsToggle();
+        if (showOverviewAnnotations) renderAllSections();
+        if (insightsTopLevelTab === 'compare' && insightsCompareTab === 'regions') renderAnnotationComparison();
         return true;
+    }}
+
+    function updateOverviewAnnotationsToggle() {{
+        const btn = document.getElementById('annotations-overview-toggle');
+        if (!btn) return;
+        const n = modalAnnotations.length;
+        btn.style.display = n > 0 ? '' : 'none';
+        btn.textContent = `Annotations (${{n}})`;
+        btn.classList.toggle('active', showOverviewAnnotations);
+        if (n === 0 && showOverviewAnnotations) {{
+            showOverviewAnnotations = false;
+        }}
     }}
 
     function removeModalAnnotation(annotationId) {{
         const target = Number(annotationId);
         if (!Number.isFinite(target)) return;
+        invalidateAnnotationDEState();
         modalAnnotations = modalAnnotations.filter(annotation => annotation.id !== target);
         renderModalAnnotationPanel();
+        updateAnnotationComparisonTabVisibility();
+        updateOverviewAnnotationsToggle();
+        if (showOverviewAnnotations) renderAllSections();
+        if (insightsTopLevelTab === 'compare' && insightsCompareTab === 'regions') renderAnnotationComparison();
         if (modalSection) renderModalSection();
     }}
 
     function clearModalAnnotationsForSection(sectionId) {{
+        invalidateAnnotationDEState();
         modalAnnotations = modalAnnotations.filter(annotation => annotation.sectionId !== sectionId);
         renderModalAnnotationPanel();
+        updateAnnotationComparisonTabVisibility();
+        updateOverviewAnnotationsToggle();
+        if (showOverviewAnnotations) renderAllSections();
+        if (insightsTopLevelTab === 'compare' && insightsCompareTab === 'regions') renderAnnotationComparison();
         if (modalSection) renderModalSection();
     }}
 
     function clearAllModalAnnotations() {{
+        invalidateAnnotationDEState();
         modalAnnotations = [];
         renderModalAnnotationPanel();
+        updateAnnotationComparisonTabVisibility();
+        updateOverviewAnnotationsToggle();
+        if (showOverviewAnnotations) renderAllSections();
+        if (insightsTopLevelTab === 'compare' && insightsCompareTab === 'regions') renderAnnotationComparison();
         if (modalSection) renderModalSection();
     }}
 
@@ -3553,6 +11281,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
         }});
         selectionSummaryExpanded = false;
+        hideModalGeneDiscoveryPanel();
         updateSelectionInfo();
         renderAllSections();
         if (umapVisible) renderUMAP();
@@ -3589,6 +11318,638 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             n_polygons: polygons.length,
             polygons,
         }};
+    }}
+
+    function buildSessionState() {{
+        const sectionRotations = {{}};
+        (DATA.sections || []).forEach((section) => {{
+            const deg = Number(section.rotation_deg) || 0;
+            if (deg !== 0) sectionRotations[section.id] = deg;
+        }});
+        return {{
+            format: 'karospace-session-v1',
+            created_at: new Date().toISOString(),
+            color_column: currentColor || null,
+            active_gene: currentGene || null,
+            hidden_categories: Array.from(hiddenCategories),
+            linked_spotlight_enabled: !!linkedSpotlightEnabled,
+            spotlight_pinned_category: spotlightPinnedCategory || null,
+            samples_view: samplesView || null,
+            samples_color_col: samplesColorCol || null,
+            samples_meta_sort_by: samplesMetaSortBy || null,
+            section_rotations: sectionRotations,
+            annotations: buildModalAnnotationExport(),
+        }};
+    }}
+
+    function downloadSessionState() {{
+        const state = buildSessionState();
+        const blob = new Blob([JSON.stringify(state, null, 2)], {{ type: 'application/json' }});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+        a.href = url;
+        a.download = `karospace-session-${{stamp}}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }}
+
+    function applyAnnotationsFromExport(payload) {{
+        if (!payload || !Array.isArray(payload.polygons)) return {{ restored: 0, skipped: 0 }};
+        let restored = 0, skipped = 0;
+        invalidateAnnotationDEState();
+        modalAnnotations = [];
+        let maxId = 0;
+        payload.polygons.forEach((poly) => {{
+            const sectionId = poly.section_id;
+            const section = sectionId != null ? sectionById.get(sectionId) : null;
+            if (!section) {{ skipped++; return; }}
+            const vertices = Array.isArray(poly.vertices)
+                ? poly.vertices
+                    .map(p => ({{ x: Number(p.x), y: Number(p.y) }}))
+                    .filter(p => Number.isFinite(p.x) && Number.isFinite(p.y))
+                : [];
+            if (vertices.length < 3) {{ skipped++; return; }}
+            const cells = computeCellsInsideDataPolygon(section, vertices);
+            const id = Number.isFinite(Number(poly.id)) ? Number(poly.id) : (maxId + 1);
+            if (id > maxId) maxId = id;
+            modalAnnotations.push({{
+                id,
+                sectionId,
+                label: poly.label || `Annotation ${{id}}`,
+                color: poly.color || getAnnotationColorById(id),
+                createdAt: poly.created_at || new Date().toISOString(),
+                vertices,
+                localCellIndices: cells.localIndices,
+                globalCellIndices: cells.globalIndices,
+            }});
+            restored++;
+        }});
+        modalNextAnnotationId = Math.max(modalNextAnnotationId, maxId + 1);
+        return {{ restored, skipped }};
+    }}
+
+    function applySessionState(state) {{
+        if (!state || typeof state !== 'object') {{
+            alert('Session file is empty or malformed.');
+            return false;
+        }}
+        if (state.format && state.format !== 'karospace-session-v1') {{
+            alert(`Unrecognised session format: ${{state.format}}`);
+            return false;
+        }}
+
+        let rotationsApplied = 0;
+        if (state.section_rotations && typeof state.section_rotations === 'object') {{
+            Object.entries(state.section_rotations).forEach(([sectionId, deg]) => {{
+                const section = sectionById.get(sectionId);
+                const value = Number(deg);
+                if (!section || !Number.isFinite(value)) return;
+                section.rotation_deg = normalizeRotationDeg(value);
+                updateSectionRotationIndicators(sectionId);
+                rotationsApplied++;
+            }});
+        }}
+
+        const annResult = state.annotations
+            ? applyAnnotationsFromExport(state.annotations)
+            : {{ restored: 0, skipped: 0 }};
+
+        if (Array.isArray(state.hidden_categories)) {{
+            hiddenCategories = new Set(state.hidden_categories.map(String));
+        }} else {{
+            hiddenCategories.clear();
+        }}
+
+        linkedSpotlightEnabled = !!state.linked_spotlight_enabled;
+        spotlightPinnedCategory = state.spotlight_pinned_category || null;
+        spotlightHoverCategory = null;
+
+        if (state.samples_view) samplesView = state.samples_view;
+        if (state.samples_color_col) samplesColorCol = state.samples_color_col;
+        if (typeof state.samples_meta_sort_by === 'string') samplesMetaSortBy = state.samples_meta_sort_by;
+
+        const targetColor = state.color_column;
+        const targetGene = state.active_gene;
+
+        const finalize = () => {{
+            renderModalAnnotationPanel();
+            updateAnnotationComparisonTabVisibility();
+            updateOverviewAnnotationsToggle();
+            renderLegend('legend');
+            renderLegend('modal-legend');
+            renderAllSections();
+            if (modalSection) renderModalSection();
+            if (typeof umapVisible !== 'undefined' && umapVisible) renderUMAP();
+            renderActiveInsightsPanel();
+            const summary = [];
+            if (rotationsApplied) summary.push(`${{rotationsApplied}} rotation${{rotationsApplied === 1 ? '' : 's'}}`);
+            if (annResult.restored) summary.push(`${{annResult.restored}} annotation${{annResult.restored === 1 ? '' : 's'}}`);
+            if (annResult.skipped) summary.push(`${{annResult.skipped}} skipped (missing section)`);
+            console.log('Session restored', summary.length ? '\u2014 ' + summary.join(', ') : '(no rotations / annotations)');
+        }};
+
+        if (targetGene) {{
+            activateViewerGene(targetGene).then(finalize).catch(finalize);
+        }} else if (targetColor && targetColor !== currentColor) {{
+            setViewerColorColumn(targetColor);
+            finalize();
+        }} else {{
+            finalize();
+        }}
+        return true;
+    }}
+
+    function loadSessionFromFile(file) {{
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {{
+            try {{
+                const obj = JSON.parse(String(reader.result || ''));
+                applySessionState(obj);
+            }} catch (e) {{
+                alert(`Could not parse session file: ${{e.message || e}}`);
+            }}
+        }};
+        reader.onerror = () => alert('Could not read the selected file.');
+        reader.readAsText(file);
+    }}
+
+    let exportCancelRequested = false;
+
+    function showExportProgress(title) {{
+        const panel = document.getElementById('export-progress');
+        if (!panel) return;
+        exportCancelRequested = false;
+        panel.classList.add('is-visible');
+        const titleEl = document.getElementById('export-progress-title');
+        if (titleEl) titleEl.textContent = title || 'Exporting data';
+        const stepEl = document.getElementById('export-progress-step');
+        if (stepEl) stepEl.textContent = 'Preparing...';
+        const bar = document.getElementById('export-progress-bar');
+        if (bar) {{
+            bar.classList.add('indeterminate');
+            bar.style.width = '';
+        }}
+        const counterEl = document.getElementById('export-progress-counter');
+        if (counterEl) counterEl.textContent = '';
+        const cancelBtn = document.getElementById('export-progress-cancel');
+        if (cancelBtn) {{
+            cancelBtn.disabled = false;
+            cancelBtn.textContent = 'Cancel';
+        }}
+    }}
+
+    function updateExportProgress(step, current, total) {{
+        const stepEl = document.getElementById('export-progress-step');
+        if (stepEl && step != null) stepEl.textContent = step;
+        const bar = document.getElementById('export-progress-bar');
+        const counterEl = document.getElementById('export-progress-counter');
+        if (Number.isFinite(current) && Number.isFinite(total) && total > 0) {{
+            if (bar) {{
+                bar.classList.remove('indeterminate');
+                const pct = Math.max(0, Math.min(100, (current / total) * 100));
+                bar.style.width = pct.toFixed(1) + '%';
+            }}
+            if (counterEl) counterEl.textContent = `${{current.toLocaleString()}} / ${{total.toLocaleString()}}`;
+        }} else {{
+            if (bar) {{
+                bar.classList.add('indeterminate');
+                bar.style.width = '';
+            }}
+            if (counterEl) counterEl.textContent = '';
+        }}
+    }}
+
+    function finalizeExportProgress(message) {{
+        const stepEl = document.getElementById('export-progress-step');
+        if (stepEl && message) stepEl.textContent = message;
+        const bar = document.getElementById('export-progress-bar');
+        if (bar) {{
+            bar.classList.remove('indeterminate');
+            bar.style.width = '100%';
+        }}
+        const cancelBtn = document.getElementById('export-progress-cancel');
+        if (cancelBtn) {{
+            cancelBtn.textContent = 'Close';
+            cancelBtn.disabled = false;
+        }}
+        setTimeout(() => {{
+            const panel = document.getElementById('export-progress');
+            if (panel) panel.classList.remove('is-visible');
+        }}, 2200);
+    }}
+
+    function hideExportProgress() {{
+        const panel = document.getElementById('export-progress');
+        if (panel) panel.classList.remove('is-visible');
+    }}
+
+    function yieldToUI() {{
+        return new Promise(resolve => setTimeout(resolve, 0));
+    }}
+
+    function csvEscape(value) {{
+        if (value == null) return '';
+        const str = String(value);
+        if (str.indexOf(',') === -1 && str.indexOf('"') === -1 && str.indexOf('\\n') === -1 && str.indexOf('\\r') === -1) return str;
+        return '"' + str.replace(/"/g, '""') + '"';
+    }}
+
+    function csvFormatNumber(v) {{
+        if (v == null || Number.isNaN(v)) return '';
+        if (!Number.isFinite(v)) return '';
+        return Number(v).toString();
+    }}
+
+    function buildTarHeader(name, contentSize) {{
+        const header = new Uint8Array(512);
+        const nameBytes = new TextEncoder().encode(name);
+        if (nameBytes.length > 100) throw new Error('Tar filename too long: ' + name);
+        header.set(nameBytes, 0);
+        const write = (value, offset, length) => {{
+            const s = value.padStart(length - 1, '0') + '\\0';
+            header.set(new TextEncoder().encode(s), offset);
+        }};
+        write('0000644', 100, 8);
+        write('0000000', 108, 8);
+        write('0000000', 116, 8);
+        write(contentSize.toString(8), 124, 12);
+        write(Math.floor(Date.now() / 1000).toString(8), 136, 12);
+        for (let i = 148; i < 156; i++) header[i] = 0x20;
+        header[156] = 0x30;
+        header.set(new TextEncoder().encode('ustar\\0'), 257);
+        header.set(new TextEncoder().encode('00'), 263);
+        let chksum = 0;
+        for (let i = 0; i < 512; i++) chksum += header[i];
+        write(chksum.toString(8), 148, 8);
+        header[155] = 0x20;
+        return header;
+    }}
+
+    function normalizeTarFileChunks(content) {{
+        const enc = new TextEncoder();
+        if (typeof content === 'string') return [enc.encode(content)];
+        if (content instanceof Uint8Array) return [content];
+        if (Array.isArray(content)) {{
+            return content.map(part => {{
+                if (typeof part === 'string') return enc.encode(part);
+                if (part instanceof Uint8Array) return part;
+                throw new Error('Unsupported tar chunk type');
+            }});
+        }}
+        throw new Error('Unsupported tar content');
+    }}
+
+    function buildTarChunks(files) {{
+        const chunks = [];
+        files.forEach(f => {{
+            const contentChunks = normalizeTarFileChunks(f.content);
+            let size = 0;
+            for (const c of contentChunks) size += c.length;
+            chunks.push(buildTarHeader(f.name, size));
+            for (const c of contentChunks) chunks.push(c);
+            const padLen = (512 - (size % 512)) % 512;
+            if (padLen > 0) chunks.push(new Uint8Array(padLen));
+        }});
+        chunks.push(new Uint8Array(1024));
+        return chunks;
+    }}
+
+    async function gzipBlob(blob) {{
+        if (typeof CompressionStream === 'undefined') return null;
+        const stream = blob.stream().pipeThrough(new CompressionStream('gzip'));
+        return await new Response(stream).blob();
+    }}
+
+    function hydrateAllSectionArrays() {{
+        (DATA.sections || []).forEach((section) => {{
+            try {{ ensureSectionXY?.(section); }} catch (_) {{}}
+            try {{ ensureSectionObsIndices?.(section); }} catch (_) {{}}
+            try {{ ensureSectionUMAP?.(section); }} catch (_) {{}}
+        }});
+    }}
+
+    function collectLoadedGenes() {{
+        const meta = DATA.genes_meta || {{}};
+        return (DATA.available_genes || []).filter(g => meta[g]);
+    }}
+
+    function makeChunkWriter(chunkTargetBytes) {{
+        const target = chunkTargetBytes || 1048576;
+        const chunks = [];
+        let buf = '';
+        const enc = new TextEncoder();
+        return {{
+            write(text) {{
+                if (text == null || text === '') return;
+                buf += text;
+                if (buf.length >= target) {{
+                    chunks.push(enc.encode(buf));
+                    buf = '';
+                }}
+            }},
+            flush() {{
+                if (buf.length > 0) {{
+                    chunks.push(enc.encode(buf));
+                    buf = '';
+                }}
+                return chunks;
+            }},
+            totalBytes() {{
+                let s = 0;
+                for (const c of chunks) s += c.length;
+                return s + (new TextEncoder().encode(buf)).length;
+            }},
+        }};
+    }}
+
+    async function exportDataBundle() {{
+        const sections = DATA.sections || [];
+        if (!sections.length) {{
+            alert('No sections available to export.');
+            return;
+        }}
+
+        const allGenes = DATA.available_genes || [];
+        let genesToExport = collectLoadedGenes();
+        if (allGenes.length > 0) {{
+            const choice = window.confirm(
+                `Include ALL ${{allGenes.length}} genes in X.csv?\n\n` +
+                `OK  = fetch + include every gene (may be slow and large for big datasets).\n` +
+                `Cancel = include only the ${{genesToExport.length}} gene${{genesToExport.length === 1 ? '' : 's'}} currently loaded in this session.`
+            );
+            if (choice) genesToExport = allGenes.slice();
+        }}
+
+        const btn = document.getElementById('export-data-btn');
+        const origLabel = btn ? btn.textContent : '';
+        const setLabel = (txt) => {{ if (btn) btn.textContent = txt; }};
+        if (btn) btn.disabled = true;
+        setLabel('Exporting...');
+        showExportProgress('Exporting data');
+        const cancelBtn = document.getElementById('export-progress-cancel');
+        const onCancelClick = () => {{
+            if (cancelBtn && cancelBtn.textContent === 'Close') {{
+                hideExportProgress();
+                return;
+            }}
+            exportCancelRequested = true;
+            if (cancelBtn) {{
+                cancelBtn.disabled = true;
+                cancelBtn.textContent = 'Cancelling...';
+            }}
+        }};
+        cancelBtn?.addEventListener('click', onCancelClick);
+        const checkCancel = () => {{
+            if (exportCancelRequested) throw new Error('Export cancelled');
+        }};
+
+        try {{
+            if (genesToExport.length && typeof ensureGeneAvailable === 'function') {{
+                updateExportProgress('Fetching gene shards', 0, genesToExport.length);
+                for (let i = 0; i < genesToExport.length; i++) {{
+                    checkCancel();
+                    const g = genesToExport[i];
+                    if (!DATA.genes_meta?.[g]) {{
+                        setLabel(`Fetching genes ${{i + 1}}/${{genesToExport.length}}`);
+                        try {{ await ensureGeneAvailable(g, {{ showErrors: false }}); }} catch (_) {{}}
+                    }}
+                    updateExportProgress('Fetching gene shards', i + 1, genesToExport.length);
+                }}
+                genesToExport = genesToExport.filter(g => DATA.genes_meta?.[g]);
+            }}
+
+            checkCancel();
+            updateExportProgress('Hydrating section arrays', null, null);
+            await yieldToUI();
+            hydrateAllSectionArrays();
+
+            const obsCols = (DATA.available_colors || []).filter(c => {{
+                const meta = DATA.colors_meta?.[c];
+                return !!meta;
+            }});
+
+            const nGenes = genesToExport.length;
+            const totalCellEstimate = sections.reduce((s, sec) => s + (sec.x?.length || 0), 0);
+            const DENSE_BYTE_LIMIT = 200 * 1024 * 1024;
+            const denseEstimateBytes = totalCellEstimate * (nGenes * 8 + 16);
+            const useSparse = nGenes > 0 && denseEstimateBytes > DENSE_BYTE_LIMIT;
+
+            const obsWriter = makeChunkWriter();
+            const spatialWriter = makeChunkWriter();
+            const umapWriter = makeChunkWriter();
+            const xWriter = makeChunkWriter();
+
+            obsWriter.write(['cell_id', 'sample_id', ...obsCols.map(c => c)].map(csvEscape).join(',') + '\\n');
+            spatialWriter.write(['cell_id', 'sample_id', 'x', 'y'].map(csvEscape).join(',') + '\\n');
+            umapWriter.write(['cell_id', 'sample_id', 'umap1', 'umap2'].map(csvEscape).join(',') + '\\n');
+            if (!useSparse) {{
+                xWriter.write(['cell_id', ...genesToExport].map(csvEscape).join(',') + '\\n');
+            }}
+
+            let anyUMAP = false;
+            let totalCells = 0;
+            let nnz = 0;
+
+            updateExportProgress('Writing CSV rows', 0, sections.length);
+            for (let sIdx = 0; sIdx < sections.length; sIdx++) {{
+                checkCancel();
+                const section = sections[sIdx];
+                const n = (section.x && section.x.length) ? section.x.length : 0;
+                if (!n) {{ updateExportProgress('Writing CSV rows', sIdx + 1, sections.length); continue; }}
+                const sampleId = section.id;
+                const obsIdx = section.obs_idx;
+                const xs = section.x, ys = section.y;
+                const ux = section.umap_x, uy = section.umap_y;
+                const hasUMAP = ux && uy && ux.length === n && uy.length === n;
+                if (hasUMAP) anyUMAP = true;
+
+                const obsColValues = obsCols.map(col => {{
+                    const meta = DATA.colors_meta?.[col];
+                    const values = getSectionColorValues(section, col);
+                    const cats = (meta && !meta.is_continuous && Array.isArray(meta.categories)) ? meta.categories : null;
+                    return {{ values, cats, isContinuous: !!meta?.is_continuous }};
+                }});
+
+                const geneArrays = genesToExport.map(gene => getSectionGeneValues(section, gene) || null);
+
+                for (let i = 0; i < n; i++) {{
+                    const globalIdx = (obsIdx && obsIdx.length > i) ? obsIdx[i] : (totalCells + i);
+                    const cellId = 'cell_' + globalIdx;
+                    const cellRow1Based = totalCells + i + 1;
+
+                    const obsRow = [cellId, sampleId];
+                    for (let k = 0; k < obsColValues.length; k++) {{
+                        const ov = obsColValues[k];
+                        const v = ov.values ? ov.values[i] : null;
+                        if (v == null || Number.isNaN(v)) {{ obsRow.push(''); continue; }}
+                        if (ov.isContinuous) obsRow.push(csvFormatNumber(v));
+                        else if (ov.cats) {{
+                            const ci = Math.round(v);
+                            obsRow.push(ci >= 0 && ci < ov.cats.length ? String(ov.cats[ci]) : '');
+                        }} else obsRow.push(csvFormatNumber(v));
+                    }}
+                    obsWriter.write(obsRow.map(csvEscape).join(',') + '\\n');
+
+                    spatialWriter.write([cellId, sampleId, csvFormatNumber(xs[i]), csvFormatNumber(ys[i])].map(csvEscape).join(',') + '\\n');
+                    if (hasUMAP) umapWriter.write([cellId, sampleId, csvFormatNumber(ux[i]), csvFormatNumber(uy[i])].map(csvEscape).join(',') + '\\n');
+
+                    if (nGenes > 0) {{
+                        if (useSparse) {{
+                            for (let g = 0; g < nGenes; g++) {{
+                                const arr = geneArrays[g];
+                                if (!arr) continue;
+                                const v = arr[i];
+                                if (!Number.isFinite(v) || v === 0) continue;
+                                xWriter.write(cellRow1Based + ' ' + (g + 1) + ' ' + v + '\\n');
+                                nnz++;
+                            }}
+                        }} else {{
+                            const parts = new Array(1 + nGenes);
+                            parts[0] = cellId;
+                            for (let g = 0; g < nGenes; g++) {{
+                                const arr = geneArrays[g];
+                                parts[g + 1] = arr ? csvFormatNumber(arr[i]) : '';
+                            }}
+                            xWriter.write(parts.join(',') + '\\n');
+                        }}
+                    }} else {{
+                        xWriter.write(cellId + '\\n');
+                    }}
+                }}
+                totalCells += n;
+                updateExportProgress('Writing CSV rows', sIdx + 1, sections.length);
+                if ((sIdx & 1) === 1) await yieldToUI();
+            }}
+
+            checkCancel();
+
+            const obsChunks = obsWriter.flush();
+            const spatialChunks = spatialWriter.flush();
+            const umapChunks = anyUMAP ? umapWriter.flush() : [];
+            let xChunks = xWriter.flush();
+
+            if (useSparse) {{
+                const header = new TextEncoder().encode(
+                    '%%MatrixMarket matrix coordinate real general\\n' +
+                    '%\\n' +
+                    totalCells + ' ' + nGenes + ' ' + nnz + '\\n'
+                );
+                xChunks = [header, ...xChunks];
+            }}
+
+            const varCsv = 'gene_name\\n' + genesToExport.map(csvEscape).join('\\n') + (nGenes ? '\\n' : '');
+
+            const xFileName = useSparse ? 'X.mtx' : 'X.csv';
+            const readmeLines = [
+                '# KaroSpace data export',
+                '',
+                'Generated at ' + new Date().toISOString(),
+                '',
+                'Files:',
+                '- obs.csv      Per-cell metadata (' + totalCells.toLocaleString() + ' cells)',
+                '- var.csv      Gene list (' + nGenes.toLocaleString() + ' genes)',
+                useSparse
+                    ? '- X.mtx        Sparse expression matrix in Matrix Market coordinate format (' + nnz.toLocaleString() + ' non-zero entries)'
+                    : '- X.csv        Dense expression matrix (rows = cells, columns = genes)',
+                '- spatial.csv  Per-cell spatial coordinates',
+                anyUMAP ? '- umap.csv     Per-cell UMAP coordinates' : '- umap.csv     (not produced \u2014 no UMAP in viewer)',
+                '',
+                '## Rebuild AnnData in Python',
+                '',
+                '```python',
+                'import pandas as pd',
+                'import anndata as ad',
+                'import numpy as np',
+                '',
+                'obs = pd.read_csv("obs.csv").set_index("cell_id")',
+                'var = pd.read_csv("var.csv").set_index("gene_name")',
+            ];
+            if (useSparse) {{
+                readmeLines.push(
+                    'from scipy.io import mmread',
+                    'X = mmread("X.mtx").tocsr().astype(np.float32)',
+                    'assert X.shape == (len(obs), len(var)), "Row/col order must match obs.csv / var.csv"',
+                );
+            }} else {{
+                readmeLines.push(
+                    'X_df = pd.read_csv("X.csv").set_index("cell_id").loc[obs.index, var.index]',
+                    'X = X_df.to_numpy(dtype=np.float32)',
+                );
+            }}
+            readmeLines.push(
+                '',
+                'spatial = pd.read_csv("spatial.csv").set_index("cell_id").loc[obs.index]',
+                'obsm = {{"spatial": spatial[["x", "y"]].to_numpy(dtype=np.float32)}}',
+                '',
+                'try:',
+                '    umap = pd.read_csv("umap.csv").set_index("cell_id").loc[obs.index]',
+                '    obsm["X_umap"] = umap[["umap1", "umap2"]].to_numpy(dtype=np.float32)',
+                'except FileNotFoundError:',
+                '    pass',
+                '',
+                'adata = ad.AnnData(X=X, obs=obs, var=var, obsm=obsm)',
+                'adata.write_h5ad("karospace_export.h5ad")',
+                '```',
+                '',
+            );
+            const readme = readmeLines.join('\\n');
+
+            const files = [
+                {{ name: 'karospace-export/README.md', content: readme }},
+                {{ name: 'karospace-export/obs.csv', content: obsChunks }},
+                {{ name: 'karospace-export/var.csv', content: varCsv }},
+                {{ name: 'karospace-export/' + xFileName, content: xChunks }},
+                {{ name: 'karospace-export/spatial.csv', content: spatialChunks }},
+            ];
+            if (anyUMAP) files.push({{ name: 'karospace-export/umap.csv', content: umapChunks }});
+
+            setLabel('Packing archive...');
+            updateExportProgress('Packing archive', null, null);
+            await yieldToUI();
+            const tarChunks = buildTarChunks(files);
+            const tarBlob = new Blob(tarChunks, {{ type: 'application/x-tar' }});
+
+            checkCancel();
+            updateExportProgress('Compressing (gzip)', null, null);
+            await yieldToUI();
+            let blob, ext;
+            const gz = await gzipBlob(tarBlob);
+            if (gz) {{
+                blob = gz;
+                ext = 'tar.gz';
+            }} else {{
+                blob = tarBlob;
+                ext = 'tar';
+            }}
+
+            const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `karospace-export-${{stamp}}.${{ext}}`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+            setLabel(origLabel || 'Export data');
+            finalizeExportProgress(`Saved ${{totalCells.toLocaleString()}} cells \u00d7 ${{genesToExport.length.toLocaleString()}} genes`);
+        }} catch (err) {{
+            if (err && /cancelled/i.test(err.message)) {{
+                finalizeExportProgress('Export cancelled');
+            }} else {{
+                console.error('Export failed', err);
+                finalizeExportProgress('Export failed: ' + (err.message || err));
+                alert(`Export failed: ${{err.message || err}}`);
+            }}
+            setLabel(origLabel || 'Export data');
+        }} finally {{
+            cancelBtn?.removeEventListener('click', onCancelClick);
+            if (btn) btn.disabled = false;
+        }}
     }}
 
     function exportModalAnnotations() {{
@@ -3662,43 +12023,42 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!modalSection || modalLassoPath.length < 3) return;
         ensureSectionXY(modalSection);
 
-        const canvas = document.getElementById('modal-canvas');
-        const rect = canvas.getBoundingClientRect();
-        const width = rect.width, height = rect.height;
-
-        const bounds = modalSection.bounds;
-        const dataWidth = bounds.xmax - bounds.xmin;
-        const dataHeight = bounds.ymax - bounds.ymin;
-        const baseScale = Math.min((width - 40) / dataWidth, (height - 40) / dataHeight);
-        const scale = baseScale * modalZoom;
-
-        const centerX = width / 2 + modalPanX;
-        const centerY = height / 2 + modalPanY;
-        const dataCenterX = (bounds.xmin + bounds.xmax) / 2;
-        const dataCenterY = (bounds.ymin + bounds.ymax) / 2;
+        const container = document.getElementById('modal-canvas-container');
+        if (!container) return;
+        const rect = container.getBoundingClientRect();
+        const transform = getModalViewTransform(rect);
+        if (!transform) return;
 
         const config = getColorConfig();
         const values = getSectionValues(modalSection);
+        const polygonData = modalLassoPath.map((point) => screenPointToModalData(point.x, point.y, transform));
+        const polygonBounds = getBoundsFromPoints(polygonData);
+        const candidateIndices = filterModalCandidateIndices(
+            modalSection,
+            polygonBounds ? querySectionSpatialIndex(modalSection, polygonBounds) : null,
+        );
         selectedCells.clear();
 
-        for (let i = 0; i < modalSection.x.length; i++) {{
+        const nCandidates = candidateIndices ? candidateIndices.length : modalSection.x.length;
+        for (let k = 0; k < nCandidates; k++) {{
+            const i = candidateIndices ? candidateIndices[k] : k;
             const val = values[i];
-            if (val === null || val === undefined) continue;
+            if (isMissingDisplayValue(val)) continue;
 
             if (!config.is_continuous) {{
-                const catIdx = Math.round(val);
-                const catName = config.categories[catIdx];
-                if (hiddenCategories.has(catName)) continue;
+                const catInfo = getCategoricalValueInfo(config, val);
+                if (!catInfo || hiddenCategories.has(catInfo.catName)) continue;
             }}
 
-            const x = centerX + (modalSection.x[i] - dataCenterX) * scale;
-            const y = centerY - (modalSection.y[i] - dataCenterY) * scale;
-            if (pointInPolygon(x, y, modalLassoPath)) {{
+            const x = modalSection.x[i];
+            const y = modalSection.y[i];
+            if (pointInPolygon(x, y, polygonData)) {{
                 selectedCells.add(`${{modalSection.id}}:${{i}}`);
             }}
         }}
 
         selectionSummaryExpanded = false;
+        hideModalGeneDiscoveryPanel();
         updateSelectionInfo();
         renderAllSections();
         if (umapVisible) renderUMAP();
@@ -3707,35 +12067,58 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     // Update selection info display
     function updateSelectionInfo() {{
+        if (modalSection && modalSubview) {{
+            const nextSubview = buildModalSubviewStateFromSelection(modalSection);
+            if (nextSubview) {{
+                modalSubview = nextSubview;
+            }} else {{
+                modalSubview = null;
+                modalZoom = 1;
+                modalPanX = 0;
+                modalPanY = 0;
+                invalidateModalRenderedView();
+            }}
+            updateModalHeader();
+        }}
         const countText = selectedCells.size === 0
             ? 'No cells selected'
             : `${{selectedCells.size.toLocaleString()}} cells selected`;
 
         const umapInfo = document.getElementById('umap-selection-info');
-        if (umapInfo) umapInfo.textContent = countText;
+        if (umapInfo) {{
+            umapInfo.textContent = countText;
+            umapInfo.style.display = selectedCells.size > 0 ? '' : 'none';
+        }}
         const modalInfo = document.getElementById('modal-selection-info');
         if (modalInfo) modalInfo.textContent = countText;
 
         const summary = computeSelectionSummary();
-        const summaryHtml = renderSelectionSummaryHtml(summary);
         const umapSummary = document.getElementById('umap-selection-summary');
         if (umapSummary) {{
-            umapSummary.classList.toggle('expanded', selectionSummaryExpanded);
-            umapSummary.innerHTML = summaryHtml;
-            bindSelectionSummaryInteractions(umapSummary);
+            const hasSelection = selectedCells.size > 0;
+            umapSummary.style.display = hasSelection ? '' : 'none';
+            if (hasSelection) {{
+                umapSummary.classList.toggle('expanded', selectionSummaryExpanded);
+                umapSummary.innerHTML = renderSelectionSummaryHtml(summary);
+                bindSelectionSummaryInteractions(umapSummary);
+            }}
         }}
         const modalSummary = document.getElementById('modal-selection-summary');
         if (modalSummary) {{
             modalSummary.classList.toggle('expanded', selectionSummaryExpanded);
-            modalSummary.innerHTML = summaryHtml;
+            modalSummary.innerHTML = renderSelectionSummaryHtml(summary, {{ allowFocusSubview: true, allowGenePanel: true }});
             bindSelectionSummaryInteractions(modalSummary);
         }}
+        updateModalToolbarState();
     }}
 
     // Clear selection
     function clearSelection() {{
         selectedCells.clear();
+        selectedCellsB.clear();
+        lassoModeB = false;
         selectionSummaryExpanded = false;
+        hideModalGeneDiscoveryPanel();
         updateSelectionInfo();
         renderUMAP();
         renderAllSections();
@@ -3773,7 +12156,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function loadUMAPPanelState() {{
         try {{
-            const saved = localStorage.getItem(UMAP_PANEL_STORAGE_KEY);
+            const saved = VIEWER_STORAGE.getItem(UMAP_PANEL_STORAGE_KEY);
             if (!saved) return;
             const parsed = JSON.parse(saved);
             if (parsed && typeof parsed === 'object') {{
@@ -3787,7 +12170,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function saveUMAPPanelState() {{
         try {{
-            localStorage.setItem(
+            VIEWER_STORAGE.setItem(
                 UMAP_PANEL_STORAGE_KEY,
                 JSON.stringify({{ dock: umapPanelDock, size: umapPanelSize }})
             );
@@ -3974,6 +12357,46 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
     }}
 
+    function getSortedCellDrawOrder(section, values, config) {{
+        const n = section.x.length;
+        if (cellDrawOrder === 'default' || n === 0) return null;
+        const indices = new Uint32Array(n);
+        for (let i = 0; i < n; i++) indices[i] = i;
+
+        if (cellDrawOrder === 'rare-on-top' && !config.is_continuous) {{
+            // Count cells per category, draw largest groups first (rare on top)
+            const catCounts = new Map();
+            for (let i = 0; i < n; i++) {{
+                const val = values[i];
+                if (isMissingDisplayValue(val)) continue;
+                const catInfo = getCategoricalValueInfo(config, val);
+                if (!catInfo) continue;
+                catCounts.set(catInfo.catName, (catCounts.get(catInfo.catName) || 0) + 1);
+            }}
+            indices.sort((a, b) => {{
+                const valA = values[a], valB = values[b];
+                const catA = getCategoricalValueInfo(config, valA);
+                const catB = getCategoricalValueInfo(config, valB);
+                const countA = catA ? (catCounts.get(catA.catName) || 0) : 0;
+                const countB = catB ? (catCounts.get(catB.catName) || 0) : 0;
+                return countB - countA;  // Large groups first → rare cells drawn last (on top)
+            }});
+            return indices;
+        }}
+
+        if (cellDrawOrder === 'expression' && config.is_continuous) {{
+            // Sort by expression ascending: low expression drawn first, high on top
+            indices.sort((a, b) => {{
+                const va = Number(values[a]) || 0;
+                const vb = Number(values[b]) || 0;
+                return va - vb;
+            }});
+            return indices;
+        }}
+
+        return null;
+    }}
+
     function renderSection(section, canvas) {{
         ensureSectionXY(section);
         const ctx = canvas.getContext('2d');
@@ -3988,16 +12411,86 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         ctx.fillRect(0, 0, width, height);
 
         if (section.x.length === 0) return;
-
-        const bounds = section.bounds;
-        const dataWidth = bounds.xmax - bounds.xmin;
-        const dataHeight = bounds.ymax - bounds.ymin;
-        const scale = Math.min((width - 2*padding) / dataWidth, (height - 2*padding) / dataHeight);
-        const offsetX = padding + ((width - 2*padding) - dataWidth * scale) / 2;
-        const offsetY = padding + ((height - 2*padding) - dataHeight * scale) / 2;
+        const transform = createSectionViewTransform(section, {{
+            width,
+            height,
+            padding,
+            isModal: false,
+        }});
+        if (!transform) return;
 
         const config = getColorConfig();
         const values = getSectionValues(section);
+
+        // Overview split rendering path
+        const ovBlend = getOverviewBlendRuntimes(section);
+        if (ovBlend) {{
+            const splitX = width * overviewBlendMix;
+            // Pre-compute CSS color cache for categorical runtimes to avoid per-cell rgbToCss
+            const colorCacheA = ovBlend.a.kind === 'cell-all' && ovBlend.a.paletteRgb
+                ? ovBlend.a.paletteRgb.map(rgb => rgbToCss(rgb)) : null;
+            const colorCacheB = ovBlend.b.kind === 'cell-all' && ovBlend.b.paletteRgb
+                ? ovBlend.b.paletteRgb.map(rgb => rgbToCss(rgb)) : null;
+            const cellCssA = ovBlend.a.kind === 'cell' ? rgbToCss(ovBlend.a.activeRgb) : null;
+            const cellInactiveCssA = ovBlend.a.kind === 'cell' ? rgbToCss(ovBlend.a.inactiveRgb) : null;
+            const cellCssB = ovBlend.b.kind === 'cell' ? rgbToCss(ovBlend.b.activeRgb) : null;
+            const cellInactiveCssB = ovBlend.b.kind === 'cell' ? rgbToCss(ovBlend.b.inactiveRgb) : null;
+
+            function fastBlendColor(runtime, idx, colorCache, cellCss, cellInactiveCss) {{
+                const raw = runtime.values?.[idx];
+                if (runtime.kind === 'cell-all') {{
+                    if (!Number.isFinite(raw)) return 'rgb(160,160,160)';
+                    return colorCache?.[Math.round(raw)] || 'rgb(160,160,160)';
+                }}
+                if (runtime.kind === 'cell') {{
+                    if (!Number.isFinite(raw)) return cellInactiveCss;
+                    return Math.round(raw) === runtime.catIdx ? cellCss : cellInactiveCss;
+                }}
+                // Gene: must compute per cell (magma colormap)
+                if (!Number.isFinite(raw)) return 'rgb(140,140,140)';
+                const t = clamp01((raw - runtime.vmin) / (runtime.vmax - runtime.vmin));
+                return magma(t);
+            }}
+
+            const drawOrder = getSortedCellDrawOrder(section, values, config);
+            let lastFill = '';
+            for (let di = 0; di < section.x.length; di++) {{
+                const i = drawOrder ? drawOrder[di] : di;
+                const point = transform.dataToScreen(section.x[i], section.y[i]);
+                if (!transform.isPointVisible(point.x, point.y, spotSize)) continue;
+                const isA = point.x <= splitX;
+                const color = isA
+                    ? fastBlendColor(ovBlend.a, i, colorCacheA, cellCssA, cellInactiveCssA)
+                    : fastBlendColor(ovBlend.b, i, colorCacheB, cellCssB, cellInactiveCssB);
+                if (color !== lastFill) {{ ctx.fillStyle = color; lastFill = color; }}
+                ctx.beginPath();
+                ctx.arc(point.x, point.y, spotSize, 0, Math.PI * 2);
+                ctx.fill();
+            }}
+            // Split line
+            ctx.strokeStyle = currentTheme === 'dark' ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.3)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([3, 2]);
+            ctx.beginPath();
+            ctx.moveTo(splitX, 0);
+            ctx.lineTo(splitX, height);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }}
+
+        const showGeneDensity = !ovBlend && !!currentGene && (overviewGeneRenderMode === 'density' || overviewGeneRenderMode === 'both');
+        const showGeneCells = !ovBlend && (!currentGene || overviewGeneRenderMode !== 'density');
+
+        if (showGeneDensity) {{
+            const densityCache = ensureSectionGeneDensityCache(
+                section,
+                transform,
+                width,
+                height,
+                values,
+            );
+            drawGeneDensityLayer(ctx, width, height, densityCache);
+        }}
 
         const edges = getSectionEdgesPacked(section);
         if (showGraph && edges && edges.length) {{
@@ -4011,10 +12504,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     const i = edge[0];
                     const j = edge[1];
                     if (i >= section.x.length || j >= section.x.length) continue;
-                    const x1 = offsetX + (section.x[i] - bounds.xmin) * scale;
-                    const y1 = height - (offsetY + (section.y[i] - bounds.ymin) * scale);
-                    const x2 = offsetX + (section.x[j] - bounds.xmin) * scale;
-                    const y2 = height - (offsetY + (section.y[j] - bounds.ymin) * scale);
+                    const p1 = transform.dataToScreen(section.x[i], section.y[i]);
+                    const p2 = transform.dataToScreen(section.x[j], section.y[j]);
+                    const x1 = p1.x;
+                    const y1 = p1.y;
+                    const x2 = p2.x;
+                    const y2 = p2.y;
                     ctx.moveTo(x1, y1);
                     ctx.lineTo(x2, y2);
                 }}
@@ -4023,10 +12518,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     const i = edges[e];
                     const j = edges[e + 1];
                     if (i >= section.x.length || j >= section.x.length) continue;
-                    const x1 = offsetX + (section.x[i] - bounds.xmin) * scale;
-                    const y1 = height - (offsetY + (section.y[i] - bounds.ymin) * scale);
-                    const x2 = offsetX + (section.x[j] - bounds.xmin) * scale;
-                    const y2 = height - (offsetY + (section.y[j] - bounds.ymin) * scale);
+                    const p1 = transform.dataToScreen(section.x[i], section.y[i]);
+                    const p2 = transform.dataToScreen(section.x[j], section.y[j]);
+                    const x1 = p1.x;
+                    const y1 = p1.y;
+                    const x2 = p2.x;
+                    const y2 = p2.y;
                     ctx.moveTo(x1, y1);
                     ctx.lineTo(x2, y2);
                 }}
@@ -4034,22 +12531,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ctx.stroke();
         }}
 
+        const drawOrder = getSortedCellDrawOrder(section, values, config);
+
         // First pass: draw grey background for hidden categories (if any are hidden)
-        const hasHidden = hiddenCategories.size > 0 && !config.is_continuous;
+        const hasHidden = showGeneCells && hiddenCategories.size > 0 && !config.is_continuous;
         if (hasHidden) {{
             ctx.fillStyle = '#cccccc';
             ctx.globalAlpha = 0.2;
-            for (let i = 0; i < section.x.length; i++) {{
+            for (let di = 0; di < section.x.length; di++) {{
+                const i = drawOrder ? drawOrder[di] : di;
                 const val = values[i];
-                if (val === null || val === undefined) continue;
-                const catIdx = Math.round(val);
-                const catName = config.categories[catIdx];
-                if (!hiddenCategories.has(catName)) continue;  // Only draw hidden ones
+                if (isMissingDisplayValue(val)) continue;
+                const catInfo = getCategoricalValueInfo(config, val);
+                if (!catInfo || !hiddenCategories.has(catInfo.catName)) continue;
 
-                const x = offsetX + (section.x[i] - bounds.xmin) * scale;
-                const y = offsetY + (section.y[i] - bounds.ymin) * scale;
+                const point = transform.dataToScreen(section.x[i], section.y[i]);
                 ctx.beginPath();
-                ctx.arc(x, height - y, spotSize, 0, Math.PI * 2);
+                ctx.arc(point.x, point.y, spotSize, 0, Math.PI * 2);
                 ctx.fill();
             }}
             ctx.globalAlpha = 1;
@@ -4058,71 +12556,143 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         // Second pass: draw visible categories on top (with optional selected-category focus)
         const activeSpotlight = getLinkedSpotlightCategory(config);
         const focusCategory = activeSpotlight || modalSelectedCategory;
-        const hasTypeFocus = !config.is_continuous && focusCategory;
-        for (let i = 0; i < section.x.length; i++) {{
-            const val = values[i];
-            if (val === null || val === undefined) continue;
-
-            let color;
-            let isSelectedCat = false;
-            if (config.is_continuous) {{
-                const t = (val - config.vmin) / (config.vmax - config.vmin);
-                color = magma(Math.max(0, Math.min(1, t)));
-            }} else {{
-                const catIdx = Math.round(val);
-                const catName = config.categories[catIdx];
-                if (hiddenCategories.has(catName)) continue;  // Skip hidden, already drawn as grey
-                isSelectedCat = focusCategory && catName === focusCategory;
-                color = getCategoryColor(catIdx);
+        const hasNeighborFocus = neighborNetworkFocusCategories && neighborNetworkFocusCategories.size > 0;
+        const hasTypeFocus = !config.is_continuous && (focusCategory || hasNeighborFocus);
+        if (showGeneCells && config.is_proportions) {{
+            const propData = getSectionProportions(section, currentColor);
+            const k = propData?.k || 0;
+            // Below this radius pies are unreadable; fall back to dominant-component solid.
+            const PIE_MIN_RADIUS = 2.0;
+            if (propData && k > 0) {{
+                const matrix = propData.matrix;
+                const paletteCss = getProportionsPaletteCss(config);
+                const hiddenMask = getProportionsHiddenMask(config);
+                if (spotSize >= PIE_MIN_RADIUS) {{
+                    for (let di = 0; di < section.x.length; di++) {{
+                        const i = drawOrder ? drawOrder[di] : di;
+                        const val = values[i];
+                        if (isMissingDisplayValue(val)) continue;
+                        const off = i * k;
+                        // Reject rows that are all-zero/NaN (already encoded as missing val above).
+                        const point = transform.dataToScreen(section.x[i], section.y[i]);
+                        ctx.globalAlpha = 1;
+                        drawProportionsPie(
+                            ctx, point.x, point.y, spotSize,
+                            matrix.subarray(off, off + k), k, hiddenMask, paletteCss,
+                        );
+                    }}
+                }} else {{
+                    // Solid fallback by dominant component when pies would be sub-pixel.
+                    for (let di = 0; di < section.x.length; di++) {{
+                        const i = drawOrder ? drawOrder[di] : di;
+                        const val = values[i];
+                        if (isMissingDisplayValue(val)) continue;
+                        const catInfo = getCategoricalValueInfo(config, val);
+                        if (!catInfo || hiddenCategories.has(catInfo.catName)) continue;
+                        const point = transform.dataToScreen(section.x[i], section.y[i]);
+                        ctx.fillStyle = paletteCss[catInfo.catIdx];
+                        ctx.globalAlpha = 1;
+                        ctx.beginPath();
+                        ctx.arc(point.x, point.y, spotSize, 0, Math.PI * 2);
+                        ctx.fill();
+                    }}
+                }}
             }}
+        }} else if (showGeneCells) {{
+            for (let di = 0; di < section.x.length; di++) {{
+                const i = drawOrder ? drawOrder[di] : di;
+                const val = values[i];
+                if (isMissingDisplayValue(val)) continue;
 
-            const x = offsetX + (section.x[i] - bounds.xmin) * scale;
-            const y = offsetY + (section.y[i] - bounds.ymin) * scale;
-            if (hasTypeFocus && !isSelectedCat) {{
-                ctx.fillStyle = '#bbbbbb';
-                ctx.globalAlpha = 0.15;
-            }} else {{
-                ctx.fillStyle = color;
-                ctx.globalAlpha = 1;
+                let color;
+                let isSelectedCat = false;
+                if (config.is_continuous) {{
+                    const t = (val - config.vmin) / (config.vmax - config.vmin);
+                    color = magma(Math.max(0, Math.min(1, t)));
+                }} else {{
+                    const catInfo = getCategoricalValueInfo(config, val);
+                    if (!catInfo || hiddenCategories.has(catInfo.catName)) continue;
+                    isSelectedCat = (focusCategory && catInfo.catName === focusCategory) ||
+                                    (hasNeighborFocus && neighborNetworkFocusCategories.has(catInfo.catName));
+                    color = getCategoryColor(catInfo.catIdx, config.colorCol);
+                }}
+
+                const point = transform.dataToScreen(section.x[i], section.y[i]);
+                if (hasTypeFocus && !isSelectedCat) {{
+                    ctx.fillStyle = '#bbbbbb';
+                    ctx.globalAlpha = 0.15;
+                }} else {{
+                    ctx.fillStyle = color;
+                    ctx.globalAlpha = 1;
+                }}
+                ctx.beginPath();
+                ctx.arc(point.x, point.y, spotSize, 0, Math.PI * 2);
+                ctx.fill();
             }}
-            ctx.beginPath();
-            ctx.arc(x, height - y, spotSize, 0, Math.PI * 2);
-            ctx.fill();
         }}
         ctx.globalAlpha = 1;
 
         // Third pass: draw selection highlights
         if (selectedCells.size > 0) {{
-            ctx.strokeStyle = '#ffd700';
-            ctx.lineWidth = 2;
+            ctx.strokeStyle = getSelectionOutlineColor();
+            ctx.lineWidth = 1.25;
             for (let i = 0; i < section.x.length; i++) {{
                 if (!isCellSelected(section.id, i)) continue;
 
                 const val = values[i];
-                if (val === null || val === undefined) continue;
+                if (isMissingDisplayValue(val)) continue;
 
                 // Skip hidden categories
                 if (!config.is_continuous) {{
-                    const catIdx = Math.round(val);
-                    const catName = config.categories[catIdx];
-                    if (hiddenCategories.has(catName)) continue;
+                    const catInfo = getCategoricalValueInfo(config, val);
+                    if (!catInfo || hiddenCategories.has(catInfo.catName)) continue;
                 }}
 
-                const x = offsetX + (section.x[i] - bounds.xmin) * scale;
-                const y = offsetY + (section.y[i] - bounds.ymin) * scale;
+                const point = transform.dataToScreen(section.x[i], section.y[i]);
+                const x = point.x;
+                const y = point.y;
                 ctx.beginPath();
-                ctx.arc(x, height - y, spotSize + 1, 0, Math.PI * 2);
+                ctx.arc(x, y, spotSize + 0.75, 0, Math.PI * 2);
                 ctx.stroke();
             }}
         }}
+
+        // Draw polygon annotations in overview
+        if (showOverviewAnnotations) {{
+            const sectionAnnotations = getSectionAnnotations(section.id);
+            sectionAnnotations.forEach((annotation) => {{
+                const vertices = annotation.vertices || [];
+                if (vertices.length < 2) return;
+                ctx.save();
+                ctx.lineWidth = 1.5;
+                ctx.strokeStyle = annotation.color || getAnnotationColorById(annotation.id);
+                ctx.fillStyle = annotation.color || getAnnotationColorById(annotation.id);
+                ctx.globalAlpha = 0.12;
+                const first = transform.dataToScreen(vertices[0].x, vertices[0].y);
+                ctx.beginPath();
+                ctx.moveTo(first.x, first.y);
+                for (let i = 1; i < vertices.length; i++) {{
+                    const point = transform.dataToScreen(vertices[i].x, vertices[i].y);
+                    ctx.lineTo(point.x, point.y);
+                }}
+                ctx.closePath();
+                ctx.fill();
+                ctx.globalAlpha = 0.8;
+                ctx.stroke();
+                ctx.restore();
+            }});
+        }}
+
+        drawScalebar(ctx, transform, {{ darkBg: currentTheme === 'dark' }});
     }}
 
     function renderAllSections() {{
         renderAllJobId += 1;
         const jobId = renderAllJobId;
-        const panels = document.querySelectorAll('.section-panel');
         const grid = document.getElementById('grid');
         const gridRect = grid ? grid.getBoundingClientRect() : null;
+        const panelMap = new Map();
+        grid.querySelectorAll('.section-panel').forEach(p => panelMap.set(p.dataset.sectionId, p));
         const isInView = (panel) => {{
             if (!gridRect) return true;
             const r = panel.getBoundingClientRect();
@@ -4138,8 +12708,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         let totalCells = 0;
         const drawList = [];
 
-        DATA.sections.forEach((section, idx) => {{
-            const panel = panels[idx];
+        DATA.sections.forEach((section) => {{
+            const panel = panelMap.get(section.id);
             if (!panel) return;
 
             const passes = sectionPassesFilter(section);
@@ -4289,36 +12859,46 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function findNearestCell(section, mouseX, mouseY, canvasRect, transform, options = {{}}) {{
         ensureSectionXY(section);
-        // transform: {{ scale, offsetX, offsetY, centerX, centerY, dataCenterX, dataCenterY, isModal }}
         const config = getColorConfig();
         const values = getSectionValues(section);
         const ignoreMissing = !!options.ignoreMissing;
         const ignoreHidden = !!options.ignoreHidden;
+        const activeIndexSet = transform.isModal ? getModalActiveCellIndexSet(section?.id) : null;
         const searchRadius = transform.isModal ? modalSpotSize * modalZoom * 2 : spotSize * 3;
+        const candidateBounds = getDataBoundsFromScreenRect(
+            transform,
+            mouseX - searchRadius,
+            mouseY - searchRadius,
+            mouseX + searchRadius,
+            mouseY + searchRadius,
+        );
+        const candidateIndices = (transform.isModal && candidateBounds)
+            ? filterModalCandidateIndices(section, querySectionSpatialIndex(section, candidateBounds))
+            : null;
 
         let nearestIdx = -1;
         let nearestDist = Infinity;
 
-        for (let i = 0; i < section.x.length; i++) {{
+        const nCandidates = candidateIndices ? candidateIndices.length : section.x.length;
+        for (let k = 0; k < nCandidates; k++) {{
+            const i = candidateIndices ? candidateIndices[k] : k;
+            if (activeIndexSet && !activeIndexSet.has(i)) continue;
             const val = values[i];
-            if (!ignoreMissing && (val === null || val === undefined)) continue;
+            if (!ignoreMissing && isMissingDisplayValue(val)) continue;
 
             // Skip hidden categories
-            if (!ignoreHidden && !config.is_continuous && Number.isFinite(val)) {{
-                const catIdx = Math.round(val);
-                const catName = config.categories[catIdx];
-                if (hiddenCategories.has(catName)) continue;
+            if (!ignoreHidden && !config.is_continuous) {{
+                const catInfo = getCategoricalValueInfo(config, val);
+                if (!catInfo) {{
+                    if (!ignoreMissing) continue;
+                }} else if (hiddenCategories.has(catInfo.catName)) {{
+                    continue;
+                }}
             }}
 
-            let screenX, screenY;
-            if (transform.isModal) {{
-                screenX = transform.centerX + (section.x[i] - transform.dataCenterX) * transform.scale;
-                screenY = transform.centerY - (section.y[i] - transform.dataCenterY) * transform.scale;
-            }} else {{
-                const bounds = section.bounds;
-                screenX = transform.offsetX + (section.x[i] - bounds.xmin) * transform.scale;
-                screenY = transform.height - (transform.offsetY + (section.y[i] - bounds.ymin) * transform.scale);
-            }}
+            const point = transform.dataToScreen(section.x[i], section.y[i]);
+            const screenX = point.x;
+            const screenY = point.y;
 
             const dist = Math.sqrt((mouseX - screenX) ** 2 + (mouseY - screenY) ** 2);
             if (dist < nearestDist && dist < searchRadius) {{
@@ -4337,17 +12917,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const colorLabel = currentGene || currentColor;
 
         if (config.is_continuous) {{
+            if (isMissingDisplayValue(val)) {{
+                return `<span class="cell-tooltip-label">${{colorLabel}}:</span>
+                        <span class="cell-tooltip-value">n/a</span>`;
+            }}
             const t = (val - config.vmin) / (config.vmax - config.vmin);
             const color = magma(Math.max(0, Math.min(1, t)));
             return `<span class="cell-tooltip-color" style="background: ${{color}}"></span>
                     <span class="cell-tooltip-label">${{colorLabel}}:</span>
                     <span class="cell-tooltip-value">${{val.toFixed(3)}}</span>`;
         }} else {{
-            const catIdx = Math.round(val);
-            const catName = config.categories[catIdx];
-            const color = getCategoryColor(catIdx);
+            const catInfo = getCategoricalValueInfo(config, val);
+            if (!catInfo) {{
+                return `<span class="cell-tooltip-label">Missing ${{escapeHtml(colorLabel)}}</span>`;
+            }}
+            const color = getCategoryColor(catInfo.catIdx, config.colorCol);
             return `<span class="cell-tooltip-color" style="background: ${{color}}"></span>
-                    <span class="cell-tooltip-label">${{catName}}</span>`;
+                    <span class="cell-tooltip-label">${{catInfo.catName}}</span>`;
         }}
     }}
 
@@ -4355,7 +12941,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const blendRuntimes = getModalBlendRuntimes(section);
         if (!blendRuntimes) return null;
 
-        const cellX = transform.centerX + (section.x[cellIdx] - transform.dataCenterX) * transform.scale;
+        const cellX = transform.dataToScreen(section.x[cellIdx], section.y[cellIdx]).x;
         const splitX = transform.width * modalBlendMix;
         const side = cellX <= splitX ? 'a' : 'b';
         const sideLabel = side === 'a' ? 'A (left)' : 'B (right)';
@@ -4433,12 +13019,372 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }});
     }}
 
+    function createModalBlendLayerCanvas(width, height, dpr) {{
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(width * dpr));
+        canvas.height = Math.max(1, Math.round(height * dpr));
+        const ctx = canvas.getContext('2d');
+        ctx.scale(dpr, dpr);
+        return {{ canvas, ctx }};
+    }}
+
+    function updateOverviewGeneViewState() {{
+        const block = document.getElementById('overview-gene-view-block');
+        const select = document.getElementById('overview-gene-view-mode');
+        const show = !!currentGene;
+        if (block) block.style.display = show ? 'flex' : 'none';
+        if (select) {{
+            select.disabled = !show;
+            select.value = overviewGeneRenderMode;
+        }}
+    }}
+
+    function getGeneDensityCacheKey(section, transform, width, height, gene, vmin, vmax, cacheToken = '') {{
+        return [
+            section?.id || '',
+            width,
+            height,
+            transform.centerX.toFixed(3),
+            transform.centerY.toFixed(3),
+            transform.scale.toFixed(6),
+            transform.angleDeg.toFixed(3),
+            gene || '',
+            Number(vmin || 0).toFixed(6),
+            Number(vmax || 0).toFixed(6),
+            cacheToken,
+        ].join('::');
+    }}
+
+    function getGeneDensityGridSize(width, height) {{
+        return {{
+            gridW: Math.max(88, Math.min(420, Math.round(width / 3.25))),
+            gridH: Math.max(88, Math.min(420, Math.round(height / 3.25))),
+        }};
+    }}
+
+    function smoothDensityGrid(values, width, height) {{
+        const source = values instanceof Float32Array ? values : new Float32Array(values || []);
+        const target = new Float32Array(source.length);
+        for (let y = 0; y < height; y++) {{
+            const y0 = Math.max(0, y - 1);
+            const y1 = Math.min(height - 1, y + 1);
+            for (let x = 0; x < width; x++) {{
+                const x0 = Math.max(0, x - 1);
+                const x1 = Math.min(width - 1, x + 1);
+                let sum = 0;
+                let weight = 0;
+                for (let yy = y0; yy <= y1; yy++) {{
+                    const rowOffset = yy * width;
+                    for (let xx = x0; xx <= x1; xx++) {{
+                        const kernel = (xx === x && yy === y) ? 4 : ((xx === x || yy === y) ? 2 : 1);
+                        sum += source[rowOffset + xx] * kernel;
+                        weight += kernel;
+                    }}
+                }}
+                target[y * width + x] = weight > 0 ? (sum / weight) : 0;
+            }}
+        }}
+        return target;
+    }}
+
+    function buildGeneDensityCache(section, transform, width, height, values, cacheKey, candidateIndices = null) {{
+        if (!section || !transform || !currentGene || !values) return null;
+        const {{ vmin, vmax }} = getGeneScaleRange(currentGene);
+        const scaleDenom = Math.max(1e-9, vmax - vmin);
+        const {{ gridW, gridH }} = getGeneDensityGridSize(width, height);
+        const accum = new Float32Array(gridW * gridH);
+        const nCandidates = candidateIndices ? candidateIndices.length : section.x.length;
+        for (let k = 0; k < nCandidates; k++) {{
+            const i = candidateIndices ? candidateIndices[k] : k;
+            const rawValue = Number(values[i]);
+            if (!Number.isFinite(rawValue) || rawValue <= vmin) continue;
+            const intensity = clamp01((rawValue - vmin) / scaleDenom);
+            if (!(intensity > 0)) continue;
+
+            const point = transform.dataToScreen(section.x[i], section.y[i]);
+            const fx = (point.x / Math.max(1, width)) * (gridW - 1);
+            const fy = (point.y / Math.max(1, height)) * (gridH - 1);
+            if (!Number.isFinite(fx) || !Number.isFinite(fy)) continue;
+            if (fx < -1 || fx > gridW || fy < -1 || fy > gridH) continue;
+
+            const x0 = Math.max(0, Math.min(gridW - 1, Math.floor(fx)));
+            const y0 = Math.max(0, Math.min(gridH - 1, Math.floor(fy)));
+            const x1 = Math.min(gridW - 1, x0 + 1);
+            const y1 = Math.min(gridH - 1, y0 + 1);
+            const tx = Math.max(0, Math.min(1, fx - x0));
+            const ty = Math.max(0, Math.min(1, fy - y0));
+
+            accum[y0 * gridW + x0] += intensity * (1 - tx) * (1 - ty);
+            accum[y0 * gridW + x1] += intensity * tx * (1 - ty);
+            accum[y1 * gridW + x0] += intensity * (1 - tx) * ty;
+            accum[y1 * gridW + x1] += intensity * tx * ty;
+        }}
+
+        const smoothA = smoothDensityGrid(accum, gridW, gridH);
+        let maxValue = 0;
+        for (let i = 0; i < smoothA.length; i++) {{
+            if (smoothA[i] > maxValue) maxValue = smoothA[i];
+        }}
+        if (!(maxValue > 0)) {{
+            return {{
+                key: cacheKey,
+                width,
+                height,
+                canvas: null,
+            }};
+        }}
+
+        const canvas = document.createElement('canvas');
+        canvas.width = gridW;
+        canvas.height = gridH;
+        const ctx = canvas.getContext('2d');
+        const image = ctx.createImageData(gridW, gridH);
+        const pixels = image.data;
+        for (let i = 0; i < smoothA.length; i++) {{
+            const t = clamp01(smoothA[i] / maxValue);
+            const px = i * 4;
+            if (t <= 0.028) {{
+                pixels[px + 3] = 0;
+                continue;
+            }}
+            const rgb = magmaRgb(t);
+            pixels[px] = rgb[0];
+            pixels[px + 1] = rgb[1];
+            pixels[px + 2] = rgb[2];
+            pixels[px + 3] = Math.max(10, Math.round(255 * Math.pow(t, 0.92) * 0.9));
+        }}
+        ctx.putImageData(image, 0, 0);
+
+        return {{
+            key: cacheKey,
+            width,
+            height,
+            canvas,
+        }};
+    }}
+
+    function ensureSectionGeneDensityCache(section, transform, width, height, values, candidateIndices = null) {{
+        if (!section || !transform || !currentGene || !values) return null;
+        const {{ vmin, vmax }} = getGeneScaleRange(currentGene);
+        const cacheKey = getGeneDensityCacheKey(
+            section,
+            transform,
+            width,
+            height,
+            currentGene,
+            vmin,
+            vmax,
+            'overview',
+        );
+        if (section._geneDensityCache && section._geneDensityCache.key === cacheKey) {{
+            return section._geneDensityCache;
+        }}
+        section._geneDensityCache = buildGeneDensityCache(
+            section,
+            transform,
+            width,
+            height,
+            values,
+            cacheKey,
+            candidateIndices,
+        );
+        return section._geneDensityCache;
+    }}
+
+    function ensureModalGeneDensityCache(section, transform, width, height, values, candidateIndices = null) {{
+        if (!section || !transform || !currentGene || !values) return null;
+        const {{ vmin, vmax }} = getGeneScaleRange(currentGene);
+        const cacheKey = getGeneDensityCacheKey(
+            section,
+            transform,
+            width,
+            height,
+            currentGene,
+            vmin,
+            vmax,
+            `modal::${{getModalSubviewRenderToken()}}`,
+        );
+        if (modalGeneDensityCache && modalGeneDensityCache.key === cacheKey) {{
+            return modalGeneDensityCache;
+        }}
+        modalGeneDensityCache = buildGeneDensityCache(
+            section,
+            transform,
+            width,
+            height,
+            values,
+            cacheKey,
+            candidateIndices,
+        );
+        return modalGeneDensityCache;
+    }}
+
+    function drawGeneDensityLayer(ctx, width, height, cache) {{
+        if (!ctx || !cache?.canvas) return false;
+        ctx.save();
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(cache.canvas, 0, 0, width, height);
+        ctx.restore();
+        return true;
+    }}
+
+    function getModalBlendSpecCacheKey(spec, runtime) {{
+        const parts = [
+            spec?.kind || '',
+            spec?.color || '',
+            spec?.category || '',
+            spec?.gene || '',
+            runtime?.kind || '',
+        ];
+        if (runtime?.kind === 'gene') {{
+            parts.push(
+                Number(runtime.vmin || 0).toFixed(6),
+                Number(runtime.vmax || 0).toFixed(6),
+            );
+        }} else if (Number.isFinite(runtime?.catIdx)) {{
+            parts.push(String(runtime.catIdx));
+        }}
+        return parts.join('|');
+    }}
+
+    function getModalBlendRenderCacheKey(section, transform, width, height, dpr, adjustedSpotSize, runtimes) {{
+        return [
+            section?.id || '',
+            width,
+            height,
+            dpr.toFixed(3),
+            transform.centerX.toFixed(3),
+            transform.centerY.toFixed(3),
+            transform.scale.toFixed(6),
+            transform.angleDeg.toFixed(3),
+            adjustedSpotSize.toFixed(4),
+            getModalSubviewRenderToken(),
+            getModalBlendSpecCacheKey(modalBlendSpec.a, runtimes?.a),
+            getModalBlendSpecCacheKey(modalBlendSpec.b, runtimes?.b),
+        ].join('::');
+    }}
+
+    function renderModalBlendRuntimeLayer(ctx, section, runtime, transform, adjustedSpotSize, candidateIndices = null) {{
+        const nCandidates = candidateIndices ? candidateIndices.length : section.x.length;
+        for (let k = 0; k < nCandidates; k++) {{
+            const i = candidateIndices ? candidateIndices[k] : k;
+            const point = transform.dataToScreen(section.x[i], section.y[i]);
+            const x = point.x;
+            const y = point.y;
+            if (!transform.isPointVisible(x, y, adjustedSpotSize)) continue;
+            ctx.fillStyle = rgbToCss(getModalBlendCellRgb(runtime, i));
+            ctx.beginPath();
+            ctx.arc(x, y, adjustedSpotSize, 0, Math.PI * 2);
+            ctx.fill();
+        }}
+    }}
+
+    function ensureModalBlendRenderCache(section, transform, width, height, dpr, adjustedSpotSize, runtimes, candidateIndices = null) {{
+        if (!section || !transform || !runtimes) return null;
+        const cacheKey = getModalBlendRenderCacheKey(section, transform, width, height, dpr, adjustedSpotSize, runtimes);
+        if (modalBlendRenderCache && modalBlendRenderCache.key === cacheKey) {{
+            return modalBlendRenderCache;
+        }}
+
+        const layerA = createModalBlendLayerCanvas(width, height, dpr);
+        const layerB = createModalBlendLayerCanvas(width, height, dpr);
+        renderModalBlendRuntimeLayer(layerA.ctx, section, runtimes.a, transform, adjustedSpotSize, candidateIndices);
+        renderModalBlendRuntimeLayer(layerB.ctx, section, runtimes.b, transform, adjustedSpotSize, candidateIndices);
+
+        modalBlendRenderCache = {{
+            key: cacheKey,
+            width,
+            height,
+            dpr,
+            canvasA: layerA.canvas,
+            canvasB: layerB.canvas,
+        }};
+        return modalBlendRenderCache;
+    }}
+
+    function drawModalBlendCachedLayers(ctx, width, height, cache, splitX) {{
+        if (!ctx || !cache) return false;
+        const clampedSplitX = Math.max(0, Math.min(width, splitX));
+
+        if (clampedSplitX > 0) {{
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(0, 0, clampedSplitX, height);
+            ctx.clip();
+            ctx.drawImage(cache.canvasA, 0, 0, width, height);
+            ctx.restore();
+        }}
+        if (clampedSplitX < width) {{
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(clampedSplitX, 0, width - clampedSplitX, height);
+            ctx.clip();
+            ctx.drawImage(cache.canvasB, 0, 0, width, height);
+            ctx.restore();
+        }}
+
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([5, 3]);
+        ctx.beginPath();
+        ctx.moveTo(clampedSplitX, 0);
+        ctx.lineTo(clampedSplitX, height);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        return true;
+    }}
+
+    function renderModalBlendFromCache() {{
+        if (!modalSection || !modalBlendEnabled) return false;
+        if (showGraph || hoverNeighbors || isDrawingModalLasso || isDrawingModalAnnotation) return false;
+        if (selectedCells.size > 0 && !getModalActiveCellIndexSet(modalSection.id)) return false;
+
+        const canvas = document.getElementById('modal-canvas');
+        const container = document.getElementById('modal-canvas-container');
+        if (!canvas || !container) return false;
+
+        clearModalInteractionPreview();
+        const ctx = canvas.getContext('2d');
+        const dpr = getRenderDpr();
+        const rect = container.getBoundingClientRect();
+        const width = rect.width;
+        const height = rect.height;
+        if (width <= 0 || height <= 0) return false;
+
+        const transform = getModalViewTransform(rect);
+        const runtimes = getModalBlendRuntimes(modalSection);
+        if (!transform || !runtimes || !modalBlendRenderCache) return false;
+
+        const cacheKey = getModalBlendRenderCacheKey(
+            modalSection,
+            transform,
+            width,
+            height,
+            dpr,
+            Math.max(0.25, modalSpotSize * modalZoom * 0.8),
+            runtimes,
+        );
+        if (modalBlendRenderCache.key !== cacheKey) return false;
+
+        canvas.width = width * dpr;
+        canvas.height = height * dpr;
+        ctx.scale(dpr, dpr);
+        ctx.fillStyle = getPanelBg();
+        ctx.fillRect(0, 0, width, height);
+        drawModalBlendCachedLayers(ctx, width, height, modalBlendRenderCache, width * modalBlendMix);
+        cacheModalRenderedView(rect, transform);
+        updateModalViewportInfo(transform);
+        return true;
+    }}
+
     // Modal rendering
-    function renderModalSection() {{
+    function renderModalSectionExact() {{
         if (!modalSection) return;
         ensureSectionXY(modalSection);
 
         const canvas = document.getElementById('modal-canvas');
+        clearModalInteractionPreview();
         const ctx = canvas.getContext('2d');
         const dpr = getRenderDpr();
         const container = document.getElementById('modal-canvas-container');
@@ -4451,36 +13397,49 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         ctx.fillStyle = getPanelBg();
         ctx.fillRect(0, 0, width, height);
 
-        if (modalSection.x.length === 0) return;
-
-        const bounds = modalSection.bounds;
-        const dataWidth = bounds.xmax - bounds.xmin;
-        const dataHeight = bounds.ymax - bounds.ymin;
-        const baseScale = Math.min((width - 40) / dataWidth, (height - 40) / dataHeight);
-        const scale = baseScale * modalZoom;
-
-        const centerX = width / 2 + modalPanX;
-        const centerY = height / 2 + modalPanY;
-        const dataCenterX = (bounds.xmin + bounds.xmax) / 2;
-        const dataCenterY = (bounds.ymin + bounds.ymax) / 2;
+        if (modalSection.x.length === 0) {{
+            modalRenderedView = null;
+            updateModalViewportInfo();
+            return;
+        }}
+        const transform = getModalViewTransform(rect);
+        if (!transform) {{
+            modalRenderedView = null;
+            updateModalViewportInfo();
+            return;
+        }}
         const adjustedSpotSize = Math.max(0.25, modalSpotSize * modalZoom * 0.8);
 
         const config = getColorConfig();
         const values = getSectionValues(modalSection);
         const blendRuntimes = getModalBlendRuntimes(modalSection);
         const blendActive = !!blendRuntimes;
-        const typeToggleBtn = document.getElementById('modal-type-toggle');
-        const typeClearBtn = document.getElementById('modal-type-clear');
-        const typeSelectionDisabled = config.is_continuous || blendActive || modalAnnotationModeActive;
-        if (typeSelectionDisabled) {{
-            modalSelectedCategory = null;
-            modalTypeSelectEnabled = false;
-            typeToggleBtn?.classList.remove('active');
-        }} else if (modalSelectedCategory && !config.categories?.includes(modalSelectedCategory)) {{
-            modalSelectedCategory = null;
+        const candidateIndices = filterModalCandidateIndices(
+            modalSection,
+            getSectionVisibleScreenCandidates(modalSection, transform, adjustedSpotSize),
+        );
+        const showGeneDensity = !!currentGene && !blendActive && (modalGeneRenderMode === 'density' || modalGeneRenderMode === 'both');
+        const showGeneCells = !currentGene || blendActive || modalGeneRenderMode !== 'density';
+        const densityCandidateIndices = showGeneDensity
+            ? filterModalCandidateIndices(
+                modalSection,
+                getSectionVisibleScreenCandidates(modalSection, transform, Math.max(36, adjustedSpotSize * 8)),
+            )
+            : null;
+        const nCandidates = candidateIndices ? candidateIndices.length : modalSection.x.length;
+        const focusedSubviewActive = !!getModalActiveCellIndexSet(modalSection.id);
+
+        if (showGeneDensity) {{
+            const densityCache = ensureModalGeneDensityCache(
+                modalSection,
+                transform,
+                width,
+                height,
+                values,
+                densityCandidateIndices,
+            );
+            drawGeneDensityLayer(ctx, width, height, densityCache);
         }}
-        if (typeToggleBtn) typeToggleBtn.disabled = typeSelectionDisabled;
-        if (typeClearBtn) typeClearBtn.disabled = typeSelectionDisabled;
 
         const modalEdges = getSectionEdgesPacked(modalSection);
         if (showGraph && modalEdges && modalEdges.length) {{
@@ -4489,12 +13448,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ctx.lineWidth = Math.max(0.3, Math.min(2.2, modalSpotSize * modalZoom * 0.12));
             ctx.beginPath();
             const n = modalSection.x.length;
+            const visibleIndexSet = candidateIndices ? new Set(candidateIndices) : null;
             const drawEdge = (i, j) => {{
                 if (i < 0 || j < 0 || i >= n || j >= n) return;
-                const x1 = centerX + (modalSection.x[i] - dataCenterX) * scale;
-                const y1 = centerY - (modalSection.y[i] - dataCenterY) * scale;
-                const x2 = centerX + (modalSection.x[j] - dataCenterX) * scale;
-                const y2 = centerY - (modalSection.y[j] - dataCenterY) * scale;
+                if (focusedSubviewActive && (!modalSubview.indexSet.has(i) || !modalSubview.indexSet.has(j))) return;
+                if (visibleIndexSet && !visibleIndexSet.has(i) && !visibleIndexSet.has(j)) return;
+                const p1 = transform.dataToScreen(modalSection.x[i], modalSection.y[i]);
+                const p2 = transform.dataToScreen(modalSection.x[j], modalSection.y[j]);
+                const x1 = p1.x;
+                const y1 = p1.y;
+                const x2 = p2.x;
+                const y2 = p2.y;
                 const minX = Math.min(x1, x2);
                 const maxX = Math.max(x1, x2);
                 const minY = Math.min(y1, y2);
@@ -4518,22 +13482,21 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
 
         // First pass: draw grey background for hidden categories
-        const hasHidden = !blendActive && hiddenCategories.size > 0 && !config.is_continuous;
+        const hasHidden = showGeneCells && !blendActive && hiddenCategories.size > 0 && !config.is_continuous;
         if (hasHidden) {{
             ctx.fillStyle = '#cccccc';
             ctx.globalAlpha = 0.2;
-            for (let i = 0; i < modalSection.x.length; i++) {{
+            for (let k = 0; k < nCandidates; k++) {{
+                const i = candidateIndices ? candidateIndices[k] : k;
                 const val = values[i];
-                if (val === null || val === undefined) continue;
-                const catIdx = Math.round(val);
-                const catName = config.categories[catIdx];
-                if (!hiddenCategories.has(catName)) continue;
+                if (isMissingDisplayValue(val)) continue;
+                const catInfo = getCategoricalValueInfo(config, val);
+                if (!catInfo || !hiddenCategories.has(catInfo.catName)) continue;
 
-                const x = centerX + (modalSection.x[i] - dataCenterX) * scale;
-                const y = centerY - (modalSection.y[i] - dataCenterY) * scale;
-
-                if (x < -adjustedSpotSize || x > width + adjustedSpotSize ||
-                    y < -adjustedSpotSize || y > height + adjustedSpotSize) continue;
+                const point = transform.dataToScreen(modalSection.x[i], modalSection.y[i]);
+                const x = point.x;
+                const y = point.y;
+                if (!transform.isPointVisible(x, y, adjustedSpotSize)) continue;
 
                 ctx.beginPath();
                 ctx.arc(x, y, adjustedSpotSize, 0, Math.PI * 2);
@@ -4545,12 +13508,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         // Second pass: draw visible categories on top (with optional selected-category focus)
         if (blendActive) {{
             const splitX = width * modalBlendMix;
-            for (let i = 0; i < modalSection.x.length; i++) {{
-                const x = centerX + (modalSection.x[i] - dataCenterX) * scale;
-                const y = centerY - (modalSection.y[i] - dataCenterY) * scale;
-                if (x < -adjustedSpotSize || x > width + adjustedSpotSize ||
-                    y < -adjustedSpotSize || y > height + adjustedSpotSize) continue;
-
+            for (let k = 0; k < nCandidates; k++) {{
+                const i = candidateIndices ? candidateIndices[k] : k;
+                const point = transform.dataToScreen(modalSection.x[i], modalSection.y[i]);
+                const x = point.x;
+                const y = point.y;
+                if (!transform.isPointVisible(x, y, adjustedSpotSize)) continue;
                 const runtime = x <= splitX ? blendRuntimes.a : blendRuntimes.b;
                 ctx.fillStyle = rgbToCss(getModalBlendCellRgb(runtime, i));
                 ctx.globalAlpha = 1;
@@ -4558,7 +13521,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 ctx.arc(x, y, adjustedSpotSize, 0, Math.PI * 2);
                 ctx.fill();
             }}
-
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
             ctx.lineWidth = 1.5;
             ctx.setLineDash([5, 3]);
@@ -4567,13 +13529,59 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ctx.lineTo(splitX, height);
             ctx.stroke();
             ctx.setLineDash([]);
-        }} else {{
+            ensureModalBlendRenderCache(modalSection, transform, width, height, dpr, adjustedSpotSize, blendRuntimes, candidateIndices);
+        }} else if (showGeneCells && config.is_proportions) {{
+            const propData = getSectionProportions(modalSection, currentColor);
+            const k = propData?.k || 0;
+            const PIE_MIN_RADIUS = 2.0;
+            if (propData && k > 0) {{
+                const matrix = propData.matrix;
+                const paletteCss = getProportionsPaletteCss(config);
+                const hiddenMask = getProportionsHiddenMask(config);
+                if (adjustedSpotSize >= PIE_MIN_RADIUS) {{
+                    for (let kc = 0; kc < nCandidates; kc++) {{
+                        const i = candidateIndices ? candidateIndices[kc] : kc;
+                        const val = values[i];
+                        if (isMissingDisplayValue(val)) continue;
+                        const point = transform.dataToScreen(modalSection.x[i], modalSection.y[i]);
+                        const x = point.x;
+                        const y = point.y;
+                        if (!transform.isPointVisible(x, y, adjustedSpotSize)) continue;
+                        const off = i * k;
+                        ctx.globalAlpha = 1;
+                        drawProportionsPie(
+                            ctx, x, y, adjustedSpotSize,
+                            matrix.subarray(off, off + k), k, hiddenMask, paletteCss,
+                        );
+                    }}
+                }} else {{
+                    for (let kc = 0; kc < nCandidates; kc++) {{
+                        const i = candidateIndices ? candidateIndices[kc] : kc;
+                        const val = values[i];
+                        if (isMissingDisplayValue(val)) continue;
+                        const catInfo = getCategoricalValueInfo(config, val);
+                        if (!catInfo || hiddenCategories.has(catInfo.catName)) continue;
+                        const point = transform.dataToScreen(modalSection.x[i], modalSection.y[i]);
+                        const x = point.x;
+                        const y = point.y;
+                        if (!transform.isPointVisible(x, y, adjustedSpotSize)) continue;
+                        ctx.fillStyle = paletteCss[catInfo.catIdx];
+                        ctx.globalAlpha = 1;
+                        ctx.beginPath();
+                        ctx.arc(x, y, adjustedSpotSize, 0, Math.PI * 2);
+                        ctx.fill();
+                    }}
+                }}
+            }}
+        }} else if (showGeneCells) {{
             const activeSpotlight = getLinkedSpotlightCategory(config);
             const focusCategory = activeSpotlight || modalSelectedCategory;
-            const hasTypeFocus = !config.is_continuous && focusCategory;
-            for (let i = 0; i < modalSection.x.length; i++) {{
+            const hasNeighborFocusModal = neighborNetworkFocusCategories && neighborNetworkFocusCategories.size > 0;
+            const hasTypeFocus = !config.is_continuous && (focusCategory || hasNeighborFocusModal);
+            for (let k = 0; k < nCandidates; k++) {{
+                const i = candidateIndices ? candidateIndices[k] : k;
                 const val = values[i];
-                if (val === null || val === undefined) continue;
+                if (isMissingDisplayValue(val)) continue;
 
                 let color;
                 let isSelectedCat = false;
@@ -4581,18 +13589,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     const t = (val - config.vmin) / (config.vmax - config.vmin);
                     color = magma(Math.max(0, Math.min(1, t)));
                 }} else {{
-                    const catIdx = Math.round(val);
-                    const catName = config.categories[catIdx];
-                    if (hiddenCategories.has(catName)) continue;
-                    isSelectedCat = focusCategory && catName === focusCategory;
-                    color = getCategoryColor(catIdx);
+                    const catInfo = getCategoricalValueInfo(config, val);
+                    if (!catInfo || hiddenCategories.has(catInfo.catName)) continue;
+                    isSelectedCat = (focusCategory && catInfo.catName === focusCategory) ||
+                                    (hasNeighborFocusModal && neighborNetworkFocusCategories.has(catInfo.catName));
+                    color = getCategoryColor(catInfo.catIdx, config.colorCol);
                 }}
 
-                const x = centerX + (modalSection.x[i] - dataCenterX) * scale;
-                const y = centerY - (modalSection.y[i] - dataCenterY) * scale;
-
-                if (x < -adjustedSpotSize || x > width + adjustedSpotSize ||
-                    y < -adjustedSpotSize || y > height + adjustedSpotSize) continue;
+                const point = transform.dataToScreen(modalSection.x[i], modalSection.y[i]);
+                const x = point.x;
+                const y = point.y;
+                if (!transform.isPointVisible(x, y, adjustedSpotSize)) continue;
 
                 if (hasTypeFocus && !isSelectedCat) {{
                     ctx.fillStyle = '#bbbbbb';
@@ -4609,53 +13616,37 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         ctx.globalAlpha = 1;
 
         // Third pass: draw selection highlights
-        if (selectedCells.size > 0) {{
-            ctx.strokeStyle = '#ffd700';
-            ctx.lineWidth = 3;
-            for (let i = 0; i < modalSection.x.length; i++) {{
+        if (selectedCells.size > 0 && !focusedSubviewActive) {{
+            ctx.strokeStyle = getSelectionOutlineColor();
+            ctx.lineWidth = Math.max(1, Math.min(1.75, adjustedSpotSize * 0.24));
+            for (let k = 0; k < nCandidates; k++) {{
+                const i = candidateIndices ? candidateIndices[k] : k;
                 if (!isCellSelected(modalSection.id, i)) continue;
 
                 const val = values[i];
-                if (!blendActive && (val === null || val === undefined)) continue;
+                if (!blendActive && isMissingDisplayValue(val)) continue;
 
                 // Skip hidden categories
                 if (!blendActive && !config.is_continuous) {{
-                    const catIdx = Math.round(val);
-                    const catName = config.categories[catIdx];
-                    if (hiddenCategories.has(catName)) continue;
+                    const catInfo = getCategoricalValueInfo(config, val);
+                    if (!catInfo || hiddenCategories.has(catInfo.catName)) continue;
                 }}
 
-                const x = centerX + (modalSection.x[i] - dataCenterX) * scale;
-                const y = centerY - (modalSection.y[i] - dataCenterY) * scale;
-
-                if (x < -adjustedSpotSize || x > width + adjustedSpotSize ||
-                    y < -adjustedSpotSize || y > height + adjustedSpotSize) continue;
+                const point = transform.dataToScreen(modalSection.x[i], modalSection.y[i]);
+                const x = point.x;
+                const y = point.y;
+                if (!transform.isPointVisible(x, y, adjustedSpotSize)) continue;
 
                 ctx.beginPath();
-                ctx.arc(x, y, adjustedSpotSize + 2, 0, Math.PI * 2);
+                ctx.arc(x, y, adjustedSpotSize + 1, 0, Math.PI * 2);
                 ctx.stroke();
             }}
         }}
 
         // No extra highlight needed: non-selected categories are greyed out above
 
-        drawNeighborHighlights(ctx, modalSection, {{
-            scale,
-            centerX,
-            centerY,
-            dataCenterX,
-            dataCenterY,
-            width,
-            height
-        }}, adjustedSpotSize);
-
-        drawModalAnnotations(ctx, {{
-            scale,
-            centerX,
-            centerY,
-            dataCenterX,
-            dataCenterY,
-        }});
+        drawNeighborHighlights(ctx, modalSection, transform, adjustedSpotSize);
+        drawModalAnnotations(ctx, transform);
 
         if (isDrawingModalLasso && modalLassoPath.length > 1) {{
             ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
@@ -4683,7 +13674,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ctx.setLineDash([]);
         }}
 
-        document.getElementById('zoom-info').textContent = `${{Math.round(modalZoom * 100)}}%`;
+        drawScalebar(ctx, transform, {{ isModal: true, darkBg: currentTheme === 'dark' }});
+
+        cacheModalRenderedView(rect, transform);
+        updateModalViewportInfo(transform);
+    }}
+
+    function renderModalSection() {{
+        clearModalInteractionCommitTimer();
+        renderModalSectionExact();
     }}
 
     // Legend
@@ -4757,8 +13756,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
         }} else {{
             const activeSpotlight = getLinkedSpotlightCategory(config);
+            const proportionsBadge = config.is_proportions
+                ? `<div class="legend-subtitle" style="font-size:11px;opacity:0.7;margin-top:-4px;margin-bottom:6px;">Cell-type proportions (pie per spot)</div>`
+                : '';
             let html = `
                 <div class="legend-title">${{colorLabel}}</div>
+                ${{proportionsBadge}}
                 <div class="legend-actions">
                     <button class="legend-btn" id="${{targetId}}-show-all">Show All</button>
                     <button class="legend-btn" id="${{targetId}}-hide-all">Hide All</button>
@@ -4771,7 +13774,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const spotlightClass = activeSpotlight && cat === activeSpotlight ? 'spotlight' : '';
                 const dimmedClass = activeSpotlight && cat !== activeSpotlight ? 'dimmed' : '';
                 html += `<div class="legend-item ${{hiddenClass}} ${{selectedClass}} ${{spotlightClass}} ${{dimmedClass}}" data-category="${{cat}}">
-                    <div class="legend-color" style="background: ${{getCategoryColor(idx)}}"></div>
+                    <div class="legend-color" style="background: ${{getCategoryColor(idx, config.colorCol)}}"></div>
                     <span>${{cat}}</span>
                 </div>`;
             }});
@@ -4808,6 +13811,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     spotlightPinnedCategory = null;
                     spotlightHoverCategory = null;
                 }}
+                neighborNetworkFocusCategories = null;
                 updateAllLegendSpotlightClasses();
                 rerenderForSpotlightChange();
             }});
@@ -4832,6 +13836,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 item.addEventListener('click', () => {{
                     const cat = item.dataset.category;
                     if (linkedSpotlightEnabled) {{
+                        neighborNetworkFocusCategories = null;
                         if (hiddenCategories.has(cat)) hiddenCategories.delete(cat);
                         if (spotlightPinnedCategory === cat) spotlightPinnedCategory = null;
                         else spotlightPinnedCategory = cat;
@@ -4854,6 +13859,527 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
     }}
 
+    function updateAnnotationComparisonTabVisibility() {{
+        if (insightsTopLevelTab === 'compare' && insightsCompareTab === 'regions') {{
+            renderAnnotationComparison();
+        }}
+    }}
+
+    const INSIGHTS_TOP_LEVEL_TABS = ['overview', 'genes', 'compare', 'neighbors'];
+    const INSIGHTS_SUBTABS = {{
+        overview: ['summary', 'sections'],
+        genes: ['markers', 'spatial', 'distribution'],
+        compare: ['groups', 'regions', 'cell-de'],
+        neighbors: ['enrichment', 'interactions'],
+    }};
+
+    function normalizeInsightsTabsState() {{
+        if (!INSIGHTS_TOP_LEVEL_TABS.includes(insightsTopLevelTab)) insightsTopLevelTab = 'overview';
+        if (!INSIGHTS_SUBTABS.overview.includes(insightsOverviewTab)) insightsOverviewTab = 'summary';
+        if (!INSIGHTS_SUBTABS.genes.includes(insightsGenesTab)) insightsGenesTab = 'markers';
+        if (!INSIGHTS_SUBTABS.compare.includes(insightsCompareTab)) insightsCompareTab = 'groups';
+        if (!INSIGHTS_SUBTABS.neighbors.includes(insightsNeighborsTab)) insightsNeighborsTab = 'enrichment';
+    }}
+
+    function getActiveInsightsSubtab(topLevel) {{
+        normalizeInsightsTabsState();
+        if (topLevel === 'genes') return insightsGenesTab;
+        if (topLevel === 'compare') return insightsCompareTab;
+        if (topLevel === 'neighbors') return insightsNeighborsTab;
+        return insightsOverviewTab;
+    }}
+
+    function setActiveInsightsSubtab(topLevel, value) {{
+        if (topLevel === 'genes') {{
+            insightsGenesTab = value;
+            return;
+        }}
+        if (topLevel === 'compare') {{
+            insightsCompareTab = value;
+            return;
+        }}
+        if (topLevel === 'neighbors') {{
+            insightsNeighborsTab = value;
+            return;
+        }}
+        insightsOverviewTab = value;
+    }}
+
+    function syncInsightsTabClasses() {{
+        normalizeInsightsTabsState();
+        INSIGHTS_TOP_LEVEL_TABS.forEach((topLevel) => {{
+            document.getElementById(`color-tab-${{topLevel}}`)?.classList.toggle('active', insightsTopLevelTab === topLevel);
+            document.getElementById(`color-tab-${{topLevel}}-content`)?.classList.toggle('active', insightsTopLevelTab === topLevel);
+            (INSIGHTS_SUBTABS[topLevel] || []).forEach((subtab) => {{
+                const isActive = getActiveInsightsSubtab(topLevel) === subtab;
+                document.getElementById(`${{topLevel}}-tab-${{subtab}}`)?.classList.toggle('active', isActive);
+                document.getElementById(`${{topLevel}}-tab-${{subtab}}-content`)?.classList.toggle('active', isActive);
+            }});
+        }});
+    }}
+
+    function renderActiveInsightsPanel() {{
+        normalizeInsightsTabsState();
+        syncInsightsTabClasses();
+
+        if (insightsTopLevelTab === 'overview') {{
+            if (insightsOverviewTab === 'sections') {{
+                renderSamplesInsights();
+            }} else {{
+                renderColorAggregation();
+                renderCellTypeTrend();
+            }}
+            return;
+        }}
+
+        if (insightsTopLevelTab === 'genes') {{
+            if (insightsGenesTab === 'spatial') {{
+                renderSpatialVariableGenes();
+            }} else if (insightsGenesTab === 'distribution') {{
+                renderGeneDistributionInsights();
+            }} else {{
+                renderMarkerGenes();
+            }}
+            return;
+        }}
+
+        if (insightsTopLevelTab === 'compare') {{
+            if (insightsCompareTab === 'regions') {{
+                renderAnnotationComparison();
+            }} else if (insightsCompareTab === 'cell-de') {{
+                renderClusterDE();
+            }} else {{
+                renderGroupDE();
+            }}
+            return;
+        }}
+
+        if (insightsNeighborsTab === 'interactions') {{
+            renderInteractionBrowser();
+        }} else {{
+            renderNeighborStats();
+        }}
+    }}
+
+    function activateInsightsTopLevelTab(topLevel, focusSubtab = null) {{
+        if (!INSIGHTS_TOP_LEVEL_TABS.includes(topLevel)) return;
+        insightsTopLevelTab = topLevel;
+        if (focusSubtab && INSIGHTS_SUBTABS[topLevel]?.includes(focusSubtab)) {{
+            setActiveInsightsSubtab(topLevel, focusSubtab);
+        }}
+        renderActiveInsightsPanel();
+    }}
+
+    function activateInsightsSubtab(topLevel, subtab) {{
+        if (!INSIGHTS_SUBTABS[topLevel]?.includes(subtab)) return;
+        insightsTopLevelTab = topLevel;
+        setActiveInsightsSubtab(topLevel, subtab);
+        renderActiveInsightsPanel();
+    }}
+
+    function renderAnnotationRegionDESection(annotations) {{
+        const {{ annotations: availableAnnotations, source, reference }} = syncAnnotationDEState(annotations);
+        let html = '<div class="annot-de-controls">';
+        html += '<div class="selection-summary-title" style="margin-top:10px">Region-to-Region DE</div>';
+        html += '<div class="agg-group-meta">Quick DE uses genes already loaded in the viewer. Full region DE can scan the sidecar in the background when available.</div>';
+
+        if (availableAnnotations.length < 2) {{
+            html += '<div class="agg-group-meta">Draw at least two annotations to compare region-level DE.</div>';
+            html += '</div>';
+            return html;
+        }}
+
+        const options = availableAnnotations.map((annotation) => {{
+            const id = Number(annotation.id);
+            const label = escapeHtml(getAnnotationDisplayLabel(annotation));
+            return `<option value="${{id}}">${{label}}</option>`;
+        }}).join('');
+
+        html += `
+            <div class="cluster-de-controls">
+                <div class="cluster-de-select-row">
+                    <div>
+                        <label>Region A</label>
+                        <select id="annotation-de-source">${{options}}</select>
+                    </div>
+                    <div>
+                        <label>Region B</label>
+                        <select id="annotation-de-reference">${{options}}</select>
+                    </div>
+                    <div>
+                        <label>Top Genes</label>
+                        <input id="annotation-de-topn" type="number" min="3" max="100" step="1" value="${{Math.max(3, Number(annotationDeTopN) || ANNOTATION_DE_TOP_N)}}">
+                    </div>
+                </div>
+                <div style="display: flex; justify-content: flex-end;">
+                    <button class="legend-btn" id="annotation-de-swap" type="button">Swap A/B</button>
+                </div>
+            </div>
+        `;
+
+        const deResult = computeRegionAnnotationDE(source, reference, {{ topN: annotationDeTopN }});
+        const exportState = getAnnotationDEExportState(source, reference, deResult);
+        const pairKey = getAnnotationDECacheKey(source, reference);
+        const fullCached = pairKey ? annotationDeFullCache.get(pairKey) : null;
+        const fullRun = (annotationDeFullRun && annotationDeFullRun.key === pairKey) ? annotationDeFullRun : null;
+        const sidecarAvailable = !!DATA.gene_aux_url;
+        const renderCards = (result) => {{
+            const topN = Math.max(1, Number(annotationDeTopN) || ANNOTATION_DE_TOP_N);
+            return (result.results || []).slice(0, topN).map((entry) => {{
+                return `
+                    <div class="comparison-card">
+                        <div class="comparison-card-title">
+                            ${{renderGeneTokenButton(entry.gene, {{
+                                isActive: entry.gene === currentGene,
+                                showMeta: false,
+                                title: 'Load region DE gene into the viewer',
+                            }})}}
+                            ${{renderGeneGoogleSearchButton(entry.gene, {{
+                                title: 'Search Google for this gene',
+                            }})}}
+                        </div>
+                        <div class="comparison-metric-grid">
+                            <div class="comparison-metric">
+                                <span class="comparison-metric-label">log2FC A/B</span>
+                                <span class="comparison-metric-value">${{formatScaleNumber(entry.log2fc)}}</span>
+                            </div>
+                            <div class="comparison-metric">
+                                <span class="comparison-metric-label">Score</span>
+                                <span class="comparison-metric-value">${{formatScaleNumber(entry.score)}}</span>
+                            </div>
+                            <div class="comparison-metric">
+                                <span class="comparison-metric-label">% expr A</span>
+                                <span class="comparison-metric-value">${{formatClusterDEPct(entry.pctA)}}</span>
+                            </div>
+                            <div class="comparison-metric">
+                                <span class="comparison-metric-label">% expr B</span>
+                                <span class="comparison-metric-value">${{formatClusterDEPct(entry.pctB)}}</span>
+                            </div>
+                            <div class="comparison-metric">
+                                <span class="comparison-metric-label">Mean A</span>
+                                <span class="comparison-metric-value">${{formatScaleNumber(entry.meanA)}}</span>
+                            </div>
+                            <div class="comparison-metric">
+                                <span class="comparison-metric-label">Mean B</span>
+                                <span class="comparison-metric-value">${{formatScaleNumber(entry.meanB)}}</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }}).join('');
+        }};
+        const sourceLabel = source ? escapeHtml(getAnnotationDisplayLabel(source)) : '';
+        const referenceLabel = reference ? escapeHtml(getAnnotationDisplayLabel(reference)) : '';
+        const topNLabel = Math.max(1, Number(annotationDeTopN) || ANNOTATION_DE_TOP_N).toLocaleString();
+        const quickSummaryHtml = (deResult.available && deResult.results.length)
+            ? `
+                <div class="agg-group-meta">
+                    Region A: <strong>${{sourceLabel}}</strong> (${{Number(deResult.nA || 0).toLocaleString()}} cells)
+                    vs Region B: <strong>${{referenceLabel}}</strong> (${{Number(deResult.nB || 0).toLocaleString()}} cells).
+                </div>
+                <div class="agg-group-meta">
+                    ${{
+                        Number(deResult.loadedGeneCount || 0) < Number(deResult.totalGeneCount || 0)
+                            ? `Using ${{Number(deResult.loadedGeneCount || 0).toLocaleString()}} of ${{Number(deResult.totalGeneCount || 0).toLocaleString()}} genes currently loaded in the viewer.`
+                            : `Using ${{Number(deResult.loadedGeneCount || 0).toLocaleString()}} loaded genes.`
+                    }}
+                    Showing top ${{topNLabel}} genes. Positive scores indicate enrichment in Region A.
+                </div>
+                ${{buildGroupVolcanoPlot(deResult.results || [])}}
+                <div class="comparison-stack">${{renderCards(deResult)}}</div>
+            `
+            : '';
+        const cachedTimestamp = fullCached?.completedAt
+            ? new Date(fullCached.completedAt).toLocaleTimeString([], {{ hour: '2-digit', minute: '2-digit', second: '2-digit' }})
+            : '';
+        const cachedSummaryHtml = fullCached?.available
+            ? (fullCached.results || []).length
+                ? `
+                    <div class="agg-group-meta">
+                        Region A: <strong>${{sourceLabel}}</strong> (${{Number(fullCached.nA || 0).toLocaleString()}} cells)
+                        vs Region B: <strong>${{referenceLabel}}</strong> (${{Number(fullCached.nB || 0).toLocaleString()}} cells).
+                    </div>
+                    <div class="agg-group-meta">
+                        Cached full sidecar DE${{cachedTimestamp ? ` from ${{cachedTimestamp}}` : ''}}
+                        across ${{Number(fullCached.totalGeneCount || 0).toLocaleString()}} genes.
+                        Showing top ${{topNLabel}} genes. Positive scores indicate enrichment in Region A.
+                    </div>
+                    ${{buildGroupVolcanoPlot(fullCached.results || [])}}
+                    <div class="comparison-stack">${{renderCards(fullCached)}}</div>
+                `
+                : `
+                    <div class="agg-group-meta">
+                        Region A: <strong>${{sourceLabel}}</strong> (${{Number(fullCached.nA || 0).toLocaleString()}} cells)
+                        vs Region B: <strong>${{referenceLabel}}</strong> (${{Number(fullCached.nB || 0).toLocaleString()}} cells).
+                    </div>
+                    <div class="agg-group-meta">
+                        Cached full sidecar DE${{cachedTimestamp ? ` from ${{cachedTimestamp}}` : ''}} found no enriched genes across ${{Number(fullCached.totalGeneCount || 0).toLocaleString()}} genes.
+                    </div>
+                `
+            : '';
+        let resultHtml = '';
+        if (!source || !reference) {{
+            resultHtml = '<div class="agg-group-meta">Choose two different annotations to compare.</div>';
+        }} else if (fullRun?.running) {{
+            const totalShards = Number(fullRun.totalShards || 0);
+            const completedShards = Number(fullRun.completedShards || 0);
+            const totalGenes = Number(fullRun.totalGenes || 0);
+            const completedGenes = Number(fullRun.completedGenes || 0);
+            const progressMax = Math.max(1, totalGenes || totalShards || 1);
+            const progressValue = Math.min(progressMax, totalGenes ? completedGenes : completedShards);
+            const progressPct = progressMax > 0 ? Math.round((progressValue / progressMax) * 100) : 0;
+            resultHtml = `
+                <div class="agg-group-meta">Scanning the full sidecar in the background. The viewer stays interactive while this runs.</div>
+                <progress value="${{progressValue}}" max="${{progressMax}}" style="width:100%; height:12px;"></progress>
+                <div class="agg-group-meta">
+                    ${{progressPct}}% complete
+                    · ${{completedGenes.toLocaleString()}} / ${{totalGenes.toLocaleString()}} genes
+                    · ${{completedShards.toLocaleString()}} / ${{totalShards.toLocaleString()}} shards
+                </div>
+                <div style="display:flex; justify-content:flex-end;">
+                    <button class="legend-btn" id="annotation-de-cancel" type="button">Cancel Full DE</button>
+                </div>
+            `;
+        }} else if (fullRun?.error) {{
+            resultHtml = `
+                <div class="agg-group-meta">Full sidecar DE failed: ${{escapeHtml(fullRun.error)}}</div>
+                <div style="display:flex; justify-content:flex-end;">
+                    <button class="legend-btn" id="annotation-de-run-full" type="button">Retry Full Region DE</button>
+                </div>
+            `;
+            if (cachedSummaryHtml) {{
+                resultHtml += '<div class="agg-group-meta">Showing the previous cached full result:</div>';
+                resultHtml += cachedSummaryHtml;
+            }} else if (quickSummaryHtml) {{
+                resultHtml += '<div class="agg-group-meta">Quick DE preview from currently loaded genes:</div>';
+                resultHtml += quickSummaryHtml;
+            }}
+        }} else if (fullCached?.available) {{
+            resultHtml = cachedSummaryHtml;
+            resultHtml += '<div style="display:flex; justify-content:flex-end;"><button class="legend-btn" id="annotation-de-refresh-full" type="button">Refresh Full DE</button></div>';
+        }} else if (!deResult.available && deResult.reason === 'empty_region') {{
+            resultHtml = '<div class="agg-group-meta">One of the selected annotations has no cells.</div>';
+        }} else if (!deResult.available && deResult.reason === 'no_loaded_genes' && sidecarAvailable) {{
+            const totalGenes = Number(deResult.totalGeneCount || 0).toLocaleString();
+            resultHtml = `
+                <div class="agg-group-meta">
+                    No genes are currently loaded for quick region DE.
+                    ${{totalGenes !== '0' ? `This viewer knows about ${{totalGenes}} sidecar genes that can be scanned on demand.` : ''}}
+                </div>
+                <div style="display:flex; justify-content:flex-end;">
+                    <button class="legend-btn" id="annotation-de-run-full" type="button">Run Full Region DE</button>
+                </div>
+            `;
+        }} else if (!deResult.available && deResult.reason === 'no_loaded_genes') {{
+            resultHtml = '<div class="agg-group-meta">No genes are currently loaded for region DE. Load genes in the Genes tab or click marker genes first.</div>';
+        }} else if (!deResult.available) {{
+            resultHtml = '<div class="agg-group-meta">Choose two different annotations to compare.</div>';
+        }} else if (!deResult.results.length) {{
+            if (sidecarAvailable && Number(deResult.loadedGeneCount || 0) < Number(deResult.totalGeneCount || 0)) {{
+                resultHtml = `
+                    <div class="agg-group-meta">No enriched genes were found among the currently loaded genes.</div>
+                    <div style="display:flex; justify-content:flex-end;">
+                        <button class="legend-btn" id="annotation-de-run-full" type="button">Run Full Region DE</button>
+                    </div>
+                `;
+            }} else {{
+                resultHtml = '<div class="agg-group-meta">No enriched genes were found among the genes currently loaded in the viewer.</div>';
+            }}
+        }} else {{
+            resultHtml = quickSummaryHtml;
+            if (sidecarAvailable && Number(deResult.loadedGeneCount || 0) < Number(deResult.totalGeneCount || 0)) {{
+                resultHtml += '<div style="display:flex; justify-content:flex-end;"><button class="legend-btn" id="annotation-de-run-full" type="button">Run Full Region DE</button></div>';
+            }}
+        }}
+
+        if (exportState) {{
+            resultHtml += `
+                <div style="display:flex; justify-content:flex-end; gap:6px; margin-top:6px;">
+                    <button class="legend-btn" id="annotation-de-export-json" type="button">Export JSON</button>
+                    <button class="legend-btn" id="annotation-de-export-csv" type="button">Export CSV</button>
+                </div>
+            `;
+        }}
+
+        html += `<div id="annotation-de-results">${{resultHtml}}</div>`;
+        html += '</div>';
+        return html;
+    }}
+
+    function renderAnnotationComparison() {{
+        const container = document.getElementById('annotation-comparison');
+        if (!container) return;
+
+        if (!modalAnnotations.length) {{
+            container.innerHTML = '<div class="agg-group-meta">Open a section, draw annotations, then switch to this tab to compare them.</div>';
+            return;
+        }}
+
+        // Build per-annotation summaries
+        const annotSummaries = modalAnnotations.map((annotation) => {{
+            const cellSet = new Set(
+                (annotation.localCellIndices || [])
+                    .filter(idx => Number.isInteger(idx) && idx >= 0)
+                    .map(idx => `${{annotation.sectionId}}:${{idx}}`)
+            );
+            const summary = computeSelectionSummary(cellSet);
+            return {{ annotation, summary }};
+        }});
+
+        let html = '';
+
+        // Composition section: stacked bars per annotation
+        const typeColumn = annotSummaries[0]?.summary?.typeColumn;
+        if (typeColumn) {{
+            // Collect all type names
+            const allTypes = new Set();
+            annotSummaries.forEach((as) => as.summary.types.forEach(([t]) => allTypes.add(t)));
+            const typeList = Array.from(allTypes);
+
+            html += `<div class="selection-summary-title">Cell Composition by Annotation</div>`;
+            annotSummaries.forEach((as) => {{
+                const annotation = as.annotation;
+                const summary = as.summary;
+                const color = annotation.color || '#888';
+                const label = escapeHtml(annotation.label || `Annotation ${{annotation.id}}`);
+                const total = summary.total;
+                const typeMap = new Map(summary.types);
+
+                html += `<div class="annot-comp-row">`;
+                html += `<div class="annot-comp-header"><span class="annot-comp-dot" style="background:${{color}}"></span><span>${{label}}</span><span class="annot-comp-count">${{total.toLocaleString()}} cells</span></div>`;
+                if (total > 0) {{
+                    html += `<div class="annot-comp-bar-track">`;
+                    let offset = 0;
+                    typeList.forEach((type, ti) => {{
+                        const cnt = typeMap.get(type) || 0;
+                        const pct = Math.round(100 * cnt / total);
+                        if (pct <= 0) return;
+                        const bgColor = getCategoryColorForValue(typeColumn, type);
+                        html += `<div class="annot-comp-segment" title="${{escapeHtml(type)}}: ${{cnt}} (${{pct}}%)" style="width:${{pct}}%;background:${{bgColor}}"></div>`;
+                    }});
+                    html += `</div>`;
+                }}
+                html += `</div>`;
+            }});
+
+            // Legend
+            if (typeList.length) {{
+                html += `<div class="annot-comp-legend">`;
+                typeList.slice(0, 8).forEach((type) => {{
+                    const typeColor = getCategoryColorForValue(typeColumn, type);
+                    html += `<span class="annot-comp-legend-item"><span class="annot-comp-dot" style="background:${{typeColor}}"></span>${{escapeHtml(type)}}</span>`;
+                }});
+                if (typeList.length > 8) {{
+                    html += `<span class="annot-comp-legend-item agg-group-meta">+${{typeList.length - 8}} more</span>`;
+                }}
+                html += `</div>`;
+            }}
+        }}
+
+        // Expression section: top 6 genes, one row per gene
+        const exprArrays = annotSummaries.map((as) => computeSelectionMeanExpression(as.summary));
+        const firstNonEmpty = exprArrays.find(arr => arr.length > 0);
+        if (firstNonEmpty) {{
+            const topGenes = firstNonEmpty.slice(0, 6).map(e => e.gene);
+            const vmax = Math.max(1, ...exprArrays.flatMap(arr =>
+                topGenes.map(g => (arr.find(e => e.gene === g)?.meanSel || 0))
+            ));
+
+            html += `<div class="selection-summary-title" style="margin-top:10px">Gene Expression by Annotation</div>`;
+            topGenes.forEach((gene) => {{
+                html += `<div class="annot-expr-row"><span class="selection-summary-expr-gene" data-gene-activate="${{escapeHtml(gene)}}" title="Load ${{escapeHtml(gene)}} into the viewer">${{escapeHtml(gene)}}</span>`;
+                html += `<div class="annot-expr-bars">`;
+                exprArrays.forEach((arr, ai) => {{
+                    const val = arr.find(e => e.gene === gene)?.meanSel || 0;
+                    const pct = Math.round(100 * val / vmax);
+                    const color = annotSummaries[ai].annotation.color || '#888';
+                    html += `<div class="annot-expr-bar" style="width:${{pct}}%;background:${{color}}" title="${{escapeHtml(annotSummaries[ai].annotation.label || '')}}: ${{val.toFixed(2)}}"></div>`;
+                }});
+                html += `</div></div>`;
+            }});
+        }}
+
+        html += renderAnnotationRegionDESection(modalAnnotations);
+
+        container.innerHTML = html || '<div class="agg-group-meta">No data available.</div>';
+        const {{ source, reference }} = syncAnnotationDEState(modalAnnotations);
+        const sourceSelect = container.querySelector('#annotation-de-source');
+        const referenceSelect = container.querySelector('#annotation-de-reference');
+        const topNInput = container.querySelector('#annotation-de-topn');
+        const swapBtn = container.querySelector('#annotation-de-swap');
+        if (sourceSelect) {{
+            sourceSelect.value = annotationDeSourceId ? String(annotationDeSourceId) : '';
+            sourceSelect.addEventListener('change', () => {{
+                cancelAnnotationFullDERun();
+                annotationDeSourceId = Number(sourceSelect.value) || null;
+                renderAnnotationComparison();
+            }});
+        }}
+        if (referenceSelect) {{
+            referenceSelect.value = annotationDeReferenceId ? String(annotationDeReferenceId) : '';
+            referenceSelect.addEventListener('change', () => {{
+                cancelAnnotationFullDERun();
+                annotationDeReferenceId = Number(referenceSelect.value) || null;
+                renderAnnotationComparison();
+            }});
+        }}
+        if (topNInput) {{
+            topNInput.value = String(Math.max(3, Number(annotationDeTopN) || ANNOTATION_DE_TOP_N));
+            topNInput.addEventListener('change', () => {{
+                const next = Math.min(100, Math.max(3, Number(topNInput.value) || ANNOTATION_DE_TOP_N));
+                annotationDeTopN = next;
+                renderAnnotationComparison();
+            }});
+        }}
+        if (swapBtn) {{
+            swapBtn.addEventListener('click', () => {{
+                cancelAnnotationFullDERun();
+                const sourceId = annotationDeSourceId;
+                annotationDeSourceId = annotationDeReferenceId;
+                annotationDeReferenceId = sourceId;
+                renderAnnotationComparison();
+            }});
+        }}
+        const runFullBtn = container.querySelector('#annotation-de-run-full');
+        if (runFullBtn && source && reference) {{
+            runFullBtn.addEventListener('click', () => {{
+                runFullRegionAnnotationDE(source, reference);
+            }});
+        }}
+        const refreshFullBtn = container.querySelector('#annotation-de-refresh-full');
+        if (refreshFullBtn && source && reference) {{
+            refreshFullBtn.addEventListener('click', () => {{
+                runFullRegionAnnotationDE(source, reference);
+            }});
+        }}
+        const cancelBtn = container.querySelector('#annotation-de-cancel');
+        if (cancelBtn) {{
+            cancelBtn.addEventListener('click', () => {{
+                cancelAnnotationFullDERun();
+                renderAnnotationComparison();
+            }});
+        }}
+        const exportJsonBtn = container.querySelector('#annotation-de-export-json');
+        if (exportJsonBtn && source && reference) {{
+            exportJsonBtn.addEventListener('click', () => {{
+                const quickResult = computeRegionAnnotationDE(source, reference, {{ topN: annotationDeTopN }});
+                const exportState = getAnnotationDEExportState(source, reference, quickResult);
+                exportAnnotationDEReport(source, reference, exportState);
+            }});
+        }}
+        const exportCsvBtn = container.querySelector('#annotation-de-export-csv');
+        if (exportCsvBtn && source && reference) {{
+            exportCsvBtn.addEventListener('click', () => {{
+                const quickResult = computeRegionAnnotationDE(source, reference, {{ topN: annotationDeTopN }});
+                const exportState = getAnnotationDEExportState(source, reference, quickResult);
+                exportAnnotationDECsv(source, reference, exportState);
+            }});
+        }}
+        bindVolcanoGroupInteraction(container, renderAnnotationComparison);
+        bindGeneActivateButtons(container, renderAnnotationComparison);
+        bindGeneGoogleSearchButtons(container);
+    }}
+
     function buildColorPanel() {{
         const panel = document.getElementById('color-panel');
         if (!panel) return;
@@ -4866,104 +14392,157 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         panel.innerHTML = `
             <div class="color-panel-header">
-                <div class="color-panel-title">Color explorer</div>
+                <div class="color-panel-title">Insights</div>
             </div>
             <div class="color-panel-section">
-                <label>Search colors</label>
+                <label>Search Colors</label>
                 <input class="color-search" id="color-search" type="text" placeholder="Type to filter...">
             </div>
             <div class="color-panel-section">
-                <label>Available colors</label>
+                <label>Available Colors</label>
                 <div class="color-list" id="color-list"></div>
             </div>
             <div class="color-panel-section">
                 <label>Details</label>
-                <div class="color-tabs">
-                    <button class="color-tab active" id="color-tab-aggregate" type="button">Stats</button>
-                    <button class="color-tab" id="color-tab-neighbors" type="button">Neighbors</button>
-                    <button class="color-tab" id="color-tab-genes" type="button">Genes</button>
+                <div class="color-tabs insights-top-tabs">
+                    <button class="color-tab active" id="color-tab-overview" data-insights-top="overview" type="button">Overview</button>
+                    <button class="color-tab" id="color-tab-genes" data-insights-top="genes" type="button">Genes</button>
+                    <button class="color-tab" id="color-tab-compare" data-insights-top="compare" type="button">Compare</button>
+                    <button class="color-tab" id="color-tab-neighbors" data-insights-top="neighbors" type="button">Neighbors</button>
                 </div>
-                <div class="color-tab-content active" id="color-tab-aggregate-content">
-                    <div>
-                        <label>Aggregate by</label>
-                        <select id="color-groupby" ${{!hasMetadata ? 'disabled' : ''}}>
-                            ${{options}}
-                        </select>
+                <div class="color-tab-content active" id="color-tab-overview-content">
+                    <div class="color-tabs insights-subtabs">
+                        <button class="color-tab active" id="overview-tab-summary" data-insights-parent="overview" data-insights-subtab="summary" type="button">Summary</button>
+                        <button class="color-tab" id="overview-tab-sections" data-insights-parent="overview" data-insights-subtab="sections" type="button">Sections</button>
                     </div>
-                    <div style="display: flex; justify-content: flex-end;">
-                        <button class="legend-btn" id="color-aggregation-toggle" type="button">Collapse stats</button>
+                    <div class="color-tab-content active" id="overview-tab-summary-content">
+                        <div>
+                            <label>Aggregate By</label>
+                            <select id="color-groupby" ${{!hasMetadata ? 'disabled' : ''}}>
+                                ${{options}}
+                            </select>
+                        </div>
+                        <div style="display: flex; justify-content: flex-end;">
+                            <button class="legend-btn" id="color-aggregation-toggle" type="button">Collapse Stats</button>
+                        </div>
+                        <div class="color-aggregation" id="color-aggregation">
+                            <div class="agg-group-meta">${{hasMetadata ? 'Pick a metadata column to summarize.' : 'No metadata columns available for aggregation.'}}</div>
+                        </div>
+                        <div>
+                            <label>Cell Type Trend</label>
+                            <input class="color-search" id="celltype-search" type="text" placeholder="Search Cell Type...">
+                        </div>
+                        <div class="color-aggregation" id="celltype-trend">
+                            <div class="agg-group-meta">${{hasMetadata ? 'Search for a category to see counts across the selected metadata.' : 'No metadata columns available.'}}</div>
+                        </div>
                     </div>
-                    <div class="color-aggregation" id="color-aggregation">
-                        <div class="agg-group-meta">${{hasMetadata ? 'Pick a metadata column to summarize.' : 'No metadata columns available for aggregation.'}}</div>
-                    </div>
-                    <div>
-                        <label>Cell type trend</label>
-                        <input class="color-search" id="celltype-search" type="text" placeholder="Search cell type...">
-                    </div>
-                    <div class="color-aggregation" id="celltype-trend">
-                        <div class="agg-group-meta">${{hasMetadata ? 'Search for a category to see counts across the selected metadata.' : 'No metadata columns available.'}}</div>
-                    </div>
-                </div>
-                <div class="color-tab-content" id="color-tab-neighbors-content">
-                    <div>
-                        <label>Search cell type</label>
-                        <input class="color-search" id="neighbor-search" type="text" placeholder="Search cell type...">
-                    </div>
-                    <div style="display: flex; justify-content: flex-end;">
-                        <button class="legend-btn" id="neighbor-stats-toggle" type="button">Collapse neighbor stats</button>
-                    </div>
-                    <div class="color-aggregation" id="neighbor-stats">
-                        <div class="agg-group-meta">Select a categorical color to view neighbor stats.</div>
-                    </div>
-                    <div>
-                        <label>Interaction source</label>
-                        <select id="interaction-source"></select>
-                    </div>
-                    <div>
-                        <label>Target filter</label>
-                        <input class="color-search" id="interaction-search" type="text" placeholder="Filter target cell types...">
-                    </div>
-                    <div class="color-aggregation" id="interaction-browser">
-                        <div class="agg-group-meta">Select a source cell type to browse interactions.</div>
+                    <div class="color-tab-content" id="overview-tab-sections-content">
+                        <div class="color-aggregation" id="samples-panel">
+                            <div class="agg-group-meta">Open Sections to view per-section composition as stacked bars or a heatmap.</div>
+                        </div>
                     </div>
                 </div>
                 <div class="color-tab-content" id="color-tab-genes-content">
-                    <div class="color-tabs">
-                        <button class="color-tab active" id="genes-tab-dotplot" type="button">Dotplot</button>
-                        <button class="color-tab" id="genes-tab-markers" type="button">Markers</button>
+                    <div class="color-tabs insights-subtabs">
+                        <button class="color-tab active" id="genes-tab-markers" data-insights-parent="genes" data-insights-subtab="markers" type="button">Markers</button>
+                        <button class="color-tab" id="genes-tab-spatial" data-insights-parent="genes" data-insights-subtab="spatial" type="button">Spatial</button>
+                        <button class="color-tab" id="genes-tab-distribution" data-insights-parent="genes" data-insights-subtab="distribution" type="button">Distribution</button>
                     </div>
-                    <div class="color-tab-content active" id="genes-tab-dotplot-content">
-                        <div class="dotplot-controls">
-                            <div>
-                                <label>Group by (categorical color)</label>
-                                <select id="dotplot-groupby"></select>
-                            </div>
-                            <div>
-                                <label>Aggregate by (metadata)</label>
-                                <select id="dotplot-aggregate-by" ${{!hasMetadata ? 'disabled' : ''}}>
-                                    ${{options}}
-                                </select>
-                            </div>
-                            <div id="dotplot-aggregate-value-wrap" style="display: none;">
-                                <label>Aggregate value</label>
-                                <select id="dotplot-aggregate-value"></select>
-                            </div>
-                            <div>
-                                <label>Genes (comma-separated)</label>
-                                <input class="color-search" id="dotplot-genes" type="text" placeholder="e.g. Cd4, Cd8a, Gfap" list="gene-list">
-                                <div class="scale-hint">Dot size = % expressing; dot color = mean expression. Press Tab to autocomplete the current gene token.</div>
-                            </div>
-                            <div style="display: flex; gap: 6px; justify-content: flex-end;">
-                                <button class="legend-btn" id="dotplot-use-hvgs" type="button">Use HVGs</button>
-                                <button class="legend-btn" id="dotplot-run" type="button">Update</button>
-                            </div>
-                            <div class="agg-group-meta" id="dotplot-status">Pick a categorical color + genes to compute a dotplot.</div>
-                            <div class="dotplot-grid" id="dotplot-grid"></div>
-                        </div>
-                    </div>
-                    <div class="color-tab-content" id="genes-tab-markers-content">
+                    <div class="color-tab-content active" id="genes-tab-markers-content">
                         <input class="marker-search" id="marker-gene-search" type="text" placeholder="Search marker genes...">
                         <div class="marker-genes" id="marker-genes"></div>
+                    </div>
+                    <div class="color-tab-content" id="genes-tab-spatial-content">
+                        <input class="marker-search" id="spatial-gene-search" type="text" placeholder="Search spatially variable genes...">
+                        <div class="marker-genes" id="spatially-variable-genes"></div>
+                    </div>
+                    <div class="color-tab-content" id="genes-tab-distribution-content">
+                        <div class="gene-distribution-panel" id="gene-distribution-panel"></div>
+                    </div>
+                </div>
+                <div class="color-tab-content" id="color-tab-compare-content">
+                    <div class="color-tabs insights-subtabs">
+                        <button class="color-tab active" id="compare-tab-groups" data-insights-parent="compare" data-insights-subtab="groups" type="button">Groups</button>
+                        <button class="color-tab" id="compare-tab-regions" data-insights-parent="compare" data-insights-subtab="regions" type="button">Regions</button>
+                        <button class="color-tab" id="compare-tab-cell-de" data-insights-parent="compare" data-insights-subtab="cell-de" type="button">Cell DE</button>
+                    </div>
+                    <div class="color-tab-content active" id="compare-tab-groups-content">
+                        <div class="agg-group-meta" id="group-de-summary">Compare samples, metadata groups, or annotations.</div>
+                        <div class="color-aggregation" id="group-de-panel">
+                            <div class="agg-group-meta">Configure two samples, metadata groups, or annotation groups for exploratory group DE.</div>
+                        </div>
+                    </div>
+                    <div class="color-tab-content" id="compare-tab-regions-content">
+                        <div class="color-aggregation" id="annotation-comparison">
+                            <div class="agg-group-meta">Open a section, draw annotations, then use Regions to compare those cell sets.</div>
+                        </div>
+                    </div>
+                    <div class="color-tab-content" id="compare-tab-cell-de-content">
+                        <div class="cluster-de-controls">
+                            <div>
+                                <label>Annotation</label>
+                                <select id="cluster-de-groupby"></select>
+                            </div>
+                            <div class="cluster-de-select-row">
+                                <div>
+                                    <label>Category A</label>
+                                    <select id="cluster-de-source"></select>
+                                </div>
+                                <div>
+                                    <label>Category B</label>
+                                    <select id="cluster-de-reference"></select>
+                                </div>
+                            </div>
+                            <div style="display: flex; justify-content: flex-end;">
+                                <button class="legend-btn" id="cluster-de-swap" type="button">Swap A/B</button>
+                            </div>
+                        </div>
+                        <div class="agg-group-meta" id="cluster-de-summary">Choose two categories to compare.</div>
+                        <div class="color-aggregation" id="cluster-de-results">
+                            <div class="agg-group-meta">Choose two categories to compare.</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="color-tab-content" id="color-tab-neighbors-content">
+                    <div class="color-tabs insights-subtabs">
+                        <button class="color-tab active" id="neighbors-tab-enrichment" data-insights-parent="neighbors" data-insights-subtab="enrichment" type="button">Enrichment</button>
+                        <button class="color-tab" id="neighbors-tab-interactions" data-insights-parent="neighbors" data-insights-subtab="interactions" type="button">Interactions</button>
+                    </div>
+                    <div class="color-tab-content active" id="neighbors-tab-enrichment-content">
+                        <div>
+                            <label>Search Cell Type</label>
+                            <input class="color-search" id="neighbor-search" type="text" placeholder="Search Cell Type...">
+                        </div>
+                        <div class="neighbor-view-controls">
+                            <div>
+                                <label>View</label>
+                            </div>
+                            <div class="neighbor-view-buttons">
+                                <button class="legend-btn active" data-neighbor-view="table" type="button">Table</button>
+                                <button class="legend-btn" data-neighbor-view="bubble" type="button">Network</button>
+                                <button class="legend-btn" data-neighbor-view="chord" type="button">Chord</button>
+                            </div>
+                        </div>
+                        <div style="display: flex; justify-content: flex-end; gap: 6px;">
+                            <button class="legend-btn" id="neighbor-focus-reset" type="button" style="display:none">Reset highlight</button>
+                            <button class="legend-btn" id="neighbor-stats-toggle" type="button">Collapse Neighbor Stats</button>
+                        </div>
+                        <div class="color-aggregation" id="neighbor-stats">
+                            <div class="agg-group-meta">Select a categorical color to view neighbor stats.</div>
+                        </div>
+                    </div>
+                    <div class="color-tab-content" id="neighbors-tab-interactions-content">
+                        <div>
+                            <label>Interaction Source</label>
+                            <select id="interaction-source"></select>
+                        </div>
+                        <div>
+                            <label>Target Filter</label>
+                            <input class="color-search" id="interaction-search" type="text" placeholder="Filter Target Cell Types...">
+                        </div>
+                        <div class="color-aggregation" id="interaction-browser">
+                            <div class="agg-group-meta">Select a source cell type to browse interactions.</div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -4978,14 +14557,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         groupBy.addEventListener('change', () => {{
             renderColorAggregation();
             renderCellTypeTrend();
-            const dpAgg = document.getElementById('dotplot-aggregate-by');
-            if (dpAgg) dpAgg.value = groupBy.value;
-            updateDotplotAggregateValueOptions();
-            const genesTop = document.getElementById('color-tab-genes');
-            const genesDot = document.getElementById('genes-tab-dotplot');
-            if (genesTop?.classList.contains('active') && genesDot?.classList.contains('active')) {{
-                renderDotplot();
-            }}
         }});
 
         const aggregationToggle = document.getElementById('color-aggregation-toggle');
@@ -4995,74 +14566,29 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             aggregationToggle.textContent = isCollapsed ? 'Show stats' : 'Collapse stats';
         }});
 
-        const aggregateTab = document.getElementById('color-tab-aggregate');
-        const neighborTab = document.getElementById('color-tab-neighbors');
-        const genesTab = document.getElementById('color-tab-genes');
-        const aggregateContent = document.getElementById('color-tab-aggregate-content');
-        const neighborContent = document.getElementById('color-tab-neighbors-content');
-        const genesContent = document.getElementById('color-tab-genes-content');
-
-        const genesDotTab = document.getElementById('genes-tab-dotplot');
-        const genesMarkersTab = document.getElementById('genes-tab-markers');
-        const genesDotContent = document.getElementById('genes-tab-dotplot-content');
-        const genesMarkersContent = document.getElementById('genes-tab-markers-content');
-        aggregateTab.addEventListener('click', () => {{
-            aggregateTab.classList.add('active');
-            neighborTab.classList.remove('active');
-            genesTab.classList.remove('active');
-            aggregateContent.classList.add('active');
-            neighborContent.classList.remove('active');
-            genesContent.classList.remove('active');
-            renderColorAggregation();
-            renderCellTypeTrend();
+        panel.querySelectorAll('[data-insights-top]').forEach((btn) => {{
+            btn.addEventListener('click', () => {{
+                activateInsightsTopLevelTab(btn.getAttribute('data-insights-top') || 'overview');
+            }});
         }});
-        neighborTab.addEventListener('click', () => {{
-            neighborTab.classList.add('active');
-            aggregateTab.classList.remove('active');
-            genesTab.classList.remove('active');
-            neighborContent.classList.add('active');
-            aggregateContent.classList.remove('active');
-            genesContent.classList.remove('active');
-            renderNeighborStats();
-            renderInteractionBrowser();
-        }});
-        genesTab.addEventListener('click', () => {{
-            genesTab.classList.add('active');
-            aggregateTab.classList.remove('active');
-            neighborTab.classList.remove('active');
-            genesContent.classList.add('active');
-            aggregateContent.classList.remove('active');
-            neighborContent.classList.remove('active');
-            // Default to Dotplot subtab.
-            if (!genesDotTab.classList.contains('active') && !genesMarkersTab.classList.contains('active')) {{
-                genesDotTab.classList.add('active');
-                genesMarkersTab.classList.remove('active');
-                genesDotContent.classList.add('active');
-                genesMarkersContent.classList.remove('active');
-            }}
-            if (genesDotTab.classList.contains('active')) renderDotplot();
-            else renderMarkerGenes();
-        }});
-
-        genesDotTab.addEventListener('click', () => {{
-            genesDotTab.classList.add('active');
-            genesMarkersTab.classList.remove('active');
-            genesDotContent.classList.add('active');
-            genesMarkersContent.classList.remove('active');
-            renderDotplot();
-        }});
-        genesMarkersTab.addEventListener('click', () => {{
-            genesMarkersTab.classList.add('active');
-            genesDotTab.classList.remove('active');
-            genesMarkersContent.classList.add('active');
-            genesDotContent.classList.remove('active');
-            renderMarkerGenes();
+        panel.querySelectorAll('[data-insights-subtab]').forEach((btn) => {{
+            btn.addEventListener('click', () => {{
+                const topLevel = btn.getAttribute('data-insights-parent') || 'overview';
+                const subtab = btn.getAttribute('data-insights-subtab') || '';
+                activateInsightsSubtab(topLevel, subtab);
+            }});
         }});
 
         const markerSearch = document.getElementById('marker-gene-search');
         markerSearch.addEventListener('input', () => {{
-            if (genesTab.classList.contains('active') && genesMarkersTab.classList.contains('active')) {{
+            if (insightsTopLevelTab === 'genes' && insightsGenesTab === 'markers') {{
                 renderMarkerGenes();
+            }}
+        }});
+        const spatialGeneSearch = document.getElementById('spatial-gene-search');
+        spatialGeneSearch?.addEventListener('input', () => {{
+            if (insightsTopLevelTab === 'genes' && insightsGenesTab === 'spatial') {{
+                renderSpatialVariableGenes();
             }}
         }});
 
@@ -5075,6 +14601,27 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         neighborSearch.addEventListener('input', () => {{
             renderNeighborStats();
         }});
+        panel.querySelectorAll('[data-neighbor-view]').forEach((btn) => {{
+            btn.classList.toggle('active', btn.getAttribute('data-neighbor-view') === neighborStatsView);
+            btn.addEventListener('click', () => {{
+                const nextView = btn.getAttribute('data-neighbor-view') || 'table';
+                if (nextView === neighborStatsView) return;
+                neighborStatsView = nextView;
+                hoveredNeighborFocus = null;
+                clearNeighborNetworkFocus();
+                panel.querySelectorAll('[data-neighbor-view]').forEach((other) => {{
+                    other.classList.toggle('active', other.getAttribute('data-neighbor-view') === neighborStatsView);
+                }});
+                renderNeighborStats();
+            }});
+        }});
+        const neighborFocusReset = document.getElementById('neighbor-focus-reset');
+        if (neighborFocusReset) {{
+            neighborFocusReset.addEventListener('click', () => {{
+                clearNeighborNetworkFocus();
+                renderNeighborStats();
+            }});
+        }}
         const neighborStatsToggle = document.getElementById('neighbor-stats-toggle');
         const neighborStatsContainer = document.getElementById('neighbor-stats');
         neighborStatsToggle.addEventListener('click', () => {{
@@ -5091,53 +14638,56 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             renderInteractionBrowser();
         }});
 
-        // Dotplot setup
-        const dotplotGroupby = document.getElementById('dotplot-groupby');
-        const dotplotGenes = document.getElementById('dotplot-genes');
-        const dotplotRun = document.getElementById('dotplot-run');
-        const dotplotUseHvgs = document.getElementById('dotplot-use-hvgs');
-        const dotplotAgg = document.getElementById('dotplot-aggregate-by');
-        const dotplotAggValue = document.getElementById('dotplot-aggregate-value');
+        const clusterDeGroupbySelect = document.getElementById('cluster-de-groupby');
+        const clusterDeSourceSelect = document.getElementById('cluster-de-source');
+        const clusterDeReferenceSelect = document.getElementById('cluster-de-reference');
+        const clusterDeSwap = document.getElementById('cluster-de-swap');
 
         const catCols = getCategoricalColorColumns();
-        if (dotplotGroupby) {{
-            dotplotGroupby.innerHTML = catCols.map(c => `<option value="${{c}}">${{c}}</option>`).join('');
-            if (catCols.includes(currentColor)) dotplotGroupby.value = currentColor;
-            dotplotGroupby.addEventListener('change', () => renderDotplot());
-        }}
-        if (dotplotAgg) {{
-            dotplotAgg.value = groupBy.value;
-            dotplotAgg.addEventListener('change', () => {{
-                groupBy.value = dotplotAgg.value;
-                renderColorAggregation();
-                renderCellTypeTrend();
-                updateDotplotAggregateValueOptions();
-                renderDotplot();
-            }});
-        }}
-        updateDotplotAggregateValueOptions();
-        dotplotAggValue?.addEventListener('change', () => renderDotplot());
-        dotplotRun?.addEventListener('click', () => renderDotplot());
-        dotplotGenes?.addEventListener('keydown', (e) => {{
-            if (e.key !== 'Tab') return;
-            if (e.altKey || e.ctrlKey || e.metaKey) return;
-            if (autocompleteDotplotGeneToken(dotplotGenes)) e.preventDefault();
+        syncClusterDEControls();
+        clusterDeGroupbySelect?.addEventListener('change', () => {{
+            clusterDeGroupby = clusterDeGroupbySelect.value || null;
+            clusterDeSourceCategory = null;
+            clusterDeReferenceCategory = null;
+            renderClusterDE();
         }});
-        dotplotGenes?.addEventListener('change', () => renderDotplot());
-        dotplotUseHvgs?.addEventListener('click', () => {{
-            const hvgs = (DATA.available_genes || []).slice(0, 8);
-            if (dotplotGenes) dotplotGenes.value = hvgs.join(', ');
-            renderDotplot();
+        clusterDeSourceSelect?.addEventListener('change', () => {{
+            clusterDeSourceCategory = clusterDeSourceSelect.value || null;
+            renderClusterDE();
+        }});
+        clusterDeReferenceSelect?.addEventListener('change', () => {{
+            clusterDeReferenceCategory = clusterDeReferenceSelect.value || null;
+            renderClusterDE();
+        }});
+        clusterDeSwap?.addEventListener('click', () => {{
+            const source = clusterDeSourceCategory;
+            clusterDeSourceCategory = clusterDeReferenceCategory;
+            clusterDeReferenceCategory = source;
+            renderClusterDE();
         }});
 
         // Keep initial load fast: only render the list. Other Insights content is computed on-demand
         // when the panel/tab is opened.
         renderColorList('');
+        syncInsightsTabClasses();
         updateExpressionScaleUI();
 
         const exprVmin = document.getElementById('expr-vmin');
         const exprVmax = document.getElementById('expr-vmax');
         const exprAuto = document.getElementById('expr-auto');
+        const exprColormap = document.getElementById('expr-colormap');
+        if (exprColormap) {{
+            Object.entries(EXPRESSION_COLORMAPS).forEach(([name, cmap]) => {{
+                const opt = document.createElement('option');
+                opt.value = name;
+                opt.textContent = cmap.label || name;
+                opt.selected = name === expressionColormapName;
+                exprColormap.appendChild(opt);
+            }});
+            exprColormap.addEventListener('change', () => {{
+                setExpressionColormap(exprColormap.value);
+            }});
+        }}
         if (exprVmin && exprVmax) {{
             const applyExpressionScale = () => {{
                 if (!currentGene) return;
@@ -5192,37 +14742,279 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             item.addEventListener('click', () => {{
                 const col = item.dataset.color;
                 if (!col) return;
-                currentColor = col;
-                currentGene = null;
-                modalSelectedCategory = null;
-                modalTypeSelectEnabled = false;
-                document.getElementById('color-select').value = col;
-                document.getElementById('gene-input').value = '';
-                hiddenCategories.clear();
-                if (DATA.colors_meta?.[col] && !DATA.colors_meta[col].is_continuous) {{
-                    selectionSummaryColor = col;
-                }}
-                updateExpressionScaleUI();
-                renderLegend('legend');
-                renderLegend('modal-legend');
-                renderAllSections();
-                if (modalSection) renderModalSection();
-                if (umapVisible) renderUMAP();
-                updateSelectionInfo();
-                renderColorList(document.getElementById('color-search').value);
-                renderColorAggregation();
-                renderCellTypeTrend();
-                renderNeighborStats();
-                renderInteractionBrowser();
-                renderMarkerGenes();
+                setViewerColorColumn(col);
             }});
         }});
+    }}
+
+    function setViewerColorColumn(col) {{
+        if (!col || !(DATA.available_colors || []).includes(col)) return;
+        currentColor = col;
+        currentGene = null;
+        invalidateGeneDensityCaches();
+        celltypeTrendTarget = null;
+        modalSelectedCategory = null;
+        modalTypeSelectEnabled = false;
+        hoveredNeighborFocus = null;
+        selectedNeighborFocus = null;
+        const colorSelect = document.getElementById('color-select');
+        if (colorSelect) colorSelect.value = col;
+        const modalColorSelect = document.getElementById('modal-color-select');
+        if (modalColorSelect) modalColorSelect.value = col;
+        const geneInput = document.getElementById('gene-input');
+        if (geneInput) geneInput.value = '';
+        const modalGeneInput = document.getElementById('modal-gene-input');
+        if (modalGeneInput) modalGeneInput.value = '';
+        (DATA.sections || []).forEach(s => {{ if (s && s._colorCache) s._colorCache = {{}}; }});
+        hiddenCategories.clear();
+        if (DATA.colors_meta?.[currentColor] && !DATA.colors_meta[currentColor].is_continuous) {{
+            selectionSummaryColor = currentColor;
+        }}
+        updateExpressionScaleUI();
+        renderLegend('legend');
+        renderLegend('modal-legend');
+        renderAllSections();
+        if (modalSection) renderModalSection();
+        if (umapVisible) renderUMAP();
+        updateSelectionInfo();
+        renderGeneDiscoveryPanel();
+        renderColorList(document.getElementById('color-search')?.value || '');
+        renderActiveInsightsPanel();
+    }}
+
+    function computeSectionComposition(colorCol) {{
+        const config = DATA.colors_meta?.[colorCol];
+        if (!config || config.is_continuous) return null;
+        const categories = config.categories || [];
+        if (!categories.length) return null;
+        const rows = [];
+        (DATA.sections || []).forEach(function(section) {{
+            const vals = getSectionColorValues(section, colorCol);
+            if (!vals || !vals.length) return;
+            const counts = new Array(categories.length).fill(0);
+            let total = 0;
+            for (let i = 0; i < vals.length; i++) {{
+                const v = Math.round(vals[i]);
+                if (v >= 0 && v < categories.length) {{ counts[v]++; total++; }}
+            }}
+            const fractions = total > 0 ? counts.map(function(c) {{ return c / total; }}) : counts.map(function() {{ return 0; }});
+            rows.push({{ id: section.id, metadata: section.metadata || {{}}, fractions, total, counts }});
+        }});
+        return {{ categories, rows }};
+    }}
+
+    function buildSamplesBarsSvg(rows, categories, colorCol) {{
+        const ROW_H = 18, STRIP_W = 8, LABEL_W = 88, BAR_W = 194, PL = 4, PT = 2, PR = 4;
+        const W = PL + STRIP_W + 3 + LABEL_W + 3 + BAR_W + PR;
+        const H = PT + rows.length * ROW_H + PT;
+        const parts = ['<svg class="samples-svg" viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '">'];
+        rows.forEach(function(row, ri) {{
+            const y = PT + ri * ROW_H;
+            const midY = (y + ROW_H / 2).toFixed(1);
+            const sid = row.id;
+            const esc = escapeHtml(sid);
+            const outlineCol = OUTLINE_BY ? getOutlineColor(row.metadata[OUTLINE_BY]) : null;
+            if (outlineCol) {{
+                parts.push('<rect x="' + PL + '" y="' + (y+2) + '" width="' + STRIP_W + '" height="' + (ROW_H-4) + '" fill="' + outlineCol + '" rx="2" data-section-id="' + esc + '" style="cursor:pointer"/>');
+            }}
+            const labelX = PL + STRIP_W + 3;
+            const shortId = sid.length > 13 ? sid.slice(0, 12) + '\u2026' : sid;
+            const headerTip = escapeHtml(sid + ' \u00b7 ' + row.total.toLocaleString() + ' cells');
+            parts.push('<text x="' + labelX + '" y="' + midY + '" dy="0.35em" font-size="9" fill="var(--text-color)" font-family="inherit" text-anchor="start" data-section-id="' + esc + '" data-tooltip="' + headerTip + '" style="cursor:pointer">' + escapeHtml(shortId) + '</text>');
+            const barX = PL + STRIP_W + 3 + LABEL_W + 3;
+            let ox = 0;
+            categories.forEach(function(cat, ci) {{
+                const frac = row.fractions[ci] || 0;
+                if (frac <= 0) return;
+                const w = Math.max(1, frac * BAR_W);
+                const col = getCategoryColor(ci, colorCol);
+                const tip = escapeHtml(sid + ' \u00b7 ' + cat + ': ' + Math.round(frac * 100) + '% (' + row.counts[ci].toLocaleString() + ' cells)');
+                parts.push('<rect x="' + (barX + ox).toFixed(1) + '" y="' + (y+2) + '" width="' + w.toFixed(1) + '" height="' + (ROW_H-4) + '" fill="' + col + '" data-bar-cat="' + escapeHtml(cat) + '" data-tooltip="' + tip + '" style="cursor:pointer"/>');
+                ox += w;
+            }});
+        }});
+        parts.push('</svg>');
+        return parts.join('');
+    }}
+
+    function buildSamplesHeatmapSvg(rows, categories, colorCol) {{
+        const cats = categories.slice(0, 30);
+        const CELL_W = 14, CELL_H = 14, LABEL_W = 88, HEADER_H = 54, PL = 4, PR = 4, PT = 2;
+        const W = PL + LABEL_W + cats.length * CELL_W + PR;
+        const H = PT + HEADER_H + rows.length * CELL_H + PT;
+        const parts = ['<svg class="samples-svg" viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '">'];
+        cats.forEach(function(cat, ci) {{
+            const cx = (PL + LABEL_W + ci * CELL_W + CELL_W / 2).toFixed(1);
+            const cy = PT + HEADER_H - 4;
+            const shortCat = cat.length > 12 ? cat.slice(0, 11) + '\u2026' : cat;
+            parts.push('<text x="' + cx + '" y="' + cy + '" font-size="8" fill="var(--muted-color)" font-family="inherit" text-anchor="start" transform="rotate(-45,' + cx + ',' + cy + ')">' + escapeHtml(shortCat) + '</text>');
+        }});
+        rows.forEach(function(row, ri) {{
+            const y = PT + HEADER_H + ri * CELL_H;
+            const sid = row.id;
+            const esc = escapeHtml(sid);
+            const shortId = sid.length > 12 ? sid.slice(0, 11) + '\u2026' : sid;
+            parts.push('<text x="' + (PL + LABEL_W - 3) + '" y="' + (y + CELL_H / 2).toFixed(1) + '" dy="0.35em" font-size="8" fill="var(--text-color)" font-family="inherit" text-anchor="end" data-section-id="' + esc + '" style="cursor:pointer">' + escapeHtml(shortId) + '</text>');
+            cats.forEach(function(cat, ci) {{
+                const frac = row.fractions[ci] || 0;
+                const alpha = Math.min(1, frac * 3.5).toFixed(3);
+                const col = getCategoryColor(ci, colorCol);
+                const cellX = PL + LABEL_W + ci * CELL_W;
+                const tip = escapeHtml(sid + ' \u00b7 ' + cat + ': ' + Math.round(frac * 100) + '% (' + row.counts[ci].toLocaleString() + ' cells)');
+                parts.push('<rect x="' + cellX + '" y="' + y + '" width="' + CELL_W + '" height="' + CELL_H + '" fill="' + col + '" fill-opacity="' + alpha + '" stroke="var(--input-bg)" stroke-width="0.5" data-bar-cat="' + escapeHtml(cat) + '" data-tooltip="' + tip + '" style="cursor:pointer"/>');
+            }});
+        }});
+        parts.push('</svg>');
+        return parts.join('');
+    }}
+
+    function renderSamplesInsights() {{
+        const container = document.getElementById('samples-panel');
+        if (!container) return;
+
+        const availableCols = (DATA.available_colors || []).filter(function(c) {{
+            const meta = DATA.colors_meta?.[c];
+            return meta && !meta.is_continuous && (meta.categories || []).length > 0;
+        }});
+        if (!availableCols.length) {{
+            container.innerHTML = '<div class="agg-group-meta">No categorical color columns available.</div>';
+            return;
+        }}
+
+        if (!samplesColorCol || !availableCols.includes(samplesColorCol)) {{
+            const curMeta = DATA.colors_meta?.[currentColor];
+            samplesColorCol = (!currentGene && curMeta && !curMeta.is_continuous) ? currentColor : availableCols[0];
+        }}
+
+        const comp = computeSectionComposition(samplesColorCol);
+        if (!comp || !comp.rows.length) {{
+            container.innerHTML = '<div class="agg-group-meta">No composition data available.</div>';
+            return;
+        }}
+
+        let rows = comp.rows.slice();
+        if (samplesMetaSortBy) {{
+            rows.sort(function(a, b) {{
+                const va = String(a.metadata[samplesMetaSortBy] ?? '');
+                const vb = String(b.metadata[samplesMetaSortBy] ?? '');
+                return va.localeCompare(vb) || a.id.localeCompare(b.id);
+            }});
+        }}
+
+        const categories = comp.categories;
+        const svgHtml = samplesView === 'heatmap'
+            ? buildSamplesHeatmapSvg(rows, categories, samplesColorCol)
+            : buildSamplesBarsSvg(rows, categories, samplesColorCol);
+
+        const metaKeys = new Set();
+        comp.rows.forEach(function(r) {{ Object.keys(r.metadata).forEach(function(k) {{ metaKeys.add(k); }}); }});
+        const sortOptions = ['<option value="">— original order —</option>'].concat(
+            Array.from(metaKeys).map(function(k) {{
+                const sel = samplesMetaSortBy === k ? ' selected' : '';
+                return '<option value="' + escapeHtml(k) + '"' + sel + '>' + escapeHtml(formatMetadataLabel(k)) + '</option>';
+            }})
+        ).join('');
+        const colorOptions = availableCols.map(function(c) {{
+            const sel = c === samplesColorCol ? ' selected' : '';
+            return '<option value="' + escapeHtml(c) + '"' + sel + '>' + escapeHtml(formatMetadataLabel(c)) + '</option>';
+        }}).join('');
+
+        const maxLeg = Math.min(categories.length, 16);
+        const legendHtml = categories.slice(0, maxLeg).map(function(cat, idx) {{
+            return '<span class="samples-legend-item"><span class="samples-legend-swatch" style="background:' + getCategoryColor(idx, samplesColorCol) + '"></span>' + escapeHtml(cat) + '</span>';
+        }}).join('') + (categories.length > maxLeg ? '<span class="samples-legend-item agg-group-meta">+' + (categories.length - maxLeg) + ' more</span>' : '');
+
+        container.innerHTML = `
+            <div class="samples-controls">
+                <div class="cluster-de-select-row">
+                    <div>
+                        <label>Color column</label>
+                        <select id="samples-color-col">${{colorOptions}}</select>
+                    </div>
+                    <div>
+                        <label>Sort sections by</label>
+                        <select id="samples-sort-by">${{sortOptions}}</select>
+                    </div>
+                </div>
+                <div class="samples-view-toggle">
+                    <button class="legend-btn ${{samplesView === 'bars' ? 'active' : ''}}" data-samples-view="bars" type="button">Bars</button>
+                    <button class="legend-btn ${{samplesView === 'heatmap' ? 'active' : ''}}" data-samples-view="heatmap" type="button">Heatmap</button>
+                </div>
+            </div>
+            <div class="samples-chart-container">
+                ${{svgHtml}}
+                <div class="samples-tooltip"></div>
+            </div>
+            <div class="samples-legend">${{legendHtml}}</div>
+        `;
+
+        const colorColSel = container.querySelector('#samples-color-col');
+        colorColSel?.addEventListener('change', function() {{
+            samplesColorCol = colorColSel.value;
+            renderSamplesInsights();
+        }});
+        const sortBySel = container.querySelector('#samples-sort-by');
+        sortBySel?.addEventListener('change', function() {{
+            samplesMetaSortBy = sortBySel.value;
+            renderSamplesInsights();
+        }});
+        container.querySelectorAll('[data-samples-view]').forEach(function(btn) {{
+            btn.addEventListener('click', function() {{
+                samplesView = btn.getAttribute('data-samples-view') || 'bars';
+                renderSamplesInsights();
+            }});
+        }});
+
+        const svgEl = container.querySelector('.samples-svg');
+        const tooltip = container.querySelector('.samples-tooltip');
+        if (svgEl && tooltip) {{
+            svgEl.addEventListener('click', function(e) {{
+                const barEl = e.target.closest('[data-bar-cat]');
+                if (barEl) {{
+                    const cat = barEl.getAttribute('data-bar-cat');
+                    if (cat) {{
+                        linkedSpotlightEnabled = true;
+                        neighborNetworkFocusCategories = null;
+                        spotlightPinnedCategory = spotlightPinnedCategory === cat ? null : cat;
+                        spotlightHoverCategory = null;
+                        updateAllLegendSpotlightClasses();
+                        rerenderForSpotlightChange();
+                    }}
+                    return;
+                }}
+                const el = e.target.closest('[data-section-id]');
+                if (!el) return;
+                const sectionId = el.getAttribute('data-section-id');
+                if (sectionId) openModal(sectionId);
+            }});
+            svgEl.addEventListener('mouseover', function(e) {{
+                const el = e.target.closest('[data-tooltip]');
+                if (!el) {{ tooltip.style.display = 'none'; return; }}
+                tooltip.textContent = el.getAttribute('data-tooltip') || '';
+                tooltip.style.display = 'block';
+                const cRect = svgEl.parentElement.getBoundingClientRect();
+                const eRect = el.getBoundingClientRect();
+                let left = eRect.left - cRect.left + 8;
+                let top = eRect.top - cRect.top - 28;
+                if (left + tooltip.offsetWidth > cRect.width - 4) left -= tooltip.offsetWidth + 14;
+                if (top < 0) top = eRect.bottom - cRect.top + 4;
+                tooltip.style.left = left + 'px';
+                tooltip.style.top = top + 'px';
+            }});
+            svgEl.parentElement.addEventListener('mouseleave', function() {{
+                tooltip.style.display = 'none';
+            }});
+        }}
     }}
 
     function renderColorAggregation() {{
         const container = document.getElementById('color-aggregation');
         const groupBy = document.getElementById('color-groupby');
         if (!container || !groupBy) return;
+        if (!groupBy.value) {{
+            const firstOption = groupBy.querySelector('option[value]:not([value=""])');
+            if (firstOption) groupBy.value = firstOption.value;
+        }}
         const groupKey = groupBy.value;
         if (!groupKey) {{
             container.innerHTML = '<div class="agg-group-meta">Pick a metadata column to summarize.</div>';
@@ -5299,11 +15091,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const rows = top.map(([cat, count]) => {{
                 const pct = total > 0 ? Math.round((count / total) * 100) : 0;
                 const catIdx = config.categories?.indexOf(cat) ?? -1;
-                const color = catIdx >= 0 ? getCategoryColor(catIdx) : '#999';
+                const color = catIdx >= 0 ? getCategoryColor(catIdx, config.colorCol) : '#999';
+                const isActive = linkedSpotlightEnabled && spotlightPinnedCategory === cat;
                 return `
-                    <div class="agg-row">
+                    <div class="agg-row${{isActive ? ' is-active' : ''}}" data-agg-cat="${{escapeHtml(cat)}}">
                         <span class="agg-dot" style="background: ${{color}}"></span>
-                        <span class="agg-label">${{cat}}</span>
+                        <span class="agg-label">${{escapeHtml(cat)}}</span>
                         <span class="agg-value">${{pct}}% (${{count}})</span>
                     </div>
                 `;
@@ -5337,6 +15130,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 renderColorAggregation();
             }});
         }});
+
+        container.querySelectorAll('[data-agg-cat]').forEach(row => {{
+            row.addEventListener('click', () => {{
+                const cat = row.getAttribute('data-agg-cat');
+                if (!cat) return;
+                linkedSpotlightEnabled = true;
+                neighborNetworkFocusCategories = null;
+                spotlightPinnedCategory = spotlightPinnedCategory === cat ? null : cat;
+                spotlightHoverCategory = null;
+                updateAllLegendSpotlightClasses();
+                rerenderForSpotlightChange();
+                renderColorAggregation();
+            }});
+        }});
     }}
 
     function renderMarkerGenes() {{
@@ -5346,36 +15153,61 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const query = (searchInput?.value || '').trim().toLowerCase();
         const markers = DATA.marker_genes || {{}};
 
-        if (currentGene) {{
-            container.innerHTML = '<div class="agg-group-meta">Clear the gene input to view marker genes.</div>';
-            return;
-        }}
-
-        const config = getColorConfig();
-        if (config.is_continuous) {{
+        const colorMeta = DATA.colors_meta?.[currentColor];
+        if (!colorMeta || colorMeta.is_continuous) {{
             container.innerHTML = '<div class="agg-group-meta">Marker genes are available for categorical colors only.</div>';
             return;
         }}
 
         const groupMarkers = markers[currentColor];
         if (!groupMarkers || Object.keys(groupMarkers).length === 0) {{
-            container.innerHTML = '<div class="agg-group-meta">No marker genes available for this color.</div>';
+            const availableColors = getAvailableMarkerGeneColors();
+            const extra = availableColors.length
+                ? ` Available for: ${{availableColors.join(', ')}}.`
+                : ' No marker genes were embedded in this viewer.';
+            container.innerHTML = `<div class="agg-group-meta">No marker genes available for this color.${{escapeHtml(extra)}}</div>`;
             return;
         }}
 
-        const categories = config.categories || Object.keys(groupMarkers);
+        const categories = colorMeta.categories || Object.keys(groupMarkers);
         const rows = categories.map(cat => {{
             const key = String(cat);
-            const genes = groupMarkers[key] || [];
+            const categoryColor = getCategoryColorForValue(currentColor, key);
+            const genes = getMarkerGenesForColorCategory(currentColor, key)
+                .map((gene) => {{
+                    const raw = String(gene || '').trim();
+                    if (!raw) return null;
+                    return {{
+                        raw,
+                        canonical: resolveCanonicalGeneName(raw),
+                    }};
+                }})
+                .filter(Boolean);
             if (query) {{
-                const hasMatch = genes.some(g => String(g).toLowerCase().includes(query));
+                const hasMatch = genes.some((entry) => {{
+                    const rawMatch = entry.raw.toLowerCase().includes(query);
+                    const canonicalMatch = entry.canonical
+                        ? entry.canonical.toLowerCase().includes(query)
+                        : false;
+                    return rawMatch || canonicalMatch;
+                }});
                 if (!hasMatch) return '';
             }}
-            const geneText = genes.length ? genes.join(' ') : 'No genes found.';
+            const geneButtons = genes.length
+                ? genes.map((entry) => renderGeneTokenButton(entry.raw, {{
+                    allowUnknown: true,
+                    isActive: !!entry.canonical && entry.canonical === currentGene,
+                    showMeta: false,
+                    title: entry.canonical
+                        ? 'Load marker gene into the viewer'
+                        : 'Marker gene name only; this gene was not embedded in the viewer',
+                }})).join('')
+                : '<div class="agg-group-meta">No marker genes found.</div>';
+            const isSpotlit = linkedSpotlightEnabled && spotlightPinnedCategory === key;
             return `
                 <div class="marker-group">
-                    <div class="marker-group-title">${{key}}</div>
-                    <div class="marker-genes-list">${{geneText}}</div>
+                    <div class="marker-group-title${{isSpotlit ? ' is-spotlit' : ''}}" data-marker-category="${{escapeHtml(key)}}" title="Click to highlight this annotation in the viewer"><span class="agg-dot" style="background: ${{categoryColor}}"></span>${{escapeHtml(key)}}</div>
+                    <div class="gene-token-grid">${{geneButtons}}</div>
                 </div>
             `;
         }}).filter(Boolean);
@@ -5385,7 +15217,1850 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             return;
         }}
 
-        container.innerHTML = rows.join('');
+        const loadedGeneNote = currentGene
+            ? `<div class="agg-group-meta">Loaded gene: <strong>${{escapeHtml(currentGene)}}</strong>. Click another marker gene to switch.</div>`
+            : '<div class="agg-group-meta">Click a marker gene to load it in the viewer. Genes not embedded in this viewer are shown as names only.</div>';
+
+        container.innerHTML = loadedGeneNote + rows.join('');
+        bindGeneActivateButtons(container, renderMarkerGenes);
+
+        container.querySelectorAll('[data-marker-category]').forEach(title => {{
+            title.addEventListener('click', () => {{
+                const cat = title.getAttribute('data-marker-category');
+                if (!cat) return;
+                linkedSpotlightEnabled = true;
+                neighborNetworkFocusCategories = null;
+                spotlightPinnedCategory = spotlightPinnedCategory === cat ? null : cat;
+                spotlightHoverCategory = null;
+                updateAllLegendSpotlightClasses();
+                rerenderForSpotlightChange();
+                renderMarkerGenes();
+            }});
+        }});
+    }}
+
+    function parseGeneDistributionGroupSpec(encoded) {{
+        if (!encoded) return null;
+        const s = String(encoded);
+        const sep = s.indexOf(':');
+        if (sep > 0) {{
+            const kind = s.slice(0, sep);
+            const key = s.slice(sep + 1);
+            if ((kind === 'cell' || kind === 'meta') && key) return {{ kind, key }};
+        }}
+        return {{ kind: 'cell', key: s }};
+    }}
+
+    function encodeGeneDistributionGroupSpec(kind, key) {{
+        return `${{kind}}:${{key}}`;
+    }}
+
+    function getAvailableSectionMetadataKeys() {{
+        const keySet = new Set();
+        (DATA.sections || []).forEach((section) => {{
+            if (section && section.metadata && typeof section.metadata === 'object') {{
+                Object.keys(section.metadata).forEach((k) => {{ if (k) keySet.add(k); }});
+            }}
+        }});
+        return Array.from(keySet).sort((a, b) => a.localeCompare(b));
+    }}
+
+    function getSectionMetadataValues(metaKey) {{
+        const values = new Set();
+        (DATA.sections || []).forEach((section) => {{
+            if (section && section.metadata && Object.prototype.hasOwnProperty.call(section.metadata, metaKey)) {{
+                const raw = section.metadata[metaKey];
+                if (raw === undefined || raw === null || raw === '') return;
+                values.add(String(raw));
+            }}
+        }});
+        return Array.from(values).sort((a, b) => a.localeCompare(b));
+    }}
+
+    function getRestrictValuesForSpec(spec) {{
+        if (!spec || !spec.key) return [];
+        if (spec.kind === 'meta') return getSectionMetadataValues(spec.key);
+        return getCategoriesForColorColumn(spec.key).map((v) => String(v));
+    }}
+
+    function finalizeDistributionBuckets(groups) {{
+        return Array.from(groups.entries()).map(([cat, arr]) => {{
+            const n = arr.length;
+            if (n === 0) return {{ cat, n: 0, mean: null, median: null, pctExpr: null, max: null }};
+            let sum = 0, nnz = 0, max = -Infinity;
+            for (let i = 0; i < n; i++) {{
+                const v = arr[i];
+                sum += v;
+                if (v > 0) nnz++;
+                if (v > max) max = v;
+            }}
+            const mean = sum / n;
+            const sorted = arr.slice().sort((a, b) => a - b);
+            const mid = Math.floor(n / 2);
+            const median = n % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+            return {{ cat, n, mean, median, pctExpr: (nnz / n) * 100, max }};
+        }});
+    }}
+
+    function buildGeneDistributionRestrictPredicate(restrictSpec, restrictValue) {{
+        if (!restrictSpec || !restrictSpec.key || restrictValue == null || restrictValue === '') return null;
+        const target = String(restrictValue);
+        if (restrictSpec.kind === 'meta') {{
+            const metaKey = restrictSpec.key;
+            return {{
+                sectionAllows(section) {{
+                    const raw = section && section.metadata ? section.metadata[metaKey] : undefined;
+                    return (raw !== undefined && raw !== null && raw !== '' && String(raw) === target);
+                }},
+                cellAllows: null,
+            }};
+        }}
+        const col = restrictSpec.key;
+        const cats = getCategoriesForColorColumn(col);
+        const targetIdx = cats.findIndex((c) => String(c) === target);
+        if (targetIdx < 0) {{
+            return {{
+                sectionAllows: () => false,
+                cellAllows: () => false,
+            }};
+        }}
+        return {{
+            sectionAllows: () => true,
+            cellAllows(section, cellIdx) {{
+                const colVals = getSectionColorValues(section, col);
+                if (!colVals || cellIdx >= colVals.length) return false;
+                return Math.round(colVals[cellIdx]) === targetIdx;
+            }},
+        }};
+    }}
+
+    function computeGeneDistributionStats(gene, spec, restrictSpec, restrictValue) {{
+        if (!gene || !spec || !spec.key) return null;
+        const restrict = buildGeneDistributionRestrictPredicate(restrictSpec, restrictValue);
+
+        if (spec.kind === 'meta') {{
+            const metaKey = spec.key;
+            const groups = new Map();
+            (DATA.sections || []).forEach((section) => {{
+                if (restrict && !restrict.sectionAllows(section)) return;
+                const vals = getSectionGeneValues(section, gene);
+                if (!vals || !vals.length) return;
+                const raw = section.metadata ? section.metadata[metaKey] : undefined;
+                const groupVal = (raw === undefined || raw === null || raw === '') ? 'unknown' : String(raw);
+                if (!groups.has(groupVal)) groups.set(groupVal, []);
+                const bucket = groups.get(groupVal);
+                for (let i = 0; i < vals.length; i++) {{
+                    const v = vals[i];
+                    if (isMissingDisplayValue(v)) continue;
+                    if (restrict && restrict.cellAllows && !restrict.cellAllows(section, i)) continue;
+                    bucket.push(v);
+                }}
+            }});
+            return finalizeDistributionBuckets(groups);
+        }}
+
+        const cats = getCategoriesForColorColumn(spec.key);
+        if (!cats.length) return null;
+        const groups = new Map();
+        cats.forEach((cat) => groups.set(String(cat), []));
+        (DATA.sections || []).forEach((section) => {{
+            if (restrict && !restrict.sectionAllows(section)) return;
+            const vals = getSectionGeneValues(section, gene);
+            const colVals = getSectionColorValues(section, spec.key);
+            if (!vals || !colVals) return;
+            const n = Math.min(vals.length, colVals.length);
+            for (let i = 0; i < n; i++) {{
+                const v = vals[i];
+                if (isMissingDisplayValue(v)) continue;
+                if (restrict && restrict.cellAllows && !restrict.cellAllows(section, i)) continue;
+                const catIdx = Math.round(colVals[i]);
+                if (catIdx >= 0 && catIdx < cats.length) {{
+                    groups.get(String(cats[catIdx])).push(v);
+                }}
+            }}
+        }});
+        return finalizeDistributionBuckets(groups);
+    }}
+
+    function wireGeneDistributionInputs(container) {{
+        const geneInput = container.querySelector('#gene-distribution-input');
+        if (geneInput) {{
+            const activate = () => {{
+                const val = geneInput.value.trim();
+                if (val !== (currentGene || '')) {{
+                    activateViewerGene(val);
+                }}
+            }};
+            geneInput.addEventListener('keydown', (e) => {{
+                if (e.key === 'Enter') {{ e.preventDefault(); activate(); }}
+            }});
+            geneInput.addEventListener('change', activate);
+        }}
+        const groupSel = container.querySelector('#gene-distribution-groupby');
+        if (groupSel) {{
+            groupSel.addEventListener('change', () => {{
+                geneDistributionGroupBy = groupSel.value;
+                renderGeneDistributionInsights();
+            }});
+        }}
+        const restrictBySel = container.querySelector('#gene-distribution-restrictby');
+        if (restrictBySel) {{
+            restrictBySel.addEventListener('change', () => {{
+                geneDistributionRestrictBy = restrictBySel.value || '';
+                geneDistributionRestrictValue = '';
+                renderGeneDistributionInsights();
+            }});
+        }}
+        const restrictValSel = container.querySelector('#gene-distribution-restrictvalue');
+        if (restrictValSel) {{
+            restrictValSel.addEventListener('change', () => {{
+                geneDistributionRestrictValue = restrictValSel.value || '';
+                renderGeneDistributionInsights();
+            }});
+        }}
+        container.querySelectorAll('[data-gene-dist-sort]').forEach(th => {{
+            th.addEventListener('click', () => {{
+                const key = th.getAttribute('data-gene-dist-sort');
+                if (!key) return;
+                if (geneDistributionSortKey === key) {{
+                    geneDistributionSortDir = geneDistributionSortDir === 'asc' ? 'desc' : 'asc';
+                }} else {{
+                    geneDistributionSortKey = key;
+                    geneDistributionSortDir = key === 'cat' ? 'asc' : 'desc';
+                }}
+                renderGeneDistributionInsights();
+            }});
+        }});
+        container.querySelectorAll('[data-gene-dist-cat]').forEach(tr => {{
+            tr.addEventListener('click', () => {{
+                const cat = tr.getAttribute('data-gene-dist-cat');
+                if (!cat) return;
+                const spec = parseGeneDistributionGroupSpec(geneDistributionGroupBy);
+                if (!spec || spec.kind !== 'cell') return;
+                if (currentColor !== spec.key) {{
+                    setViewerColorColumn(spec.key);
+                }}
+                linkedSpotlightEnabled = true;
+                spotlightPinnedCategory = spotlightPinnedCategory === cat ? null : cat;
+                spotlightHoverCategory = null;
+                updateAllLegendSpotlightClasses();
+                rerenderForSpotlightChange();
+            }});
+        }});
+    }}
+
+    function renderGeneDistributionInsights() {{
+        const container = document.getElementById('gene-distribution-panel');
+        if (!container) return;
+
+        const availableCellCols = (DATA.available_colors || []).filter(c => {{
+            const meta = DATA.colors_meta?.[c];
+            return meta && !meta.is_continuous && (meta.categories || []).length > 0;
+        }});
+        const availableMetaKeys = getAvailableSectionMetadataKeys();
+
+        if (!availableCellCols.length && !availableMetaKeys.length) {{
+            container.innerHTML = '<div class="agg-group-meta">No categorical columns or section metadata available.</div>';
+            return;
+        }}
+
+        const validSpecs = new Set();
+        availableCellCols.forEach(c => validSpecs.add(encodeGeneDistributionGroupSpec('cell', c)));
+        availableMetaKeys.forEach(k => validSpecs.add(encodeGeneDistributionGroupSpec('meta', k)));
+
+        const currentSpec = parseGeneDistributionGroupSpec(geneDistributionGroupBy);
+        const currentEncoded = currentSpec ? encodeGeneDistributionGroupSpec(currentSpec.kind, currentSpec.key) : '';
+        if (!currentEncoded || !validSpecs.has(currentEncoded)) {{
+            const curMeta = DATA.colors_meta?.[currentColor];
+            const fallback = (curMeta && !curMeta.is_continuous && availableCellCols.includes(currentColor))
+                ? encodeGeneDistributionGroupSpec('cell', currentColor)
+                : (availableCellCols.length
+                    ? encodeGeneDistributionGroupSpec('cell', availableCellCols[0])
+                    : encodeGeneDistributionGroupSpec('meta', availableMetaKeys[0]));
+            geneDistributionGroupBy = fallback;
+        }}
+
+        const spec = parseGeneDistributionGroupSpec(geneDistributionGroupBy);
+        const buildOptions = (kind, keys, selectedEncoded) => keys.map(k => {{
+            const enc = encodeGeneDistributionGroupSpec(kind, k);
+            const sel = enc === selectedEncoded ? ' selected' : '';
+            return '<option value="' + escapeHtml(enc) + '"' + sel + '>' + escapeHtml(formatMetadataLabel(k)) + '</option>';
+        }}).join('');
+        let optionsHtml = '';
+        if (availableCellCols.length) optionsHtml += '<optgroup label="Cell annotations">' + buildOptions('cell', availableCellCols, geneDistributionGroupBy) + '</optgroup>';
+        if (availableMetaKeys.length) optionsHtml += '<optgroup label="Sample metadata">' + buildOptions('meta', availableMetaKeys, geneDistributionGroupBy) + '</optgroup>';
+
+        const restrictSpec = parseGeneDistributionGroupSpec(geneDistributionRestrictBy);
+        const restrictEnabled = !!(restrictSpec && restrictSpec.key && validSpecs.has(encodeGeneDistributionGroupSpec(restrictSpec.kind, restrictSpec.key)));
+        if (!restrictEnabled) {{
+            geneDistributionRestrictBy = '';
+            geneDistributionRestrictValue = '';
+        }}
+        const restrictValues = restrictEnabled ? getRestrictValuesForSpec(restrictSpec) : [];
+        if (restrictEnabled && geneDistributionRestrictValue && !restrictValues.includes(geneDistributionRestrictValue)) {{
+            geneDistributionRestrictValue = '';
+        }}
+
+        let restrictOptionsHtml = '<option value="">All cells (no filter)</option>';
+        if (availableCellCols.length) restrictOptionsHtml += '<optgroup label="Cell annotations">' + buildOptions('cell', availableCellCols, geneDistributionRestrictBy || '') + '</optgroup>';
+        if (availableMetaKeys.length) restrictOptionsHtml += '<optgroup label="Sample metadata">' + buildOptions('meta', availableMetaKeys, geneDistributionRestrictBy || '') + '</optgroup>';
+
+        const restrictValueOptions = restrictEnabled
+            ? '<option value="">— pick a value —</option>' + restrictValues.map((v) => {{
+                const sel = v === geneDistributionRestrictValue ? ' selected' : '';
+                return '<option value="' + escapeHtml(v) + '"' + sel + '>' + escapeHtml(v) + '</option>';
+            }}).join('')
+            : '<option value="">—</option>';
+
+        const activeRestrict = restrictEnabled && geneDistributionRestrictValue;
+
+        const geneVal = currentGene || '';
+        const controlsHtml = `
+            <div class="cluster-de-controls">
+                <div>
+                    <label>Gene</label>
+                    <input type="text" id="gene-distribution-input" list="gene-list" placeholder="e.g. Dbp" value="${{escapeHtml(geneVal)}}" autocomplete="off" spellcheck="false">
+                </div>
+                <div>
+                    <label>Group by</label>
+                    <select id="gene-distribution-groupby">${{optionsHtml}}</select>
+                </div>
+            </div>
+            <div class="cluster-de-controls">
+                <div>
+                    <label>Restrict to</label>
+                    <select id="gene-distribution-restrictby">${{restrictOptionsHtml}}</select>
+                </div>
+                <div>
+                    <label>Value</label>
+                    <select id="gene-distribution-restrictvalue"${{restrictEnabled ? '' : ' disabled'}}>${{restrictValueOptions}}</select>
+                </div>
+            </div>
+        `;
+
+        if (!currentGene) {{
+            container.innerHTML = controlsHtml + '<div class="agg-group-meta">Type a gene name and press Enter to see per-group expression stats. The viewer will recolor by that gene.</div>';
+            wireGeneDistributionInputs(container);
+            return;
+        }}
+
+        const stats = computeGeneDistributionStats(
+            currentGene,
+            spec,
+            activeRestrict ? restrictSpec : null,
+            activeRestrict ? geneDistributionRestrictValue : null,
+        );
+        if (!stats || !stats.length) {{
+            container.innerHTML = controlsHtml + '<div class="agg-group-meta">No data available for this gene \u00d7 group combination.</div>';
+            wireGeneDistributionInputs(container);
+            return;
+        }}
+
+        const sortDir = geneDistributionSortDir === 'asc' ? 1 : -1;
+        const sortKey = geneDistributionSortKey;
+        const sorted = stats.slice().sort((a, b) => {{
+            if (sortKey === 'cat') return String(a.cat).localeCompare(String(b.cat)) * sortDir;
+            const va = a[sortKey];
+            const vb = b[sortKey];
+            const aMissing = (va == null);
+            const bMissing = (vb == null);
+            if (aMissing && bMissing) return 0;
+            if (aMissing) return 1;
+            if (bMissing) return -1;
+            if (va === vb) return 0;
+            return (va < vb ? -1 : 1) * sortDir;
+        }});
+
+        const fmtN = n => n == null ? '\u2014' : Number(n).toLocaleString();
+        const fmtF = v => v == null ? '\u2014' : Number(v).toFixed(3);
+        const fmtP = v => v == null ? '\u2014' : Number(v).toFixed(1) + '%';
+        const arrow = k => geneDistributionSortKey === k ? (geneDistributionSortDir === 'asc' ? ' \u2191' : ' \u2193') : '';
+
+        const isCellKind = spec.kind === 'cell';
+        const dotColorFor = (cat, idx) => isCellKind
+            ? getCategoryColorForValue(spec.key, cat)
+            : getCategoryColor(idx);
+        const rows = sorted.map((s, idx) => `
+            <tr data-gene-dist-cat="${{escapeHtml(String(s.cat))}}" ${{isCellKind ? 'style="cursor:pointer"' : 'style="cursor:default"'}} title="${{isCellKind ? `Click to spotlight \\"${{escapeHtml(String(s.cat))}}\\" in the viewer` : 'Sample-metadata group (not linked to spatial view)'}}">
+                <td><span class="agg-dot" style="background:${{dotColorFor(String(s.cat), idx)}}"></span>${{escapeHtml(String(s.cat))}}</td>
+                <td>${{fmtN(s.n)}}</td>
+                <td>${{fmtF(s.mean)}}</td>
+                <td>${{fmtF(s.median)}}</td>
+                <td>${{fmtP(s.pctExpr)}}</td>
+                <td>${{fmtF(s.max)}}</td>
+            </tr>
+        `).join('');
+
+        const scopeLabel = spec.kind === 'meta' ? 'sample metadata' : 'cell annotation';
+        const restrictLabel = activeRestrict
+            ? ` \u2014 restricted to ${{escapeHtml(formatMetadataLabel(restrictSpec.key))}} = <strong>${{escapeHtml(String(geneDistributionRestrictValue))}}</strong>`
+            : '';
+        const tableHtml = `
+            <div class="gene-distribution-summary">Expression of <strong>${{escapeHtml(currentGene)}}</strong> across ${{escapeHtml(formatMetadataLabel(spec.key))}} (${{scopeLabel}}, ${{stats.length}} groups)${{restrictLabel}}</div>
+            <table class="gene-distribution-table">
+                <thead>
+                    <tr>
+                        <th data-gene-dist-sort="cat">Group${{arrow('cat')}}</th>
+                        <th data-gene-dist-sort="n">n${{arrow('n')}}</th>
+                        <th data-gene-dist-sort="mean">Mean${{arrow('mean')}}</th>
+                        <th data-gene-dist-sort="median">Median${{arrow('median')}}</th>
+                        <th data-gene-dist-sort="pctExpr">% Expr${{arrow('pctExpr')}}</th>
+                        <th data-gene-dist-sort="max">Max${{arrow('max')}}</th>
+                    </tr>
+                </thead>
+                <tbody>${{rows}}</tbody>
+            </table>
+        `;
+
+        container.innerHTML = controlsHtml + tableHtml;
+        wireGeneDistributionInputs(container);
+    }}
+
+    function renderSpatialVariableGenes() {{
+        const container = document.getElementById('spatially-variable-genes');
+        if (!container) return;
+        const searchInput = document.getElementById('spatial-gene-search');
+        const query = (searchInput?.value || '').trim().toLowerCase();
+        const entries = Array.isArray(DATA.spatial_variable_genes) ? DATA.spatial_variable_genes : [];
+
+        if (!entries.length) {{
+            container.innerHTML = '<div class="agg-group-meta">No spatially variable genes were precomputed for this viewer.</div>';
+            return;
+        }}
+
+        const filtered = entries
+            .map((entry, idx) => {{
+                const gene = String(entry?.gene || '').trim();
+                if (!gene) return null;
+                const score = Number.isFinite(entry?.score) ? Number(entry.score) : Number(entry?.I);
+                return {{
+                    rank: idx + 1,
+                    gene,
+                    score: Number.isFinite(score) ? score : 0,
+                }};
+            }})
+            .filter(Boolean)
+            .filter((entry) => !query || entry.gene.toLowerCase().includes(query));
+
+        if (!filtered.length) {{
+            container.innerHTML = '<div class="agg-group-meta">No spatially variable genes match your search.</div>';
+            return;
+        }}
+
+        const summaryNote = `<div class="agg-group-meta">Global Moran&apos;s I ranking precomputed at export. Click a gene to load it into the viewer.</div>`;
+        const rows = filtered.map((entry) => {{
+            const scoreLabel = `I=${{entry.score.toFixed(4)}}`;
+            return `
+                <div class="spatial-gene-row">
+                    <span class="spatial-gene-rank">#${{entry.rank}}</span>
+                    ${{renderGeneTokenButton(entry.gene, {{
+                        isActive: entry.gene === currentGene,
+                        showMeta: false,
+                        title: `Load spatially variable gene into the viewer (Moran's I ${{entry.score.toFixed(4)}})`,
+                    }})}}
+                    <span class="spatial-gene-score">${{scoreLabel}}</span>
+                </div>
+            `;
+        }}).join('');
+
+        container.innerHTML = summaryNote + rows;
+        bindGeneActivateButtons(container, renderSpatialVariableGenes);
+    }}
+
+    function formatClusterDEPct(value) {{
+        if (!Number.isFinite(value)) return 'n/a';
+        return `${{(100 * value).toFixed(1)}}%`;
+    }}
+
+    function renderComparisonGeneTokenGrid(entries, emptyMessage, activateTitle = 'Load gene into the viewer') {{
+        if (!entries || !entries.length) {{
+            return `<div class="agg-group-meta">${{escapeHtml(emptyMessage)}}</div>`;
+        }}
+        return `
+            <div class="gene-token-grid">
+                ${{entries.map((entry) => renderGeneTokenButton(entry.raw, {{
+                    allowUnknown: true,
+                    isActive: !!entry.canonical && entry.canonical === currentGene,
+                    showMeta: false,
+                    title: entry.canonical
+                        ? activateTitle
+                        : 'Gene name only; this gene was not embedded in the viewer',
+                }})).join('')}}
+            </div>
+        `;
+    }}
+
+    function renderComparisonNeighborSummary(colorCol, sourceCategory, referenceCategory) {{
+        if (!DATA.has_neighbors) {{
+            return `
+                <div class="agg-group">
+                    <div class="agg-group-title">Neighbor Relationship</div>
+                    <div class="agg-group-meta">No neighbor graph was found in this dataset.</div>
+                </div>
+            `;
+        }}
+
+        const sourceToReference = getNeighborPairSummary(colorCol, sourceCategory, referenceCategory);
+        const referenceToSource = getNeighborPairSummary(colorCol, referenceCategory, sourceCategory);
+        if (!sourceToReference && !referenceToSource) {{
+            return `
+                <div class="agg-group">
+                    <div class="agg-group-title">Neighbor Relationship</div>
+                    <div class="agg-group-meta">Neighbor stats were not precomputed for this annotation.</div>
+                </div>
+            `;
+        }}
+
+        const cards = [sourceToReference, referenceToSource]
+            .filter(Boolean)
+            .map((entry) => {{
+                const targetColor = getCategoryColorForValue(colorCol, entry.targetCategory);
+                const zLabel = entry.z === null ? 'n/a' : entry.z.toFixed(2);
+                const degreeLabel = Number.isFinite(entry.meanDegree) ? entry.meanDegree.toFixed(2) : 'n/a';
+                return `
+                    <div class="comparison-card">
+                        <div class="comparison-card-title">
+                            <span class="agg-dot" style="background: ${{targetColor}}"></span>
+                            <span>${{escapeHtml(entry.sourceCategory)}} → ${{escapeHtml(entry.targetCategory)}}</span>
+                        </div>
+                        <div class="comparison-metric-grid">
+                            <div class="comparison-metric">
+                                <span class="comparison-metric-label">Share</span>
+                                <span class="comparison-metric-value">${{entry.pct.toFixed(1)}}%</span>
+                            </div>
+                            <div class="comparison-metric">
+                                <span class="comparison-metric-label">Edges</span>
+                                <span class="comparison-metric-value">${{formatNeighborCount(entry.count)}}</span>
+                            </div>
+                            <div class="comparison-metric">
+                                <span class="comparison-metric-label">Z</span>
+                                <span class="comparison-metric-value">${{zLabel}}</span>
+                            </div>
+                            <div class="comparison-metric">
+                                <span class="comparison-metric-label">Mean degree</span>
+                                <span class="comparison-metric-value">${{degreeLabel}}</span>
+                            </div>
+                            <div class="comparison-metric">
+                                <span class="comparison-metric-label">n cells</span>
+                                <span class="comparison-metric-value">${{Number.isFinite(entry.nCells) ? Math.round(entry.nCells).toLocaleString() : 'n/a'}}</span>
+                            </div>
+                            <div class="comparison-metric">
+                                <span class="comparison-metric-label">Permutations</span>
+                                <span class="comparison-metric-value">${{entry.permN > 0 ? entry.permN.toLocaleString() : '0'}}</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }})
+            .join('');
+
+        return `
+            <div class="agg-group">
+                <div class="agg-group-title">Neighbor Relationship</div>
+                <div class="agg-group-meta">Directional neighbor enrichment between the selected categories.</div>
+                <div class="comparison-stack">${{cards}}</div>
+            </div>
+        `;
+    }}
+
+    function renderComparisonMarkerSummary(colorCol, sourceCategory, referenceCategory) {{
+        const sourceMarkers = getMarkerGeneEntries(colorCol, sourceCategory, 6);
+        const referenceMarkers = getMarkerGeneEntries(colorCol, referenceCategory, 6);
+        const overlap = getMarkerOverlapEntries(colorCol, sourceCategory, referenceCategory, 6);
+        const sourceColor = getCategoryColorForValue(colorCol, sourceCategory);
+        const referenceColor = getCategoryColorForValue(colorCol, referenceCategory);
+
+        if (!sourceMarkers.length && !referenceMarkers.length) {{
+            return `
+                <div class="agg-group">
+                    <div class="agg-group-title">Marker Summary</div>
+                    <div class="agg-group-meta">Marker genes were not precomputed for this annotation.</div>
+                </div>
+            `;
+        }}
+
+        return `
+            <div class="agg-group">
+                <div class="agg-group-title">Marker Summary</div>
+                <div class="agg-group-meta">Top markers for each category. Click a gene to load it when available.</div>
+            </div>
+            <div class="agg-group">
+                <div class="agg-group-title"><span class="agg-dot" style="background: ${{sourceColor}}"></span>${{escapeHtml(sourceCategory)}} markers</div>
+                ${{renderComparisonGeneTokenGrid(sourceMarkers, 'No marker genes available for Category A.', 'Load Category A marker gene into the viewer')}}
+            </div>
+            <div class="agg-group">
+                <div class="agg-group-title"><span class="agg-dot" style="background: ${{referenceColor}}"></span>${{escapeHtml(referenceCategory)}} markers</div>
+                ${{renderComparisonGeneTokenGrid(referenceMarkers, 'No marker genes available for Category B.', 'Load Category B marker gene into the viewer')}}
+            </div>
+            <div class="agg-group">
+                <div class="agg-group-title">Marker Overlap</div>
+                <div class="agg-group-meta">Shared names across the top marker lists.</div>
+                ${{renderComparisonGeneTokenGrid(overlap, 'No shared top markers found.', 'Load shared marker gene into the viewer')}}
+            </div>
+        `;
+    }}
+
+    function renderInteractionComparisonCard(colorCol, sourceCategory, targetCategory) {{
+        const summary = getInteractionPairSummary(colorCol, sourceCategory, targetCategory);
+        const title = `${{escapeHtml(sourceCategory)}} → ${{escapeHtml(targetCategory)}}`;
+        if (!summary) {{
+            return `
+                <div class="agg-group">
+                    <div class="agg-group-title">${{title}}</div>
+                    <div class="agg-group-meta">No contact-conditioned marker result for this direction.</div>
+                </div>
+            `;
+        }}
+
+        const result = summary.result || {{}};
+        const nContact = Number(result.n_contact ?? 0).toLocaleString();
+        const nNonContact = Number(result.n_non_contact ?? 0).toLocaleString();
+        const available = result.available !== false;
+        const meta = available
+            ? `n+ ${{nContact}} | n- ${{nNonContact}}`
+            : `Unavailable: need >= ${{Number(result.min_cells_required ?? 0).toLocaleString()}} cells per group (got n+ ${{nContact}} | n- ${{nNonContact}})`;
+
+        return `
+            <div class="agg-group">
+                <div class="agg-group-title">${{title}}</div>
+                <div class="agg-group-meta">${{meta}}</div>
+                ${{renderComparisonGeneTokenGrid(summary.genes, available ? 'No contact-conditioned genes returned.' : 'Contact-conditioned markers unavailable for this direction.', 'Load contact-conditioned marker gene into the viewer')}}
+            </div>
+        `;
+    }}
+
+    function renderComparisonInteractionSummary(colorCol, sourceCategory, referenceCategory) {{
+        const colorData = (DATA.interaction_markers || {{}})[colorCol] || {{}};
+        if (!Object.keys(colorData).length) {{
+            return `
+                <div class="agg-group">
+                    <div class="agg-group-title">Contact-Conditioned Markers</div>
+                    <div class="agg-group-meta">Interaction markers were not precomputed for this annotation.</div>
+                </div>
+            `;
+        }}
+
+        return `
+            <div class="agg-group">
+                <div class="agg-group-title">Contact-Conditioned Markers</div>
+                <div class="agg-group-meta">Directional DE between contact-positive and contact-negative source cells.</div>
+            </div>
+            ${{renderInteractionComparisonCard(colorCol, sourceCategory, referenceCategory)}}
+            ${{renderInteractionComparisonCard(colorCol, referenceCategory, sourceCategory)}}
+        `;
+    }}
+
+    function buildVolcanoPlot(genes, logfc, pvalsAdj) {{
+        if (!genes.length) return '';
+        const W = 310, H = 190, ml = 34, mr = 10, mt = 10, mb = 26;
+        const iw = W - ml - mr, ih = H - mt - mb;
+        const logfcValues = genes.map(function(_, i) {{
+            const value = Number(logfc[i]);
+            return Number.isFinite(value) ? value : 0;
+        }});
+        const nlp = genes.map(function(_, i) {{
+            const value = Number(pvalsAdj[i]);
+            const safe = Number.isFinite(value) && value > 0 ? value : 1;
+            return -Math.log10(Math.max(safe, 1e-300));
+        }});
+        const maxAbsFC = Math.max.apply(null, logfcValues.map(function(v) {{ return Math.abs(v); }}).concat([0.5]));
+        const fcRange = maxAbsFC * 1.15;
+        const maxNLP = Math.max.apply(null, nlp.concat([2])) * 1.1;
+        function xs(fc) {{ return ml + (fc + fcRange) / (2 * fcRange) * iw; }}
+        function ys(v) {{ return mt + ih - (v / maxNLP) * ih; }}
+        const sigNLP = -Math.log10(0.05);
+        const fcThr = 0.5;
+        const parts = [];
+        parts.push('<svg class="volcano-svg" viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '">');
+        parts.push('<line x1="' + ml + '" y1="' + mt + '" x2="' + ml + '" y2="' + (mt+ih) + '" stroke="var(--border-color)"/>');
+        parts.push('<line x1="' + ml + '" y1="' + (mt+ih) + '" x2="' + (ml+iw) + '" y2="' + (mt+ih) + '" stroke="var(--border-color)"/>');
+        const yThr = ys(sigNLP), xL = xs(-fcThr), xR = xs(fcThr);
+        parts.push('<line class="volcano-threshold-line" x1="' + ml + '" y1="' + yThr.toFixed(1) + '" x2="' + (ml+iw) + '" y2="' + yThr.toFixed(1) + '"/>');
+        parts.push('<line class="volcano-threshold-line" x1="' + xL.toFixed(1) + '" y1="' + mt + '" x2="' + xL.toFixed(1) + '" y2="' + (mt+ih) + '"/>');
+        parts.push('<line class="volcano-threshold-line" x1="' + xR.toFixed(1) + '" y1="' + mt + '" x2="' + xR.toFixed(1) + '" y2="' + (mt+ih) + '"/>');
+        [Math.ceil(-maxAbsFC), 0, Math.ceil(maxAbsFC)].forEach(function(t) {{
+            const tx = xs(t);
+            parts.push('<line x1="' + tx.toFixed(1) + '" y1="' + (mt+ih) + '" x2="' + tx.toFixed(1) + '" y2="' + (mt+ih+3) + '" stroke="var(--border-color)"/>');
+            parts.push('<text class="volcano-axis-label" x="' + tx.toFixed(1) + '" y="' + (mt+ih+13) + '" text-anchor="middle">' + t + '</text>');
+        }});
+        const nlpTick = Math.floor(maxNLP * 0.75);
+        [0, nlpTick].forEach(function(t) {{
+            const ty = ys(t);
+            parts.push('<line x1="' + (ml-3) + '" y1="' + ty.toFixed(1) + '" x2="' + ml + '" y2="' + ty.toFixed(1) + '" stroke="var(--border-color)"/>');
+            parts.push('<text class="volcano-axis-label" x="' + (ml-5) + '" y="' + ty.toFixed(1) + '" text-anchor="end" dy="0.35em">' + t + '</text>');
+        }});
+        parts.push('<text class="volcano-axis-label" x="' + (ml+iw/2).toFixed(1) + '" y="' + (H-2) + '" text-anchor="middle">log\u2082FC</text>');
+        parts.push('<text class="volcano-axis-label" x="8" y="' + (mt+ih/2).toFixed(1) + '" text-anchor="middle" transform="rotate(-90,8,' + (mt+ih/2).toFixed(1) + ')">\u2212log\u2081\u2080p</text>');
+        genes.forEach(function(gene, i) {{
+            const fc = logfcValues[i], nlpi = nlp[i];
+            const sig = nlpi >= sigNLP && Math.abs(fc) >= fcThr;
+            const col = sig ? (fc > 0 ? '#d94f4f' : '#4f82d9') : 'var(--border-color)';
+            const pvalAdj = Number(pvalsAdj[i]);
+            const safePAdj = Number.isFinite(pvalAdj) ? pvalAdj : 1;
+            const padjDisplay = safePAdj < 0.001 ? safePAdj.toExponential(2) : safePAdj.toFixed(4);
+            parts.push('<circle class="volcano-dot" cx="' + xs(fc).toFixed(1) + '" cy="' + ys(nlpi).toFixed(1) + '" r="3" fill="' + col + '" fill-opacity="0.82" data-volcano-gene="' + escapeHtml(gene) + '" data-volcano-fc="' + fc.toFixed(3) + '" data-volcano-padj="' + padjDisplay + '"/>');
+        }});
+        parts.push('</svg>');
+        return '<div class="volcano-container">' + parts.join('') + '<div class="volcano-tooltip"></div></div>';
+    }}
+
+    function buildGroupVolcanoPlot(entries) {{
+        if (!entries || !entries.length) return '';
+        const VOLCANO_MAX_DOTS = 500;
+        if (entries.length > VOLCANO_MAX_DOTS) entries = entries.slice(0, VOLCANO_MAX_DOTS);
+        const W = 310, H = 190, ml = 34, mr = 10, mt = 10, mb = 26;
+        const iw = W - ml - mr, ih = H - mt - mb;
+        const logfc = entries.map(function(e) {{ return Number(e.log2fc) || 0; }});
+        const scores = entries.map(function(e) {{ return Number(e.score) || 0; }});
+        const maxAbsFC = Math.max.apply(null, logfc.map(function(v) {{ return Math.abs(v); }}).concat([0.5]));
+        const fcRange = maxAbsFC * 1.15;
+        const maxAbsScore = Math.max.apply(null, scores.map(function(v) {{ return Math.abs(v); }}).concat([1]));
+        const scoreRange = maxAbsScore * 1.15;
+        function xs(fc) {{ return ml + (fc + fcRange) / (2 * fcRange) * iw; }}
+        function ys(s) {{ return mt + ih - (s + scoreRange) / (2 * scoreRange) * ih; }}
+        const x0 = xs(0), y0 = ys(0);
+        const parts = [];
+        parts.push('<svg class="volcano-svg" viewBox="0 0 ' + W + ' ' + H + '" width="' + W + '" height="' + H + '">');
+        parts.push('<line x1="' + ml + '" y1="' + mt + '" x2="' + ml + '" y2="' + (mt+ih) + '" stroke="var(--border-color)"/>');
+        parts.push('<line x1="' + ml + '" y1="' + (mt+ih) + '" x2="' + (ml+iw) + '" y2="' + (mt+ih) + '" stroke="var(--border-color)"/>');
+        parts.push('<line class="volcano-threshold-line" x1="' + x0.toFixed(1) + '" y1="' + mt + '" x2="' + x0.toFixed(1) + '" y2="' + (mt+ih) + '"/>');
+        if (Math.abs(y0 - (mt + ih)) > 5) {{
+            parts.push('<line class="volcano-threshold-line" x1="' + ml + '" y1="' + y0.toFixed(1) + '" x2="' + (ml+iw) + '" y2="' + y0.toFixed(1) + '"/>');
+        }}
+        [Math.ceil(-maxAbsFC), 0, Math.ceil(maxAbsFC)].forEach(function(t) {{
+            const tx = xs(t);
+            parts.push('<line x1="' + tx.toFixed(1) + '" y1="' + (mt+ih) + '" x2="' + tx.toFixed(1) + '" y2="' + (mt+ih+3) + '" stroke="var(--border-color)"/>');
+            parts.push('<text class="volcano-axis-label" x="' + tx.toFixed(1) + '" y="' + (mt+ih+13) + '" text-anchor="middle">' + t + '</text>');
+        }});
+        const scoreTick = parseFloat(maxAbsScore.toFixed(1));
+        [-scoreTick, 0, scoreTick].forEach(function(t) {{
+            const ty = ys(t);
+            const tLabel = Math.abs(t) >= 100 ? t.toExponential(1) : t.toFixed(1);
+            parts.push('<line x1="' + (ml-3) + '" y1="' + ty.toFixed(1) + '" x2="' + ml + '" y2="' + ty.toFixed(1) + '" stroke="var(--border-color)"/>');
+            parts.push('<text class="volcano-axis-label" x="' + (ml-5) + '" y="' + ty.toFixed(1) + '" text-anchor="end" dy="0.35em">' + tLabel + '</text>');
+        }});
+        parts.push('<text class="volcano-axis-label" x="' + (ml+iw/2).toFixed(1) + '" y="' + (H-2) + '" text-anchor="middle">log\u2082FC</text>');
+        parts.push('<text class="volcano-axis-label" x="8" y="' + (mt+ih/2).toFixed(1) + '" text-anchor="middle" transform="rotate(-90,8,' + (mt+ih/2).toFixed(1) + ')">Score</text>');
+        entries.forEach(function(entry, i) {{
+            const fc = logfc[i], sc = scores[i];
+            const col = fc >= 0 ? '#d94f4f' : '#4f82d9';
+            parts.push('<circle class="volcano-dot" cx="' + xs(fc).toFixed(1) + '" cy="' + ys(sc).toFixed(1) + '" r="3.5" fill="' + col + '" fill-opacity="0.82" data-volcano-gene="' + escapeHtml(entry.gene) + '" data-volcano-fc="' + fc.toFixed(3) + '" data-volcano-score="' + sc.toFixed(3) + '"/>');
+        }});
+        parts.push('</svg>');
+        return '<div class="volcano-container">' + parts.join('') + '<div class="volcano-tooltip"></div></div>';
+    }}
+
+    function bindVolcanoGroupInteraction(container, rerenderFn) {{
+        const volcanoSvg = container.querySelector('.volcano-svg');
+        const volcanoTooltip = container.querySelector('.volcano-tooltip');
+        if (!volcanoSvg || !volcanoTooltip) return;
+        const volcanoContainer = volcanoSvg.parentElement;
+        volcanoSvg.addEventListener('mouseover', (e) => {{
+            const dot = e.target.closest('[data-volcano-gene]');
+            if (!dot) return;
+            const gene = dot.getAttribute('data-volcano-gene') || '';
+            const fc = dot.getAttribute('data-volcano-fc') || '';
+            const score = dot.getAttribute('data-volcano-score') || '';
+            volcanoTooltip.innerHTML = '<strong>' + escapeHtml(gene) + '</strong><br>log\u2082FC: ' + fc + '<br>score: ' + score;
+            volcanoTooltip.style.display = 'block';
+            const cRect = volcanoContainer.getBoundingClientRect();
+            const dRect = dot.getBoundingClientRect();
+            let left = dRect.left - cRect.left + 10;
+            let top = dRect.top - cRect.top - 8;
+            if (left + volcanoTooltip.offsetWidth > cRect.width - 4) left -= volcanoTooltip.offsetWidth + 16;
+            if (top < 0) top = dRect.bottom - cRect.top + 4;
+            volcanoTooltip.style.left = left + 'px';
+            volcanoTooltip.style.top = top + 'px';
+        }});
+        volcanoContainer.addEventListener('mouseleave', () => {{
+            volcanoTooltip.style.display = 'none';
+        }});
+        volcanoSvg.addEventListener('click', async (e) => {{
+            const dot = e.target.closest('[data-volcano-gene]');
+            if (!dot) return;
+            const gene = dot.getAttribute('data-volcano-gene') || '';
+            if (!gene) return;
+            const ok = await activateViewerGene(gene, {{ showErrors: true }});
+            if (ok) rerenderFn();
+        }});
+    }}
+
+    function renderClusterDEResultSection(colorCol, sourceCategory, referenceCategory) {{
+        const result = getPairwiseClusterDEResult(colorCol, sourceCategory, referenceCategory);
+        if (!result) {{
+            return `
+                <div class="agg-group">
+                    <div class="agg-group-title">Pairwise DE</div>
+                    <div class="agg-group-meta">No pairwise DE result is available for this comparison.</div>
+                </div>
+            `;
+        }}
+
+        if (result.available === false) {{
+            const nSource = Number(result.n_source ?? 0).toLocaleString();
+            const nReference = Number(result.n_reference ?? 0).toLocaleString();
+            const minCells = Number(result.min_cells_required ?? 0).toLocaleString();
+            let detail = `n=${{nSource}} vs n=${{nReference}}.`;
+            if (result.reason === 'insufficient_cells') {{
+                detail = `Need >= ${{minCells}} cells per category (got ${{nSource}} vs ${{nReference}}).`;
+            }}
+            return `
+                <div class="agg-group">
+                    <div class="agg-group-title">Pairwise DE</div>
+                    <div class="agg-group-meta">${{escapeHtml(detail)}}</div>
+                </div>
+            `;
+        }}
+
+        const genes = Array.isArray(result.genes) ? result.genes : [];
+        const logfc = Array.isArray(result.logfoldchanges) ? result.logfoldchanges : [];
+        const pvalsAdj = Array.isArray(result.pvals_adj) ? result.pvals_adj : [];
+        const scores = Array.isArray(result.scores) ? result.scores : [];
+        const pctSource = Array.isArray(result.pct_source) ? result.pct_source : [];
+        const pctReference = Array.isArray(result.pct_reference) ? result.pct_reference : [];
+        if (!genes.length) {{
+            return `
+                <div class="agg-group">
+                    <div class="agg-group-title">Pairwise DE</div>
+                    <div class="agg-group-meta">No DE genes were returned for this comparison.</div>
+                </div>
+            `;
+        }}
+
+        const rows = genes.map((gene, idx) => {{
+            const logfcValue = logfc[idx];
+            const pvalAdjValue = pvalsAdj[idx];
+            const scoreValue = scores[idx];
+            const pctSourceValue = pctSource[idx];
+            const pctReferenceValue = pctReference[idx];
+            return `
+                <tr>
+                    <td><button type="button" class="cluster-de-gene-btn" data-cluster-de-gene="${{escapeHtml(gene)}}">${{escapeHtml(gene)}}</button></td>
+                    <td>${{formatScaleNumber(Number.isFinite(logfcValue) ? logfcValue : NaN)}}</td>
+                    <td>${{formatScaleNumber(Number.isFinite(pvalAdjValue) ? pvalAdjValue : NaN)}}</td>
+                    <td>${{formatScaleNumber(Number.isFinite(scoreValue) ? scoreValue : NaN)}}</td>
+                    <td>${{formatClusterDEPct(Number.isFinite(pctSourceValue) ? pctSourceValue : NaN)}}</td>
+                    <td>${{formatClusterDEPct(Number.isFinite(pctReferenceValue) ? pctReferenceValue : NaN)}}</td>
+                </tr>
+            `;
+        }}).join('');
+
+        return `
+            <div class="cluster-de-result">
+                ${{buildVolcanoPlot(genes, logfc, pvalsAdj)}}
+                <table class="cluster-de-table">
+                    <thead>
+                        <tr>
+                            <th>Gene</th>
+                            <th>logFC</th>
+                            <th>adj. p</th>
+                            <th>Score</th>
+                            <th>% A</th>
+                            <th>% B</th>
+                        </tr>
+                    </thead>
+                    <tbody>${{rows}}</tbody>
+                </table>
+            </div>
+        `;
+    }}
+
+    function setCompareSectionSummary(elementId, text) {{
+        const el = document.getElementById(elementId);
+        if (el) el.textContent = text || '';
+    }}
+
+    function syncClusterDEControls() {{
+        const groupbySelect = document.getElementById('cluster-de-groupby');
+        const sourceSelect = document.getElementById('cluster-de-source');
+        const referenceSelect = document.getElementById('cluster-de-reference');
+        const availableGroupbys = getAvailableComparisonColors();
+
+        if (groupbySelect) {{
+            groupbySelect.innerHTML = availableGroupbys.map(col => `<option value="${{col}}">${{col}}</option>`).join('');
+        }}
+
+        if (!availableGroupbys.length) {{
+            clusterDeGroupby = null;
+            clusterDeSourceCategory = null;
+            clusterDeReferenceCategory = null;
+            if (sourceSelect) sourceSelect.innerHTML = '';
+            if (referenceSelect) referenceSelect.innerHTML = '';
+            return {{ availableGroupbys, categories: [] }};
+        }}
+
+        if (!clusterDeGroupby || !availableGroupbys.includes(clusterDeGroupby)) {{
+            clusterDeGroupby = availableGroupbys.includes(currentColor) ? currentColor : availableGroupbys[0];
+        }}
+        if (groupbySelect) groupbySelect.value = clusterDeGroupby;
+
+        const categories = getClusterDECategories(clusterDeGroupby);
+        const options = categories.map(category => `<option value="${{escapeHtml(category)}}">${{escapeHtml(category)}}</option>`).join('');
+        if (sourceSelect) sourceSelect.innerHTML = options;
+        if (referenceSelect) referenceSelect.innerHTML = options;
+
+        if (!categories.length) {{
+            clusterDeSourceCategory = null;
+            clusterDeReferenceCategory = null;
+            return {{ availableGroupbys, categories }};
+        }}
+
+        if (!clusterDeSourceCategory || !categories.includes(clusterDeSourceCategory)) {{
+            clusterDeSourceCategory = categories[0];
+        }}
+        if (!clusterDeReferenceCategory || !categories.includes(clusterDeReferenceCategory) || clusterDeReferenceCategory === clusterDeSourceCategory) {{
+            clusterDeReferenceCategory = categories.find(category => category !== clusterDeSourceCategory) || null;
+        }}
+
+        if (sourceSelect) sourceSelect.value = clusterDeSourceCategory || '';
+        if (referenceSelect) {{
+            referenceSelect.value = clusterDeReferenceCategory || '';
+            referenceSelect.disabled = categories.length < 2;
+        }}
+
+        return {{ availableGroupbys, categories }};
+    }}
+
+    function renderClusterDE() {{
+        const container = document.getElementById('cluster-de-results');
+        if (!container) return;
+
+        const {{ availableGroupbys, categories }} = syncClusterDEControls();
+        if (!availableGroupbys.length) {{
+            setCompareSectionSummary('cluster-de-summary', 'Available for categorical annotations only.');
+            container.innerHTML = '<div class="agg-group-meta">Category comparison is available for categorical colors only.</div>';
+            return;
+        }}
+        if (!clusterDeGroupby) {{
+            setCompareSectionSummary('cluster-de-summary', 'Choose a categorical annotation.');
+            container.innerHTML = '<div class="agg-group-meta">Choose a categorical annotation to compare.</div>';
+            return;
+        }}
+        if (!categories.length) {{
+            setCompareSectionSummary('cluster-de-summary', `${{formatMetadataLabel(clusterDeGroupby)}} has no categories.`);
+            container.innerHTML = '<div class="agg-group-meta">No categories are available for this annotation.</div>';
+            return;
+        }}
+        if (!clusterDeSourceCategory || !clusterDeReferenceCategory) {{
+            setCompareSectionSummary('cluster-de-summary', 'Choose two categories.');
+            container.innerHTML = '<div class="agg-group-meta">Choose two different categories to compare.</div>';
+            return;
+        }}
+        if (clusterDeSourceCategory === clusterDeReferenceCategory) {{
+            setCompareSectionSummary('cluster-de-summary', 'Choose two different categories.');
+            container.innerHTML = '<div class="agg-group-meta">Choose two different categories to compare.</div>';
+            return;
+        }}
+        setCompareSectionSummary(
+            'cluster-de-summary',
+            `${{formatMetadataLabel(clusterDeGroupby)}}: ${{clusterDeSourceCategory}} vs ${{clusterDeReferenceCategory}}`,
+        );
+
+        container.innerHTML = `
+            <div class="cluster-de-meta">
+                Comparing <strong>${{escapeHtml(clusterDeSourceCategory)}}</strong> vs <strong>${{escapeHtml(clusterDeReferenceCategory)}}</strong>
+                in <strong>${{escapeHtml(formatMetadataLabel(clusterDeGroupby))}}</strong>.
+            </div>
+            ${{renderComparisonMarkerSummary(clusterDeGroupby, clusterDeSourceCategory, clusterDeReferenceCategory)}}
+            ${{renderClusterDEResultSection(clusterDeGroupby, clusterDeSourceCategory, clusterDeReferenceCategory)}}
+        `;
+
+        bindGeneActivateButtons(container, renderClusterDE);
+        container.querySelectorAll('[data-cluster-de-gene]').forEach((btn) => {{
+            btn.addEventListener('click', async () => {{
+                const gene = btn.getAttribute('data-cluster-de-gene') || '';
+                if (!gene) return;
+                const ok = await activateViewerGene(gene, {{ showErrors: true }});
+                if (ok) renderClusterDE();
+            }});
+        }});
+
+        const volcanoSvg = container.querySelector('.volcano-svg');
+        const volcanoTooltip = container.querySelector('.volcano-tooltip');
+        if (volcanoSvg && volcanoTooltip) {{
+            const volcanoContainer = volcanoSvg.parentElement;
+            volcanoSvg.addEventListener('mouseover', (e) => {{
+                const dot = e.target.closest('[data-volcano-gene]');
+                if (!dot) return;
+                const gene = dot.getAttribute('data-volcano-gene') || '';
+                const fc = dot.getAttribute('data-volcano-fc') || '';
+                const padj = dot.getAttribute('data-volcano-padj') || '';
+                volcanoTooltip.innerHTML = '<strong>' + escapeHtml(gene) + '</strong><br>logFC: ' + fc + '<br>adj.p: ' + padj;
+                volcanoTooltip.style.display = 'block';
+                const cRect = volcanoContainer.getBoundingClientRect();
+                const dRect = dot.getBoundingClientRect();
+                let left = dRect.left - cRect.left + 10;
+                let top = dRect.top - cRect.top - 8;
+                if (left + volcanoTooltip.offsetWidth > cRect.width - 4) left -= volcanoTooltip.offsetWidth + 16;
+                if (top < 0) top = dRect.bottom - cRect.top + 4;
+                volcanoTooltip.style.left = left + 'px';
+                volcanoTooltip.style.top = top + 'px';
+            }});
+            volcanoContainer.addEventListener('mouseleave', () => {{
+                volcanoTooltip.style.display = 'none';
+            }});
+            volcanoSvg.addEventListener('click', async (e) => {{
+                const dot = e.target.closest('[data-volcano-gene]');
+                if (!dot) return;
+                const gene = dot.getAttribute('data-volcano-gene') || '';
+                if (!gene) return;
+                const ok = await activateViewerGene(gene, {{ showErrors: true }});
+                if (ok) renderClusterDE();
+            }});
+        }}
+    }}
+
+    function getGroupDEExportState(groupA, groupB, quickResult = null) {{
+        if (!groupA || !groupB) return null;
+        const pairKey = getGroupDECacheKey(groupA, groupB);
+        const fullCached = pairKey ? groupDeFullCache.get(pairKey) : null;
+        if (fullCached?.available) {{
+            return {{ mode: 'full-sidecar', result: fullCached }};
+        }}
+        if (quickResult?.available) {{
+            return {{ mode: 'quick-loaded-genes', result: quickResult }};
+        }}
+        return null;
+    }}
+
+    function buildGroupDEReport(groupA, groupB, exportState) {{
+        if (!groupA || !groupB || !exportState?.result) return null;
+        const result = exportState.result;
+        const topN = Math.max(1, Number(groupDeTopN) || ANNOTATION_DE_TOP_N);
+        const exportedGenes = (result.results || []).slice(0, topN).map((entry, index) => ({{
+            rank: index + 1,
+            gene: entry.gene,
+            log2fc_a_vs_b: entry.log2fc,
+            score: entry.score,
+            pct_expr_a: entry.pctA,
+            pct_expr_b: entry.pctB,
+            mean_a: entry.meanA,
+            mean_b: entry.meanB,
+        }}));
+        const buildGroupBlock = (group, nCells) => ({{
+            label: group.label,
+            description: group.description,
+            kind: group.sourceSpec?.kind || null,
+            column: group.sourceSpec?.column || null,
+            value: group.sourceValue,
+            n_cells: Number(nCells || group.nCells || 0),
+            scope: group.scope || 'all',
+            restriction: group.restrictSpec
+                ? {{
+                    kind: group.restrictSpec.kind,
+                    column: group.restrictSpec.column,
+                    value: group.restrictValue,
+                }}
+                : null,
+        }});
+        return {{
+            format: 'karospace-group-de-report-v1',
+            exported_at: new Date().toISOString(),
+            result_mode: exportState.mode,
+            color_column: currentColor || null,
+            top_genes_requested: topN,
+            group_a: buildGroupBlock(groupA, result.nA),
+            group_b: buildGroupBlock(groupB, result.nB),
+            stats: {{
+                loaded_gene_count: Number(result.loadedGeneCount || 0),
+                total_gene_count: Number(result.totalGeneCount || result.loadedGeneCount || 0),
+                total_hits_available: Array.isArray(result.results) ? result.results.length : 0,
+                genes_exported: exportedGenes.length,
+            }},
+            genes: exportedGenes,
+        }};
+    }}
+
+    function exportGroupDEReport(groupA, groupB, exportState) {{
+        const report = buildGroupDEReport(groupA, groupB, exportState);
+        if (!report) {{
+            alert('No group DE result is available to export yet.');
+            return;
+        }}
+        const sourceLabel = sanitizeFilenamePart(groupA.label || groupA.sourceValue || 'group-a');
+        const referenceLabel = sanitizeFilenamePart(groupB.label || groupB.sourceValue || 'group-b');
+        const filename = `karospace-group-de-${{sourceLabel}}-vs-${{referenceLabel}}-${{getScreenshotTimestamp()}}.json`;
+        downloadJsonFile(report, filename);
+    }}
+
+    function buildGroupDECsv(groupA, groupB, exportState) {{
+        const report = buildGroupDEReport(groupA, groupB, exportState);
+        if (!report) return '';
+        const rows = [];
+        rows.push([
+            'rank',
+            'gene',
+            'log2fc_a_vs_b',
+            'score',
+            'pct_expr_a',
+            'pct_expr_b',
+            'mean_a',
+            'mean_b',
+            'result_mode',
+            'color_column',
+            'group_a_label',
+            'group_a_kind',
+            'group_a_column',
+            'group_a_value',
+            'group_a_n_cells',
+            'group_a_scope',
+            'group_a_restriction_column',
+            'group_a_restriction_value',
+            'group_b_label',
+            'group_b_kind',
+            'group_b_column',
+            'group_b_value',
+            'group_b_n_cells',
+            'group_b_scope',
+            'group_b_restriction_column',
+            'group_b_restriction_value',
+            'loaded_gene_count',
+            'total_gene_count',
+            'exported_at',
+        ]);
+        (report.genes || []).forEach((entry) => {{
+            rows.push([
+                entry.rank,
+                entry.gene,
+                entry.log2fc_a_vs_b,
+                entry.score,
+                entry.pct_expr_a,
+                entry.pct_expr_b,
+                entry.mean_a,
+                entry.mean_b,
+                report.result_mode,
+                report.color_column,
+                report.group_a?.label,
+                report.group_a?.kind,
+                report.group_a?.column,
+                report.group_a?.value,
+                report.group_a?.n_cells,
+                report.group_a?.scope,
+                report.group_a?.restriction?.column,
+                report.group_a?.restriction?.value,
+                report.group_b?.label,
+                report.group_b?.kind,
+                report.group_b?.column,
+                report.group_b?.value,
+                report.group_b?.n_cells,
+                report.group_b?.scope,
+                report.group_b?.restriction?.column,
+                report.group_b?.restriction?.value,
+                report.stats?.loaded_gene_count,
+                report.stats?.total_gene_count,
+                report.exported_at,
+            ]);
+        }});
+        return rows
+            .map((row) => row.map((value) => escapeCsvCell(value)).join(','))
+            .join('\\n');
+    }}
+
+    function exportGroupDECsv(groupA, groupB, exportState) {{
+        const csvText = buildGroupDECsv(groupA, groupB, exportState);
+        if (!csvText) {{
+            alert('No group DE result is available to export yet.');
+            return;
+        }}
+        const sourceLabel = sanitizeFilenamePart(groupA.label || groupA.sourceValue || 'group-a');
+        const referenceLabel = sanitizeFilenamePart(groupB.label || groupB.sourceValue || 'group-b');
+        const filename = `karospace-group-de-${{sourceLabel}}-vs-${{referenceLabel}}-${{getScreenshotTimestamp()}}.csv`;
+        downloadTextFile(csvText, filename, 'text/csv;charset=utf-8');
+    }}
+
+    async function runFullGroupDE(groupA, groupB) {{
+        if (!groupA || !groupB || !DATA.gene_aux_url) return;
+        const key = getGroupDECacheKey(groupA, groupB);
+        const token = ++groupDeFullRunToken;
+        groupDeFullRun = {{
+            token,
+            key,
+            running: true,
+            completedShards: 0,
+            totalShards: 0,
+            completedGenes: 0,
+            totalGenes: 0,
+            error: null,
+        }};
+        renderGroupDE();
+        try {{
+            const result = await runFullCellSetDE(groupA, groupB, {{
+                isCancelled: () => groupDeFullRunToken !== token,
+                onProgress: (progress) => {{
+                    if (groupDeFullRunToken !== token) return;
+                    groupDeFullRun = {{
+                        token,
+                        key,
+                        running: true,
+                        completedShards: Number(progress.completedShards || 0),
+                        totalShards: Number(progress.totalShards || 0),
+                        completedGenes: Number(progress.completedGenes || 0),
+                        totalGenes: Number(progress.totalGenes || 0),
+                        error: null,
+                    }};
+                    renderGroupDE();
+                }},
+            }});
+            if (groupDeFullRunToken !== token || !result) return;
+            groupDeFullCache.set(key, result);
+            groupDeFullRun = null;
+            renderGroupDE();
+        }} catch (error) {{
+            if (groupDeFullRunToken !== token) return;
+            groupDeFullRun = {{
+                token,
+                key,
+                running: false,
+                completedShards: Number(groupDeFullRun?.completedShards || 0),
+                totalShards: Number(groupDeFullRun?.totalShards || 0),
+                completedGenes: Number(groupDeFullRun?.completedGenes || 0),
+                totalGenes: Number(groupDeFullRun?.totalGenes || 0),
+                error: error?.message || 'Unknown error',
+            }};
+            renderGroupDE();
+        }}
+    }}
+
+    function syncGroupDEUiState() {{
+        const sources = getGroupDESourceSpecs();
+        const encodedSources = sources.map((spec) => encodeGroupDESourceSpec(spec));
+        if (!encodedSources.length) {{
+            groupDeSourceSpecValue = '';
+            groupDeSourceValue = null;
+            groupDeReferenceValue = null;
+            groupDeRestrictSpecValue = '';
+            groupDeRestrictValue = null;
+            return {{
+                sources,
+                sourceSpec: null,
+                groupValues: [],
+                restrictSpec: null,
+                restrictValues: [],
+            }};
+        }}
+
+        if (!groupDeSourceSpecValue || !encodedSources.includes(groupDeSourceSpecValue)) {{
+            groupDeSourceSpecValue = getPreferredGroupDESourceSpecValue(sources);
+        }}
+        const sourceSpec = decodeGroupDESourceSpec(groupDeSourceSpecValue);
+        const groupValues = getGroupDEValuesForSpec(sourceSpec);
+        if (!groupValues.includes(String(groupDeSourceValue ?? ''))) {{
+            groupDeSourceValue = groupValues[0] || null;
+        }} else {{
+            groupDeSourceValue = String(groupDeSourceValue);
+        }}
+        if (!groupValues.includes(String(groupDeReferenceValue ?? '')) || String(groupDeReferenceValue) === String(groupDeSourceValue ?? '')) {{
+            groupDeReferenceValue = groupValues.find((value) => value !== String(groupDeSourceValue ?? '')) || null;
+        }} else {{
+            groupDeReferenceValue = String(groupDeReferenceValue);
+        }}
+
+        if (groupDeRestrictSpecValue && !encodedSources.includes(groupDeRestrictSpecValue)) {{
+            groupDeRestrictSpecValue = '';
+        }}
+        const restrictSpec = decodeGroupDESourceSpec(groupDeRestrictSpecValue);
+        let restrictValues = [];
+        if (restrictSpec) {{
+            restrictValues = getGroupDEValuesForSpec(restrictSpec);
+            if (!restrictValues.includes(String(groupDeRestrictValue ?? ''))) {{
+                groupDeRestrictValue = restrictValues[0] || null;
+            }} else {{
+                groupDeRestrictValue = String(groupDeRestrictValue);
+            }}
+        }} else {{
+            groupDeRestrictValue = null;
+        }}
+
+        groupDeScope = groupDeScope === 'visible' ? 'visible' : 'all';
+        groupDeTopN = Math.min(100, Math.max(3, Number(groupDeTopN) || ANNOTATION_DE_TOP_N));
+        return {{
+            sources,
+            sourceSpec,
+            groupValues,
+            restrictSpec,
+            restrictValues,
+        }};
+    }}
+
+    async function buildGroupDECellSetAsync(spec, value, options = {{}}) {{
+        if (!spec || value === null || value === undefined || value === '') return null;
+        const restrictSpec = options.restrictSpec || null;
+        const hasRestriction = !!(restrictSpec && options.restrictValue !== null && options.restrictValue !== undefined && options.restrictValue !== '');
+        const restrictValue = hasRestriction ? String(options.restrictValue) : null;
+        const scope = options.scope === 'visible' ? 'visible' : 'all';
+        const isCancelled = typeof options.isCancelled === 'function' ? options.isCancelled : () => false;
+        const allSections = DATA.sections || [];
+        const sections = [];
+
+        for (let si = 0; si < allSections.length; si++) {{
+            if (isCancelled()) return null;
+            const section = allSections[si];
+            if (scope === 'visible' && !sectionPassesFilter(section)) continue;
+            if (spec.kind === 'metadata' && !matchGroupDESpec(section, -1, spec, value)) continue;
+            if (hasRestriction && restrictSpec.kind === 'metadata' && !matchGroupDESpec(section, -1, restrictSpec, restrictValue)) continue;
+
+            if (spec.kind === 'metadata' && (!hasRestriction || restrictSpec.kind === 'metadata')) {{
+                const entry = normalizeCellGroupSectionEntry(section.id, null);
+                if (entry) sections.push(entry);
+                continue;
+            }}
+
+            const sourceValues = spec.kind === 'annotation' ? getSectionColorValues(section, spec.column) : null;
+            const sourceMeta = spec.kind === 'annotation' ? DATA.colors_meta?.[spec.column] : null;
+            const restrictValues = hasRestriction && restrictSpec.kind === 'annotation'
+                ? getSectionColorValues(section, restrictSpec.column)
+                : null;
+            const restrictMeta = hasRestriction && restrictSpec.kind === 'annotation'
+                ? DATA.colors_meta?.[restrictSpec.column]
+                : null;
+            const nCells = Number(section.n_cells ?? sourceValues?.length ?? restrictValues?.length ?? section.x?.length ?? 0);
+            if (!(nCells > 0)) continue;
+            const matched = [];
+            for (let cellIdx = 0; cellIdx < nCells; cellIdx++) {{
+                let include = true;
+                if (spec.kind === 'annotation') {{
+                    include = getCategoricalValueNameFromRaw(sourceMeta, sourceValues?.[cellIdx]) === String(value);
+                }}
+                if (include && hasRestriction && restrictSpec.kind === 'annotation') {{
+                    include = getCategoricalValueNameFromRaw(restrictMeta, restrictValues?.[cellIdx]) === restrictValue;
+                }}
+                if (include) matched.push(cellIdx);
+            }}
+            const entry = normalizeCellGroupSectionEntry(section.id, matched);
+            if (entry) sections.push(entry);
+
+            // Yield every 5 sections to keep the browser responsive
+            if (si % 5 === 4) await new Promise((r) => setTimeout(r, 0));
+        }}
+        if (isCancelled()) return null;
+
+        return buildCellSetGroup({{
+            key: buildGroupDEKey(spec, value, restrictSpec, restrictValue, scope),
+            label: buildGroupDELabel(spec, value, restrictSpec, restrictValue, scope),
+            description: buildGroupDELabel(spec, value, restrictSpec, restrictValue, scope),
+            sourceSpec: spec,
+            sourceValue: String(value),
+            restrictSpec: restrictSpec || null,
+            restrictValue,
+            scope,
+        }}, sections);
+    }}
+
+    async function computeCellSetDEAsync(groupA, groupB, options = {{}}) {{
+        const topN = Math.max(1, Number(options.topN) || groupDeTopN || 12);
+        const isCancelled = typeof options.isCancelled === 'function' ? options.isCancelled : () => false;
+        if (!groupA || !groupB) {{
+            return {{ available: false, reason: 'missing_groups', results: [] }};
+        }}
+        if (groupA.key && groupA.key === groupB.key) {{
+            return {{ available: false, reason: 'same_group', nA: groupA.nCells || 0, nB: groupB.nCells || 0, results: [] }};
+        }}
+        if (!(groupA.nCells > 0) || !(groupB.nCells > 0)) {{
+            return {{
+                available: false,
+                reason: 'empty_group',
+                nA: Number(groupA.nCells || 0),
+                nB: Number(groupB.nCells || 0),
+                results: [],
+            }};
+        }}
+
+        const loadedGenes = Object.keys(DATA.genes_meta || {{}}).sort((a, b) => a.localeCompare(b));
+        const totalGenes = Array.isArray(DATA.available_genes) ? DATA.available_genes.length : loadedGenes.length;
+        if (!loadedGenes.length) {{
+            return {{
+                available: false,
+                reason: 'no_loaded_genes',
+                nA: Number(groupA.nCells || 0),
+                nB: Number(groupB.nCells || 0),
+                loadedGeneCount: 0,
+                totalGeneCount: totalGenes,
+                results: [],
+            }};
+        }}
+
+        const results = [];
+        const BATCH = 10;
+        for (let i = 0; i < loadedGenes.length; i += BATCH) {{
+            if (isCancelled()) return null;
+            const end = Math.min(i + BATCH, loadedGenes.length);
+            for (let j = i; j < end; j++) {{
+                const gene = loadedGenes[j];
+                const statsA = computeQuickStatsForGroupGene(groupA, gene);
+                const statsB = computeQuickStatsForGroupGene(groupB, gene);
+                const entry = buildDEEntryFromStats(gene, statsA, statsB, groupA.nCells, groupB.nCells);
+                if (entry) results.push(entry);
+            }}
+            if (end < loadedGenes.length) await new Promise((r) => setTimeout(r, 0));
+        }}
+        if (isCancelled()) return null;
+
+        sortCellSetDEResults(results);
+        return {{
+            available: true,
+            reason: null,
+            nA: Number(groupA.nCells || 0),
+            nB: Number(groupB.nCells || 0),
+            loadedGeneCount: loadedGenes.length,
+            totalGeneCount: totalGenes,
+            results: results.slice(0, topN),
+        }};
+    }}
+
+    function renderGroupDE() {{
+        groupDeRenderDepth += 1;
+        if (groupDeRenderDepth > 3) {{
+            console.error('renderGroupDE re-entrant depth', groupDeRenderDepth);
+            groupDeRenderDepth -= 1;
+            return;
+        }}
+        try {{
+        const container = document.getElementById('group-de-panel');
+        if (!container) return;
+
+        const {{ sources, sourceSpec, groupValues, restrictSpec, restrictValues }} = syncGroupDEUiState();
+        if (!sources.length) {{
+            setCompareSectionSummary('group-de-summary', 'Needs section metadata or categorical annotations.');
+            container.innerHTML = '<div class="agg-group-meta">Group DE needs section metadata or categorical annotations to define the two groups.</div>';
+            return;
+        }}
+
+        const groupedSourceOptions = (kind) => sources
+            .filter((spec) => spec.kind === kind)
+            .map((spec) => {{
+                const encoded = encodeGroupDESourceSpec(spec);
+                const selected = encoded === groupDeSourceSpecValue ? ' selected' : '';
+                return `<option value="${{encoded}}"${{selected}}>${{escapeHtml(formatGroupDESourceSpecLabel(spec))}}</option>`;
+            }})
+            .join('');
+        const groupedRestrictionOptions = (kind) => sources
+            .filter((spec) => spec.kind === kind)
+            .map((spec) => {{
+                const encoded = encodeGroupDESourceSpec(spec);
+                const selected = encoded === groupDeRestrictSpecValue ? ' selected' : '';
+                return `<option value="${{encoded}}"${{selected}}>${{escapeHtml(formatGroupDESourceSpecLabel(spec))}}</option>`;
+            }})
+            .join('');
+        const renderValueOptions = (values, selectedValue) => values
+            .map((value) => {{
+                const text = String(value);
+                const selected = text === String(selectedValue ?? '') ? ' selected' : '';
+                return `<option value="${{escapeHtml(text)}}"${{selected}}>${{escapeHtml(text)}}</option>`;
+            }})
+            .join('');
+
+        let html = `
+            <div class="agg-group-meta">Exploratory DE between two arbitrary cell groups. Compare samples, section metadata groups, or cell annotations, and optionally restrict within a second annotation such as a cell type.</div>
+            <div class="cluster-de-controls">
+                <div>
+                    <label>Compare By</label>
+                    <select id="group-de-source-spec">
+                        ${{groupedSourceOptions('metadata') ? `<optgroup label="Section metadata">${{groupedSourceOptions('metadata')}}</optgroup>` : ''}}
+                        ${{groupedSourceOptions('annotation') ? `<optgroup label="Cell annotations">${{groupedSourceOptions('annotation')}}</optgroup>` : ''}}
+                    </select>
+                </div>
+                <div class="cluster-de-select-row">
+                    <div>
+                        <label>Group A</label>
+                        <select id="group-de-source-value">${{renderValueOptions(groupValues, groupDeSourceValue)}}</select>
+                    </div>
+                    <div>
+                        <label>Group B</label>
+                        <select id="group-de-reference-value">${{renderValueOptions(groupValues, groupDeReferenceValue)}}</select>
+                    </div>
+                    <div>
+                        <label>Top Genes</label>
+                        <input id="group-de-topn" type="number" min="3" max="100" step="1" value="${{Math.max(3, Number(groupDeTopN) || ANNOTATION_DE_TOP_N)}}">
+                    </div>
+                </div>
+                <div class="cluster-de-select-row">
+                    <div>
+                        <label>Restrict Within</label>
+                        <select id="group-de-restrict-spec">
+                            <option value="">None</option>
+                            ${{groupedRestrictionOptions('metadata') ? `<optgroup label="Section metadata">${{groupedRestrictionOptions('metadata')}}</optgroup>` : ''}}
+                            ${{groupedRestrictionOptions('annotation') ? `<optgroup label="Cell annotations">${{groupedRestrictionOptions('annotation')}}</optgroup>` : ''}}
+                        </select>
+                    </div>
+                    <div>
+                        <label>Restrict Value</label>
+                        <select id="group-de-restrict-value" ${{restrictSpec ? '' : 'disabled'}}>${{renderValueOptions(restrictValues, groupDeRestrictValue)}}</select>
+                    </div>
+                    <div>
+                        <label>Scope</label>
+                        <select id="group-de-scope">
+                            <option value="all"${{groupDeScope === 'all' ? ' selected' : ''}}>All cells</option>
+                            <option value="visible"${{groupDeScope === 'visible' ? ' selected' : ''}}>Current filters</option>
+                        </select>
+                    </div>
+                </div>
+                <div style="display: flex; justify-content: flex-end;">
+                    <button class="legend-btn" id="group-de-swap" type="button">Swap A/B</button>
+                </div>
+            </div>
+        `;
+
+        if (!sourceSpec) {{
+            setCompareSectionSummary('group-de-summary', 'Choose a grouping field.');
+            container.innerHTML = html + '<div class="agg-group-meta">Choose a section metadata field or categorical annotation to define the two groups.</div>';
+            return;
+        }}
+        if (groupValues.length < 2) {{
+            setCompareSectionSummary('group-de-summary', `${{formatGroupDESourceSpecLabel(sourceSpec)}} needs at least two values.`);
+            container.innerHTML = html + '<div class="agg-group-meta">This grouping field needs at least two values.</div>';
+            return;
+        }}
+
+        // Render controls immediately, defer heavy DE computation
+        const token = ++groupDeRenderToken;
+        const summaryLabel = formatGroupDESourceSpecLabel(sourceSpec);
+        const restrictSummary = restrictSpec && groupDeRestrictValue
+            ? ` · within ${{formatGroupDESourceSpecLabel(restrictSpec)}}=${{groupDeRestrictValue}}`
+            : '';
+        setCompareSectionSummary(
+            'group-de-summary',
+            `${{summaryLabel}}: ${{String(groupDeSourceValue ?? 'A')}} vs ${{String(groupDeReferenceValue ?? 'B')}}${{restrictSummary}}`,
+        );
+        html += '<div id="group-de-results"><div class="agg-group-meta">Computing...</div></div>';
+        container.innerHTML = html;
+
+        const sourceSpecSelect = container.querySelector('#group-de-source-spec');
+        const sourceValueSelect = container.querySelector('#group-de-source-value');
+        const referenceValueSelect = container.querySelector('#group-de-reference-value');
+        const restrictSpecSelect = container.querySelector('#group-de-restrict-spec');
+        const restrictValueSelect = container.querySelector('#group-de-restrict-value');
+        const scopeSelect = container.querySelector('#group-de-scope');
+        const topNInput = container.querySelector('#group-de-topn');
+        const swapBtn = container.querySelector('#group-de-swap');
+        // Defer re-renders via requestAnimationFrame so select elements finish
+        // their event lifecycle before innerHTML replaces them (Safari crash fix).
+        const deferRender = () => requestAnimationFrame(() => renderGroupDE());
+        sourceSpecSelect?.addEventListener('change', () => {{
+            cancelGroupDEFullRun();
+            groupDeSourceSpecValue = sourceSpecSelect.value || '';
+            groupDeSourceValue = null;
+            groupDeReferenceValue = null;
+            deferRender();
+        }});
+        sourceValueSelect?.addEventListener('change', () => {{
+            cancelGroupDEFullRun();
+            groupDeSourceValue = sourceValueSelect.value || null;
+            deferRender();
+        }});
+        referenceValueSelect?.addEventListener('change', () => {{
+            cancelGroupDEFullRun();
+            groupDeReferenceValue = referenceValueSelect.value || null;
+            deferRender();
+        }});
+        restrictSpecSelect?.addEventListener('change', () => {{
+            cancelGroupDEFullRun();
+            groupDeRestrictSpecValue = restrictSpecSelect.value || '';
+            groupDeRestrictValue = null;
+            deferRender();
+        }});
+        restrictValueSelect?.addEventListener('change', () => {{
+            cancelGroupDEFullRun();
+            groupDeRestrictValue = restrictValueSelect.value || null;
+            deferRender();
+        }});
+        scopeSelect?.addEventListener('change', () => {{
+            cancelGroupDEFullRun();
+            groupDeScope = scopeSelect.value === 'visible' ? 'visible' : 'all';
+            deferRender();
+        }});
+        topNInput?.addEventListener('change', () => {{
+            groupDeTopN = Math.min(100, Math.max(3, Number(topNInput.value) || ANNOTATION_DE_TOP_N));
+            deferRender();
+        }});
+        swapBtn?.addEventListener('click', () => {{
+            cancelGroupDEFullRun();
+            const source = groupDeSourceValue;
+            groupDeSourceValue = groupDeReferenceValue;
+            groupDeReferenceValue = source;
+            renderGroupDE();
+        }});
+
+        // Snapshot current state for the deferred computation
+        const deferredSourceSpec = sourceSpec;
+        const deferredRestrictSpec = restrictSpec;
+        const deferredSourceValue = groupDeSourceValue;
+        const deferredReferenceValue = groupDeReferenceValue;
+        const deferredRestrictValue = groupDeRestrictValue;
+        const deferredScope = groupDeScope;
+        const deferredTopN = groupDeTopN;
+
+        // Defer heavy cell-set building + DE computation so browser can breathe
+        (async () => {{
+            await new Promise((r) => setTimeout(r, 0));
+            if (groupDeRenderToken !== token) return;
+            const resultsDiv = document.getElementById('group-de-results');
+            if (!resultsDiv) return;
+
+            const groupA = await buildGroupDECellSetAsync(deferredSourceSpec, deferredSourceValue, {{
+                restrictSpec: deferredRestrictSpec,
+                restrictValue: deferredRestrictValue,
+                scope: deferredScope,
+                isCancelled: () => groupDeRenderToken !== token,
+            }});
+            if (groupDeRenderToken !== token) return;
+            const groupB = await buildGroupDECellSetAsync(deferredSourceSpec, deferredReferenceValue, {{
+                restrictSpec: deferredRestrictSpec,
+                restrictValue: deferredRestrictValue,
+                scope: deferredScope,
+                isCancelled: () => groupDeRenderToken !== token,
+            }});
+            if (groupDeRenderToken !== token) return;
+
+            const quickResult = await computeCellSetDEAsync(groupA, groupB, {{
+                topN: deferredTopN,
+                isCancelled: () => groupDeRenderToken !== token,
+            }});
+            if (groupDeRenderToken !== token || !quickResult) return;
+
+            const exportState = getGroupDEExportState(groupA, groupB, quickResult);
+            const pairKey = getGroupDECacheKey(groupA, groupB);
+            const fullCached = pairKey ? groupDeFullCache.get(pairKey) : null;
+            const fullRun = (groupDeFullRun && groupDeFullRun.key === pairKey) ? groupDeFullRun : null;
+            const sidecarAvailable = !!DATA.gene_aux_url;
+            const renderCards = (result) => {{
+                const topN = Math.max(1, Number(deferredTopN) || ANNOTATION_DE_TOP_N);
+                return (result.results || []).slice(0, topN).map((entry) => {{
+                    return `
+                        <div class="comparison-card">
+                            <div class="comparison-card-title">
+                                ${{renderGeneTokenButton(entry.gene, {{
+                                    isActive: entry.gene === currentGene,
+                                    showMeta: false,
+                                    title: 'Load group DE gene into the viewer',
+                                }})}}
+                                ${{renderGeneGoogleSearchButton(entry.gene, {{
+                                    title: 'Search Google for this gene',
+                                }})}}
+                            </div>
+                            <div class="comparison-metric-grid">
+                                <div class="comparison-metric">
+                                    <span class="comparison-metric-label">log2FC A/B</span>
+                                    <span class="comparison-metric-value">${{formatScaleNumber(entry.log2fc)}}</span>
+                                </div>
+                                <div class="comparison-metric">
+                                    <span class="comparison-metric-label">Score</span>
+                                    <span class="comparison-metric-value">${{formatScaleNumber(entry.score)}}</span>
+                                </div>
+                                <div class="comparison-metric">
+                                    <span class="comparison-metric-label">% expr A</span>
+                                    <span class="comparison-metric-value">${{formatClusterDEPct(entry.pctA)}}</span>
+                                </div>
+                                <div class="comparison-metric">
+                                    <span class="comparison-metric-label">% expr B</span>
+                                    <span class="comparison-metric-value">${{formatClusterDEPct(entry.pctB)}}</span>
+                                </div>
+                                <div class="comparison-metric">
+                                    <span class="comparison-metric-label">Mean A</span>
+                                    <span class="comparison-metric-value">${{formatScaleNumber(entry.meanA)}}</span>
+                                </div>
+                                <div class="comparison-metric">
+                                    <span class="comparison-metric-label">Mean B</span>
+                                    <span class="comparison-metric-value">${{formatScaleNumber(entry.meanB)}}</span>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }}).join('');
+            }};
+            const sourceLabel = groupA ? escapeHtml(groupA.description) : '';
+            const referenceLabel = groupB ? escapeHtml(groupB.description) : '';
+            const sizeSummary = (groupA && groupB)
+                ? ` · ${{Number(groupA.nCells || 0).toLocaleString()}} vs ${{Number(groupB.nCells || 0).toLocaleString()}} cells`
+                : '';
+            setCompareSectionSummary(
+                'group-de-summary',
+                `${{summaryLabel}}: ${{String(deferredSourceValue ?? 'A')}} vs ${{String(deferredReferenceValue ?? 'B')}}${{restrictSummary}}${{sizeSummary}}`,
+            );
+            const topNLabel = Math.max(1, Number(deferredTopN) || ANNOTATION_DE_TOP_N).toLocaleString();
+            const quickSummaryHtml = (quickResult.available && quickResult.results.length)
+                ? `
+                    <div class="agg-group-meta">
+                        Group A: <strong>${{sourceLabel}}</strong> (${{Number(quickResult.nA || 0).toLocaleString()}} cells)
+                        vs Group B: <strong>${{referenceLabel}}</strong> (${{Number(quickResult.nB || 0).toLocaleString()}} cells).
+                    </div>
+                    <div class="agg-group-meta">
+                        ${{
+                            Number(quickResult.loadedGeneCount || 0) < Number(quickResult.totalGeneCount || 0)
+                                ? `Using ${{Number(quickResult.loadedGeneCount || 0).toLocaleString()}} of ${{Number(quickResult.totalGeneCount || 0).toLocaleString()}} genes currently loaded in the viewer.`
+                                : `Using ${{Number(quickResult.loadedGeneCount || 0).toLocaleString()}} loaded genes.`
+                        }}
+                        Showing top ${{topNLabel}} genes. Positive scores indicate enrichment in Group A.
+                    </div>
+                    ${{buildGroupVolcanoPlot(quickResult.results || [])}}
+                    <div class="comparison-stack">${{renderCards(quickResult)}}</div>
+                `
+                : '';
+            const cachedTimestamp = fullCached?.completedAt
+                ? new Date(fullCached.completedAt).toLocaleTimeString([], {{ hour: '2-digit', minute: '2-digit', second: '2-digit' }})
+                : '';
+            const cachedSummaryHtml = fullCached?.available
+                ? (fullCached.results || []).length
+                    ? `
+                        <div class="agg-group-meta">
+                            Group A: <strong>${{sourceLabel}}</strong> (${{Number(fullCached.nA || 0).toLocaleString()}} cells)
+                            vs Group B: <strong>${{referenceLabel}}</strong> (${{Number(fullCached.nB || 0).toLocaleString()}} cells).
+                        </div>
+                        <div class="agg-group-meta">
+                            Cached full sidecar DE${{cachedTimestamp ? ` from ${{cachedTimestamp}}` : ''}}
+                            across ${{Number(fullCached.totalGeneCount || 0).toLocaleString()}} genes.
+                            Showing top ${{topNLabel}} genes. Positive scores indicate enrichment in Group A.
+                        </div>
+                        ${{buildGroupVolcanoPlot(fullCached.results || [])}}
+                        <div class="comparison-stack">${{renderCards(fullCached)}}</div>
+                    `
+                    : `
+                        <div class="agg-group-meta">
+                            Group A: <strong>${{sourceLabel}}</strong> (${{Number(fullCached.nA || 0).toLocaleString()}} cells)
+                            vs Group B: <strong>${{referenceLabel}}</strong> (${{Number(fullCached.nB || 0).toLocaleString()}} cells).
+                        </div>
+                        <div class="agg-group-meta">
+                            Cached full sidecar DE${{cachedTimestamp ? ` from ${{cachedTimestamp}}` : ''}} found no enriched genes across ${{Number(fullCached.totalGeneCount || 0).toLocaleString()}} genes.
+                        </div>
+                    `
+                : '';
+            let resultHtml = '';
+            if (!groupA || !groupB) {{
+                resultHtml = '<div class="agg-group-meta">Choose two different groups to compare.</div>';
+            }} else if (fullRun?.running) {{
+                const totalShards = Number(fullRun.totalShards || 0);
+                const completedShards = Number(fullRun.completedShards || 0);
+                const totalGenes = Number(fullRun.totalGenes || 0);
+                const completedGenes = Number(fullRun.completedGenes || 0);
+                const progressMax = Math.max(1, totalGenes || totalShards || 1);
+                const progressValue = Math.min(progressMax, totalGenes ? completedGenes : completedShards);
+                const progressPct = progressMax > 0 ? Math.round((progressValue / progressMax) * 100) : 0;
+                resultHtml = `
+                    <div class="agg-group-meta">Scanning the full sidecar in the background. The viewer stays interactive while this runs.</div>
+                    <progress value="${{progressValue}}" max="${{progressMax}}" style="width:100%; height:12px;"></progress>
+                    <div class="agg-group-meta">
+                        ${{progressPct}}% complete
+                        · ${{completedGenes.toLocaleString()}} / ${{totalGenes.toLocaleString()}} genes
+                        · ${{completedShards.toLocaleString()}} / ${{totalShards.toLocaleString()}} shards
+                    </div>
+                    <div style="display:flex; justify-content:flex-end;">
+                        <button class="legend-btn" id="group-de-cancel" type="button">Cancel Full DE</button>
+                    </div>
+                `;
+            }} else if (fullRun?.error) {{
+                resultHtml = `
+                    <div class="agg-group-meta">Full sidecar DE failed: ${{escapeHtml(fullRun.error)}}</div>
+                    <div style="display:flex; justify-content:flex-end;">
+                        <button class="legend-btn" id="group-de-run-full" type="button">Retry Full DE</button>
+                    </div>
+                `;
+                if (cachedSummaryHtml) {{
+                    resultHtml += '<div class="agg-group-meta">Showing the previous cached full result:</div>';
+                    resultHtml += cachedSummaryHtml;
+                }} else if (quickSummaryHtml) {{
+                    resultHtml += '<div class="agg-group-meta">Quick DE preview from currently loaded genes:</div>';
+                    resultHtml += quickSummaryHtml;
+                }}
+            }} else if (fullCached?.available) {{
+                resultHtml = cachedSummaryHtml;
+                resultHtml += '<div style="display:flex; justify-content:flex-end;"><button class="legend-btn" id="group-de-refresh-full" type="button">Refresh Full DE</button></div>';
+            }} else if (!quickResult.available && quickResult.reason === 'empty_group') {{
+                resultHtml = '<div class="agg-group-meta">One of the selected groups has no cells after applying the current restriction.</div>';
+            }} else if (!quickResult.available && quickResult.reason === 'no_loaded_genes' && sidecarAvailable) {{
+                const totalGenes = Number(quickResult.totalGeneCount || 0).toLocaleString();
+                resultHtml = `
+                    <div class="agg-group-meta">
+                        No genes are currently loaded for quick group DE.
+                        ${{totalGenes !== '0' ? `This viewer knows about ${{totalGenes}} sidecar genes that can be scanned on demand.` : ''}}
+                    </div>
+                    <div style="display:flex; justify-content:flex-end;">
+                        <button class="legend-btn" id="group-de-run-full" type="button">Run Full DE</button>
+                    </div>
+                `;
+            }} else if (!quickResult.available && quickResult.reason === 'no_loaded_genes') {{
+                resultHtml = '<div class="agg-group-meta">No genes are currently loaded for group DE. Load genes in the Genes tab or click marker genes first.</div>';
+            }} else if (!quickResult.available && quickResult.reason === 'same_group') {{
+                resultHtml = '<div class="agg-group-meta">Choose two different groups to compare.</div>';
+            }} else if (!quickResult.available) {{
+                resultHtml = '<div class="agg-group-meta">Choose two different groups to compare.</div>';
+            }} else if (!quickResult.results.length) {{
+                if (sidecarAvailable && Number(quickResult.loadedGeneCount || 0) < Number(quickResult.totalGeneCount || 0)) {{
+                    resultHtml = `
+                        <div class="agg-group-meta">No enriched genes were found among the currently loaded genes.</div>
+                        <div style="display:flex; justify-content:flex-end;">
+                            <button class="legend-btn" id="group-de-run-full" type="button">Run Full DE</button>
+                        </div>
+                    `;
+                }} else {{
+                    resultHtml = '<div class="agg-group-meta">No enriched genes were found among the genes currently loaded in the viewer.</div>';
+                }}
+            }} else {{
+                resultHtml = quickSummaryHtml;
+                if (sidecarAvailable && Number(quickResult.loadedGeneCount || 0) < Number(quickResult.totalGeneCount || 0)) {{
+                    resultHtml += '<div style="display:flex; justify-content:flex-end;"><button class="legend-btn" id="group-de-run-full" type="button">Run Full DE</button></div>';
+                }}
+            }}
+
+            if (exportState) {{
+                resultHtml += `
+                    <div style="display:flex; justify-content:flex-end; gap:6px; margin-top:6px;">
+                        <button class="legend-btn" id="group-de-export-json" type="button">Export JSON</button>
+                        <button class="legend-btn" id="group-de-export-csv" type="button">Export CSV</button>
+                    </div>
+                `;
+            }}
+
+            resultsDiv.innerHTML = resultHtml;
+
+            const runFullBtn = resultsDiv.querySelector('#group-de-run-full');
+            if (runFullBtn && groupA && groupB) {{
+                runFullBtn.addEventListener('click', () => {{
+                    runFullGroupDE(groupA, groupB);
+                }});
+            }}
+            const refreshFullBtn = resultsDiv.querySelector('#group-de-refresh-full');
+            if (refreshFullBtn && groupA && groupB) {{
+                refreshFullBtn.addEventListener('click', () => {{
+                    runFullGroupDE(groupA, groupB);
+                }});
+            }}
+            const cancelBtn = resultsDiv.querySelector('#group-de-cancel');
+            if (cancelBtn) {{
+                cancelBtn.addEventListener('click', () => {{
+                    cancelGroupDEFullRun();
+                    renderGroupDE();
+                }});
+            }}
+            const exportJsonBtn = resultsDiv.querySelector('#group-de-export-json');
+            if (exportJsonBtn && groupA && groupB) {{
+                exportJsonBtn.addEventListener('click', () => {{
+                    exportGroupDEReport(groupA, groupB, exportState);
+                }});
+            }}
+            const exportCsvBtn = resultsDiv.querySelector('#group-de-export-csv');
+            if (exportCsvBtn && groupA && groupB) {{
+                exportCsvBtn.addEventListener('click', () => {{
+                    exportGroupDECsv(groupA, groupB, exportState);
+                }});
+            }}
+            bindVolcanoGroupInteraction(resultsDiv, renderGroupDE);
+            bindGeneActivateButtons(resultsDiv, renderGroupDE);
+            bindGeneGoogleSearchButtons(resultsDiv);
+        }})();
+        }} catch (err) {{
+            console.error('renderGroupDE crashed:', err);
+        }} finally {{
+            groupDeRenderDepth -= 1;
+        }}
+    }}
+
+    function renderCompareInsights() {{
+        if (insightsCompareTab === 'regions') {{
+            renderAnnotationComparison();
+        }} else if (insightsCompareTab === 'cell-de') {{
+            renderClusterDE();
+        }} else {{
+            renderGroupDE();
+        }}
     }}
 
     function renderCellTypeTrend() {{
@@ -5423,7 +17098,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             return;
         }}
 
-        const target = matches[0];
+        if (!celltypeTrendTarget || !matches.includes(celltypeTrendTarget)) {{
+            celltypeTrendTarget = matches[0];
+        }}
+        const target = celltypeTrendTarget;
         const groups = new Map();
 
         DATA.sections.forEach(section => {{
@@ -5455,12 +17133,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             `;
         }}).join('');
 
-        const matchNote = matches.length > 1
-            ? `<div class="agg-group-meta">Multiple matches; showing first: <strong>${{target}}</strong></div>`
-            : `<div class="agg-group-meta">Showing: <strong>${{target}}</strong></div>`;
+        const matchBadges = matches.length > 1
+            ? `<div class="agg-group-meta" style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;">
+                Matches:
+                ${{matches.map(cat => `<button type="button" class="legend-btn${{cat === target ? ' active' : ''}}" data-trend-target="${{escapeHtml(cat)}}"><span class="agg-dot" style="background: ${{getCategoryColorForValue(currentColor, cat)}}"></span>${{escapeHtml(cat)}}</button>`).join('')}}
+               </div>`
+            : `<div class="agg-group-meta">Showing: <span class="agg-dot" style="background: ${{getCategoryColorForValue(currentColor, target)}}"></span><strong>${{escapeHtml(target)}}</strong></div>`;
 
         container.innerHTML = `
-            ${{matchNote}}
+            ${{matchBadges}}
             <table class="trend-table">
                 <thead>
                     <tr>
@@ -5475,57 +17156,1088 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 </tbody>
             </table>
         `;
+        container.querySelectorAll('[data-trend-target]').forEach(btn => {{
+            btn.addEventListener('click', () => {{
+                celltypeTrendTarget = btn.getAttribute('data-trend-target');
+                renderCellTypeTrend();
+            }});
+        }});
     }}
 
-    function renderNeighborStats() {{
-        const container = document.getElementById('neighbor-stats');
-        if (!container) return;
+    function truncateNeighborStatLabel(text, maxLength = 18) {{
+        const value = String(text || '');
+        if (value.length <= maxLength) return value;
+        return `${{value.slice(0, Math.max(0, maxLength - 1))}}…`;
+    }}
 
+    function mixRgb(rgbA, rgbB, t) {{
+        const alpha = clamp01(t);
+        return [0, 1, 2].map((idx) => Math.round((rgbA[idx] || 0) + ((rgbB[idx] || 0) - (rgbA[idx] || 0)) * alpha));
+    }}
+
+    function rgbToRgba(rgb, alpha = 1) {{
+        if (!Array.isArray(rgb) || rgb.length < 3) return `rgba(128, 128, 128, ${{clamp01(alpha)}})`;
+        return `rgba(${{rgb[0]}}, ${{rgb[1]}}, ${{rgb[2]}}, ${{clamp01(alpha)}})`;
+    }}
+
+    function getNeighborBubbleFillColor(zValue, maxAbsZ) {{
+        const z = Number(zValue);
+        const scale = maxAbsZ > 0 ? clamp01(Math.abs(z) / maxAbsZ) : 0;
+        const neutral = [243, 244, 246];
+        const positive = [193, 18, 31];
+        const negative = [17, 138, 178];
+        return rgbToCss(mixRgb(neutral, z >= 0 ? positive : negative, 0.2 + scale * 0.8));
+    }}
+
+    function polarToCartesian(cx, cy, radius, angleRadians) {{
+        return {{
+            x: cx + Math.cos(angleRadians) * radius,
+            y: cy + Math.sin(angleRadians) * radius,
+        }};
+    }}
+
+    function describeSvgArc(cx, cy, radius, startAngle, endAngle) {{
+        const start = polarToCartesian(cx, cy, radius, startAngle);
+        const end = polarToCartesian(cx, cy, radius, endAngle);
+        const largeArcFlag = (endAngle - startAngle) > Math.PI ? 1 : 0;
+        return [
+            'M', start.x.toFixed(2), start.y.toFixed(2),
+            'A', radius.toFixed(2), radius.toFixed(2), '0', largeArcFlag, '1',
+            end.x.toFixed(2), end.y.toFixed(2),
+        ].join(' ');
+    }}
+
+    function describeChordRibbon(cx, cy, radius, subA, subB) {{
+        // Filled ribbon connecting two sub-arcs on the inner ring
+        const p1 = polarToCartesian(cx, cy, radius, subA.start);
+        const p2 = polarToCartesian(cx, cy, radius, subA.end);
+        const p3 = polarToCartesian(cx, cy, radius, subB.start);
+        const p4 = polarToCartesian(cx, cy, radius, subB.end);
+        const la = (subA.end - subA.start) > Math.PI ? 1 : 0;
+        const lb = (subB.end - subB.start) > Math.PI ? 1 : 0;
+        return [
+            'M', p1.x.toFixed(2), p1.y.toFixed(2),
+            'A', radius.toFixed(2), radius.toFixed(2), '0', la, '1', p2.x.toFixed(2), p2.y.toFixed(2),
+            'Q', cx, cy, p3.x.toFixed(2), p3.y.toFixed(2),
+            'A', radius.toFixed(2), radius.toFixed(2), '0', lb, '1', p4.x.toFixed(2), p4.y.toFixed(2),
+            'Q', cx, cy, p1.x.toFixed(2), p1.y.toFixed(2),
+            'Z',
+        ].join(' ');
+    }}
+
+    function describeChordSelfRibbon(cx, cy, radius, sub) {{
+        // Teardrop self-loop for same-type connections
+        const mid = (sub.start + sub.end) / 2;
+        const p1 = polarToCartesian(cx, cy, radius, sub.start);
+        const p2 = polarToCartesian(cx, cy, radius, sub.end);
+        const inner = polarToCartesian(cx, cy, radius * 0.36, mid);
+        const la = (sub.end - sub.start) > Math.PI ? 1 : 0;
+        return [
+            'M', p1.x.toFixed(2), p1.y.toFixed(2),
+            'A', radius.toFixed(2), radius.toFixed(2), '0', la, '1', p2.x.toFixed(2), p2.y.toFixed(2),
+            'Q', inner.x.toFixed(2), inner.y.toFixed(2), p1.x.toFixed(2), p1.y.toFixed(2),
+            'Z',
+        ].join(' ');
+    }}
+
+    function getNeighborEdgeStrokeColor(zValue, maxAbsZ) {{
+        const z = Number(zValue);
+        const scale = maxAbsZ > 0 ? clamp01(Math.abs(z) / maxAbsZ) : 0;
+        const neutral = [145, 151, 161];
+        const positive = [193, 18, 31];
+        const negative = [17, 138, 178];
+        const rgb = mixRgb(neutral, z >= 0 ? positive : negative, 0.18 + scale * 0.82);
+        return rgbToRgba(rgb, 0.28 + scale * 0.54);
+    }}
+
+    function computeNeighborSpringLayout(nodeEntries, edgeEntries, width, height, padding = 56) {{
+        const nodes = nodeEntries.map((entry, idx) => ({{
+            idx: entry.idx,
+            x: width / 2,
+            y: height / 2,
+        }}));
+        if (!nodes.length) return new Map();
+        if (nodes.length === 1) {{
+            return new Map([[nodes[0].idx, {{ x: width / 2, y: height / 2 }}]]);
+        }}
+
+        const radius = Math.max(60, Math.min(width, height) * 0.32);
+        nodes.forEach((node, idx) => {{
+            const angle = (-Math.PI / 2) + (idx / nodes.length) * Math.PI * 2;
+            node.x = width / 2 + Math.cos(angle) * radius;
+            node.y = height / 2 + Math.sin(angle) * radius;
+        }});
+
+        const nodeIndex = new Map(nodes.map((node, idx) => [node.idx, idx]));
+        const usableWidth = Math.max(120, width - padding * 2);
+        const usableHeight = Math.max(120, height - padding * 2);
+        const area = usableWidth * usableHeight;
+        const k = Math.sqrt(area / nodes.length) * 0.82;
+        let temperature = Math.min(width, height) * 0.14;
+
+        for (let iter = 0; iter < 140; iter++) {{
+            const displacements = nodes.map(() => ({{ x: 0, y: 0 }}));
+
+            for (let i = 0; i < nodes.length; i++) {{
+                for (let j = i + 1; j < nodes.length; j++) {{
+                    const dx = nodes[i].x - nodes[j].x;
+                    const dy = nodes[i].y - nodes[j].y;
+                    const dist = Math.max(1, Math.hypot(dx, dy));
+                    const force = (k * k) / dist;
+                    const ux = dx / dist;
+                    const uy = dy / dist;
+                    displacements[i].x += ux * force;
+                    displacements[i].y += uy * force;
+                    displacements[j].x -= ux * force;
+                    displacements[j].y -= uy * force;
+                }}
+            }}
+
+            edgeEntries.forEach((edge) => {{
+                const sourcePos = nodeIndex.get(edge.sourceIdx);
+                const targetPos = nodeIndex.get(edge.targetIdx);
+                if (sourcePos === undefined || targetPos === undefined || sourcePos === targetPos) return;
+                const dx = nodes[sourcePos].x - nodes[targetPos].x;
+                const dy = nodes[sourcePos].y - nodes[targetPos].y;
+                const dist = Math.max(1, Math.hypot(dx, dy));
+                const weight = 0.45 + (edge.weightNormalized || 0) * 1.8;
+                const force = (dist * dist / k) * weight;
+                const ux = dx / dist;
+                const uy = dy / dist;
+                displacements[sourcePos].x -= ux * force;
+                displacements[sourcePos].y -= uy * force;
+                displacements[targetPos].x += ux * force;
+                displacements[targetPos].y += uy * force;
+            }});
+
+            nodes.forEach((node, idx) => {{
+                const centerDx = node.x - width / 2;
+                const centerDy = node.y - height / 2;
+                displacements[idx].x -= centerDx * 0.04;
+                displacements[idx].y -= centerDy * 0.04;
+                const dispLength = Math.max(1, Math.hypot(displacements[idx].x, displacements[idx].y));
+                const limited = Math.min(dispLength, temperature);
+                node.x += (displacements[idx].x / dispLength) * limited;
+                node.y += (displacements[idx].y / dispLength) * limited;
+                node.x = Math.min(width - padding, Math.max(padding, node.x));
+                node.y = Math.min(height - padding, Math.max(padding, node.y));
+            }});
+
+            temperature *= 0.95;
+        }}
+
+        return new Map(nodes.map((node) => [node.idx, {{ x: node.x, y: node.y }}]));
+    }}
+
+    function limitNeighborViewIndices(indices, nCells, limit) {{
+        if (!Number.isFinite(limit) || limit <= 0 || indices.length <= limit) {{
+            return {{ indices: indices.slice(), trimmedCount: 0 }};
+        }}
+        const limited = indices
+            .map((idx) => ({{
+                idx,
+                nCells: Number(nCells?.[idx] ?? 0),
+            }}))
+            .sort((a, b) => {{
+                if (b.nCells !== a.nCells) return b.nCells - a.nCells;
+                return a.idx - b.idx;
+            }})
+            .slice(0, limit)
+            .map((entry) => entry.idx);
+        return {{
+            indices: limited,
+            trimmedCount: Math.max(0, indices.length - limited.length),
+        }};
+    }}
+
+    function getNeighborStatsViewState() {{
         if (!DATA.has_neighbors) {{
-            container.innerHTML = '<div class="agg-group-meta">No neighbor graph was found in this dataset.</div>';
-            return;
+            return {{ error: 'No neighbor graph was found in this dataset.' }};
         }}
 
         if (currentGene) {{
-            container.innerHTML = '<div class="agg-group-meta">Clear the gene input to view neighbor stats.</div>';
-            return;
+            return {{ error: 'Clear the gene input to view neighbor stats.' }};
         }}
 
         const config = getColorConfig();
         if (config.is_continuous) {{
-            container.innerHTML = '<div class="agg-group-meta">Neighbor stats are available for categorical colors only.</div>';
-            return;
+            return {{ error: 'Neighbor stats are available for categorical colors only.' }};
         }}
 
         const stats = (DATA.neighbor_stats || {{}})[currentColor];
         if (!stats || !stats.counts || !stats.categories) {{
-            container.innerHTML = '<div class="agg-group-meta">No neighbor stats available for this color.</div>';
-            return;
+            return {{ error: 'No neighbor stats available for this color.' }};
         }}
 
-        const categories = stats.categories || [];
+        const categories = (stats.categories || []).map((category) => String(category));
         const counts = stats.counts || [];
         const nCells = stats.n_cells || [];
         const meanDegree = stats.mean_degree || [];
         const zscores = stats.zscore || null;
-        const permN = stats.perm_n || 0;
+        const permN = Number(stats.perm_n || 0);
         if (categories.length === 0 || counts.length === 0) {{
-            container.innerHTML = '<div class="agg-group-meta">Neighbor stats are empty for this color.</div>';
-            return;
+            return {{ error: 'Neighbor stats are empty for this color.' }};
         }}
 
-        const input = document.getElementById('neighbor-search');
-        const query = (input?.value || '').trim().toLowerCase();
+        const query = (document.getElementById('neighbor-search')?.value || '').trim().toLowerCase();
         const matches = categories
-            .map((cat, idx) => (query && !String(cat).toLowerCase().includes(query)) ? null : idx)
-            .filter(idx => idx !== null);
+            .map((cat, idx) => (!query || cat.toLowerCase().includes(query)) ? idx : null)
+            .filter((idx) => idx !== null);
 
-        if (matches.length === 0) {{
-            container.innerHTML = '<div class="agg-group-meta">No matching cell types.</div>';
-            return;
+        if (!matches.length) {{
+            return {{ error: 'No matching cell types.' }};
         }}
 
-        const rows = matches.map((idx) => {{
+        return {{
+            stats,
+            categories,
+            counts,
+            nCells,
+            meanDegree,
+            zscores,
+            permN,
+            matches,
+            query,
+        }};
+    }}
+
+    function getNeighborMetricOptions(viewKey) {{
+        if (viewKey === 'bubble') {{
+            return ['zscore', 'count', 'share'];
+        }}
+        return ['count', 'share'];
+    }}
+
+    function getNeighborMetric(viewKey) {{
+        if (viewKey === 'bubble') {{
+            if (!getNeighborMetricOptions('bubble').includes(neighborNetworkMetric)) {{
+                neighborNetworkMetric = 'zscore';
+            }}
+            return neighborNetworkMetric;
+        }}
+        if (!getNeighborMetricOptions('chord').includes(neighborChordMetric)) {{
+            neighborChordMetric = 'count';
+        }}
+        return neighborChordMetric;
+    }}
+
+    function setNeighborMetric(viewKey, value) {{
+        const options = getNeighborMetricOptions(viewKey);
+        const nextValue = options.includes(value) ? value : options[0];
+        if (viewKey === 'bubble') {{
+            neighborNetworkMetric = nextValue;
+        }} else {{
+            neighborChordMetric = nextValue;
+        }}
+    }}
+
+    function getNeighborThresholdPercent(viewKey) {{
+        return viewKey === 'bubble'
+            ? Math.min(95, Math.max(0, Number(neighborNetworkThresholdPercent) || 0))
+            : Math.min(95, Math.max(0, Number(neighborChordThresholdPercent) || 0));
+    }}
+
+    function setNeighborThresholdPercent(viewKey, value) {{
+        const nextValue = Math.min(95, Math.max(0, Number(value) || 0));
+        if (viewKey === 'bubble') {{
+            neighborNetworkThresholdPercent = nextValue;
+        }} else {{
+            neighborChordThresholdPercent = nextValue;
+        }}
+    }}
+
+    function getNeighborViewControlState(viewKey) {{
+        return {{
+            focusMode: ['all', 'selected', 'ego'].includes(neighborFocusMode) ? neighborFocusMode : 'all',
+            maxCategories: [8, 12, 16, 24].includes(Number(neighborMaxCategories)) ? Number(neighborMaxCategories) : 12,
+            labelMode: ['full', 'short', 'hover'].includes(neighborLabelMode) ? neighborLabelMode : 'short',
+            metric: getNeighborMetric(viewKey),
+            thresholdPercent: getNeighborThresholdPercent(viewKey),
+            chordOrder: ['strength', 'cells', 'alphabetical'].includes(neighborChordOrder) ? neighborChordOrder : 'strength',
+        }};
+    }}
+
+    function formatNeighborMetricLabel(metric) {{
+        if (metric === 'zscore') return '|z|';
+        if (metric === 'share') return 'share';
+        return 'edge count';
+    }}
+
+    function formatNeighborMetricValue(metric, value) {{
+        if (!Number.isFinite(value)) return 'n/a';
+        if (metric === 'share') return `${{(value * 100).toFixed(1)}}%`;
+        if (metric === 'zscore') return value.toFixed(2);
+        return formatNeighborCount(value);
+    }}
+
+    function renderNeighborVisualizationControlPanel(viewKey, viewState) {{
+        const controls = getNeighborViewControlState(viewKey);
+        const metricOptions = getNeighborMetricOptions(viewKey)
+            .map((metric) => {{
+                const selected = metric === controls.metric ? ' selected' : '';
+                return `<option value="${{metric}}"${{selected}}>${{escapeHtml(formatNeighborMetricLabel(metric))}}</option>`;
+            }})
+            .join('');
+        const maxCategoryOptions = [8, 12, 16, 24]
+            .map((value) => {{
+                const selected = value === controls.maxCategories ? ' selected' : '';
+                return `<option value="${{value}}"${{selected}}>${{value}}</option>`;
+            }})
+            .join('');
+        const labelOptions = [
+            ['full', 'Full'],
+            ['short', 'Short'],
+            ['hover', 'Hover only'],
+        ].map(([value, label]) => {{
+            const selected = value === controls.labelMode ? ' selected' : '';
+            return `<option value="${{value}}"${{selected}}>${{label}}</option>`;
+        }}).join('');
+        const focusOptions = [
+            ['all', 'All'],
+            ['selected', 'Selected only'],
+            ['ego', 'Selected + neighbors'],
+        ].map(([value, label]) => {{
+            const selected = value === controls.focusMode ? ' selected' : '';
+            return `<option value="${{value}}"${{selected}}>${{label}}</option>`;
+        }}).join('');
+        const orderOptions = viewKey === 'chord'
+            ? `
+                <div class="neighbor-control-group">
+                    <label>Order</label>
+                    <select id="neighbor-chord-order">
+                        <option value="strength"${{controls.chordOrder === 'strength' ? ' selected' : ''}}>Strength</option>
+                        <option value="cells"${{controls.chordOrder === 'cells' ? ' selected' : ''}}>Cell count</option>
+                        <option value="alphabetical"${{controls.chordOrder === 'alphabetical' ? ' selected' : ''}}>Alphabetical</option>
+                    </select>
+                </div>
+            `
+            : '';
+        const thresholdHint = `Hides connections below ${{controls.thresholdPercent}}% of the strongest visible ${{formatNeighborMetricLabel(controls.metric)}}.`;
+        const focusHint = controls.focusMode === 'all'
+            ? 'Show all matching categories.'
+            : 'Uses the pinned node, edge, arc, or ribbon as the focus seed.';
+        return `
+            <div class="neighbor-control-panel">
+                <div class="neighbor-control-grid">
+                    <div class="neighbor-control-group">
+                        <label>Focus</label>
+                        <select id="neighbor-focus-mode">${{focusOptions}}</select>
+                        <div class="neighbor-control-hint">${{focusHint}}</div>
+                    </div>
+                    <div class="neighbor-control-group">
+                        <label>Metric</label>
+                        <select id="neighbor-metric-mode">${{metricOptions}}</select>
+                    </div>
+                    <div class="neighbor-control-group">
+                        <label>Min strength</label>
+                        <input id="neighbor-threshold-range" type="range" min="0" max="95" step="5" value="${{controls.thresholdPercent}}">
+                        <div class="neighbor-control-hint" id="neighbor-threshold-label">${{thresholdHint}}</div>
+                    </div>
+                    <div class="neighbor-control-group">
+                        <label>Max categories</label>
+                        <select id="neighbor-max-categories">${{maxCategoryOptions}}</select>
+                    </div>
+                    <div class="neighbor-control-group">
+                        <label>Labels</label>
+                        <select id="neighbor-label-mode">${{labelOptions}}</select>
+                    </div>
+                    ${{orderOptions}}
+                </div>
+            </div>
+        `;
+    }}
+
+    function bindNeighborVisualizationSettingControls(container, viewKey) {{
+        const focusSelect = container.querySelector('#neighbor-focus-mode');
+        const metricSelect = container.querySelector('#neighbor-metric-mode');
+        const thresholdInput = container.querySelector('#neighbor-threshold-range');
+        const thresholdLabel = container.querySelector('#neighbor-threshold-label');
+        const maxCategoriesSelect = container.querySelector('#neighbor-max-categories');
+        const labelModeSelect = container.querySelector('#neighbor-label-mode');
+        const chordOrderSelect = container.querySelector('#neighbor-chord-order');
+        focusSelect?.addEventListener('change', () => {{
+            neighborFocusMode = focusSelect.value || 'all';
+            renderNeighborStats();
+        }});
+        metricSelect?.addEventListener('change', () => {{
+            setNeighborMetric(viewKey, metricSelect.value || '');
+            renderNeighborStats();
+        }});
+        thresholdInput?.addEventListener('input', () => {{
+            const metric = getNeighborMetric(viewKey);
+            if (thresholdLabel) {{
+                thresholdLabel.textContent = `Hides connections below ${{Number(thresholdInput.value || 0)}}% of the strongest visible ${{formatNeighborMetricLabel(metric)}}.`;
+            }}
+        }});
+        thresholdInput?.addEventListener('change', () => {{
+            setNeighborThresholdPercent(viewKey, thresholdInput.value);
+            renderNeighborStats();
+        }});
+        maxCategoriesSelect?.addEventListener('change', () => {{
+            neighborMaxCategories = Number(maxCategoriesSelect.value) || 12;
+            renderNeighborStats();
+        }});
+        labelModeSelect?.addEventListener('change', () => {{
+            neighborLabelMode = labelModeSelect.value || 'short';
+            renderNeighborStats();
+        }});
+        chordOrderSelect?.addEventListener('change', () => {{
+            neighborChordOrder = chordOrderSelect.value || 'strength';
+            renderNeighborStats();
+        }});
+    }}
+
+    function getNeighborSelectedSeedIndices(viewState) {{
+        const focus = normalizeNeighborFocus(selectedNeighborFocus, viewState);
+        if (!focus) return {{ focus: null, seedIndices: [] }};
+        const seedIndices = focus.kind === 'category'
+            ? [focus.sourceIdx]
+            : Array.from(new Set([focus.sourceIdx, focus.targetIdx]));
+        return {{ focus, seedIndices }};
+    }}
+
+    function getNeighborPairMetrics(viewState, sourceIdx, targetIdx) {{
+        const forwardCount = Math.max(0, Number(viewState.counts[sourceIdx]?.[targetIdx] ?? 0));
+        const reverseCount = sourceIdx === targetIdx
+            ? forwardCount
+            : Math.max(0, Number(viewState.counts[targetIdx]?.[sourceIdx] ?? 0));
+        const forwardZ = Number(viewState.zscores?.[sourceIdx]?.[targetIdx]);
+        const reverseZ = sourceIdx === targetIdx ? forwardZ : Number(viewState.zscores?.[targetIdx]?.[sourceIdx]);
+        const meanZ = Number.isFinite(forwardZ) && Number.isFinite(reverseZ)
+            ? (forwardZ + reverseZ) / 2
+            : Number.isFinite(forwardZ)
+                ? forwardZ
+                : reverseZ;
+        const maxAbsZ = Math.max(
+            Number.isFinite(forwardZ) ? Math.abs(forwardZ) : 0,
+            Number.isFinite(reverseZ) ? Math.abs(reverseZ) : 0,
+        );
+        return {{
+            sourceIdx,
+            targetIdx,
+            forwardCount,
+            reverseCount,
+            symmetricCount: sourceIdx === targetIdx ? forwardCount : forwardCount + reverseCount,
+            forwardZ,
+            reverseZ,
+            meanZ,
+            maxAbsZ,
+        }};
+    }}
+
+    function getNeighborPairMetricValue(pairMetrics, metric, totalSymmetricCount = 0) {{
+        if (!pairMetrics) return 0;
+        if (metric === 'zscore') return Number(pairMetrics.maxAbsZ || 0);
+        if (metric === 'share') {{
+            return totalSymmetricCount > 0 ? (Number(pairMetrics.symmetricCount || 0) / totalSymmetricCount) : 0;
+        }}
+        return Number(pairMetrics.symmetricCount || 0);
+    }}
+
+    function getNeighborFocusStrength(viewState, sourceIdx, targetIdx, metric) {{
+        const pairMetrics = getNeighborPairMetrics(viewState, sourceIdx, targetIdx);
+        if (metric === 'zscore') return pairMetrics.maxAbsZ;
+        return pairMetrics.symmetricCount;
+    }}
+
+    function getNeighborFocusedIndices(viewState, metric, controls) {{
+        if (controls.focusMode === 'all') {{
+            const limited = limitNeighborViewIndices(viewState.matches, viewState.nCells, controls.maxCategories);
+            return {{
+                indices: limited.indices,
+                trimmedCount: limited.trimmedCount,
+                focus: null,
+                seedIndices: [],
+            }};
+        }}
+
+        const {{ focus, seedIndices }} = getNeighborSelectedSeedIndices(viewState);
+        const matchSet = new Set(viewState.matches);
+        const filteredSeeds = seedIndices.filter((idx) => matchSet.has(idx));
+        if (!focus || !filteredSeeds.length) {{
+            return {{
+                error: 'Pin a node, edge, arc, or ribbon first to focus the view.',
+                indices: [],
+                trimmedCount: 0,
+                focus: null,
+                seedIndices: [],
+            }};
+        }}
+
+        const rankedNeighbors = viewState.matches
+            .filter((idx) => !filteredSeeds.includes(idx))
+            .map((idx) => {{
+                const score = filteredSeeds.reduce((maxScore, seedIdx) => {{
+                    return Math.max(maxScore, getNeighborFocusStrength(viewState, seedIdx, idx, metric));
+                }}, 0);
+                return {{ idx, score, nCells: Number(viewState.nCells[idx] ?? 0), label: String(viewState.categories[idx] ?? '') }};
+            }})
+            .filter((entry) => entry.score > 0)
+            .sort((a, b) => {{
+                if (b.score !== a.score) return b.score - a.score;
+                if (b.nCells !== a.nCells) return b.nCells - a.nCells;
+                return a.label.localeCompare(b.label);
+            }});
+
+        const extrasAllowed = controls.focusMode === 'selected' && focus.kind === 'pair'
+            ? 0
+            : Math.max(0, controls.maxCategories - filteredSeeds.length);
+        const extraIndices = rankedNeighbors.slice(0, extrasAllowed).map((entry) => entry.idx);
+        const indices = Array.from(new Set([...filteredSeeds, ...extraIndices]));
+        return {{
+            indices,
+            trimmedCount: Math.max(0, viewState.matches.length - indices.length),
+            focus,
+            seedIndices: filteredSeeds,
+        }};
+    }}
+
+    function getNeighborRenderedLabel(text, maxLength) {{
+        if (neighborLabelMode === 'hover') return '';
+        if (neighborLabelMode === 'full') return String(text || '');
+        return truncateNeighborStatLabel(text, maxLength);
+    }}
+
+    function sortNeighborIndicesForChord(indices, viewState, order) {{
+        const next = indices.slice();
+        if (order === 'alphabetical') {{
+            next.sort((a, b) => String(viewState.categories[a] || '').localeCompare(String(viewState.categories[b] || '')));
+            return next;
+        }}
+        if (order === 'cells') {{
+            next.sort((a, b) => {{
+                const diff = Number(viewState.nCells[b] ?? 0) - Number(viewState.nCells[a] ?? 0);
+                if (diff !== 0) return diff;
+                return String(viewState.categories[a] || '').localeCompare(String(viewState.categories[b] || ''));
+            }});
+            return next;
+        }}
+        next.sort((a, b) => {{
+            const aTotal = getNeighborSymmetricTotal(viewState.counts, a);
+            const bTotal = getNeighborSymmetricTotal(viewState.counts, b);
+            if (bTotal !== aTotal) return bTotal - aTotal;
+            return String(viewState.categories[a] || '').localeCompare(String(viewState.categories[b] || ''));
+        }});
+        return next;
+    }}
+
+    function getNeighborRowTotal(counts, sourceIdx) {{
+        const row = counts[sourceIdx] || [];
+        return row.reduce((sum, value) => sum + (Number.isFinite(value) ? value : 0), 0);
+    }}
+
+    function getNeighborSymmetricTotal(counts, sourceIdx) {{
+        let total = 0;
+        for (let targetIdx = 0; targetIdx < counts.length; targetIdx++) {{
+            const forward = Math.max(0, Number(counts[sourceIdx]?.[targetIdx] ?? 0));
+            if (sourceIdx === targetIdx) {{
+                total += forward;
+            }} else {{
+                const reverse = Math.max(0, Number(counts[targetIdx]?.[sourceIdx] ?? 0));
+                total += forward + reverse;
+            }}
+        }}
+        return total;
+    }}
+
+    function getNeighborVisualizationState(viewKey = neighborStatsView) {{
+        const key = viewKey === 'chord' ? 'chord' : 'bubble';
+        const current = neighborVisualizationState[key] || {{ zoom: 1.0, expanded: false }};
+        return {{
+            key,
+            zoom: Math.min(2.8, Math.max(0.7, Number(current.zoom) || 1.0)),
+            expanded: !!current.expanded,
+        }};
+    }}
+
+    function setNeighborVisualizationZoom(viewKey, nextZoom) {{
+        const key = viewKey === 'chord' ? 'chord' : 'bubble';
+        const current = getNeighborVisualizationState(key);
+        neighborVisualizationState[key] = {{
+            zoom: Math.min(2.8, Math.max(0.7, Number(nextZoom) || 1.0)),
+            expanded: current.expanded,
+        }};
+    }}
+
+    function setNeighborVisualizationExpanded(viewKey, expanded) {{
+        const key = viewKey === 'chord' ? 'chord' : 'bubble';
+        const current = getNeighborVisualizationState(key);
+        neighborVisualizationState[key] = {{
+            zoom: current.zoom,
+            expanded: !!expanded,
+        }};
+    }}
+
+    function renderNeighborVisualizationToolbar(viewKey, label) {{
+        const state = getNeighborVisualizationState(viewKey);
+        const zoomLabel = `${{Math.round(state.zoom * 100)}}%`;
+        return `
+            <div class="neighbor-visualization-toolbar">
+                <div class="neighbor-view-note">${{escapeHtml(label)}}</div>
+                <div class="neighbor-zoom-controls">
+                    <button type="button" class="legend-btn" data-neighbor-zoom-action="out">-</button>
+                    <span class="neighbor-zoom-label" data-neighbor-zoom-label>${{zoomLabel}}</span>
+                    <button type="button" class="legend-btn" data-neighbor-zoom-action="in">+</button>
+                    <button type="button" class="legend-btn" data-neighbor-zoom-action="reset">Reset</button>
+                    <button type="button" class="legend-btn" data-neighbor-zoom-action="expand">${{state.expanded ? 'Compact' : 'Expand'}}</button>
+                </div>
+            </div>
+        `;
+    }}
+
+    function applyNeighborVisualizationViewport(container, viewKey, options = {{}}) {{
+        const scrollContainer = container.querySelector('[data-neighbor-scroll]');
+        const svg = container.querySelector('[data-neighbor-svg]');
+        if (!scrollContainer || !svg) return;
+        const zoomLabel = container.querySelector('[data-neighbor-zoom-label]');
+        const expandButton = container.querySelector('[data-neighbor-zoom-action="expand"]');
+        const baseWidth = Math.max(1, Number(svg.getAttribute('data-neighbor-base-width')) || 1);
+        const baseHeight = Math.max(1, Number(svg.getAttribute('data-neighbor-base-height')) || 1);
+        const previousZoom = Math.max(0.01, Number(options.previousZoom) || Number(svg.getAttribute('data-neighbor-current-zoom')) || 1);
+        const state = getNeighborVisualizationState(viewKey);
+        const nextWidth = baseWidth * state.zoom;
+        const nextHeight = baseHeight * state.zoom;
+
+        let anchorRatioX = null;
+        let anchorRatioY = null;
+        if (!options.resetPosition && Number.isFinite(options.clientX) && Number.isFinite(options.clientY)) {{
+            const rect = scrollContainer.getBoundingClientRect();
+            anchorRatioX = (scrollContainer.scrollLeft + (options.clientX - rect.left)) / (baseWidth * previousZoom);
+            anchorRatioY = (scrollContainer.scrollTop + (options.clientY - rect.top)) / (baseHeight * previousZoom);
+        }}
+
+        svg.style.width = `${{nextWidth.toFixed(1)}}px`;
+        svg.style.height = `${{nextHeight.toFixed(1)}}px`;
+        svg.setAttribute('data-neighbor-current-zoom', String(state.zoom));
+        scrollContainer.classList.toggle('expanded', state.expanded);
+        if (zoomLabel) zoomLabel.textContent = `${{Math.round(state.zoom * 100)}}%`;
+        if (expandButton) expandButton.textContent = state.expanded ? 'Compact' : 'Expand';
+
+        const applyScrollPosition = () => {{
+            if (options.resetPosition) {{
+                scrollContainer.scrollLeft = 0;
+                scrollContainer.scrollTop = 0;
+                return;
+            }}
+            if (anchorRatioX === null || anchorRatioY === null) return;
+            const rect = scrollContainer.getBoundingClientRect();
+            const viewportX = options.clientX - rect.left;
+            const viewportY = options.clientY - rect.top;
+            const nextScrollLeft = anchorRatioX * nextWidth - viewportX;
+            const nextScrollTop = anchorRatioY * nextHeight - viewportY;
+            const maxScrollLeft = Math.max(0, scrollContainer.scrollWidth - scrollContainer.clientWidth);
+            const maxScrollTop = Math.max(0, scrollContainer.scrollHeight - scrollContainer.clientHeight);
+            scrollContainer.scrollLeft = Math.max(0, Math.min(maxScrollLeft, nextScrollLeft));
+            scrollContainer.scrollTop = Math.max(0, Math.min(maxScrollTop, nextScrollTop));
+        }};
+
+        requestAnimationFrame(applyScrollPosition);
+    }}
+
+    function bindNeighborVisualizationControls(container, viewKey) {{
+        const scrollContainer = container.querySelector('[data-neighbor-scroll]');
+        if (!scrollContainer) return;
+
+        let gestureStartZoom = getNeighborVisualizationState(viewKey).zoom;
+        const getViewportCenter = () => {{
+            const rect = scrollContainer.getBoundingClientRect();
+            return {{
+                clientX: rect.left + scrollContainer.clientWidth / 2,
+                clientY: rect.top + scrollContainer.clientHeight / 2,
+            }};
+        }};
+
+        container.querySelectorAll('[data-neighbor-zoom-action]').forEach((btn) => {{
+            btn.addEventListener('click', () => {{
+                const action = btn.getAttribute('data-neighbor-zoom-action');
+                const current = getNeighborVisualizationState(viewKey);
+                if (action === 'in') {{
+                    setNeighborVisualizationZoom(viewKey, current.zoom + 0.2);
+                    applyNeighborVisualizationViewport(container, viewKey, {{
+                        previousZoom: current.zoom,
+                        ...getViewportCenter(),
+                    }});
+                }} else if (action === 'out') {{
+                    setNeighborVisualizationZoom(viewKey, current.zoom - 0.2);
+                    applyNeighborVisualizationViewport(container, viewKey, {{
+                        previousZoom: current.zoom,
+                        ...getViewportCenter(),
+                    }});
+                }} else if (action === 'reset') {{
+                    setNeighborVisualizationZoom(viewKey, 1.0);
+                    setNeighborVisualizationExpanded(viewKey, false);
+                    applyNeighborVisualizationViewport(container, viewKey, {{ previousZoom: current.zoom, resetPosition: true }});
+                }} else if (action === 'expand') {{
+                    setNeighborVisualizationExpanded(viewKey, !current.expanded);
+                    applyNeighborVisualizationViewport(container, viewKey, {{ previousZoom: current.zoom }});
+                }}
+            }});
+        }});
+
+        scrollContainer.addEventListener('wheel', (event) => {{
+            if (!(event.ctrlKey || event.metaKey)) return;
+            event.preventDefault();
+            const current = getNeighborVisualizationState(viewKey);
+            const nextZoom = current.zoom * Math.exp(-event.deltaY * 0.0025);
+            setNeighborVisualizationZoom(viewKey, nextZoom);
+            applyNeighborVisualizationViewport(container, viewKey, {{
+                previousZoom: current.zoom,
+                clientX: event.clientX,
+                clientY: event.clientY,
+            }});
+        }}, {{ passive: false }});
+
+        scrollContainer.addEventListener('gesturestart', (event) => {{
+            if (!Number.isFinite(event.scale)) return;
+            event.preventDefault();
+            gestureStartZoom = getNeighborVisualizationState(viewKey).zoom;
+        }}, {{ passive: false }});
+
+        scrollContainer.addEventListener('gesturechange', (event) => {{
+            if (!Number.isFinite(event.scale)) return;
+            event.preventDefault();
+            const current = getNeighborVisualizationState(viewKey);
+            setNeighborVisualizationZoom(viewKey, gestureStartZoom * event.scale);
+            applyNeighborVisualizationViewport(container, viewKey, {{
+                previousZoom: current.zoom,
+                ...getViewportCenter(),
+            }});
+        }}, {{ passive: false }});
+
+        scrollContainer.addEventListener('gestureend', () => {{
+            gestureStartZoom = getNeighborVisualizationState(viewKey).zoom;
+        }});
+
+        applyNeighborVisualizationViewport(container, viewKey, {{ previousZoom: getNeighborVisualizationState(viewKey).zoom }});
+    }}
+
+    function getNeighborFocusKey(focus) {{
+        if (!focus || !focus.kind) return '';
+        if (focus.kind === 'category') return `category:${{focus.sourceLabel}}`;
+        return `pair:${{focus.sourceLabel}}:${{focus.targetLabel}}:${{focus.directional ? 'dir' : 'sym'}}`;
+    }}
+
+    function normalizeNeighborFocus(focus, viewState) {{
+        if (!focus || !viewState || !Array.isArray(viewState.categories)) return null;
+        const sourceIdx = Number(focus.sourceIdx);
+        if (!Number.isInteger(sourceIdx) || sourceIdx < 0 || sourceIdx >= viewState.categories.length) return null;
+        const sourceLabel = String(viewState.categories[sourceIdx] ?? '');
+        if (!sourceLabel || (focus.sourceLabel && String(focus.sourceLabel) !== sourceLabel)) return null;
+        if (focus.kind === 'category') {{
+            return {{
+                kind: 'category',
+                sourceIdx,
+                sourceLabel,
+                directional: false,
+            }};
+        }}
+        const targetIdx = Number(focus.targetIdx);
+        if (!Number.isInteger(targetIdx) || targetIdx < 0 || targetIdx >= viewState.categories.length) return null;
+        const targetLabel = String(viewState.categories[targetIdx] ?? '');
+        if (!targetLabel || (focus.targetLabel && String(focus.targetLabel) !== targetLabel)) return null;
+        return {{
+            kind: 'pair',
+            sourceIdx,
+            sourceLabel,
+            targetIdx,
+            targetLabel,
+            directional: focus.directional !== false,
+        }};
+    }}
+
+    function readNeighborFocusFromElement(element, viewState) {{
+        if (!element || !viewState) return null;
+        const kind = element.getAttribute('data-neighbor-kind') === 'category' ? 'category' : 'pair';
+        const sourceIdx = Number(element.getAttribute('data-neighbor-source-idx'));
+        if (!Number.isInteger(sourceIdx)) return null;
+        const focus = {{
+            kind,
+            sourceIdx,
+            sourceLabel: String(viewState.categories?.[sourceIdx] ?? ''),
+            directional: element.getAttribute('data-neighbor-directional') !== '0',
+        }};
+        if (kind === 'pair') {{
+            const targetIdx = Number(element.getAttribute('data-neighbor-target-idx'));
+            if (!Number.isInteger(targetIdx)) return null;
+            focus.targetIdx = targetIdx;
+            focus.targetLabel = String(viewState.categories?.[targetIdx] ?? '');
+        }}
+        return normalizeNeighborFocus(focus, viewState);
+    }}
+
+    function neighborElementMatchesFocus(element, focus) {{
+        const kind = element.getAttribute('data-neighbor-kind');
+        const sourceIdx = Number(element.getAttribute('data-neighbor-source-idx'));
+        if (kind === 'category') {{
+            return focus.kind === 'category' && sourceIdx === focus.sourceIdx;
+        }}
+        const targetIdx = Number(element.getAttribute('data-neighbor-target-idx'));
+        return focus.kind === 'pair' && sourceIdx === focus.sourceIdx && targetIdx === focus.targetIdx;
+    }}
+
+    function neighborElementRelatesToFocus(element, focus, visibleNeighborMap = null) {{
+        const kind = element.getAttribute('data-neighbor-kind');
+        const sourceIdx = Number(element.getAttribute('data-neighbor-source-idx'));
+        if (focus.kind === 'category') {{
+            if (kind === 'category') {{
+                if (sourceIdx === focus.sourceIdx) return true;
+                const neighbors = visibleNeighborMap?.get(focus.sourceIdx);
+                return !!neighbors && neighbors.has(sourceIdx);
+            }}
+            const targetIdx = Number(element.getAttribute('data-neighbor-target-idx'));
+            return sourceIdx === focus.sourceIdx || targetIdx === focus.sourceIdx;
+        }}
+        if (kind === 'category') {{
+            return sourceIdx === focus.sourceIdx || sourceIdx === focus.targetIdx;
+        }}
+        const targetIdx = Number(element.getAttribute('data-neighbor-target-idx'));
+        return sourceIdx === focus.sourceIdx && targetIdx === focus.targetIdx;
+    }}
+
+    function focusNeighborInteractionPair(sourceLabel, targetLabel = null) {{
+        interactionSourceCategory = sourceLabel || null;
+        const targetInput = document.getElementById('interaction-search');
+        if (targetInput) {{
+            targetInput.value = targetLabel && targetLabel !== sourceLabel ? targetLabel : '';
+        }}
+        renderInteractionBrowser();
+        const sourceSelect = document.getElementById('interaction-source');
+        if (sourceSelect && interactionSourceCategory) {{
+            sourceSelect.value = interactionSourceCategory;
+        }}
+    }}
+
+    function syncNeighborFocusToInteractionBrowser(focus, direction = 'primary') {{
+        const nextFocus = normalizeNeighborFocus(focus, getNeighborStatsViewState());
+        if (!nextFocus) return;
+        if (nextFocus.kind === 'category') {{
+            focusNeighborInteractionPair(nextFocus.sourceLabel, null);
+            return;
+        }}
+        if (direction === 'reverse' && nextFocus.sourceIdx !== nextFocus.targetIdx) {{
+            focusNeighborInteractionPair(nextFocus.targetLabel, nextFocus.sourceLabel);
+            return;
+        }}
+        focusNeighborInteractionPair(nextFocus.sourceLabel, nextFocus.targetLabel);
+    }}
+
+    function renderNeighborFocusDetail(focus, viewState) {{
+        const normalizedFocus = normalizeNeighborFocus(focus, viewState);
+        const isPinned = normalizedFocus && getNeighborFocusKey(normalizedFocus) === getNeighborFocusKey(selectedNeighborFocus);
+        if (!normalizedFocus) {{
+            const label = neighborStatsView === 'chord' ? 'a chord, arc, or legend item' : 'a node or edge';
+            return `
+                <div class="neighbor-detail-card is-empty" data-neighbor-detail-panel>
+                    <div class="neighbor-detail-header">
+                        <div class="neighbor-detail-title">Inspect neighborhood pairs</div>
+                    </div>
+                    <div class="neighbor-detail-meta">
+                        Hover ${{label}} for details. Click to pin it. Network node clicks and chord arc clicks also sync the interaction browser below.
+                    </div>
+                </div>
+            `;
+        }}
+
+        if (normalizedFocus.kind === 'category') {{
+            const idx = normalizedFocus.sourceIdx;
+            const rowTotal = getNeighborRowTotal(viewState.counts, idx);
+            const symmetricTotal = getNeighborSymmetricTotal(viewState.counts, idx);
+            const nLabel = Number(viewState.nCells[idx] ?? 0).toLocaleString();
+            const degreeLabel = Number.isFinite(viewState.meanDegree?.[idx]) ? viewState.meanDegree[idx].toFixed(2) : '0.00';
+            const meta = neighborStatsView === 'chord'
+                ? `n=${{nLabel}} | mean degree=${{degreeLabel}} | outgoing edges=${{formatNeighborCount(rowTotal)}} | symmetric edges=${{formatNeighborCount(symmetricTotal)}}`
+                : `n=${{nLabel}} | mean degree=${{degreeLabel}} | outgoing neighbor edges=${{formatNeighborCount(rowTotal)}}`;
+            return `
+                <div class="neighbor-detail-card" data-neighbor-detail-panel>
+                    <div class="neighbor-detail-header">
+                        <div class="neighbor-detail-title">${{escapeHtml(normalizedFocus.sourceLabel)}}</div>
+                        ${{isPinned ? '<span class="neighbor-detail-chip">Pinned</span>' : ''}}
+                    </div>
+                    <div class="neighbor-detail-meta">${{meta}}</div>
+                    <div class="neighbor-detail-actions">
+                        <button type="button" class="legend-btn" data-neighbor-action="use-source" data-neighbor-source-idx="${{idx}}">Use as source</button>
+                    </div>
+                </div>
+            `;
+        }}
+
+        const sourceIdx = normalizedFocus.sourceIdx;
+        const targetIdx = normalizedFocus.targetIdx;
+        const forward = Math.max(0, Number(viewState.counts[sourceIdx]?.[targetIdx] ?? 0));
+        const reverse = sourceIdx === targetIdx ? forward : Math.max(0, Number(viewState.counts[targetIdx]?.[sourceIdx] ?? 0));
+        const rowTotal = getNeighborRowTotal(viewState.counts, sourceIdx);
+        const pct = rowTotal > 0 ? (forward / rowTotal) * 100 : 0;
+        const sourceN = Number(viewState.nCells[sourceIdx] ?? 0).toLocaleString();
+        const targetN = Number(viewState.nCells[targetIdx] ?? 0).toLocaleString();
+        const zForward = Number(viewState.zscores?.[sourceIdx]?.[targetIdx]);
+        const zReverse = Number(viewState.zscores?.[targetIdx]?.[sourceIdx]);
+        const title = normalizedFocus.directional
+            ? `${{escapeHtml(normalizedFocus.sourceLabel)}} → ${{escapeHtml(normalizedFocus.targetLabel)}}`
+            : normalizedFocus.sourceIdx === normalizedFocus.targetIdx
+                ? `${{escapeHtml(normalizedFocus.sourceLabel)}} self-links`
+                : `${{escapeHtml(normalizedFocus.sourceLabel)}} ↔ ${{escapeHtml(normalizedFocus.targetLabel)}}`;
+        const firstLine = normalizedFocus.directional
+            ? `edges=${{formatNeighborCount(forward)}} | share=${{pct.toFixed(1)}}%`
+            : normalizedFocus.sourceIdx === normalizedFocus.targetIdx
+                ? `self-links=${{formatNeighborCount(forward)}}`
+                : `symmetric edges=${{formatNeighborCount(forward + reverse)}}`;
+        const secondLine = normalizedFocus.directional
+            ? `${{Number.isFinite(zForward) ? `z=${{zForward.toFixed(2)}} | ` : ''}}source n=${{sourceN}} | target n=${{targetN}}`
+            : normalizedFocus.sourceIdx === normalizedFocus.targetIdx
+                ? `${{Number.isFinite(zForward) ? `z=${{zForward.toFixed(2)}} | ` : ''}}source n=${{sourceN}}`
+                : `${{escapeHtml(normalizedFocus.sourceLabel)}}→${{escapeHtml(normalizedFocus.targetLabel)}}=${{formatNeighborCount(forward)}}${{Number.isFinite(zForward) ? ` | z=${{zForward.toFixed(2)}}` : ''}}<br>${{escapeHtml(normalizedFocus.targetLabel)}}→${{escapeHtml(normalizedFocus.sourceLabel)}}=${{formatNeighborCount(reverse)}}${{Number.isFinite(zReverse) ? ` | z=${{zReverse.toFixed(2)}}` : ''}}`;
+        const reverseAction = normalizedFocus.sourceIdx !== normalizedFocus.targetIdx
+            ? `<button type="button" class="legend-btn" data-neighbor-action="use-source" data-neighbor-source-idx="${{targetIdx}}" data-neighbor-target-idx="${{sourceIdx}}">Use ${{escapeHtml(normalizedFocus.targetLabel)}} as source</button>`
+            : '';
+        return `
+            <div class="neighbor-detail-card" data-neighbor-detail-panel>
+                <div class="neighbor-detail-header">
+                    <div class="neighbor-detail-title">${{title}}</div>
+                    ${{isPinned ? '<span class="neighbor-detail-chip">Pinned</span>' : ''}}
+                </div>
+                <div class="neighbor-detail-meta">
+                    ${{firstLine}}<br>
+                    ${{secondLine}}
+                </div>
+                <div class="neighbor-detail-actions">
+                    <button type="button" class="legend-btn" data-neighbor-action="use-source" data-neighbor-source-idx="${{sourceIdx}}" data-neighbor-target-idx="${{targetIdx}}">Use ${{escapeHtml(normalizedFocus.sourceLabel)}} as source</button>
+                    ${{reverseAction}}
+                </div>
+            </div>
+        `;
+    }}
+
+    function bindNeighborVisualizationInteractions(container, viewState) {{
+        const detail = container.querySelector('[data-neighbor-detail]');
+        const interactiveElements = Array.from(container.querySelectorAll('[data-neighbor-kind]'));
+        if (!detail || !interactiveElements.length) return;
+        const visibleNeighborMap = new Map();
+        interactiveElements.forEach((element) => {{
+            if (element.getAttribute('data-neighbor-kind') !== 'pair') return;
+            const sourceIdx = Number(element.getAttribute('data-neighbor-source-idx'));
+            const targetIdx = Number(element.getAttribute('data-neighbor-target-idx'));
+            if (!Number.isInteger(sourceIdx) || !Number.isInteger(targetIdx)) return;
+            if (!visibleNeighborMap.has(sourceIdx)) visibleNeighborMap.set(sourceIdx, new Set());
+            if (!visibleNeighborMap.has(targetIdx)) visibleNeighborMap.set(targetIdx, new Set());
+            visibleNeighborMap.get(sourceIdx).add(targetIdx);
+            visibleNeighborMap.get(targetIdx).add(sourceIdx);
+        }});
+
+        const applyState = () => {{
+            hoveredNeighborFocus = normalizeNeighborFocus(hoveredNeighborFocus, viewState);
+            selectedNeighborFocus = normalizeNeighborFocus(selectedNeighborFocus, viewState);
+            const candidateFocus = hoveredNeighborFocus || selectedNeighborFocus;
+            const activeFocus = candidateFocus && interactiveElements.some((element) => neighborElementMatchesFocus(element, candidateFocus))
+                ? candidateFocus
+                : null;
+            detail.innerHTML = renderNeighborFocusDetail(activeFocus, viewState);
+
+            interactiveElements.forEach((element) => {{
+                const isHovered = hoveredNeighborFocus && neighborElementMatchesFocus(element, hoveredNeighborFocus);
+                const isSelected = selectedNeighborFocus && neighborElementMatchesFocus(element, selectedNeighborFocus);
+                const isRelated = !activeFocus || neighborElementRelatesToFocus(element, activeFocus, visibleNeighborMap);
+                element.classList.toggle('is-hovered', !!isHovered);
+                element.classList.toggle('is-selected', !!isSelected);
+                element.classList.toggle('is-related', !!activeFocus && !!isRelated);
+                element.classList.toggle('is-dimmed', !!activeFocus && !isRelated);
+            }});
+        }};
+
+        detail.addEventListener('click', (event) => {{
+            const actionButton = event.target.closest('[data-neighbor-action]');
+            if (!actionButton) return;
+            const action = actionButton.getAttribute('data-neighbor-action');
+            if (action !== 'use-source') return;
+            const sourceIdx = Number(actionButton.getAttribute('data-neighbor-source-idx'));
+            const targetIdxRaw = actionButton.getAttribute('data-neighbor-target-idx');
+            const targetIdx = targetIdxRaw === null || targetIdxRaw === '' ? null : Number(targetIdxRaw);
+            const sourceLabel = String(viewState.categories?.[sourceIdx] ?? '');
+            const targetLabel = targetIdx !== null ? String(viewState.categories?.[targetIdx] ?? '') : null;
+            if (!sourceLabel) return;
+            focusNeighborInteractionPair(sourceLabel, targetLabel);
+        }});
+
+        // Delegate mouse hover to the scroll container so overlapping SVG paths
+        // don't fire competing mouseenter/mouseleave events (eliminates jitter).
+        const hoverContainer = container.querySelector('[data-neighbor-scroll]') || container;
+        let hoverDelegateTarget = null;
+        hoverContainer.addEventListener('mousemove', (event) => {{
+            const el = event.target.closest('[data-neighbor-kind]');
+            if (el === hoverDelegateTarget) return;
+            hoverDelegateTarget = el;
+            hoveredNeighborFocus = el ? readNeighborFocusFromElement(el, viewState) : null;
+            applyState();
+        }});
+        hoverContainer.addEventListener('mouseleave', () => {{
+            if (hoverDelegateTarget === null && hoveredNeighborFocus === null) return;
+            hoverDelegateTarget = null;
+            hoveredNeighborFocus = null;
+            applyState();
+        }});
+
+        interactiveElements.forEach((element) => {{
+            element.addEventListener('focus', () => {{
+                hoveredNeighborFocus = readNeighborFocusFromElement(element, viewState);
+                applyState();
+            }});
+            element.addEventListener('blur', () => {{
+                const focus = readNeighborFocusFromElement(element, viewState);
+                if (getNeighborFocusKey(hoveredNeighborFocus) === getNeighborFocusKey(focus)) {{
+                    hoveredNeighborFocus = null;
+                    applyState();
+                }}
+            }});
+            element.addEventListener('keydown', (event) => {{
+                if (event.key !== 'Enter' && event.key !== ' ') return;
+                event.preventDefault();
+                element.click();
+            }});
+            element.addEventListener('click', () => {{
+                const focus = readNeighborFocusFromElement(element, viewState);
+                if (!focus) return;
+                if (getNeighborFocusKey(selectedNeighborFocus) === getNeighborFocusKey(focus)) {{
+                    selectedNeighborFocus = null;
+                }} else {{
+                    selectedNeighborFocus = focus;
+                }}
+                if (selectedNeighborFocus && element.getAttribute('data-neighbor-auto-sync') === '1') {{
+                    syncNeighborFocusToInteractionBrowser(selectedNeighborFocus, 'primary');
+                }}
+                if (selectedNeighborFocus && selectedNeighborFocus.kind === 'category') {{
+                    const srcIdx = selectedNeighborFocus.sourceIdx;
+                    const focusSet = new Set([selectedNeighborFocus.sourceLabel]);
+                    const visibleNeighbors = visibleNeighborMap.get(srcIdx);
+                    if (visibleNeighbors) {{
+                        visibleNeighbors.forEach((j) => {{
+                            if (viewState.categories?.[j] != null)
+                                focusSet.add(String(viewState.categories[j]));
+                        }});
+                    }}
+                    neighborNetworkFocusCategories = focusSet;
+                    spotlightPinnedCategory = null;
+                }} else if (selectedNeighborFocus && selectedNeighborFocus.kind === 'pair') {{
+                    const focusSet = new Set([selectedNeighborFocus.sourceLabel]);
+                    if (selectedNeighborFocus.targetLabel)
+                        focusSet.add(selectedNeighborFocus.targetLabel);
+                    neighborNetworkFocusCategories = focusSet;
+                    spotlightPinnedCategory = null;
+                }} else {{
+                    neighborNetworkFocusCategories = null;
+                    spotlightPinnedCategory = null;
+                }}
+                updateNeighborFocusResetButton();
+                updateAllLegendSpotlightClasses();
+                rerenderForSpotlightChange();
+                applyState();
+            }});
+        }});
+
+        applyState();
+    }}
+
+    function renderNeighborStatsTableView(viewState) {{
+        const {{ categories, counts, nCells, meanDegree, zscores, permN, matches }} = viewState;
+        return matches.map((idx) => {{
             const source = String(categories[idx]);
             const row = counts[idx] || [];
             const total = row.reduce((sum, val) => sum + (Number.isFinite(val) ? val : 0), 0);
@@ -5548,13 +18260,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const rowsHtml = top.map(([j, val]) => {{
                 const pct = total > 0 ? (val / total) * 100 : 0;
                 const target = String(categories[j] ?? 'unknown');
-                const color = j >= 0 ? getCategoryColor(j) : '#999';
+                const color = j >= 0 ? getCategoryColor(j, currentColor) : '#999';
                 let zLabel = '';
                 if (zscores && zscores[idx] && Number.isFinite(zscores[idx][j])) {{
                     zLabel = ` z=${{zscores[idx][j].toFixed(2)}}`;
                 }}
                 return `
-                    <div class="agg-row">
+                    <div class="agg-row" data-target-cat="${{escapeHtml(target)}}">
                         <span class="agg-dot" style="background: ${{color}}"></span>
                         <span class="agg-label">${{target}}</span>
                         <span class="agg-value">${{pct.toFixed(1)}}% (${{formatCount(val)}})${{zLabel}}</span>
@@ -5571,7 +18283,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ` : '';
 
             const totalLabel = formatCount(total);
-            const nLabel = (nCells[idx] ?? 0).toLocaleString();
+            const nLabel = Number(nCells[idx] ?? 0).toLocaleString();
             const degreeLabel = Number.isFinite(meanDegree[idx]) ? meanDegree[idx].toFixed(2) : '0.00';
             const permLabel = permN ? ` | perms=${{permN}}` : '';
 
@@ -5586,8 +18298,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
 
             return `
-                <div class="agg-group">
-                    <div class="agg-group-title">${{source}}</div>
+                <div class="agg-group" data-source-cat="${{escapeHtml(source)}}">
+                    <div class="agg-group-title">${{escapeHtml(source)}}</div>
                     <div class="agg-group-meta">n=${{nLabel}} | mean degree=${{degreeLabel}} | neighbor edges=${{totalLabel}}${{permLabel}}</div>
                     <button class="legend-btn" data-neighbor-toggle="${{idx}}">${{toggleLabel}}</button>
                     ${{rowsHtml}}
@@ -5595,10 +18307,449 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 </div>
             `;
         }}).join('');
+    }}
 
-        container.innerHTML = rows;
+    function renderNeighborNetworkView(viewState) {{
+        const {{ categories, nCells, zscores, permN }} = viewState;
+        const controls = getNeighborViewControlState('bubble');
+        const controlPanel = renderNeighborVisualizationControlPanel('bubble', viewState);
+        const vizState = getNeighborVisualizationState('bubble');
+        if (controls.metric === 'zscore' && !zscores) {{
+            return controlPanel + '<div class="agg-group-meta">This viewer has no neighbor z-scores for the current annotation. Switch the metric to edge count or share.</div>';
+        }}
 
-        container.querySelectorAll('[data-neighbor-toggle]').forEach(btn => {{
+        const focusState = getNeighborFocusedIndices(viewState, controls.metric, controls);
+        if (focusState.error) {{
+            return controlPanel + `<div class="agg-group-meta">${{escapeHtml(focusState.error)}}</div>`;
+        }}
+        const {{ indices, trimmedCount, focus, seedIndices }} = focusState;
+        if (!indices.length) {{
+            return controlPanel + '<div class="agg-group-meta">No matching cell types.</div>';
+        }}
+
+        const pairCandidates = [];
+        let totalSymmetricCount = 0;
+        let maxZMagnitude = 0;
+        for (let i = 0; i < indices.length; i++) {{
+            for (let j = i + 1; j < indices.length; j++) {{
+                const pairMetrics = getNeighborPairMetrics(viewState, indices[i], indices[j]);
+                totalSymmetricCount += pairMetrics.symmetricCount;
+                maxZMagnitude = Math.max(maxZMagnitude, pairMetrics.maxAbsZ);
+                if (pairMetrics.symmetricCount > 0 || pairMetrics.maxAbsZ > 0) {{
+                    pairCandidates.push(pairMetrics);
+                }}
+            }}
+        }}
+
+        let edgeEntries = pairCandidates.map((entry) => ({{
+            ...entry,
+            metricValue: getNeighborPairMetricValue(entry, controls.metric, totalSymmetricCount),
+        }}));
+        const maxMetric = edgeEntries.reduce((maxValue, entry) => Math.max(maxValue, Number(entry.metricValue) || 0), 0);
+        const thresholdRaw = maxMetric > 0 ? maxMetric * (controls.thresholdPercent / 100) : 0;
+        edgeEntries = edgeEntries.filter((entry) => entry.metricValue > 0 && entry.metricValue >= thresholdRaw);
+
+        if (controls.focusMode === 'selected' && seedIndices.length) {{
+            edgeEntries = edgeEntries.filter((entry) => seedIndices.includes(entry.sourceIdx) || seedIndices.includes(entry.targetIdx));
+        }}
+
+        const visibleNodeIndices = Array.from(new Set(
+            edgeEntries.length
+                ? [
+                    ...indices.filter((idx) => seedIndices.includes(idx)),
+                    ...edgeEntries.flatMap((entry) => [entry.sourceIdx, entry.targetIdx]),
+                ]
+                : indices.filter((idx) => seedIndices.includes(idx) || controls.focusMode === 'all')
+        ));
+        const fallbackNodeIndices = visibleNodeIndices.length ? visibleNodeIndices : indices.slice(0, Math.max(1, Math.min(indices.length, controls.maxCategories)));
+        const nodeEntries = fallbackNodeIndices.map((idx) => ({{ idx }}));
+        const positions = computeNeighborSpringLayout(nodeEntries, edgeEntries.map((entry) => ({{
+            sourceIdx: entry.sourceIdx,
+            targetIdx: entry.targetIdx,
+            weightNormalized: maxMetric > 0 ? clamp01(entry.metricValue / maxMetric) : 0,
+        }})), 540, 430, 60);
+        const maxN = fallbackNodeIndices.reduce((maxValue, idx) => Math.max(maxValue, Number(nCells[idx] ?? 0)), 0);
+
+        const edgesSvg = edgeEntries
+            .slice()
+            .sort((a, b) => a.metricValue - b.metricValue)
+            .map((entry) => {{
+                const sourcePos = positions.get(entry.sourceIdx);
+                const targetPos = positions.get(entry.targetIdx);
+                if (!sourcePos || !targetPos) return '';
+                const edgeDx = targetPos.x - sourcePos.x;
+                const edgeDy = targetPos.y - sourcePos.y;
+                const edgeDist = Math.hypot(edgeDx, edgeDy);
+                const edgeNx = edgeDist > 0 ? -edgeDy / edgeDist : 0;
+                const edgeNy = edgeDist > 0 ? edgeDx / edgeDist : 0;
+                const edgeCurve = edgeDist * 0.13;
+                const edgeMx = (sourcePos.x + targetPos.x) / 2 + edgeNx * edgeCurve;
+                const edgeMy = (sourcePos.y + targetPos.y) / 2 + edgeNy * edgeCurve;
+                const path = `M ${{sourcePos.x.toFixed(2)}} ${{sourcePos.y.toFixed(2)}} Q ${{edgeMx.toFixed(2)}} ${{edgeMy.toFixed(2)}} ${{targetPos.x.toFixed(2)}} ${{targetPos.y.toFixed(2)}}`;
+                const weightNormalized = maxMetric > 0 ? clamp01(entry.metricValue / maxMetric) : 0;
+                const strokeWidth = 1.4 + 7.4 * Math.sqrt(weightNormalized || 0);
+                const sourceLabel = categories[entry.sourceIdx];
+                const targetLabel = categories[entry.targetIdx];
+                const metricLabel = formatNeighborMetricValue(controls.metric, entry.metricValue);
+                const stroke = controls.metric === 'zscore'
+                    ? getNeighborEdgeStrokeColor(entry.meanZ, maxZMagnitude)
+                    : rgbToRgba([96, 103, 112], 0.24 + 0.48 * Math.sqrt(weightNormalized || 0));
+                return `
+                    <path
+                        class="neighbor-network-edge neighbor-interactive"
+                        d="${{path}}"
+                        stroke="${{stroke}}"
+                        stroke-width="${{strokeWidth.toFixed(2)}}"
+                        data-neighbor-kind="pair"
+                        data-neighbor-source-idx="${{entry.sourceIdx}}"
+                        data-neighbor-target-idx="${{entry.targetIdx}}"
+                        data-neighbor-directional="0"
+                        role="button"
+                        tabindex="0"
+                    >
+                        <title>${{escapeHtml(sourceLabel)}} ↔ ${{escapeHtml(targetLabel)}} | ${{formatNeighborMetricLabel(controls.metric)}}=${{metricLabel}} | ${{escapeHtml(sourceLabel)}}→${{escapeHtml(targetLabel)}}=${{formatNeighborCount(entry.forwardCount)}} | ${{escapeHtml(targetLabel)}}→${{escapeHtml(sourceLabel)}}=${{formatNeighborCount(entry.reverseCount)}}${{Number.isFinite(entry.meanZ) ? ` | mean z=${{entry.meanZ.toFixed(2)}}` : ''}}</title>
+                    </path>
+                `;
+            }})
+            .join('');
+
+        const nodesSvg = fallbackNodeIndices.map((categoryIdx) => {{
+            const pos = positions.get(categoryIdx);
+            if (!pos) return '';
+            const label = categories[categoryIdx];
+            const renderedLabel = getNeighborRenderedLabel(label, 18);
+            const nodeN = Number(nCells[categoryIdx] ?? 0);
+            const radius = 9 + 14 * Math.sqrt(maxN > 0 ? clamp01(nodeN / maxN) : 0);
+            const labelOffset = radius + 8;
+            const anchor = pos.x >= 270 ? 'start' : 'end';
+            const labelX = pos.x + (anchor === 'start' ? labelOffset : -labelOffset);
+            const subLabelY = pos.y + 13;
+            const labelText = renderedLabel
+                ? `<text class="neighbor-network-label" x="${{labelX.toFixed(2)}}" y="${{(pos.y + 3).toFixed(2)}}" text-anchor="${{anchor}}" pointer-events="none">${{escapeHtml(renderedLabel)}}</text>`
+                : '';
+            const metaText = neighborLabelMode === 'hover'
+                ? ''
+                : `<text class="neighbor-network-label meta" x="${{labelX.toFixed(2)}}" y="${{subLabelY.toFixed(2)}}" text-anchor="${{anchor}}" pointer-events="none">n=${{nodeN.toLocaleString()}}</text>`;
+            return `
+                <g
+                    class="neighbor-network-node neighbor-interactive"
+                    data-neighbor-kind="category"
+                    data-neighbor-source-idx="${{categoryIdx}}"
+                    data-neighbor-auto-sync="1"
+                    role="button"
+                    tabindex="0"
+                >
+                    <title>${{escapeHtml(label)}} | n=${{nodeN.toLocaleString()}} | outgoing edges=${{formatNeighborCount(getNeighborRowTotal(viewState.counts, categoryIdx))}}</title>
+                    <circle cx="${{pos.x.toFixed(2)}}" cy="${{pos.y.toFixed(2)}}" r="${{radius.toFixed(2)}}" fill="${{getCategoryColor(categoryIdx, currentColor)}}"></circle>
+                    ${{labelText}}
+                    ${{metaText}}
+                </g>
+            `;
+        }}).join('');
+
+        const trimNote = trimmedCount > 0
+            ? `<div class="neighbor-view-note">Showing ${{fallbackNodeIndices.length}} categories after focus and category limits. Broaden the search or raise Max categories to include more.</div>`
+            : '';
+        const focusLabel = focus
+            ? (focus.kind === 'category' ? focus.sourceLabel : `${{focus.sourceLabel}} ↔ ${{focus.targetLabel}}`)
+            : '';
+        const focusNote = controls.focusMode === 'all'
+            ? ''
+            : `<div class="neighbor-view-note">${{focus ? `Focused on ${{escapeHtml(focusLabel)}}. Selected only keeps edges touching the pinned selection, while Selected + neighbors keeps the whole local subgraph.` : 'Pin a node or edge first to focus the view.'}}</div>`;
+        const metricNote = controls.metric === 'zscore'
+            ? (permN > 0
+                ? `Edge width shows z-score magnitude from ${{permN.toLocaleString()}} shuffle${{permN === 1 ? '' : 's'}}, and edge color shows enrichment sign.`
+                : 'Edge width shows z-score magnitude and edge color shows enrichment sign.')
+            : `Edge width shows ${{formatNeighborMetricLabel(controls.metric)}}. Hover still shows raw counts${{zscores ? ' and z-scores' : ''}}.`;
+        const emptyNote = !edgeEntries.length
+            ? '<div class="neighbor-view-note">No inter-category edges pass the current focus and threshold settings.</div>'
+            : '';
+        const svgWidth = (540 * vizState.zoom).toFixed(1);
+        const svgHeight = (430 * vizState.zoom).toFixed(1);
+        const scrollClass = vizState.expanded ? 'neighbor-visualization-scroll expanded' : 'neighbor-visualization-scroll';
+        const legendHtml = controls.metric === 'zscore'
+            ? `
+                <div class="neighbor-zscore-legend">
+                    <span>Depleted</span>
+                    <div class="neighbor-zscore-gradient"></div>
+                    <span>Enriched</span>
+                </div>
+            `
+            : '';
+
+        return `
+            ${{controlPanel}}
+            ${{trimNote}}
+            ${{focusNote}}
+            ${{emptyNote}}
+            <div class="neighbor-visualization">
+                ${{renderNeighborVisualizationToolbar('bubble', 'Use focus mode and thresholding to simplify dense local neighborhood structure.')}}
+                <div class="${{scrollClass}}" data-neighbor-scroll>
+                    <svg class="neighbor-svg" data-neighbor-svg data-neighbor-base-width="540" data-neighbor-base-height="430" data-neighbor-current-zoom="${{vizState.zoom}}" style="width:${{svgWidth}}px;height:${{svgHeight}}px;" viewBox="0 0 540 430" role="img" aria-label="Neighbor enrichment network">
+                        ${{edgesSvg}}
+                        ${{nodesSvg}}
+                    </svg>
+                </div>
+                <div data-neighbor-detail></div>
+            </div>
+            <div class="neighbor-view-note">${{metricNote}} Self-links stay in the table and chord view for readability.</div>
+            ${{legendHtml}}
+        `;
+    }}
+
+    function renderNeighborChordDiagram(viewState) {{
+        const {{ categories, nCells }} = viewState;
+        const controls = getNeighborViewControlState('chord');
+        const controlPanel = renderNeighborVisualizationControlPanel('chord', viewState);
+        const vizState = getNeighborVisualizationState('chord');
+        const focusState = getNeighborFocusedIndices(viewState, controls.metric, controls);
+        if (focusState.error) {{
+            return controlPanel + `<div class="agg-group-meta">${{escapeHtml(focusState.error)}}</div>`;
+        }}
+
+        const orderedIndices = sortNeighborIndicesForChord(focusState.indices, viewState, controls.chordOrder);
+        if (orderedIndices.length < 2) {{
+            return controlPanel + '<div class="agg-group-meta">Chord view needs at least two visible cell types after the current focus and category settings.</div>';
+        }}
+
+        const pairCandidates = [];
+        let totalSymmetricCount = 0;
+        for (let i = 0; i < orderedIndices.length; i++) {{
+            for (let j = i; j < orderedIndices.length; j++) {{
+                const pairMetrics = getNeighborPairMetrics(viewState, orderedIndices[i], orderedIndices[j]);
+                totalSymmetricCount += pairMetrics.symmetricCount;
+                if (pairMetrics.symmetricCount > 0) {{
+                    pairCandidates.push(pairMetrics);
+                }}
+            }}
+        }}
+        if (!(totalSymmetricCount > 0)) {{
+            return controlPanel + '<div class="agg-group-meta">No neighbor connections are available for the current annotation.</div>';
+        }}
+
+        let linkEntries = pairCandidates.map((entry) => ({{
+            ...entry,
+            metricValue: getNeighborPairMetricValue(entry, controls.metric, totalSymmetricCount),
+        }}));
+        const maxMetric = linkEntries.reduce((maxValue, entry) => Math.max(maxValue, Number(entry.metricValue) || 0), 0);
+        const thresholdRaw = maxMetric > 0 ? maxMetric * (controls.thresholdPercent / 100) : 0;
+        linkEntries = linkEntries.filter((entry) => entry.metricValue > 0 && entry.metricValue >= thresholdRaw);
+
+        if (controls.focusMode === 'selected' && focusState.seedIndices.length) {{
+            linkEntries = linkEntries.filter((entry) => focusState.seedIndices.includes(entry.sourceIdx) || focusState.seedIndices.includes(entry.targetIdx));
+        }}
+        if (!linkEntries.length) {{
+            return controlPanel + '<div class="agg-group-meta">No chord ribbons pass the current focus and threshold settings.</div>';
+        }}
+
+        const visibleIndices = Array.from(new Set(linkEntries.flatMap((entry) => [entry.sourceIdx, entry.targetIdx])));
+        if (visibleIndices.length < 2) {{
+            return controlPanel + '<div class="agg-group-meta">Chord view needs at least two connected cell types after the current focus and threshold settings.</div>';
+        }}
+
+        const indices = sortNeighborIndicesForChord(visibleIndices, viewState, controls.chordOrder);
+        const matrix = indices.map(() => indices.map(() => 0));
+        const totalsByIndex = new Map(indices.map((idx) => [idx, 0]));
+        linkEntries.forEach((entry) => {{
+            const i = indices.indexOf(entry.sourceIdx);
+            const j = indices.indexOf(entry.targetIdx);
+            if (i < 0 || j < 0) return;
+            matrix[i][j] = entry.metricValue;
+            if (i !== j) {{
+                matrix[j][i] = entry.metricValue;
+            }}
+            totalsByIndex.set(entry.sourceIdx, Number(totalsByIndex.get(entry.sourceIdx) || 0) + entry.metricValue);
+            if (entry.sourceIdx !== entry.targetIdx) {{
+                totalsByIndex.set(entry.targetIdx, Number(totalsByIndex.get(entry.targetIdx) || 0) + entry.metricValue);
+            }}
+        }});
+
+        const totals = indices.map((idx) => Number(totalsByIndex.get(idx) || 0));
+        const grandTotal = totals.reduce((sum, value) => sum + value, 0);
+        if (!(grandTotal > 0)) {{
+            return controlPanel + '<div class="agg-group-meta">No chord ribbons pass the current focus and threshold settings.</div>';
+        }}
+
+        const gap = 0.045;
+        const availableAngle = Math.max(0.5, (Math.PI * 2) - gap * indices.length);
+        let angleCursor = -Math.PI / 2;
+        const layout = totals.map((total) => {{
+            const span = grandTotal > 0 ? (total / grandTotal) * availableAngle : availableAngle / indices.length;
+            const start = angleCursor;
+            const end = angleCursor + span;
+            angleCursor = end + gap;
+            return {{ start, end, mid: (start + end) / 2, span }};
+        }});
+
+        const subLayout = indices.map((_, i) => {{
+            const total = totals[i];
+            let cursor = layout[i].start;
+            return indices.map((_, j) => {{
+                const value = Number(matrix[i][j] ?? 0);
+                const span = total > 0 ? (value / total) * layout[i].span : 0;
+                const sub = {{ start: cursor, end: cursor + span }};
+                cursor += span;
+                return sub;
+            }});
+        }});
+
+        const cx = 290;
+        const cy = 290;
+        const outerRadius = 165;
+        const innerRadius = 130;
+        const labelRadius = 182;
+        const width = 580;
+        const height = 580;
+
+        const arcs = indices.map((categoryIdx, pos) => {{
+            const label = categories[categoryIdx];
+            const totalLabel = formatNeighborMetricValue(controls.metric, totals[pos]);
+            return `
+                <path
+                    class="neighbor-chord-arc neighbor-interactive"
+                    d="${{describeSvgArc(cx, cy, outerRadius, layout[pos].start, layout[pos].end)}}"
+                    stroke="${{getCategoryColor(categoryIdx, currentColor)}}"
+                    stroke-width="16"
+                    data-neighbor-kind="category"
+                    data-neighbor-source-idx="${{categoryIdx}}"
+                    data-neighbor-auto-sync="1"
+                    role="button"
+                    tabindex="0"
+                >
+                    <title>${{escapeHtml(label)}} | n=${{Number(nCells[categoryIdx] ?? 0).toLocaleString()}} | total ${{formatNeighborMetricLabel(controls.metric)}}=${{totalLabel}}</title>
+                </path>
+            `;
+        }}).join('');
+
+        const arcLabels = neighborLabelMode === 'hover'
+            ? ''
+            : indices.map((categoryIdx, pos) => {{
+                const renderedLabel = getNeighborRenderedLabel(categories[categoryIdx], 13);
+                const pt = polarToCartesian(cx, cy, labelRadius, layout[pos].mid);
+                const anchor = pt.x >= cx ? 'start' : 'end';
+                return `<text class="neighbor-chord-arc-label" x="${{pt.x.toFixed(2)}}" y="${{pt.y.toFixed(2)}}" text-anchor="${{anchor}}" dy="0.35em" pointer-events="none">${{escapeHtml(renderedLabel)}}</text>`;
+            }}).join('');
+
+        const links = linkEntries
+            .slice()
+            .sort((a, b) => a.metricValue - b.metricValue)
+            .map((entry) => {{
+                const i = indices.indexOf(entry.sourceIdx);
+                const j = indices.indexOf(entry.targetIdx);
+                if (i < 0 || j < 0) return '';
+                const sourceLabel = categories[entry.sourceIdx];
+                const targetLabel = categories[entry.targetIdx];
+                const sourceColor = cssColorToRgb(getCategoryColor(entry.sourceIdx, currentColor));
+                const targetColor = cssColorToRgb(getCategoryColor(entry.targetIdx, currentColor));
+                const alpha = entry.sourceIdx === entry.targetIdx
+                    ? 0.40
+                    : 0.18 + 0.22 * Math.sqrt(maxMetric > 0 ? clamp01(entry.metricValue / maxMetric) : 0);
+                const fillColor = entry.sourceIdx === entry.targetIdx
+                    ? rgbToRgba(sourceColor, alpha)
+                    : rgbToRgba(mixRgb(sourceColor, targetColor, 0.5), alpha);
+                const metricLabel = formatNeighborMetricValue(controls.metric, entry.metricValue);
+                const path = entry.sourceIdx === entry.targetIdx
+                    ? describeChordSelfRibbon(cx, cy, innerRadius, subLayout[i][j])
+                    : describeChordRibbon(cx, cy, innerRadius, subLayout[i][j], subLayout[j][i]);
+                const title = entry.sourceIdx === entry.targetIdx
+                    ? `${{escapeHtml(sourceLabel)}} self-links | ${{formatNeighborMetricLabel(controls.metric)}}=${{metricLabel}} | edges=${{formatNeighborCount(entry.symmetricCount)}}`
+                    : `${{escapeHtml(sourceLabel)}} ↔ ${{escapeHtml(targetLabel)}} | ${{formatNeighborMetricLabel(controls.metric)}}=${{metricLabel}} | ${{escapeHtml(sourceLabel)}}→${{escapeHtml(targetLabel)}}=${{formatNeighborCount(entry.forwardCount)}} | ${{escapeHtml(targetLabel)}}→${{escapeHtml(sourceLabel)}}=${{formatNeighborCount(entry.reverseCount)}}`;
+                return `
+                    <path
+                        class="neighbor-chord-link neighbor-interactive"
+                        d="${{path}}"
+                        fill="${{fillColor}}"
+                        data-neighbor-kind="pair"
+                        data-neighbor-source-idx="${{entry.sourceIdx}}"
+                        data-neighbor-target-idx="${{entry.targetIdx}}"
+                        data-neighbor-directional="0"
+                        role="button"
+                        tabindex="0"
+                    >
+                        <title>${{title}}</title>
+                    </path>
+                `;
+            }})
+            .join('');
+
+        const legend = indices.map((categoryIdx, pos) => {{
+            return `
+                <div class="neighbor-chord-legend-item neighbor-interactive" data-neighbor-kind="category" data-neighbor-source-idx="${{categoryIdx}}" role="button" tabindex="0">
+                    <span class="agg-dot" style="background:${{getCategoryColor(categoryIdx, currentColor)}}"></span>
+                    <span>${{escapeHtml(categories[categoryIdx])}} · n=${{Number(nCells[categoryIdx] ?? 0).toLocaleString()}} · ${{formatNeighborMetricLabel(controls.metric)}}=${{formatNeighborMetricValue(controls.metric, totals[pos])}}</span>
+                </div>
+            `;
+        }}).join('');
+
+        const trimNote = focusState.trimmedCount > 0
+            ? `<div class="neighbor-view-note">Showing ${{indices.length}} categories after focus, ordering, and category limits.</div>`
+            : '';
+        const focusLabel = focusState.focus
+            ? (focusState.focus.kind === 'category'
+                ? focusState.focus.sourceLabel
+                : `${{focusState.focus.sourceLabel}} ↔ ${{focusState.focus.targetLabel}}`)
+            : '';
+        const focusNote = controls.focusMode === 'all'
+            ? ''
+            : `<div class="neighbor-view-note">Focused on ${{escapeHtml(focusLabel)}}. Selected only keeps ribbons touching the pinned selection, while Selected + neighbors keeps the full local chord.</div>`;
+        const metricNote = controls.metric === 'share'
+            ? 'Ribbon area shows share of visible connection volume after the current filters.'
+            : 'Ribbon area shows symmetric connection volume after the current filters.';
+        const svgWidth = (width * vizState.zoom).toFixed(1);
+        const svgHeight = (height * vizState.zoom).toFixed(1);
+        const scrollClass = vizState.expanded ? 'neighbor-visualization-scroll expanded' : 'neighbor-visualization-scroll';
+
+        return `
+            ${{controlPanel}}
+            ${{trimNote}}
+            ${{focusNote}}
+            <div class="neighbor-visualization">
+                ${{renderNeighborVisualizationToolbar('chord', 'Use ordering, thresholding, and focus mode to simplify ribbon-heavy views.')}}
+                <div class="${{scrollClass}}" data-neighbor-scroll>
+                    <svg class="neighbor-svg" data-neighbor-svg data-neighbor-base-width="${{width}}" data-neighbor-base-height="${{height}}" data-neighbor-current-zoom="${{vizState.zoom}}" style="width:${{svgWidth}}px;height:${{svgHeight}}px;" viewBox="0 0 ${{width}} ${{height}}" role="img" aria-label="Neighbor connection chord diagram">
+                        ${{links}}
+                        ${{arcs}}
+                        ${{arcLabels}}
+                    </svg>
+                </div>
+                <div class="neighbor-chord-legend">${{legend}}</div>
+                <div data-neighbor-detail></div>
+            </div>
+            <div class="neighbor-view-note">${{metricNote}} Self-links remain visible as inner loops when they pass the current threshold.</div>
+        `;
+    }}
+
+    function renderNeighborStats() {{
+        const container = document.getElementById('neighbor-stats');
+        if (!container) return;
+
+        document.querySelectorAll('[data-neighbor-view]').forEach((btn) => {{
+            btn.classList.toggle('active', btn.getAttribute('data-neighbor-view') === neighborStatsView);
+        }});
+
+        const viewState = getNeighborStatsViewState();
+        if (viewState.error) {{
+            container.innerHTML = `<div class="agg-group-meta">${{escapeHtml(viewState.error)}}</div>`;
+            return;
+        }}
+
+        if (neighborStatsView === 'bubble') {{
+            container.innerHTML = renderNeighborNetworkView(viewState);
+            bindNeighborVisualizationSettingControls(container, 'bubble');
+            bindNeighborVisualizationControls(container, 'bubble');
+            bindNeighborVisualizationInteractions(container, viewState);
+            return;
+        }}
+        if (neighborStatsView === 'chord') {{
+            container.innerHTML = renderNeighborChordDiagram(viewState);
+            bindNeighborVisualizationSettingControls(container, 'chord');
+            bindNeighborVisualizationControls(container, 'chord');
+            bindNeighborVisualizationInteractions(container, viewState);
+            return;
+        }}
+
+        container.innerHTML = renderNeighborStatsTableView(viewState);
+        container.querySelectorAll('[data-neighbor-toggle]').forEach((btn) => {{
             btn.addEventListener('click', () => {{
                 const idx = btn.getAttribute('data-neighbor-toggle');
                 if (idx === null) return;
@@ -5606,6 +18757,28 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 if (expandedNeighborGroups.has(key)) expandedNeighborGroups.delete(key);
                 else expandedNeighborGroups.add(key);
                 renderNeighborStats();
+            }});
+        }});
+
+        container.querySelectorAll('[data-target-cat]').forEach((row) => {{
+            row.addEventListener('click', () => {{
+                const targetCat = row.getAttribute('data-target-cat');
+                const sourceCat = row.closest('[data-source-cat]')?.getAttribute('data-source-cat');
+                if (!targetCat || !sourceCat) return;
+                const focusSet = new Set([sourceCat, targetCat]);
+                const isActive = neighborNetworkFocusCategories &&
+                    neighborNetworkFocusCategories.size === focusSet.size &&
+                    [...focusSet].every(c => neighborNetworkFocusCategories.has(c));
+                neighborNetworkFocusCategories = isActive ? null : focusSet;
+                spotlightPinnedCategory = null;
+                container.querySelectorAll('[data-target-cat]').forEach(r => {{
+                    const rTarget = r.getAttribute('data-target-cat');
+                    const rSource = r.closest('[data-source-cat]')?.getAttribute('data-source-cat');
+                    r.classList.toggle('is-active', !isActive && rTarget === targetCat && rSource === sourceCat);
+                }});
+                updateNeighborFocusResetButton();
+                updateAllLegendSpotlightClasses();
+                rerenderForSpotlightChange();
             }});
         }});
     }}
@@ -5718,15 +18891,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
 
         const topEntries = sortedEntries.slice(0, 12);
-        const sourceMarkerLabel = sourceMarkers.length ? sourceMarkers.join(', ') : 'No marker genes available.';
+        const renderInlineGeneLinks = (genes) => genes.map(g =>
+            `<span class="interaction-gene-link" data-gene-activate="${{escapeHtml(g)}}" title="Load ${{escapeHtml(g)}} into the viewer">${{escapeHtml(g)}}</span>`
+        ).join(', ');
+        const sourceMarkerLabel = sourceMarkers.length ? renderInlineGeneLinks(sourceMarkers) : 'No marker genes available.';
         const sourceN = (nCells[sourceIdx] ?? 0).toLocaleString();
         const degreeLabel = Number.isFinite(meanDegree[sourceIdx]) ? meanDegree[sourceIdx].toFixed(2) : '0.00';
         const withContactMarkers = topEntries.filter(entry => !!entry.contact).length;
+        const sourceColor = getCategoryColor(sourceIdx, currentColor);
         const rows = topEntries.map(entry => {{
-            const color = getCategoryColor(entry.targetIdx);
+            const color = getCategoryColor(entry.targetIdx, currentColor);
             const zLabel = entry.z === null ? 'n/a' : entry.z.toFixed(2);
-            const markerLabel = entry.targetMarkers.length ? entry.targetMarkers.join(', ') : '—';
-            const contactLabel = entry.contactMarkers.length ? entry.contactMarkers.join(', ') : '—';
+            const markerLabel = entry.targetMarkers.length ? renderInlineGeneLinks(entry.targetMarkers) : '—';
+            const contactLabel = entry.contactMarkers.length ? renderInlineGeneLinks(entry.contactMarkers) : '—';
             let contactMeta = 'not precomputed';
             if (entry.contact) {{
                 const nPos = Number(entry.contact.n_contact ?? 0);
@@ -5757,7 +18934,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         container.innerHTML = `
             <div class="agg-group">
-                <div class="agg-group-title">${{source}} → targets</div>
+                <div class="agg-group-title"><span class="agg-dot" style="background: ${{sourceColor}}"></span>${{source}} → targets</div>
                 <div class="agg-group-meta">n=${{sourceN}} | mean degree=${{degreeLabel}} | neighbor edges=${{formatNeighborCount(total)}}</div>
                 <div class="agg-group-meta">Source markers: ${{sourceMarkerLabel}}</div>
                 <div class="agg-group-meta">Contact-conditioned markers available for ${{withContactMarkers}}/${{topEntries.length}} shown targets.</div>
@@ -5779,6 +18956,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 </tbody>
             </table>
         `;
+        bindGeneActivateButtons(container, renderInteractionBrowser);
     }}
 
     function stepRange(rangeEl, delta) {{
@@ -5851,7 +19029,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 chip.classList.remove('inactive');
             }});
             updateFilterResetState();
-            renderAllSections();
+            applyMetadataFilters();
         }};
 
         document.getElementById('filter-reset-btn')?.addEventListener('click', resetAllFilters);
@@ -5878,7 +19056,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 }});
 
                 updateFilterResetState();
-                renderAllSections();
+                applyMetadataFilters();
             }});
         }});
         updateFilterResetState();
@@ -5888,6 +19066,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function openModal(sectionId) {{
         modalSection = DATA.sections.find(s => s.id === sectionId);
         if (!modalSection) return;
+        modalSubview = null;
+        invalidateModalRenderedView();
         modalZoom = 1; modalPanX = 0; modalPanY = 0;
         modalPointerMoved = false;
         modalMagicWandActive = false;
@@ -5899,16 +19079,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         modalAnnotationPath = [];
         document.getElementById('modal-annotate-btn')?.classList.remove('active');
 
-        document.getElementById('modal-title').textContent = sectionId;
-        const metaText = Object.entries(modalSection.metadata || {{}})
-            .map(([k, v]) => `${{formatMetadataLabel(k)}}: ${{v}}`).join(' | ');
-        document.getElementById('modal-meta').textContent = metaText;
+        updateModalHeader();
         document.getElementById('modal').classList.add('active');
         updateSelectionInfo();
+        updateSectionRotationIndicators(sectionId);
         renderLegend('modal-legend');
         requestAnimationFrame(() => {{
             const canvas = document.getElementById('modal-canvas');
             if (canvas) canvas.style.cursor = 'grab';
+            setModalControlsCollapsed(modalControlsCollapsed);
+            updateModalToolbarState();
+            layoutModalControls();
             layoutModalAnnotationPanel();
             renderModalAnnotationPanel();
             renderModalSection();
@@ -5916,6 +19097,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function closeModal() {{
+        invalidateModalRenderedView();
+        hideModalGeneDiscoveryPanel();
+        modalSpacePanActive = false;
         document.getElementById('modal').classList.remove('active');
         modalMagicWandActive = false;
         isDrawingModalLasso = false;
@@ -5926,7 +19110,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         modalPointerMoved = false;
         document.getElementById('modal-magic-wand-btn')?.classList.remove('active');
         document.getElementById('modal-annotate-btn')?.classList.remove('active');
+        document.querySelector('#modal .modal-controls')?.classList.remove('dragging');
+        modalSubview = null;
         modalSection = null;
+        updateModalHeader();
+        updateSectionRotationIndicators();
         renderModalAnnotationPanel();
         hideTooltip();
     }}
@@ -5941,7 +19129,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const margin = 8;
         const controls = container.querySelector('.modal-controls');
         let controlsTop = containerRect.height - margin;
-        if (controls) {{
+        if (controls && !controls.classList.contains('hidden')) {{
             const controlsRect = controls.getBoundingClientRect();
             controlsTop = Math.max(
                 margin,
@@ -6076,17 +19264,104 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const metaParts = Object.entries(section.metadata || {{}})
                 .map(([k, v]) => `${{formatMetadataLabel(k)}}: ${{v}}`).join(' | ');
             const metaHtml = metaParts ? `<div class="section-meta">${{metaParts}}</div>` : '';
+            const rotationLabel = formatRotationLabel(getSectionRotationDeg(section));
 
             panel.innerHTML = `
                 <div class="section-header">
-                    <div>${{section.id}}${{metaHtml}}</div>
-                    <span class="expand-icon">&#x26F6;</span>
+                    <div class="section-header-main">${{section.id}}${{metaHtml}}</div>
+                    <div class="section-header-actions">
+                        <span class="section-rotation-label" data-section-rotation-label>${{rotationLabel}}</span>
+                        <div class="section-rotate-group">
+                            <button class="section-rotate-btn" type="button" data-rotate-step="-45" title="Rotate section -45 degrees">-45</button>
+                            <button class="section-rotate-btn" type="button" data-rotate-step="45" title="Rotate section +45 degrees">+45</button>
+                            <button class="section-rotate-btn" type="button" data-rotate-reset title="Reset section rotation">0</button>
+                        </div>
+                        <button class="section-hide-btn" type="button" data-hide-section="${{section.id}}" title="Hide this section">&#x2715;</button>
+                        <span class="expand-icon">&#x26F6;</span>
+                    </div>
                 </div>
                 <canvas class="section-canvas"></canvas>
             `;
+            panel.querySelectorAll('[data-rotate-step], [data-rotate-reset]').forEach((btn) => {{
+                btn.addEventListener('click', (event) => {{
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (btn.hasAttribute('data-rotate-reset')) {{
+                        resetSectionRotation(section.id);
+                        return;
+                    }}
+                    rotateSectionBy(section.id, Number(btn.dataset.rotateStep || 0));
+                }});
+                btn.addEventListener('mousedown', (event) => event.stopPropagation());
+            }});
+            const hideBtn = panel.querySelector('[data-hide-section]');
+            if (hideBtn) {{
+                hideBtn.addEventListener('click', (event) => {{
+                    event.preventDefault();
+                    event.stopPropagation();
+                    hideSection(section.id);
+                }});
+                hideBtn.addEventListener('mousedown', (event) => event.stopPropagation());
+            }}
             panel.addEventListener('click', () => openModal(section.id));
             grid.appendChild(panel);
         }});
+
+        // Drag-and-drop reordering
+        if ((DATA.n_sections || 0) > 1) {{
+            let dragSrcId = null;
+            let dragAllowed = false;
+            grid.querySelectorAll('.section-panel').forEach(panel => {{
+                panel.setAttribute('draggable', 'true');
+                // Only allow drag when initiated from the header
+                const header = panel.querySelector('.section-header-main');
+                if (header) {{
+                    header.addEventListener('mousedown', () => {{ dragAllowed = true; }});
+                    header.addEventListener('mouseup', () => {{ dragAllowed = false; }});
+                }}
+                panel.addEventListener('dragstart', (e) => {{
+                    if (!dragAllowed) {{ e.preventDefault(); return; }}
+                    dragSrcId = panel.dataset.sectionId;
+                    panel.classList.add('dragging');
+                    e.dataTransfer.effectAllowed = 'move';
+                    e.dataTransfer.setData('text/plain', dragSrcId);
+                }});
+                panel.addEventListener('dragend', () => {{
+                    panel.classList.remove('dragging');
+                    grid.querySelectorAll('.section-panel').forEach(p => p.classList.remove('drag-over'));
+                    dragSrcId = null;
+                    dragAllowed = false;
+                }});
+                panel.addEventListener('dragover', (e) => {{
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    if (panel.dataset.sectionId !== dragSrcId) {{
+                        panel.classList.add('drag-over');
+                    }}
+                }});
+                panel.addEventListener('dragleave', () => {{
+                    panel.classList.remove('drag-over');
+                }});
+                panel.addEventListener('drop', (e) => {{
+                    e.preventDefault();
+                    e.stopPropagation();
+                    panel.classList.remove('drag-over');
+                    const srcId = e.dataTransfer.getData('text/plain');
+                    const targetId = panel.dataset.sectionId;
+                    if (!srcId || srcId === targetId) return;
+                    const srcPanel = grid.querySelector(`.section-panel[data-section-id="${{srcId}}"]`);
+                    if (!srcPanel) return;
+                    const targetRect = panel.getBoundingClientRect();
+                    const dropY = e.clientY - targetRect.top;
+                    if (dropY < targetRect.height / 2) {{
+                        grid.insertBefore(srcPanel, panel);
+                    }} else {{
+                        grid.insertBefore(srcPanel, panel.nextSibling);
+                    }}
+                    renderAllSections();
+                }});
+            }});
+        }}
 
         // Lazy render thumbnails while scrolling (skip offscreen panels).
         grid.addEventListener('scroll', () => {{
@@ -6113,84 +19388,389 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const refreshInsights = () => {{
             if (!isInsightsVisible()) return;
             renderColorList(document.getElementById('color-search')?.value || '');
-            const isStats = document.getElementById('color-tab-aggregate')?.classList.contains('active');
-            const isNeighbors = document.getElementById('color-tab-neighbors')?.classList.contains('active');
-            const isGenes = document.getElementById('color-tab-genes')?.classList.contains('active');
-            if (isStats) {{
-                renderColorAggregation();
-                renderCellTypeTrend();
-            }} else if (isNeighbors) {{
-                renderNeighborStats();
-                renderInteractionBrowser();
-            }} else if (isGenes) {{
-                const isDot = document.getElementById('genes-tab-dotplot')?.classList.contains('active');
-                const isMarkers = document.getElementById('genes-tab-markers')?.classList.contains('active');
-                if (isDot) renderDotplot();
-                if (isMarkers) renderMarkerGenes();
-            }}
+            renderActiveInsightsPanel();
         }};
 
         colorSelect.addEventListener('change', (e) => {{
-            currentColor = e.target.value;
-            currentGene = null;
-            modalSelectedCategory = null;
-            modalTypeSelectEnabled = false;
-            document.getElementById('gene-input').value = '';
-            (DATA.sections || []).forEach(s => {{ if (s && s._colorCache) s._colorCache = {{}}; }});
-            hiddenCategories.clear();
-            if (DATA.colors_meta?.[currentColor] && !DATA.colors_meta[currentColor].is_continuous) {{
-                selectionSummaryColor = currentColor;
-            }}
-            updateExpressionScaleUI();
-            renderLegend('legend');
-            renderLegend('modal-legend');
-            renderAllSections();
-            if (modalSection) renderModalSection();
-            if (umapVisible) renderUMAP();
-            updateSelectionInfo();
-            refreshInsights();
+            setViewerColorColumn(e.target.value);
+        }});
+
+        const modalColorSelect = document.getElementById('modal-color-select');
+        if (modalColorSelect) {{
+            DATA.available_colors.forEach(col => {{
+                const opt = document.createElement('option');
+                opt.value = col;
+                opt.textContent = formatMetadataLabel(col);
+                opt.selected = col === currentColor;
+                modalColorSelect.appendChild(opt);
+            }});
+            modalColorSelect.addEventListener('change', (e) => {{
+                setViewerColorColumn(e.target.value);
+            }});
+        }}
+
+        const modalGeneInput = document.getElementById('modal-gene-input');
+        const modalGeneClearBtn = document.getElementById('modal-gene-clear');
+        if (modalGeneInput) {{
+            modalGeneInput.addEventListener('keydown', (e) => {{
+                if (e.key === 'Enter') {{
+                    e.preventDefault();
+                    const val = modalGeneInput.value.trim();
+                    if (val) activateViewerGene(val);
+                }}
+            }});
+            modalGeneInput.addEventListener('change', () => {{
+                const val = modalGeneInput.value.trim();
+                if (val) activateViewerGene(val);
+            }});
+        }}
+        modalGeneClearBtn?.addEventListener('click', () => {{
+            activateViewerGene('');
         }});
 
         const geneList = document.getElementById('gene-list');
-        (DATA.available_genes || []).forEach(gene => {{
+        getActiveFeatureList().forEach(gene => {{
             const opt = document.createElement('option');
             opt.value = gene;
             geneList.appendChild(opt);
         }});
 
+        // Modality picker: only render when more than one modality is exported.
+        const modalityControl = document.getElementById('modality-control-group');
+        const modalitySelect = document.getElementById('modality-select');
+        if (modalityControl && modalitySelect && MODALITY_DESCRIPTORS.length > 1) {{
+            for (const desc of MODALITY_DESCRIPTORS) {{
+                const opt = document.createElement('option');
+                opt.value = desc.name;
+                opt.textContent = desc.label || desc.name;
+                if (desc.name === CURRENT_MODALITY) opt.selected = true;
+                modalitySelect.appendChild(opt);
+            }}
+            modalityControl.style.display = '';
+            modalitySelect.addEventListener('change', async (e) => {{
+                const target = e.target.value;
+                await setActiveModality(target);
+            }});
+        }}
+
         const geneInput = document.getElementById('gene-input');
-        geneInput.addEventListener('change', () => {{
-            const gene = geneInput.value.trim();
-            if (gene && DATA.genes_meta[gene]) {{
-                currentGene = gene;
-                geneDenseCache.clear();
-                modalSelectedCategory = null;
-                modalTypeSelectEnabled = false;
-                hiddenCategories.clear();
-                ensureGeneAutoScale(currentGene);
-                updateExpressionScaleUI();
-                renderLegend('legend');
-                renderLegend('modal-legend');
-                renderAllSections();
-                if (modalSection) renderModalSection();
-                if (umapVisible) renderUMAP();
-                updateSelectionInfo();
+        const geneInputShell = document.getElementById('gene-input-shell');
+        const geneDiscoveryPanel = document.getElementById('gene-discovery-panel');
+        const genePanelNew = document.getElementById('gene-panel-new');
+        recentGenes = loadRecentGenes();
+        savedGenePanels = loadSavedGenePanels();
+        renderGeneDiscoveryPanel();
+
+        geneInput?.addEventListener('focus', () => {{
+            setGeneDiscoveryOpen(true);
+            renderGeneDiscoveryPanel();
+        }});
+        geneInput?.addEventListener('input', () => {{
+            setGeneDiscoveryOpen(true);
+            geneDiscoveryResults = getGeneSearchResults(geneInput.value);
+            geneDiscoveryActiveIndex = geneDiscoveryResults.length ? 0 : -1;
+            renderGeneDiscoveryPanel();
+        }});
+        geneInput?.addEventListener('keydown', async (e) => {{
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {{
+                setGeneDiscoveryOpen(true);
+                geneDiscoveryResults = getGeneSearchResults(geneInput.value);
+                if (!geneDiscoveryResults.length) {{
+                    geneDiscoveryActiveIndex = -1;
+                    renderGeneDiscoveryPanel();
+                    return;
+                }}
+                e.preventDefault();
+                const delta = e.key === 'ArrowDown' ? 1 : -1;
+                geneDiscoveryActiveIndex = (geneDiscoveryActiveIndex + delta + geneDiscoveryResults.length) % geneDiscoveryResults.length;
+                renderGeneDiscoveryPanel();
+                return;
+            }}
+            if (e.key === 'Enter') {{
+                const highlightedGene = geneDiscoveryResults[geneDiscoveryActiveIndex];
+                const exactGene = resolveCanonicalGeneName(geneInput.value);
+                if (!highlightedGene && !exactGene && geneInput.value.trim()) return;
+                e.preventDefault();
+                await activateViewerGene(highlightedGene || exactGene || geneInput.value, {{ showErrors: false }});
                 refreshInsights();
-            }} else if (!gene) {{
-                currentGene = null;
-                hiddenCategories.clear();
-                updateExpressionScaleUI();
-                renderLegend('legend');
-                renderLegend('modal-legend');
-                renderAllSections();
-                if (modalSection) renderModalSection();
-                if (umapVisible) renderUMAP();
-                updateSelectionInfo();
-                refreshInsights();
-            }} else if (gene) {{
-                alert(`Gene "${{gene}}" was not pre-loaded.\\nTo view it, re-export with this gene included in the genes parameter or add it to highly variable genes.`);
+                return;
+            }}
+            if (e.key === 'Escape') {{
+                setGeneDiscoveryOpen(false);
             }}
         }});
+        geneInput?.addEventListener('change', async () => {{
+            const raw = geneInput.value.trim();
+            if (!raw) {{
+                await activateViewerGene('', {{ showErrors: false }});
+                refreshInsights();
+                return;
+            }}
+            const exactGene = resolveCanonicalGeneName(raw);
+            if (exactGene) {{
+                await activateViewerGene(exactGene, {{ showErrors: false }});
+                refreshInsights();
+            }} else {{
+                renderGeneDiscoveryPanel();
+            }}
+        }});
+        genePanelNew?.addEventListener('click', () => {{
+            const suggestedName = currentGene ? `${{currentGene}} panel` : '';
+            const panelName = prompt('Panel name', suggestedName);
+            if (!panelName) return;
+            upsertSavedGenePanel(panelName, getGenePanelSeedToken());
+            renderGeneDiscoveryPanel();
+            setGeneDiscoveryOpen(true);
+        }});
+        geneDiscoveryPanel?.addEventListener('click', async (event) => {{
+            const target = event.target;
+            const activateBtn = target?.closest?.('[data-gene-activate]');
+            if (activateBtn) {{
+                event.preventDefault();
+                await activateViewerGene(activateBtn.getAttribute('data-gene-activate') || '', {{ showErrors: false }});
+                refreshInsights();
+                return;
+            }}
+
+            const addBtn = target?.closest?.('[data-gene-panel-add]');
+            if (addBtn) {{
+                event.preventDefault();
+                const panelName = addBtn.getAttribute('data-gene-panel-add') || '';
+                const geneToken = getGenePanelSeedToken();
+                if (!geneToken) {{
+                    alert('Load or type an exact gene first, then add it to a panel.');
+                    return;
+                }}
+                upsertSavedGenePanel(panelName, geneToken);
+                renderGeneDiscoveryPanel();
+                setGeneDiscoveryOpen(true);
+                return;
+            }}
+
+            const deleteBtn = target?.closest?.('[data-gene-panel-delete]');
+            if (deleteBtn) {{
+                event.preventDefault();
+                const panelName = deleteBtn.getAttribute('data-gene-panel-delete') || '';
+                if (!panelName) return;
+                if (!confirm(`Delete saved panel "${{panelName}}"?`)) return;
+                deleteSavedGenePanel(panelName);
+                renderGeneDiscoveryPanel();
+                setGeneDiscoveryOpen(true);
+            }}
+        }});
+        document.addEventListener('mousedown', (event) => {{
+            if (!geneInputShell || geneInputShell.contains(event.target)) return;
+            setGeneDiscoveryOpen(false);
+        }});
+
+        const overviewGeneViewModeSelect = document.getElementById('overview-gene-view-mode');
+        if (overviewGeneViewModeSelect) {{
+            overviewGeneViewModeSelect.value = overviewGeneRenderMode;
+            overviewGeneViewModeSelect.addEventListener('change', () => {{
+                const nextMode = overviewGeneViewModeSelect.value;
+                if (!['cells', 'density', 'both'].includes(nextMode)) {{
+                    overviewGeneViewModeSelect.value = overviewGeneRenderMode;
+                    return;
+                }}
+                overviewGeneRenderMode = nextMode;
+                renderAllSections();
+            }});
+        }}
+        updateOverviewGeneViewState();
+
+        const drawOrderSelect = document.getElementById('cell-draw-order');
+        if (drawOrderSelect) {{
+            drawOrderSelect.addEventListener('change', () => {{
+                cellDrawOrder = drawOrderSelect.value || 'default';
+                renderAllSections();
+            }});
+        }}
+
+        // Overview split controls
+        {{
+            const ovBlendToggle = document.getElementById('overview-blend-toggle');
+            const ovBlendPanel = document.getElementById('overview-blend-panel');
+            const ovBlendMixRange = document.getElementById('overview-blend-mix');
+            const ovBlendMixLabel = document.getElementById('overview-blend-mix-label');
+            const ovBlendControls = {{
+                a: {{
+                    kind: document.getElementById('overview-blend-a-kind'),
+                    color: document.getElementById('overview-blend-a-color'),
+                    category: document.getElementById('overview-blend-a-category'),
+                    gene: document.getElementById('overview-blend-a-gene'),
+                }},
+                b: {{
+                    kind: document.getElementById('overview-blend-b-kind'),
+                    color: document.getElementById('overview-blend-b-color'),
+                    category: document.getElementById('overview-blend-b-category'),
+                    gene: document.getElementById('overview-blend-b-gene'),
+                }},
+            }};
+
+            function ensureOverviewBlendDefaults() {{
+                const catCols = getCategoricalColorColumns();
+                const preferredCol = catCols.includes(currentColor) ? currentColor : (catCols[0] || null);
+                const modalityNames = MODALITY_DESCRIPTORS.map(m => m.name);
+                const defaultModality = modalityNames.includes(DEFAULT_MODALITY_NAME) ? DEFAULT_MODALITY_NAME : (modalityNames[0] || 'gene');
+
+                const normalize = (entry, preferSecond) => {{
+                    if (!entry.kind) entry.kind = catCols.length ? 'cell' : defaultModality;
+                    if (entry.kind === 'cell') {{
+                        if (!catCols.length) {{ entry.kind = defaultModality; }}
+                        else {{
+                            if (!entry.color || !catCols.includes(entry.color)) entry.color = preferredCol;
+                            const cats = getCategoriesForColorColumn(entry.color);
+                            const valid = entry.category === BLEND_ALL_CATEGORIES || cats.includes(entry.category);
+                            if (!entry.category || !valid) {{
+                                entry.category = preferSecond && cats.length > 1 ? cats[1] : BLEND_ALL_CATEGORIES;
+                            }}
+                        }}
+                    }}
+                    if (entry.kind !== 'cell') {{
+                        const modName = entry.kind;
+                        const features = (modName === 'gene' && !modalityNames.includes('gene'))
+                            ? (DATA.available_genes || [])
+                            : (FEATURES_BY_MODALITY[modName] || []);
+                        
+                        if (!features.length && catCols.length) {{
+                            entry.kind = 'cell';
+                            return normalize(entry, preferSecond);
+                        }}
+
+                        const meta = (modName === CURRENT_MODALITY || (modName === 'gene' && CURRENT_MODALITY === 'rna'))
+                            ? DATA.genes_meta
+                            : (MODALITY_GENE_STATE[modName]?.genes_meta);
+                        
+                        if (!entry.gene || !(meta && meta[entry.gene])) {{
+                            entry.gene = features[preferSecond && features.length > 1 ? 1 : 0] || '';
+                        }}
+                    }}
+                }};
+                normalize(overviewBlendSpec.a, false);
+                normalize(overviewBlendSpec.b, true);
+            }}
+
+            function syncOverviewBlendSide(side) {{
+                const controls = ovBlendControls[side];
+                const spec = overviewBlendSpec[side];
+                if (!controls || !spec) return;
+
+                // Populate kind select
+                const kindOptions = [{{ value: 'cell', label: 'Cell type' }}];
+                if (MODALITY_DESCRIPTORS.length > 0) {{
+                    for (const mod of MODALITY_DESCRIPTORS) {{
+                        kindOptions.push({{ value: mod.name, label: mod.label || mod.name }});
+                    }}
+                }} else {{
+                    kindOptions.push({{ value: 'gene', label: 'Gene' }});
+                }}
+                setSelectOptions(controls.kind, kindOptions, spec.kind);
+
+                const isCell = spec.kind === 'cell';
+                controls.color.style.display = isCell ? '' : 'none';
+                controls.category.style.display = isCell ? '' : 'none';
+                controls.gene.style.display = isCell ? 'none' : '';
+                if (isCell) {{
+                    const cols = getCategoricalColorColumns();
+                    setSelectOptions(controls.color, cols, spec.color);
+                    const cats = getCategoriesForColorColumn(spec.color);
+                    const catOpts = [{{ value: BLEND_ALL_CATEGORIES, label: 'All categories' }}]
+                        .concat(cats.map(cat => ({{ value: cat, label: cat }})));
+                    setSelectOptions(controls.category, catOpts, spec.category);
+                }} else {{
+                    const modName = spec.kind;
+                    const modDesc = MODALITY_DESCRIPTORS.find(m => m.name === modName);
+                    const modLabel = modDesc?.label || (modName === 'gene' ? 'Gene' : modName);
+                    controls.gene.placeholder = `${{modLabel}} feature`;
+                    controls.gene.value = spec.gene || '';
+
+                    // Populate side-specific feature datalist
+                    const listId = `overview-blend-${{side}}-gene-list`;
+                    const listEl = document.getElementById(listId);
+                    if (listEl) {{
+                        const features = (modName === 'gene' && !MODALITY_DESCRIPTORS.some(m => m.name === 'gene'))
+                            ? (DATA.available_genes || [])
+                            : (FEATURES_BY_MODALITY[modName] || []);
+                        const fragment = document.createDocumentFragment();
+                        for (const f of features) {{
+                            const opt = document.createElement('option');
+                            opt.value = f;
+                            fragment.appendChild(opt);
+                        }}
+                        listEl.replaceChildren(fragment);
+                    }}
+                    
+                    if (spec.gene) ensureGeneAutoScale(spec.gene, modName);
+                }}
+            }}
+
+            function syncOverviewBlendUI() {{
+                ensureOverviewBlendDefaults();
+                syncOverviewBlendSide('a');
+                syncOverviewBlendSide('b');
+                if (ovBlendPanel) ovBlendPanel.classList.toggle('visible', overviewBlendEnabled);
+                if (ovBlendToggle) ovBlendToggle.classList.toggle('active', overviewBlendEnabled);
+                if (ovBlendMixRange) ovBlendMixRange.value = String(Math.round(overviewBlendMix * 100));
+                const pctA = Math.round(overviewBlendMix * 100);
+                const pctB = 100 - pctA;
+                if (ovBlendMixLabel) ovBlendMixLabel.textContent = `A left ${{pctA}}% / B right ${{pctB}}%`;
+            }}
+
+            function applyOverviewBlendChange() {{
+                syncOverviewBlendUI();
+                renderAllSections();
+            }}
+
+            ovBlendToggle?.addEventListener('click', () => {{
+                overviewBlendEnabled = !overviewBlendEnabled;
+                syncOverviewBlendUI();
+                renderAllSections();
+            }});
+            ovBlendMixRange?.addEventListener('input', (e) => {{
+                overviewBlendMix = clamp01(parseFloat(e.target.value) / 100);
+                const pctA = Math.round(overviewBlendMix * 100);
+                const pctB = 100 - pctA;
+                if (ovBlendMixLabel) ovBlendMixLabel.textContent = `A left ${{pctA}}% / B right ${{pctB}}%`;
+                renderAllSections();
+            }});
+            ['a', 'b'].forEach((side) => {{
+                const controls = ovBlendControls[side];
+                if (!controls) return;
+                controls.kind?.addEventListener('change', () => {{
+                    overviewBlendSpec[side].kind = controls.kind.value;
+                    applyOverviewBlendChange();
+                }});
+                controls.color?.addEventListener('change', () => {{
+                    overviewBlendSpec[side].color = controls.color.value;
+                    overviewBlendSpec[side].category = BLEND_ALL_CATEGORIES;
+                    applyOverviewBlendChange();
+                }});
+                controls.category?.addEventListener('change', () => {{
+                    overviewBlendSpec[side].category = controls.category.value;
+                    applyOverviewBlendChange();
+                }});
+                controls.gene?.addEventListener('change', async () => {{
+                    await runAsyncUIAction(`Overview split feature (${{side.toUpperCase()}})`, async () => {{
+                        const gene = controls.gene.value.trim();
+                        const modName = overviewBlendSpec[side].kind;
+                        if (!gene) {{
+                            overviewBlendSpec[side].gene = '';
+                            applyOverviewBlendChange();
+                            return;
+                        }}
+                        if (!await ensureGeneAvailable(gene, {{ modality: modName }})) {{
+                            controls.gene.value = overviewBlendSpec[side].gene || '';
+                            return;
+                        }}
+                        overviewBlendSpec[side].gene = gene;
+                        ensureGeneAutoScale(gene, modName);
+                        applyOverviewBlendChange();
+                    }});
+                }});
+            }});
+            ovBlendPanel?.addEventListener('wheel', (e) => e.stopPropagation());
+            syncOverviewBlendUI();
+        }}
 
         const spotRange = document.getElementById('spot-size');
         if (spotRange) {{
@@ -6218,39 +19798,42 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         document.getElementById('umap-spot-size-dec')?.addEventListener('click', () => stepRange(umapRange, -1));
         document.getElementById('umap-spot-size-inc')?.addEventListener('click', () => stepRange(umapRange, 1));
 
+        document.getElementById('show-hidden-sections-btn').addEventListener('click', showAllSections);
+
+        const annotOverviewToggle = document.getElementById('annotations-overview-toggle');
+        annotOverviewToggle.addEventListener('click', () => {{
+            showOverviewAnnotations = !showOverviewAnnotations;
+            annotOverviewToggle.classList.toggle('active', showOverviewAnnotations);
+            renderAllSections();
+        }});
+
         document.getElementById('screenshot-btn').addEventListener('click', screenshotFullPage);
 
-        // Legend toggle
-        document.getElementById('legend-toggle').addEventListener('click', () => {{
-            const legend = document.getElementById('legend');
-            const btn = document.getElementById('legend-toggle');
-            legend.classList.toggle('collapsed');
-            btn.classList.toggle('active');
-            // Re-render to adjust for new grid size
-            requestAnimationFrame(renderAllSections);
+        document.getElementById('save-session-btn')?.addEventListener('click', () => {{
+            try {{ downloadSessionState(); }}
+            catch (e) {{ alert(`Could not save session: ${{e.message || e}}`); }}
         }});
+        document.getElementById('export-data-btn')?.addEventListener('click', () => {{
+            exportDataBundle().catch(e => alert(`Export failed: ${{e.message || e}}`));
+        }});
+        const loadSessionBtn = document.getElementById('load-session-btn');
+        const loadSessionInput = document.getElementById('load-session-input');
+        if (loadSessionBtn && loadSessionInput) {{
+            loadSessionBtn.addEventListener('click', () => loadSessionInput.click());
+            loadSessionInput.addEventListener('change', () => {{
+                const file = loadSessionInput.files && loadSessionInput.files[0];
+                if (file) loadSessionFromFile(file);
+                loadSessionInput.value = '';
+            }});
+        }}
 
-        // Color explorer toggle
+        // Legend toggle
+        document.getElementById('legend-toggle').addEventListener('click', toggleLegendPanel);
+
+        // Insights panel toggle
         buildColorPanel();
         const colorToggle = document.getElementById('color-toggle');
-        const colorPanel = document.getElementById('color-panel');
-        colorToggle.addEventListener('click', () => {{
-            colorPanel.classList.toggle('collapsed');
-            colorToggle.classList.toggle('active');
-            if (!colorPanel.classList.contains('collapsed')) {{
-                if (document.getElementById('color-tab-neighbors')?.classList.contains('active')) {{
-                    renderNeighborStats();
-                    renderInteractionBrowser();
-                }} else if (document.getElementById('color-tab-genes')?.classList.contains('active')) {{
-                    if (document.getElementById('genes-tab-dotplot')?.classList.contains('active')) renderDotplot();
-                    if (document.getElementById('genes-tab-markers')?.classList.contains('active')) renderMarkerGenes();
-                }} else {{
-                    renderColorAggregation();
-                    renderCellTypeTrend();
-                }}
-            }}
-            requestAnimationFrame(renderAllSections);
-        }});
+        colorToggle.addEventListener('click', toggleInsightsPanel);
 
         const infoTrigger = document.getElementById('info-trigger');
         if (infoTrigger) {{
@@ -6276,44 +19859,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }});
         }}
 
-        // Neighborhood graph toggle
-        if (DATA.has_neighbors) {{
-            const graphBtn = document.getElementById('graph-toggle');
-            graphBtn.style.display = 'inline-block';
-            graphBtn.addEventListener('click', () => {{
-                showGraph = !showGraph;
-                graphBtn.classList.toggle('active', showGraph);
-                renderAllSections();
-                if (modalSection) renderModalSection();
-            }});
-
-            const neighborBtn = document.getElementById('neighbor-hover-toggle');
-            neighborBtn.style.display = 'inline-block';
-            neighborBtn.addEventListener('click', () => {{
-                neighborHoverEnabled = !neighborHoverEnabled;
-                neighborBtn.classList.toggle('active', neighborHoverEnabled);
-                if (!neighborHoverEnabled) {{
-                    hoverNeighbors = null;
-                    if (modalSection) renderModalSection();
-                }}
-            }});
-
-            const hopSelect = document.getElementById('neighbor-hop-select');
-            hopSelect.style.display = 'inline-block';
-            hopSelect.value = neighborHopMode;
-            hopSelect.addEventListener('change', () => {{
-                neighborHopMode = hopSelect.value;
-                if (modalSection) renderModalSection();
-            }});
-        }}
     }}
 
     function initModal() {{
         document.getElementById('modal-close').addEventListener('click', closeModal);
+        document.getElementById('modal-controls-toggle')?.addEventListener('click', () => {{
+            setModalControlsCollapsed(!modalControlsCollapsed);
+        }});
         document.getElementById('modal').addEventListener('click', (e) => {{
             if (e.target.id === 'modal') closeModal();
         }});
-        document.addEventListener('keydown', (e) => {{ if (e.key === 'Escape') closeModal(); }});
 
         document.getElementById('zoom-in').addEventListener('click', () => {{
             modalZoom = Math.min(modalZoom * 1.5, 20);
@@ -6323,11 +19878,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             modalZoom = Math.max(modalZoom / 1.5, 0.1);
             renderModalSection();
         }});
-        document.getElementById('zoom-reset').addEventListener('click', () => {{
-            modalZoom = 1; modalPanX = 0; modalPanY = 0;
-            renderModalSection();
+        document.getElementById('zoom-reset').addEventListener('click', zoomModalToFit);
+        document.getElementById('modal-rotate-left')?.addEventListener('click', () => {{
+            if (!modalSection) return;
+            rotateSectionBy(modalSection.id, -ROTATION_STEP_DEG);
+        }});
+        document.getElementById('modal-rotate-right')?.addEventListener('click', () => {{
+            if (!modalSection) return;
+            rotateSectionBy(modalSection.id, ROTATION_STEP_DEG);
+        }});
+        document.getElementById('modal-rotate-reset')?.addEventListener('click', () => {{
+            if (!modalSection) return;
+            resetSectionRotation(modalSection.id);
         }});
         document.getElementById('modal-screenshot-btn')?.addEventListener('click', screenshotModalView);
+        document.getElementById('modal-exit-subview-btn')?.addEventListener('click', () => {{
+            exitModalSubview();
+        }});
 
         const modalRange = document.getElementById('modal-spot-size');
         if (modalRange) {{
@@ -6344,6 +19911,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         document.getElementById('modal-spot-size-dec')?.addEventListener('click', () => stepRange(modalRange, -1));
         document.getElementById('modal-spot-size-inc')?.addEventListener('click', () => stepRange(modalRange, 1));
+        const modalGeneViewModeSelect = document.getElementById('modal-gene-view-mode');
+        if (modalGeneViewModeSelect) {{
+            modalGeneViewModeSelect.value = modalGeneRenderMode;
+            modalGeneViewModeSelect.addEventListener('change', () => {{
+                const nextMode = modalGeneViewModeSelect.value;
+                if (!['cells', 'density', 'both'].includes(nextMode)) {{
+                    modalGeneViewModeSelect.value = modalGeneRenderMode;
+                    return;
+                }}
+                modalGeneRenderMode = nextMode;
+                invalidateModalRenderedView();
+                renderModalSection();
+            }});
+        }}
 
         const container = document.getElementById('modal-canvas-container');
         container.addEventListener('wheel', (e) => {{
@@ -6352,30 +19933,22 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const rect = container.getBoundingClientRect();
             const mouseX = e.clientX - rect.left;
             const mouseY = e.clientY - rect.top;
-
-            const bounds = modalSection.bounds;
-            const dataWidth = bounds.xmax - bounds.xmin;
-            const dataHeight = bounds.ymax - bounds.ymin;
-            const baseScale = Math.min((rect.width - 40) / dataWidth, (rect.height - 40) / dataHeight);
-            const oldScale = baseScale * modalZoom;
+            const currentTransform = getModalViewTransform(rect);
+            if (!currentTransform) return;
+            const anchor = currentTransform.screenToData(mouseX, mouseY);
             const nextZoom = Math.max(0.1, Math.min(20, modalZoom * (e.deltaY > 0 ? 0.9 : 1.1)));
-            const newScale = baseScale * nextZoom;
-
-            const dataCenterX = (bounds.xmin + bounds.xmax) / 2;
-            const dataCenterY = (bounds.ymin + bounds.ymax) / 2;
-            const centerX = rect.width / 2 + modalPanX;
-            const centerY = rect.height / 2 + modalPanY;
-
-            const dataX = dataCenterX + (mouseX - centerX) / oldScale;
-            const dataY = dataCenterY - (mouseY - centerY) / oldScale;
-
-            const newCenterX = mouseX - (dataX - dataCenterX) * newScale;
-            const newCenterY = mouseY + (dataY - dataCenterY) * newScale;
-            modalPanX = newCenterX - rect.width / 2;
-            modalPanY = newCenterY - rect.height / 2;
             modalZoom = nextZoom;
-
-            renderModalSection();
+            const nextTransform = getModalViewTransform(rect);
+            if (nextTransform) {{
+                const nextAnchorScreen = nextTransform.dataToScreen(anchor.x, anchor.y);
+                modalPanX += mouseX - nextAnchorScreen.x;
+                modalPanY += mouseY - nextAnchorScreen.y;
+            }}
+            if (!applyModalInteractionPreview()) {{
+                renderModalSection();
+                return;
+            }}
+            scheduleModalInteractionCommit(120);
         }});
 
         const canvas = document.getElementById('modal-canvas');
@@ -6386,6 +19959,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const modalBlendMixRange = document.getElementById('modal-blend-mix');
         const modalBlendMixLabel = document.getElementById('modal-blend-mix-label');
         const modalBlendMeta = document.getElementById('modal-blend-meta');
+        const modalGenePanel = document.getElementById('modal-gene-panel');
+        const modalGenePanelCloseBtn = document.getElementById('modal-gene-panel-close');
         const modalBlendControls = {{
             a: {{
                 kind: document.getElementById('modal-blend-a-kind'),
@@ -6416,11 +19991,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const modalAnnotationClearSectionBtn = document.getElementById('modal-annotations-clear-section');
         const modalAnnotationClearAllBtn = document.getElementById('modal-annotations-clear-all');
         initModalAnnotationPanelDragging();
+        initModalControlsDragging();
 
         function updateModalCanvasCursor() {{
             if (!canvas) return;
-            if (isDragging) {{
+            if (isSplitDragging) {{
+                canvas.style.cursor = 'ew-resize';
+            }} else if (isDragging) {{
                 canvas.style.cursor = 'grabbing';
+            }} else if (modalSpacePanActive) {{
+                canvas.style.cursor = 'grab';
             }} else if (modalMagicWandActive || modalAnnotationModeActive) {{
                 canvas.style.cursor = 'crosshair';
             }} else {{
@@ -6428,33 +20008,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
         }}
 
-        function setSelectOptions(selectEl, values, selectedValue) {{
-            if (!selectEl) return;
-            selectEl.innerHTML = '';
-            values.forEach((entry) => {{
-                const value = (entry && typeof entry === 'object') ? entry.value : entry;
-                const label = (entry && typeof entry === 'object') ? (entry.label ?? entry.value) : entry;
-                const opt = document.createElement('option');
-                opt.value = value;
-                opt.textContent = label;
-                selectEl.appendChild(opt);
-            }});
-            if (selectedValue !== undefined && selectedValue !== null) {{
-                selectEl.value = selectedValue;
-            }}
-        }}
-
         function ensureModalBlendDefaults() {{
             const catCols = getCategoricalColorColumns();
             const preferredCol = catCols.includes(currentColor) ? currentColor : (catCols[0] || null);
-            const genes = DATA.available_genes || [];
-            const firstGene = genes.length ? genes[0] : '';
+            const modalityNames = MODALITY_DESCRIPTORS.map(m => m.name);
+            const defaultModality = modalityNames.includes(DEFAULT_MODALITY_NAME) ? DEFAULT_MODALITY_NAME : (modalityNames[0] || 'gene');
 
             const normalize = (entry, preferSecondCategory = false) => {{
-                if (!entry.kind) entry.kind = catCols.length ? 'cell' : 'gene';
+                if (!entry.kind) {{
+                    entry.kind = catCols.length ? 'cell' : defaultModality;
+                }}
+                
                 if (entry.kind === 'cell') {{
                     if (!catCols.length) {{
-                        entry.kind = 'gene';
+                        entry.kind = defaultModality;
                     }} else {{
                         if (!entry.color || !catCols.includes(entry.color)) entry.color = preferredCol;
                         const cats = getCategoriesForColorColumn(entry.color);
@@ -6465,37 +20032,31 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         }}
                     }}
                 }}
-                if (entry.kind === 'gene') {{
-                    if (!firstGene) {{
-                        if (catCols.length) entry.kind = 'cell';
-                    }} else if (!entry.gene || !DATA.genes_meta?.[entry.gene]) {{
-                        if (preferSecondCategory && genes.length > 1) entry.gene = genes[1];
-                        else entry.gene = firstGene;
+
+                if (entry.kind !== 'cell') {{
+                    const modName = entry.kind;
+                    const features = (modName === 'gene' && !modalityNames.includes('gene'))
+                        ? (DATA.available_genes || [])
+                        : (FEATURES_BY_MODALITY[modName] || []);
+
+                    if (!features.length && catCols.length) {{
+                        entry.kind = 'cell';
+                        return normalize(entry, preferSecondCategory);
                     }}
-                }}
-                if (entry.kind === 'cell') {{
-                    const cats = getCategoriesForColorColumn(entry.color);
-                    if (!cats.length && firstGene) {{
-                        entry.kind = 'gene';
-                        entry.gene = firstGene;
+                    
+                    const meta = (modName === CURRENT_MODALITY || (modName === 'gene' && CURRENT_MODALITY === 'rna'))
+                        ? DATA.genes_meta
+                        : (MODALITY_GENE_STATE[modName]?.genes_meta);
+
+                    if (!entry.gene || !(meta && meta[entry.gene])) {{
+                        if (preferSecondCategory && features.length > 1) entry.gene = features[1];
+                        else entry.gene = features[0] || '';
                     }}
                 }}
             }};
 
             normalize(modalBlendSpec.a, false);
             normalize(modalBlendSpec.b, true);
-        }}
-
-        function getMarkerGenesForColorCategory(colorCol, category) {{
-            if (!colorCol || category === null || category === undefined || category === BLEND_ALL_CATEGORIES) return [];
-            const byColor = (DATA.marker_genes || {{}})[colorCol];
-            if (!byColor || typeof byColor !== 'object') return [];
-            if (Array.isArray(byColor[category])) return byColor[category];
-            const catKey = String(category);
-            if (Array.isArray(byColor[catKey])) return byColor[catKey];
-            const matchedKey = Object.keys(byColor).find(k => String(k).toLowerCase() === catKey.toLowerCase());
-            if (matchedKey && Array.isArray(byColor[matchedKey])) return byColor[matchedKey];
-            return [];
         }}
 
         function getModalBlendMarkerHtml(side) {{
@@ -6569,12 +20130,24 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const controls = modalBlendControls[side];
             const spec = modalBlendSpec[side];
             if (!controls || !spec) return;
-            controls.kind.value = spec.kind;
+
+            // Populate kind select
+            const kindOptions = [{{ value: 'cell', label: 'Cell type' }}];
+            if (MODALITY_DESCRIPTORS.length > 0) {{
+                for (const mod of MODALITY_DESCRIPTORS) {{
+                    kindOptions.push({{ value: mod.name, label: mod.label || mod.name }});
+                }}
+            }} else {{
+                kindOptions.push({{ value: 'gene', label: 'Gene' }});
+            }}
+            setSelectOptions(controls.kind, kindOptions, spec.kind);
+
             const isCell = spec.kind === 'cell';
             controls.color.style.display = isCell ? '' : 'none';
             controls.category.style.display = isCell ? '' : 'none';
             controls.gene.style.display = isCell ? 'none' : '';
             if (controls.scaleRow) controls.scaleRow.style.display = isCell ? 'none' : '';
+            
             if (isCell) {{
                 const cols = getCategoricalColorColumns();
                 setSelectOptions(controls.color, cols, spec.color);
@@ -6583,11 +20156,36 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     .concat(cats.map(cat => ({{ value: cat, label: cat }})));
                 setSelectOptions(controls.category, catOptions, spec.category);
             }} else {{
+                const modName = spec.kind;
+                const modDesc = MODALITY_DESCRIPTORS.find(m => m.name === modName);
+                const modLabel = modDesc?.label || (modName === 'gene' ? 'Gene' : modName);
+                controls.gene.placeholder = `${{modLabel}} feature`;
                 controls.gene.value = spec.gene || '';
+
+                // Populate side-specific feature datalist
+                const listId = `modal-blend-${{side}}-gene-list`;
+                const listEl = document.getElementById(listId);
+                if (listEl) {{
+                    const features = (modName === 'gene' && !MODALITY_DESCRIPTORS.some(m => m.name === 'gene'))
+                        ? (DATA.available_genes || [])
+                        : (FEATURES_BY_MODALITY[modName] || []);
+                    const fragment = document.createDocumentFragment();
+                    for (const f of features) {{
+                        const opt = document.createElement('option');
+                        opt.value = f;
+                        fragment.appendChild(opt);
+                    }}
+                    listEl.replaceChildren(fragment);
+                }}
+                
                 const gene = (spec.gene || '').trim();
-                const hasGene = !!(gene && DATA.genes_meta?.[gene]);
-                if (hasGene) ensureGeneAutoScale(gene);
-                const scale = hasGene ? getGeneScaleRange(gene) : null;
+                const meta = (modName === CURRENT_MODALITY || (modName === 'gene' && CURRENT_MODALITY === 'rna'))
+                    ? DATA.genes_meta
+                    : (MODALITY_GENE_STATE[modName]?.genes_meta);
+                const hasGene = !!(gene && meta && meta[gene]);
+                
+                if (hasGene) ensureGeneAutoScale(gene, modName);
+                const scale = hasGene ? getGeneScaleRange(gene, modName) : null;
                 if (controls.scaleMin) {{
                     controls.scaleMin.value = scale ? scale.vmin.toFixed(3) : '';
                     controls.scaleMin.disabled = !hasGene;
@@ -6608,6 +20206,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             if (modalBlendToggleBtn) modalBlendToggleBtn.classList.toggle('active', modalBlendEnabled);
             if (modalBlendMixRange) modalBlendMixRange.value = String(Math.round(modalBlendMix * 100));
             updateModalBlendLabels();
+            updateModalToolbarState();
         }}
 
         function applyModalBlendControlChange() {{
@@ -6619,9 +20218,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         function applyModalBlendGeneScale(side, useAuto = false) {{
             const controls = modalBlendControls[side];
             const spec = modalBlendSpec[side];
-            if (!controls || !spec || spec.kind !== 'gene') return;
+            const isCell = spec.kind === 'cell';
+            if (!controls || !spec || isCell) return;
             const gene = (spec.gene || '').trim();
-            if (!gene || !DATA.genes_meta?.[gene]) return;
+            const modName = spec.kind;
+            const meta = (modName === CURRENT_MODALITY) ? DATA.genes_meta : (MODALITY_GENE_STATE[modName]?.genes_meta);
+            if (!gene || !(meta && meta[gene])) return;
 
             if (useAuto) {{
                 const autoScale = computeGenePercentiles(gene);
@@ -6658,13 +20260,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         modalBlendMixRange?.addEventListener('input', (e) => {{
             modalBlendMix = clamp01(parseFloat(e.target.value) / 100);
             updateModalBlendLabels();
-            if (modalSection) renderModalSection();
+            scheduleModalBlendRender();
         }});
         ['a', 'b'].forEach((side) => {{
             const controls = modalBlendControls[side];
             if (!controls) return;
             controls.kind?.addEventListener('change', () => {{
-                modalBlendSpec[side].kind = controls.kind.value === 'gene' ? 'gene' : 'cell';
+                modalBlendSpec[side].kind = controls.kind.value;
                 applyModalBlendControlChange();
             }});
             controls.color?.addEventListener('change', () => {{
@@ -6676,21 +20278,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 modalBlendSpec[side].category = controls.category.value;
                 applyModalBlendControlChange();
             }});
-            controls.gene?.addEventListener('change', () => {{
-                const gene = controls.gene.value.trim();
-                if (!gene) {{
-                    modalBlendSpec[side].gene = '';
+            controls.gene?.addEventListener('change', async () => {{
+                await runAsyncUIAction(`Modal gene selection (${{side.toUpperCase()}})`, async () => {{
+                    const gene = controls.gene.value.trim();
+                    const modName = modalBlendSpec[side].kind;
+                    if (!gene) {{
+                        modalBlendSpec[side].gene = '';
+                        applyModalBlendControlChange();
+                        return;
+                    }}
+                    if (!await ensureGeneAvailable(gene, {{ modality: modName }})) {{
+                        controls.gene.value = modalBlendSpec[side].gene || '';
+                        return;
+                    }}
+                    modalBlendSpec[side].gene = gene;
+                    ensureGeneAutoScale(gene, modName);
                     applyModalBlendControlChange();
-                    return;
-                }}
-                if (!DATA.genes_meta?.[gene]) {{
-                    alert(`Gene "${{gene}}" was not pre-loaded.\\nChoose a listed gene or re-export with this gene included.`);
-                    controls.gene.value = modalBlendSpec[side].gene || '';
-                    return;
-                }}
-                modalBlendSpec[side].gene = gene;
-                ensureGeneAutoScale(gene);
-                applyModalBlendControlChange();
+                }});
             }});
             controls.scaleMin?.addEventListener('change', () => applyModalBlendGeneScale(side));
             controls.scaleMax?.addEventListener('change', () => applyModalBlendGeneScale(side));
@@ -6698,11 +20302,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }});
         modalBlendPanel?.addEventListener('wheel', (e) => e.stopPropagation());
         modalBlendPanel?.addEventListener('touchmove', (e) => e.stopPropagation());
+        modalGenePanel?.addEventListener('wheel', (e) => e.stopPropagation());
+        modalGenePanel?.addEventListener('touchmove', (e) => e.stopPropagation());
+        modalGenePanelCloseBtn?.addEventListener('click', () => {{
+            hideModalGeneDiscoveryPanel();
+            updateSelectionInfo();
+        }});
         modalAnnotationPanel?.addEventListener('wheel', (e) => e.stopPropagation());
         modalAnnotationPanel?.addEventListener('touchmove', (e) => e.stopPropagation());
         syncModalBlendUI();
         renderModalAnnotationPanel();
         layoutModalAnnotationPanel();
+        updateModalToolbarState();
 
         modalAnnotationExportBtn?.addEventListener('click', () => {{
             exportModalAnnotations();
@@ -6719,10 +20330,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const config = getColorConfig();
             if (config.is_continuous) return;
             modalTypeSelectEnabled = !modalTypeSelectEnabled;
-            typeToggleBtn.classList.toggle('active', modalTypeSelectEnabled);
+            updateModalToolbarState();
         }});
         typeClearBtn.addEventListener('click', () => {{
             modalSelectedCategory = null;
+            updateModalToolbarState();
             renderAllSections();
             renderModalSection();
         }});
@@ -6739,6 +20351,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 isDrawingModalLasso = false;
                 modalLassoPath = [];
             }}
+            updateModalToolbarState();
             updateModalCanvasCursor();
             renderModalSection();
         }});
@@ -6754,6 +20367,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 isDrawingModalAnnotation = false;
                 modalAnnotationPath = [];
             }}
+            updateModalToolbarState();
             updateModalCanvasCursor();
             renderModalSection();
         }});
@@ -6761,9 +20375,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         canvas.addEventListener('mousedown', (e) => {{
             modalPointerMoved = false;
             hideTooltip();
+            if (modalSpacePanActive) {{
+                if (isSplitDragging) return;
+                isDragging = true;
+                dragStartX = e.clientX; dragStartY = e.clientY;
+                lastPanX = modalPanX; lastPanY = modalPanY;
+                updateModalCanvasCursor();
+                e.preventDefault();
+                return;
+            }}
             if (modalAnnotationModeActive) {{
                 if (!modalSection) return;
-                const rect = canvas.getBoundingClientRect();
+                const rect = container.getBoundingClientRect();
                 const x = e.clientX - rect.left;
                 const y = e.clientY - rect.top;
                 isDrawingModalAnnotation = true;
@@ -6773,7 +20396,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
             if (modalMagicWandActive) {{
                 if (!modalSection) return;
-                const rect = canvas.getBoundingClientRect();
+                const rect = container.getBoundingClientRect();
                 const x = e.clientX - rect.left;
                 const y = e.clientY - rect.top;
                 isDrawingModalLasso = true;
@@ -6781,46 +20404,60 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 renderModalSection();
                 return;
             }}
+            if (isSplitDragging) return;
             isDragging = true;
             dragStartX = e.clientX; dragStartY = e.clientY;
             lastPanX = modalPanX; lastPanY = modalPanY;
             updateModalCanvasCursor();
+        }});
+        canvas.addEventListener('pointerdown', (e) => {{
+            if (modalAnnotationModeActive || modalMagicWandActive) return;
+            const blendActiveNow = !!(modalSection && getModalBlendRuntimes(modalSection));
+            if (!blendActiveNow) return;
+            const rect = container.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const splitX = rect.width * modalBlendMix;
+            if (Math.abs(mouseX - splitX) > 12) return;
+            canvas.setPointerCapture(e.pointerId);
+            isSplitDragging = true;
+            modalPointerMoved = true;
+            updateModalCanvasCursor();
+            e.preventDefault();
+        }});
+        canvas.addEventListener('pointermove', (e) => {{
+            if (!isSplitDragging) return;
+            const rect = container.getBoundingClientRect();
+            modalBlendMix = clamp01((e.clientX - rect.left) / rect.width);
+            if (modalBlendMixRange) modalBlendMixRange.value = String(Math.round(modalBlendMix * 100));
+            updateModalBlendLabels();
+            scheduleModalBlendRender();
+            e.preventDefault();
+        }});
+        canvas.addEventListener('pointerup', (e) => {{
+            if (!isSplitDragging) return;
+            isSplitDragging = false;
+            updateModalCanvasCursor();
+            e.preventDefault();
         }});
         canvas.addEventListener('click', (e) => {{
             if (!modalSection || isDragging || isDrawingModalLasso || isDrawingModalAnnotation || modalPointerMoved || modalMagicWandActive || modalAnnotationModeActive) return;
             const config = getColorConfig();
             if (config.is_continuous || !modalTypeSelectEnabled) return;
 
-            const rect = canvas.getBoundingClientRect();
+            const rect = container.getBoundingClientRect();
             const mouseX = e.clientX - rect.left;
             const mouseY = e.clientY - rect.top;
-            const bounds = modalSection.bounds;
-            const dataWidth = bounds.xmax - bounds.xmin;
-            const dataHeight = bounds.ymax - bounds.ymin;
-            const baseScale = Math.min((rect.width - 40) / dataWidth, (rect.height - 40) / dataHeight);
-            const scale = baseScale * modalZoom;
-            const centerX = rect.width / 2 + modalPanX;
-            const centerY = rect.height / 2 + modalPanY;
-            const dataCenterX = (bounds.xmin + bounds.xmax) / 2;
-            const dataCenterY = (bounds.ymin + bounds.ymax) / 2;
-            const transform = {{
-                scale,
-                centerX,
-                centerY,
-                dataCenterX,
-                dataCenterY,
-                width: rect.width,
-                isModal: true
-            }};
+            const transform = getModalViewTransform(rect);
+            if (!transform) return;
 
             const cellIdx = findNearestCell(modalSection, mouseX, mouseY, rect, transform);
             if (cellIdx >= 0) {{
                 const values = getSectionValues(modalSection);
                 const val = values[cellIdx];
-                if (val !== null && val !== undefined) {{
-                    const catIdx = Math.round(val);
-                    const catName = config.categories[catIdx];
-                    modalSelectedCategory = catName || null;
+                const catInfo = getCategoricalValueInfo(config, val);
+                if (catInfo) {{
+                    modalSelectedCategory = catInfo.catName || null;
+                    updateModalToolbarState();
                     renderAllSections();
                     renderModalSection();
                 }}
@@ -6828,7 +20465,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }});
         document.addEventListener('mousemove', (e) => {{
             if (isDrawingModalAnnotation) {{
-                const rect = canvas.getBoundingClientRect();
+                const rect = container.getBoundingClientRect();
                 const x = e.clientX - rect.left;
                 const y = e.clientY - rect.top;
                 const last = modalAnnotationPath[modalAnnotationPath.length - 1];
@@ -6840,7 +20477,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 return;
             }}
             if (isDrawingModalLasso) {{
-                const rect = canvas.getBoundingClientRect();
+                const rect = container.getBoundingClientRect();
                 const x = e.clientX - rect.left;
                 const y = e.clientY - rect.top;
                 const last = modalLassoPath[modalLassoPath.length - 1];
@@ -6855,7 +20492,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             modalPanX = lastPanX + (e.clientX - dragStartX);
             modalPanY = lastPanY + (e.clientY - dragStartY);
             modalPointerMoved = true;
-            renderModalSection();
+            if (!applyModalInteractionPreview()) {{
+                renderModalSection();
+                return;
+            }}
+            scheduleModalInteractionCommit(90);
         }});
         document.addEventListener('mouseup', () => {{
             if (isDrawingModalAnnotation) {{
@@ -6870,6 +20511,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
             if (isDragging) {{
                 isDragging = false;
+                renderModalSection();
             }}
             updateModalCanvasCursor();
         }});
@@ -6879,30 +20521,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         canvas.addEventListener('mousemove', (e) => {{
             if (isDragging || isDrawingModalLasso || isDrawingModalAnnotation || modalMagicWandActive || modalAnnotationModeActive || !modalSection) return;
 
-            const rect = canvas.getBoundingClientRect();
+            const rect = container.getBoundingClientRect();
             const mouseX = e.clientX - rect.left;
             const mouseY = e.clientY - rect.top;
-
-            // Calculate transform parameters (same as renderModalSection)
-            const bounds = modalSection.bounds;
-            const dataWidth = bounds.xmax - bounds.xmin;
-            const dataHeight = bounds.ymax - bounds.ymin;
-            const baseScale = Math.min((rect.width - 40) / dataWidth, (rect.height - 40) / dataHeight);
-            const scale = baseScale * modalZoom;
-            const centerX = rect.width / 2 + modalPanX;
-            const centerY = rect.height / 2 + modalPanY;
-            const dataCenterX = (bounds.xmin + bounds.xmax) / 2;
-            const dataCenterY = (bounds.ymin + bounds.ymax) / 2;
-
-            const transform = {{
-                scale,
-                centerX,
-                centerY,
-                dataCenterX,
-                dataCenterY,
-                width: rect.width,
-                isModal: true
-            }};
+            const transform = getModalViewTransform(rect);
+            if (!transform) return;
 
             const blendActive = !!getModalBlendRuntimes(modalSection);
             const cellIdx = findNearestCell(
@@ -6939,25 +20562,21 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         if (DATA.has_neighbors) {{
             const modalGraphBtn = document.getElementById('modal-graph-toggle');
-            modalGraphBtn.style.display = 'inline-block';
             modalGraphBtn.classList.toggle('active', showGraph);
             modalGraphBtn.addEventListener('click', () => {{
                 showGraph = !showGraph;
                 modalGraphBtn.classList.toggle('active', showGraph);
-                const graphBtn = document.getElementById('graph-toggle');
-                if (graphBtn) graphBtn.classList.toggle('active', showGraph);
+                updateModalToolbarState();
                 renderAllSections();
                 if (modalSection) renderModalSection();
             }});
 
             const modalNeighborBtn = document.getElementById('modal-neighbor-hover-toggle');
-            modalNeighborBtn.style.display = 'inline-block';
             modalNeighborBtn.classList.toggle('active', neighborHoverEnabled);
             modalNeighborBtn.addEventListener('click', () => {{
                 neighborHoverEnabled = !neighborHoverEnabled;
                 modalNeighborBtn.classList.toggle('active', neighborHoverEnabled);
-                const neighborBtn = document.getElementById('neighbor-hover-toggle');
-                if (neighborBtn) neighborBtn.classList.toggle('active', neighborHoverEnabled);
+                updateModalToolbarState();
                 if (!neighborHoverEnabled) {{
                     hoverNeighbors = null;
                     if (modalSection) renderModalSection();
@@ -6965,16 +20584,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }});
 
             const modalHopSelect = document.getElementById('modal-neighbor-hop-select');
-            modalHopSelect.style.display = 'inline-block';
             modalHopSelect.value = neighborHopMode;
             modalHopSelect.addEventListener('change', () => {{
                 neighborHopMode = modalHopSelect.value;
-                const hopSelect = document.getElementById('neighbor-hop-select');
-                if (hopSelect) hopSelect.value = neighborHopMode;
                 if (modalSection) renderModalSection();
             }});
         }}
 
+        updateModalToolbarState();
+        layoutModalControls();
         layoutModalAnnotationPanel();
     }}
 
@@ -6989,7 +20607,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             initFilters();
             initModal();
             initUMAP();
+            initShortcutsOverlay();
+            initKeyboardShortcuts();
             initHelpTooltips();
+            updateSectionRotationIndicators();
             renderLegend('legend');
             updateSelectionInfo();
             initSucceeded = true;
@@ -7008,6 +20629,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (DATA.has_umap) applyUMAPPanelState();
         renderAllSections();
         if (modalSection) {{
+            layoutModalControls();
             layoutModalAnnotationPanel();
             renderModalSection();
         }}
@@ -7036,6 +20658,11 @@ def export_to_html(
     additional_colors: Optional[List[str]] = None,
     genes: Optional[List[str]] = None,
     gene_encoding: str = "auto",
+    gene_value_encoding: str = "float32",
+    gene_sidecar_format: str = GENE_SIDECAR_FORMAT_JSON_V2,
+    gene_storage: str = "embedded",
+    gene_aux_path: Optional[str] = None,
+    gene_sidecar_shard_size: int = GENE_SIDECAR_SHARD_SIZE,
     gene_sparse_zero_threshold: float = 0.8,
     pack_arrays: bool = True,
     pack_arrays_min_len: int = 1024,
@@ -7043,6 +20670,11 @@ def export_to_html(
     marker_genes_groupby: Optional[List[str]] = None,
     marker_genes_top_n: int = 30,
     use_hvgs: bool = True,
+    cluster_de_groupby: Optional[List[str]] = None,
+    cluster_de_top_n: int = 20,
+    cluster_de_method: str = "wilcoxon",
+    cluster_de_layer: Optional[str] = "normalized",
+    cluster_de_min_cells: int = 20,
     neighbor_stats_groupby: Optional[List[str]] = None,
     neighbor_stats_permutations: Union[int, None] = None,
     neighbor_stats_seed: int = 0,
@@ -7053,6 +20685,13 @@ def export_to_html(
     interaction_markers_min_neighbors: int = 1,
     interaction_markers_method: str = "wilcoxon",
     interaction_markers_layer: Optional[str] = "normalized",
+    section_rotations: Optional[Mapping[str, Union[int, float]]] = None,
+    deconvolutions: Optional[Dict[str, str]] = None,
+    gene_correlation_top_n: int = 10,
+    cluster_means_n_genes: int = 500,
+    spatial_variable_genes_n: int = 200,
+    scalebar_unit: str = "μm",
+    modalities: Optional[List[str]] = None,
 ) -> str:
     """
     Export spatial dataset to a standalone HTML file.
@@ -7062,7 +20701,8 @@ def export_to_html(
     dataset : SpatialDataset
         Dataset to export
     output_path : str
-        Path for output HTML file
+        Path for output HTML file, or a `.karospace` package when
+        `gene_storage="sidecar"`.
     color : str
         Initial color column or gene name
     title : str
@@ -7090,6 +20730,23 @@ def export_to_html(
     gene_encoding : str
         "dense", "sparse", or "auto" (default). "auto" uses sparse encoding for
         zero-inflated genes to reduce HTML size.
+    gene_value_encoding : str
+        Only used for sidecar/package genes. "float32" (default) stores full-
+        precision values; "uint16" and "uint8" store linearly quantized values
+        using each gene's exported vmin/vmax range.
+    gene_sidecar_format : str
+        Sidecar storage format. "json-v2" (default) writes JSON shard files.
+        "binary-v1" writes indexed binary `.bin` shards for faster random access.
+    gene_storage : str
+        "embedded" (default) keeps gene data in the HTML. "sidecar" embeds only
+        the selected/preloaded genes and writes remaining genes to an auxiliary
+        JSON file for downstream lazy loading. `.karospace` package export
+        requires `"sidecar"`.
+    gene_aux_path : str, optional
+        Output path for the sidecar gene JSON when gene_storage="sidecar".
+    gene_sidecar_shard_size : int
+        Number of genes to write per sidecar shard when gene_storage="sidecar".
+        Reduce this for very large datasets to avoid oversized shard JSON files.
     gene_sparse_zero_threshold : float
         Only used when gene_encoding="auto". Use sparse encoding when the
         fraction of zeros is >= this threshold (default: 0.8).
@@ -7100,11 +20757,32 @@ def export_to_html(
         Only pack per-section arrays when section cell count is >= this value. Default: 1024.
     hvg_limit : int
         Max number of highly variable genes to include (default 20)
+    gene_correlation_top_n : int
+        Number of top correlated genes to show per embedded gene (default 10). Set to 0 to disable.
+    cluster_means_n_genes : int
+        Number of top variable genes to precompute per-cluster means for (default 500).
+        These means power the mean-expression panel in the lasso selection summary for
+        all genes including sidecar ones. Set to 0 to disable.
+    spatial_variable_genes_n : int
+        Number of top variable genes to score with Moran's I spatial autocorrelation
+        (default 200). Requires a spatial weight matrix in adata.obsp. Set to 0 to disable.
     marker_genes_groupby : list, optional
         Obs columns to compute marker genes for (categorical only). If None/empty,
         marker genes are not computed.
     marker_genes_top_n : int
         Number of top marker genes to keep per group
+    cluster_de_groupby : list, optional
+        Obs columns to compute pairwise cluster-vs-cluster DE for (categorical only).
+        If None/empty, cluster DE is not computed.
+    cluster_de_top_n : int
+        Number of top DE genes to keep per cluster pair.
+    cluster_de_method : str
+        Method passed to scanpy.tl.rank_genes_groups for cluster DE
+        (e.g. "wilcoxon", "t-test").
+    cluster_de_layer : str, optional
+        Layer used for cluster DE (default: "normalized" if present).
+    cluster_de_min_cells : int
+        Minimum cells required in both clusters to report pairwise DE.
     neighbor_stats_groupby : list, optional
         Obs columns to compute neighbor composition stats for (categorical only).
         If None/empty, neighbor stats are not computed.
@@ -7126,12 +20804,41 @@ def export_to_html(
         Method passed to scanpy.tl.rank_genes_groups (e.g. "wilcoxon", "t-test").
     interaction_markers_layer : str, optional
         Layer used for interaction DE (default: "normalized" if present).
+    section_rotations : mapping, optional
+        Optional mapping of section_id -> initial rotation angle in degrees.
+        Angles are stored exactly (normalized modulo 360) for the interactive viewer.
 
     Returns
     -------
     str
         Path to created HTML file
     """
+    requested_output_path = Path(output_path).expanduser()
+    package_mode = requested_output_path.suffix.lower() == ".karospace"
+    package_output_path_obj: Optional[Path] = None
+    package_loader_output_path: Optional[Path] = None
+    package_temp_dir: Optional[tempfile.TemporaryDirectory] = None
+    package_entry_html = "index.html"
+    package_gene_manifest_name: Optional[str] = None
+    if package_mode:
+        package_output_path_obj = requested_output_path.resolve()
+        package_loader_output_path = package_output_path_obj.with_suffix(".loader.html")
+        if str(gene_storage or "embedded").strip().lower() != "sidecar":
+            raise ValueError(".karospace export requires gene_storage='sidecar'")
+        if gene_aux_path:
+            aux_name = Path(gene_aux_path).name
+            if aux_name != str(Path(gene_aux_path)):
+                raise ValueError("gene_aux_path must be a filename when exporting .karospace")
+            if Path(aux_name).suffix.lower() != ".json":
+                raise ValueError("gene_aux_path must end with .json when exporting .karospace")
+            package_gene_manifest_name = aux_name
+        else:
+            package_gene_manifest_name = f"{package_output_path_obj.stem}.genes.json"
+        package_temp_dir = tempfile.TemporaryDirectory(prefix="karospace-package-")
+        requested_output_path = Path(package_temp_dir.name) / package_entry_html
+        gene_aux_path = package_gene_manifest_name
+        output_path = str(requested_output_path)
+
     # Theme colors
     if theme == "dark":
         colors = {
@@ -7158,6 +20865,17 @@ def export_to_html(
             "graph_color": "rgba(0, 0, 0, 0.12)",
         }
 
+    gene_storage = str(gene_storage or "embedded").strip().lower()
+    if gene_storage not in {"embedded", "sidecar"}:
+        raise ValueError("gene_storage must be one of: 'embedded', 'sidecar'")
+    gene_sidecar_format = _validate_gene_sidecar_format(gene_sidecar_format)
+    gene_sidecar_shard_size = int(gene_sidecar_shard_size)
+    if gene_sidecar_shard_size < 1:
+        raise ValueError("gene_sidecar_shard_size must be >= 1")
+    if gene_sidecar_format == GENE_SIDECAR_FORMAT_BINARY_V1 and gene_value_encoding not in {"uint8", "uint16"}:
+        raise ValueError("binary-v1 sidecar format requires gene_value_encoding='uint8' or 'uint16'")
+    resolved_section_rotations = _resolve_section_rotations(dataset, section_rotations)
+
     # Prefer highly variable genes for expression if available; otherwise use provided genes
     hv_genes = None
     if use_hvgs and "highly_variable" in dataset.adata.var.columns:
@@ -7166,9 +20884,30 @@ def export_to_html(
             hv_genes = dataset.adata.var_names[hv_mask].tolist()[:max(0, int(hvg_limit))]
     if hv_genes is not None:
         genes = hv_genes
+    embedded_genes = list(dict.fromkeys([g for g in (genes or []) if g in dataset.adata.var_names]))
+    sidecar_genes: List[str] = []
+    resolved_gene_aux_path: Optional[Path] = None
+    resolved_gene_aux_dir: Optional[Path] = None
+    gene_aux_url: Optional[str] = None
+    sidecar_export_indices = None
+    if gene_storage == "sidecar":
+        sidecar_genes = [g for g in dataset.var_names if g not in set(embedded_genes)]
+        sidecar_export_indices = dataset._get_export_section_indices(downsample=downsample)
+        output_path_obj = requested_output_path
+        if gene_aux_path:
+            resolved_gene_aux_path = Path(gene_aux_path).expanduser()
+        else:
+            resolved_gene_aux_path = output_path_obj.with_suffix(".genes.json")
+        if not resolved_gene_aux_path.is_absolute():
+            resolved_gene_aux_path = (output_path_obj.parent / resolved_gene_aux_path).resolve()
+        resolved_gene_aux_dir = resolved_gene_aux_path.with_suffix("")
 
     if outline_by and outline_by not in dataset.metadata_columns:
         print(f"  Warning: outline_by '{outline_by}' not in metadata columns; no outlines will be shown.")
+    if int(cluster_de_top_n) < 1:
+        raise ValueError("cluster_de_top_n must be >= 1")
+    if int(cluster_de_min_cells) < 1:
+        raise ValueError("cluster_de_min_cells must be >= 1")
 
     if viewer_info_html is None:
         viewer_info_html = (
@@ -7205,19 +20944,31 @@ def export_to_html(
         # Keep the feature (counts + mean degree) always, but skip permutations unless requested.
         neighbor_stats_permutations = 0 if int(dataset.adata.n_obs) >= 200_000 else 20
 
+    marker_genes_groupby = _resolve_marker_genes_groupby(
+        dataset=dataset,
+        color=color,
+        marker_genes_groupby=marker_genes_groupby,
+    )
+    companion_analytics = dataset.get_companion_analytics()
+
     data = dataset.to_json_data(
         color,
         downsample=downsample,
         vmin=vmin,
         vmax=vmax,
         additional_colors=additional_colors,
-        genes=genes,
+        genes=embedded_genes,
         gene_encoding=gene_encoding,
         gene_sparse_zero_threshold=gene_sparse_zero_threshold,
         section_array_pack=pack_arrays,
         section_array_pack_min_len=pack_arrays_min_len,
         marker_genes_groupby=marker_genes_groupby,
         marker_genes_top_n=marker_genes_top_n,
+        cluster_de_groupby=cluster_de_groupby,
+        cluster_de_top_n=cluster_de_top_n,
+        cluster_de_method=cluster_de_method,
+        cluster_de_layer=cluster_de_layer,
+        cluster_de_min_cells=cluster_de_min_cells,
         neighbor_stats_groupby=neighbor_stats_groupby,
         neighbor_stats_permutations=neighbor_stats_permutations,
         neighbor_stats_seed=neighbor_stats_seed,
@@ -7228,7 +20979,105 @@ def export_to_html(
         interaction_markers_min_neighbors=interaction_markers_min_neighbors,
         interaction_markers_method=interaction_markers_method,
         interaction_markers_layer=interaction_markers_layer,
+        section_rotations=resolved_section_rotations,
+        deconvolutions=deconvolutions,
     )
+    data["scalebar_unit"] = str(scalebar_unit or "μm")
+
+    # Resolve which non-default modalities to export. Only meaningful when sidecar-based.
+    available_modalities = list(getattr(dataset, "modalities", {}).keys())
+    default_modality_name = getattr(dataset, "default_modality", "rna")
+    if modalities is None:
+        selected_modalities = list(available_modalities)
+    else:
+        requested = [str(m) for m in modalities]
+        unknown = [m for m in requested if m not in available_modalities]
+        if unknown:
+            raise ValueError(f"Unknown modalities: {unknown}. Available: {available_modalities}")
+        selected_modalities = requested
+    if default_modality_name in available_modalities and default_modality_name not in selected_modalities:
+        selected_modalities.insert(0, default_modality_name)
+    extra_modalities = [m for m in selected_modalities if m != default_modality_name]
+    if extra_modalities and gene_storage != "sidecar":
+        print(
+            f"  Note: extra modalities {extra_modalities} require gene_storage='sidecar'; "
+            "skipping in embedded mode."
+        )
+        extra_modalities = []
+
+    if gene_storage == "sidecar":
+        assert resolved_gene_aux_path is not None
+        data["available_genes"] = list(dataset.var_names)
+        data["gene_aux_url"] = Path(
+            os.path.relpath(resolved_gene_aux_path, start=requested_output_path.resolve().parent)
+        ).as_posix()
+        gene_aux_url = data["gene_aux_url"]
+    else:
+        data["gene_aux_url"] = None
+
+    # Modality descriptors for the viewer (always emitted; older viewers ignore).
+    modality_descriptors: List[Dict[str, Any]] = []
+    features_by_modality: Dict[str, List[str]] = {}
+    if available_modalities:
+        for mod_name in selected_modalities:
+            mod = dataset.modalities[mod_name]
+            features_by_modality[mod_name] = list(mod.feature_names)
+            modality_descriptors.append({
+                "name": mod_name,
+                "label": mod.label or mod_name,
+                "value_kind": mod.value_kind,
+                "n_features": int(mod.n_features),
+                "is_default": (mod_name == default_modality_name),
+            })
+    data["modalities"] = modality_descriptors
+    data["features_by_modality"] = features_by_modality
+    data["default_modality"] = default_modality_name if modality_descriptors else None
+
+    if int(gene_correlation_top_n) > 0 and embedded_genes:
+        if "gene_correlations" in companion_analytics:
+            print("Using KaroSpaceCompanion gene correlations.")
+            data["gene_correlations"] = companion_analytics["gene_correlations"]
+        else:
+            data["gene_correlations"] = _compute_gene_correlations(
+                dataset.adata, embedded_genes, top_n=int(gene_correlation_top_n)
+            )
+    else:
+        data["gene_correlations"] = {}
+
+    if int(spatial_variable_genes_n) > 0:
+        if "spatial_variable_genes" in companion_analytics:
+            print("Using KaroSpaceCompanion spatially variable genes.")
+            data["spatial_variable_genes"] = companion_analytics["spatial_variable_genes"]
+        else:
+            print(f"  - computing Moran's I for up to {int(spatial_variable_genes_n)} spatially variable genes...")
+            data["spatial_variable_genes"] = _compute_morans_i(
+                dataset.adata, list(dataset.var_names), n_genes=int(spatial_variable_genes_n)
+            )
+    else:
+        data["spatial_variable_genes"] = []
+
+    if int(cluster_means_n_genes) > 0:
+        if "cluster_gene_means" in companion_analytics:
+            print("Using KaroSpaceCompanion cluster gene means.")
+            data["cluster_gene_means"] = companion_analytics["cluster_gene_means"]
+        else:
+            cmeans_genes = _select_top_variable_genes(dataset.adata, int(cluster_means_n_genes))
+            categorical_cols = [
+                col for col in (data.get("available_colors") or [])
+                if not (data.get("colors_meta") or {}).get(col, {}).get("is_continuous", True)
+            ]
+            if categorical_cols and cmeans_genes:
+                print(f"  - precomputing cluster gene means ({len(cmeans_genes)} genes × {len(categorical_cols)} columns)...")
+                cmeans_columns = {}
+                for col in categorical_cols:
+                    result = _compute_cluster_gene_means(dataset.adata, cmeans_genes, col)
+                    if result:
+                        cmeans_columns[col] = result
+                data["cluster_gene_means"] = {"genes": cmeans_genes, "columns": cmeans_columns} if cmeans_columns else None
+            else:
+                data["cluster_gene_means"] = None
+    else:
+        data["cluster_gene_means"] = None
 
     resolved_spot_size, used_auto_spot_size = _resolve_spot_size(
         dataset=dataset,
@@ -7261,7 +21110,11 @@ def export_to_html(
     }
     max_panel_size = int(min_panel_size * 2)
 
-    data_json_safe = json.dumps(data, separators=(',', ':')).replace("</", "<\\/")
+    data_json_safe = json.dumps(
+        _json_sanitize_nonfinite(data),
+        separators=(',', ':'),
+        allow_nan=False,
+    ).replace("</", "<\\/")
 
     html = HTML_TEMPLATE.format(
         title=title,
@@ -7282,11 +21135,234 @@ def export_to_html(
     )
 
     # Write file
-    output_path = str(Path(output_path).resolve())
+    output_path = str(requested_output_path.resolve())
+    if resolved_gene_aux_path is not None:
+        resolved_gene_aux_path.parent.mkdir(parents=True, exist_ok=True)
+        assert resolved_gene_aux_dir is not None
+        resolved_gene_aux_dir.mkdir(parents=True, exist_ok=True)
+        total_sidecar_genes = len(sidecar_genes)
+        shard_groups = _chunked(sidecar_genes, gene_sidecar_shard_size)
+        total_shards = len(shard_groups)
+        sidecar_t0 = time.perf_counter()
+        progress = None
+        if total_sidecar_genes:
+            print(
+                f"Building gene sidecar: {total_sidecar_genes} genes across "
+                f"{total_shards} shard{'s' if total_shards != 1 else ''}..."
+            )
+            if tqdm is not None:
+                progress = tqdm(
+                    total=total_sidecar_genes,
+                    desc="Gene sidecar",
+                    unit="gene",
+                    dynamic_ncols=True,
+                )
+        manifest = {
+            "format": (
+                "karospace-gene-sidecar-manifest-v3"
+                if gene_sidecar_format == GENE_SIDECAR_FORMAT_BINARY_V1
+                else "karospace-gene-sidecar-manifest-v2"
+            ),
+            "gene_sidecar_format": gene_sidecar_format,
+            "shards": {},
+            "genes_meta": {},
+            "gene_encodings": {},
+            "gene_value_encodings": {},
+            "gene_to_shard": {},
+        }
+        if gene_sidecar_format == GENE_SIDECAR_FORMAT_BINARY_V1:
+            manifest["section_order"] = [section.section_id for section in dataset.sections]
+        output_parent = Path(output_path).resolve().parent
+        section_cell_counts = {
+            section_id: int(len(indices))
+            for section_id, indices in (sidecar_export_indices or {}).items()
+        }
+        genes_written = 0
+        for shard_idx, shard_genes in enumerate(shard_groups):
+            shard_suffix = ".bin" if gene_sidecar_format == GENE_SIDECAR_FORMAT_BINARY_V1 else ".json"
+            shard_filename = f"{shard_idx:03d}{shard_suffix}"
+            shard_path = resolved_gene_aux_dir / shard_filename
+            shard_rel = Path(os.path.relpath(shard_path, start=output_parent)).as_posix()
+            shard_start = genes_written + 1
+            shard_end = genes_written + len(shard_genes)
+            shard_t0 = time.perf_counter()
+            if shard_genes and progress is None:
+                print(
+                    f"  - shard {shard_idx + 1}/{total_shards}: genes {shard_start}-{shard_end} "
+                    f"({shard_genes[0]} .. {shard_genes[-1]})"
+                )
+            elif shard_genes and progress is not None:
+                progress.set_postfix_str(
+                    f"shard {shard_idx + 1}/{total_shards} {shard_genes[0]}..{shard_genes[-1]}"
+                )
+            shard_data = dataset.to_gene_sidecar_data(
+                genes=shard_genes,
+                downsample=downsample,
+                export_indices=sidecar_export_indices,
+                gene_encoding=gene_encoding,
+                gene_value_encoding=gene_value_encoding,
+                gene_sparse_zero_threshold=gene_sparse_zero_threshold,
+            )
+            manifest["shards"][shard_rel] = shard_genes
+            for gene in shard_genes:
+                manifest["gene_to_shard"][gene] = shard_rel
+                if gene in shard_data.get("genes_meta", {}):
+                    manifest["genes_meta"][gene] = shard_data["genes_meta"][gene]
+                if gene in shard_data.get("gene_encodings", {}):
+                    manifest["gene_encodings"][gene] = shard_data["gene_encodings"][gene]
+                if gene in shard_data.get("gene_value_encodings", {}):
+                    manifest["gene_value_encodings"][gene] = shard_data["gene_value_encodings"][gene]
+            if gene_sidecar_format == GENE_SIDECAR_FORMAT_BINARY_V1:
+                _write_binary_gene_shard(
+                    shard_path=shard_path,
+                    shard_genes=shard_genes,
+                    shard_data=shard_data,
+                    section_order=manifest["section_order"],
+                    section_cell_counts=section_cell_counts,
+                )
+            else:
+                shard_data["format"] = "karospace-gene-sidecar-shard-v2"
+                shard_data.pop("genes_meta", None)
+                shard_data.pop("gene_encodings", None)
+                shard_data.pop("gene_value_encodings", None)
+                with open(shard_path, "w", encoding="utf-8") as f:
+                    json.dump(shard_data, f, separators=(",", ":"))
+            genes_written += len(shard_genes)
+            shard_elapsed = time.perf_counter() - shard_t0
+            if progress is not None:
+                progress.update(len(shard_genes))
+                progress.set_postfix_str(
+                    f"shard {shard_idx + 1}/{total_shards} wrote {shard_filename} in {shard_elapsed:.1f}s"
+                )
+            else:
+                print(
+                    f"    wrote {shard_filename} ({genes_written}/{total_sidecar_genes} genes) "
+                    f"in {shard_elapsed:.1f}s"
+                )
+        # Mirror RNA fields under manifest.modalities for forward-compat.
+        manifest["modalities"] = {
+            default_modality_name: {
+                "shards": dict(manifest["shards"]),
+                "genes_meta": dict(manifest["genes_meta"]),
+                "gene_encodings": dict(manifest["gene_encodings"]),
+                "gene_value_encodings": dict(manifest["gene_value_encodings"]),
+                "gene_to_shard": dict(manifest["gene_to_shard"]),
+                "value_kind": "counts",
+            }
+        }
+        if gene_sidecar_format == GENE_SIDECAR_FORMAT_BINARY_V1:
+            manifest["modalities"][default_modality_name]["section_order"] = list(manifest["section_order"])
+
+        # Per-modality shard writes for non-default modalities.
+        for mod_name in extra_modalities:
+            mod = dataset.modalities[mod_name]
+            mod_features = list(mod.feature_names)
+            if not mod_features:
+                continue
+            mod_aux_dir = resolved_gene_aux_dir / mod_name
+            mod_aux_dir.mkdir(parents=True, exist_ok=True)
+            mod_shard_groups = _chunked(mod_features, gene_sidecar_shard_size)
+            print(
+                f"Building modality '{mod_name}' sidecar: {len(mod_features)} features × "
+                f"{len(mod_shard_groups)} shard{'s' if len(mod_shard_groups) != 1 else ''}..."
+            )
+            mod_entry: Dict[str, Any] = {
+                "shards": {},
+                "genes_meta": {},
+                "gene_encodings": {},
+                "gene_value_encodings": {},
+                "gene_to_shard": {},
+                "value_kind": mod.value_kind,
+                "label": mod.label or mod_name,
+            }
+            if gene_sidecar_format == GENE_SIDECAR_FORMAT_BINARY_V1:
+                mod_entry["section_order"] = [section.section_id for section in dataset.sections]
+            for shard_idx, shard_features in enumerate(mod_shard_groups):
+                shard_suffix = ".bin" if gene_sidecar_format == GENE_SIDECAR_FORMAT_BINARY_V1 else ".json"
+                shard_filename = f"{shard_idx:03d}{shard_suffix}"
+                shard_path = mod_aux_dir / shard_filename
+                shard_rel = Path(os.path.relpath(shard_path, start=output_parent)).as_posix()
+                shard_data = dataset.to_gene_sidecar_data(
+                    genes=shard_features,
+                    downsample=downsample,
+                    export_indices=sidecar_export_indices,
+                    gene_encoding=gene_encoding,
+                    gene_value_encoding=gene_value_encoding,
+                    gene_sparse_zero_threshold=gene_sparse_zero_threshold,
+                    modality=mod_name,
+                )
+                mod_entry["shards"][shard_rel] = shard_features
+                for feat in shard_features:
+                    mod_entry["gene_to_shard"][feat] = shard_rel
+                    if feat in shard_data.get("genes_meta", {}):
+                        mod_entry["genes_meta"][feat] = shard_data["genes_meta"][feat]
+                    if feat in shard_data.get("gene_encodings", {}):
+                        mod_entry["gene_encodings"][feat] = shard_data["gene_encodings"][feat]
+                    if feat in shard_data.get("gene_value_encodings", {}):
+                        mod_entry["gene_value_encodings"][feat] = shard_data["gene_value_encodings"][feat]
+                if gene_sidecar_format == GENE_SIDECAR_FORMAT_BINARY_V1:
+                    _write_binary_gene_shard(
+                        shard_path=shard_path,
+                        shard_genes=shard_features,
+                        shard_data=shard_data,
+                        section_order=mod_entry["section_order"],
+                        section_cell_counts=section_cell_counts,
+                    )
+                else:
+                    shard_data["format"] = "karospace-gene-sidecar-shard-v2"
+                    shard_data.pop("genes_meta", None)
+                    shard_data.pop("gene_encodings", None)
+                    shard_data.pop("gene_value_encodings", None)
+                    with open(shard_path, "w", encoding="utf-8") as f:
+                        json.dump(shard_data, f, separators=(",", ":"))
+            manifest["modalities"][mod_name] = mod_entry
+
+        # Bump format only when extra modalities are actually present.
+        if extra_modalities:
+            manifest["format"] = "karospace-gene-sidecar-manifest-v4"
+
+        with open(resolved_gene_aux_path, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, separators=(",", ":"))
+        if total_sidecar_genes:
+            total_elapsed = time.perf_counter() - sidecar_t0
+            if progress is not None:
+                progress.close()
+            print(f"Completed gene sidecar build in {total_elapsed:.1f}s")
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(html)
 
-    print(f"Exported HTML viewer to: {output_path}")
+    if package_mode:
+        assert package_output_path_obj is not None
+        assert resolved_gene_aux_path is not None
+        assert package_gene_manifest_name is not None
+        _write_karospace_package(
+            package_path=package_output_path_obj,
+            source_root=Path(output_path).parent,
+            entry_html=package_entry_html,
+            gene_manifest_path=package_gene_manifest_name,
+            gene_shard_dir=Path(package_gene_manifest_name).with_suffix("").as_posix(),
+            title=title,
+            n_sections=data["n_sections"],
+            total_cells=data["total_cells"],
+        )
+        written_loader_path = None
+        if package_loader_output_path is not None:
+            written_loader_path = _write_karospace_package_loader(
+                loader_path=package_loader_output_path,
+            )
+        print(f"Exported KaroSpace package to: {package_output_path_obj}")
+        print(f"  - entry HTML: {package_entry_html}")
+        print(f"  - packaged gene manifest: {package_gene_manifest_name}")
+        print(f"  - packaged shard directory: {Path(package_gene_manifest_name).with_suffix('').as_posix()}")
+        if written_loader_path is not None:
+            print(f"  - local package loader: {written_loader_path}")
+        else:
+            print(f"  - local package loader: unavailable (template not found)")
+    else:
+        print(f"Exported HTML viewer to: {output_path}")
+        if resolved_gene_aux_path is not None:
+            print(f"Exported gene sidecar to: {resolved_gene_aux_path}")
+            print(f"  - shard directory: {resolved_gene_aux_dir}")
     print(f"  - {data['n_sections']} sections")
     print(f"  - {data['total_cells']:,} cells")
     if used_auto_spot_size:
@@ -7294,12 +21370,16 @@ def export_to_html(
     else:
         print(f"  - spot size {resolved_spot_size:.2f}")
     print(f"  - {len(data['available_colors'])} color options")
-    if genes:
+    if embedded_genes:
         print(f"  - {len(data['genes_meta'])} genes loaded")
         enc = data.get("gene_encodings") or {}
         if enc:
             n_sparse = sum(1 for v in enc.values() if v == "sparse")
             n_dense = sum(1 for v in enc.values() if v == "dense")
             print(f"  - gene encoding: {n_sparse} sparse, {n_dense} dense")
-
-    return output_path
+    if gene_aux_url:
+        print(f"  - sidecar genes available via {gene_aux_url}")
+        print(f"  - sidecar value encoding: {gene_value_encoding}")
+    if package_temp_dir is not None:
+        package_temp_dir.cleanup()
+    return str(package_output_path_obj) if package_output_path_obj is not None else output_path

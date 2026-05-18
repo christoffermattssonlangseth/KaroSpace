@@ -1,0 +1,880 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KaroSpace</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      overflow: hidden;
+    }
+
+    .loading-overlay {
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(140px 140px at 50% 28%, rgba(135, 0, 82, 0.35), rgba(0, 0, 0, 0)),
+        radial-gradient(520px 360px at 50% 60%, rgba(255, 135, 111, 0.18), rgba(0, 0, 0, 0)),
+        linear-gradient(180deg, #0b0508 0%, #14070f 60%, #1a0a14 100%);
+      color: #f5dbe7;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
+    }
+
+    .loading-cloud {
+      position: relative;
+      width: 140px;
+      height: 90px;
+      filter: drop-shadow(0 0 12px rgba(135, 0, 82, 0.6));
+      transition: filter 0.2s ease;
+    }
+
+    .loading-overlay.drag-over .loading-cloud {
+      filter: drop-shadow(0 0 20px rgba(135, 0, 82, 0.9));
+    }
+
+    .loading-dot {
+      position: absolute;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 30% 30%, #ffe3ef 0%, #ffb39f 45%, #870052 100%);
+      opacity: 0.9;
+      box-shadow: 0 0 8px rgba(135, 0, 82, 0.9);
+      animation: drift 2.6s ease-in-out infinite;
+    }
+
+    .loading-dot:nth-child(1)  { left: 10px;  top: 18px; animation-delay: 0s;   }
+    .loading-dot:nth-child(2)  { left: 34px;  top: 46px; animation-delay: 0.2s; }
+    .loading-dot:nth-child(3)  { left: 62px;  top: 20px; animation-delay: 0.4s; }
+    .loading-dot:nth-child(4)  { left: 88px;  top: 52px; animation-delay: 0.1s; }
+    .loading-dot:nth-child(5)  { left: 114px; top: 28px; animation-delay: 0.3s; }
+    .loading-dot:nth-child(6)  { left: 22px;  top: 72px; animation-delay: 0.5s; }
+    .loading-dot:nth-child(7)  { left: 72px;  top: 72px; animation-delay: 0.6s; }
+    .loading-dot:nth-child(8)  { left: 48px;  top: 6px;  animation-delay: 0.7s; }
+    .loading-dot:nth-child(9)  { left: 96px;  top: 8px;  animation-delay: 0.8s; }
+    .loading-dot:nth-child(10) { left: 6px;   top: 54px; animation-delay: 0.9s; }
+    .loading-dot:nth-child(11) { left: 126px; top: 62px; animation-delay: 1.0s; }
+    .loading-dot:nth-child(12) { left: 58px;  top: 40px; animation-delay: 1.1s; }
+
+    @keyframes drift {
+      0%   { transform: translate(0, 0) scale(1);     opacity: 0.6; }
+      50%  { transform: translate(0, -10px) scale(1.25); opacity: 1;   }
+      100% { transform: translate(0, 0) scale(1);     opacity: 0.6; }
+    }
+
+    .loading-label {
+      font-size: 13px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: #f5dbe7;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
+
+    .loading-text {
+      font-size: 11px;
+      color: rgba(245, 219, 231, 0.7);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
+    }
+
+    .file-label {
+      font-size: 10px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: rgba(245, 219, 231, 0.45);
+      cursor: pointer;
+      margin-top: 6px;
+      border: 1px solid rgba(245, 219, 231, 0.15);
+      border-radius: 999px;
+      padding: 5px 14px;
+      transition: color 0.2s, border-color 0.2s;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
+
+    .file-label:hover {
+      color: rgba(245, 219, 231, 0.9);
+      border-color: rgba(245, 219, 231, 0.4);
+    }
+
+    input[type="file"] {
+      display: none;
+    }
+
+    .status-toast {
+      position: fixed;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 10px 14px;
+      background: rgba(20, 7, 15, 0.92);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 10px;
+      color: #f5dbe7;
+      font-size: 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      white-space: nowrap;
+      max-width: calc(100vw - 32px);
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .status-toast.error {
+      border-color: rgba(198, 40, 40, 0.5);
+    }
+
+    .clear-btn {
+      position: fixed;
+      bottom: 16px;
+      right: 16px;
+      background: rgba(135, 0, 82, 0.12);
+      border: 1px solid rgba(245, 219, 231, 0.12);
+      border-radius: 999px;
+      color: rgba(245, 219, 231, 0.5);
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      padding: 5px 12px;
+      cursor: pointer;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      transition: color 0.2s, border-color 0.2s, background 0.2s;
+    }
+
+    .clear-btn:hover {
+      color: rgba(245, 219, 231, 0.85);
+      border-color: rgba(245, 219, 231, 0.3);
+      background: rgba(135, 0, 82, 0.22);
+    }
+  </style>
+</head>
+<body>
+  <div id="dropzone" class="loading-overlay">
+
+    <div class="loading-cloud" aria-hidden="true">
+      <span class="loading-dot"></span>
+      <span class="loading-dot"></span>
+      <span class="loading-dot"></span>
+      <span class="loading-dot"></span>
+      <span class="loading-dot"></span>
+      <span class="loading-dot"></span>
+      <span class="loading-dot"></span>
+      <span class="loading-dot"></span>
+      <span class="loading-dot"></span>
+      <span class="loading-dot"></span>
+      <span class="loading-dot"></span>
+      <span class="loading-dot"></span>
+    </div>
+
+    <div class="loading-label" id="loading-label">KaroSpace</div>
+    <div class="loading-text" id="loading-text">drop a .karospace file to open</div>
+
+    <label class="file-label" for="package-file">choose file</label>
+    <input id="package-file" type="file" accept=".karospace,.zip,application/zip,application/x-karospace-package">
+
+    <button id="clear-button" class="clear-btn" type="button" hidden>clear</button>
+
+  </div>
+
+  <div id="status-toast" class="status-toast" hidden></div>
+
+  <script>
+    (function () {
+      'use strict';
+
+      const ZIP_LOCAL_FILE_HEADER = 0x04034b50;
+      const ZIP_CENTRAL_DIRECTORY = 0x02014b50;
+      const ZIP_END_OF_CENTRAL_DIRECTORY = 0x06054b50;
+      const PACKAGE_MANIFEST_PATH = 'karospace-package.json';
+      const LAZY_ARCHIVE_THRESHOLD_BYTES = 768 * 1024 * 1024;
+      const EAGER_ARCHIVE_COMPAT_MAX_BYTES = 3 * 1024 * 1024 * 1024;
+
+      const fileInput = document.getElementById('package-file');
+      const dropzone = document.getElementById('dropzone');
+      const loadingText = document.getElementById('loading-text');
+      const statusToast = document.getElementById('status-toast');
+      const clearButton = document.getElementById('clear-button');
+
+      const IDLE_TEXT = 'drop a .karospace file to open';
+
+      let currentSessionId = null;
+      let sessionCounter = 0;
+      let toastTimer = null;
+
+      window.__karospacePackageSessions = Object.create(null);
+
+      function setLoadingText(message) {
+        loadingText.textContent = message;
+      }
+
+      function showToast(message, kind) {
+        if (toastTimer) {
+          clearTimeout(toastTimer);
+          toastTimer = null;
+        }
+        statusToast.textContent = message;
+        statusToast.className = 'status-toast' + (kind ? ' ' + kind : '');
+        statusToast.hidden = false;
+        if (kind === 'error') {
+          toastTimer = setTimeout(() => {
+            statusToast.hidden = true;
+          }, 8000);
+        }
+      }
+
+      function hideToast() {
+        if (toastTimer) {
+          clearTimeout(toastTimer);
+          toastTimer = null;
+        }
+        statusToast.hidden = true;
+      }
+
+      function escapeHtml(value) {
+        return String(value)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+      }
+
+      function normalizePackagePath(path) {
+        if (typeof path !== 'string') return null;
+        const trimmed = path.trim().replace(/\\/g, '/');
+        if (!trimmed) return null;
+        const rawParts = trimmed.split('/');
+        const parts = [];
+        for (const part of rawParts) {
+          if (!part || part === '.') continue;
+          if (part === '..') {
+            throw new Error('Package paths may not escape archive root');
+          }
+          parts.push(part);
+        }
+        return parts.join('/');
+      }
+
+      function formatBytes(size) {
+        const numeric = Number(size);
+        if (!Number.isFinite(numeric) || numeric < 0) return 'n/a';
+        const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        let value = numeric;
+        let unitIndex = 0;
+        while (value >= 1024 && unitIndex < units.length - 1) {
+          value /= 1024;
+          unitIndex += 1;
+        }
+        return value.toFixed(value >= 100 || unitIndex === 0 ? 0 : 1) + ' ' + units[unitIndex];
+      }
+
+      function inferMediaType(path) {
+        if (path.endsWith('.html')) return 'text/html; charset=utf-8';
+        if (path.endsWith('.json')) return 'application/json';
+        if (path.endsWith('.js')) return 'application/javascript; charset=utf-8';
+        if (path.endsWith('.css')) return 'text/css; charset=utf-8';
+        return 'application/octet-stream';
+      }
+
+      function buildPackageResponse(path, data) {
+        const normalized = normalizePackagePath(path);
+        return new Response(data, {
+          status: 200,
+          headers: {
+            'Content-Type': inferMediaType(normalized),
+            'X-KaroSpace-Package-Path': normalized,
+          },
+        });
+      }
+
+      async function readBlobSlice(blob, start, end) {
+        if (!blob || typeof blob.slice !== 'function') {
+          throw new Error('This browser does not support reading local package slices');
+        }
+        const blobSize = Number(blob.size || 0);
+        const safeStart = Math.max(0, Math.min(blobSize, Number(start) || 0));
+        const safeEnd = Math.max(safeStart, Math.min(blobSize, Number(end) || 0));
+        return await blob.slice(safeStart, safeEnd).arrayBuffer();
+      }
+
+      function clearCurrentViewer() {
+        if (currentSessionId && window.__karospacePackageSessions[currentSessionId]) {
+          delete window.__karospacePackageSessions[currentSessionId];
+        }
+        currentSessionId = null;
+      }
+
+      async function decompressEntry(compressedBuffer, compressionMethod) {
+        if (compressionMethod === 0) return compressedBuffer;
+        if (compressionMethod !== 8) {
+          throw new Error('Unsupported ZIP compression method: ' + compressionMethod);
+        }
+        if (typeof DecompressionStream !== 'function') {
+          throw new Error('This browser does not support DecompressionStream, which is required for compressed .karospace packages');
+        }
+        const stream = new Blob([compressedBuffer]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+        return await new Response(stream).arrayBuffer();
+      }
+
+      function findEndOfCentralDirectory(view) {
+        const minimumLength = 22;
+        const maxCommentLength = 0xffff;
+        const start = Math.max(0, view.byteLength - (minimumLength + maxCommentLength));
+        for (let offset = view.byteLength - minimumLength; offset >= start; offset -= 1) {
+          if (view.getUint32(offset, true) === ZIP_END_OF_CENTRAL_DIRECTORY) {
+            return offset;
+          }
+        }
+        throw new Error('ZIP end of central directory record not found');
+      }
+
+      class ZipArchive {
+        constructor(buffer, entries) {
+          this.buffer = buffer;
+          this.view = new DataView(buffer);
+          this.entries = entries;
+        }
+
+        has(path) {
+          const normalized = normalizePackagePath(path);
+          return !!(normalized && this.entries[normalized]);
+        }
+
+        list() {
+          return Object.keys(this.entries);
+        }
+
+        getEntry(path) {
+          const normalized = normalizePackagePath(path);
+          const entry = normalized ? this.entries[normalized] : null;
+          if (!entry) {
+            throw new Error('Package asset not found: ' + path);
+          }
+          return { normalized, entry };
+        }
+
+        stat(path) {
+          const { normalized, entry } = this.getEntry(path);
+          return {
+            path: normalized,
+            compressedSize: entry.compressedSize,
+            uncompressedSize: entry.uncompressedSize,
+            compressionMethod: entry.compressionMethod,
+            directory: entry.directory,
+          };
+        }
+
+        supportsRange(path) {
+          const { entry } = this.getEntry(path);
+          return !entry.directory && entry.compressionMethod === 0;
+        }
+
+        _getEntryDataWindow(path) {
+          const { entry } = this.getEntry(path);
+          if (entry.directory) {
+            throw new Error('Cannot read directory as file: ' + path);
+          }
+          const headerOffset = entry.localHeaderOffset;
+          if (this.view.getUint32(headerOffset, true) !== ZIP_LOCAL_FILE_HEADER) {
+            throw new Error('ZIP local file header missing for ' + path);
+          }
+          const nameLength = this.view.getUint16(headerOffset + 26, true);
+          const extraLength = this.view.getUint16(headerOffset + 28, true);
+          const dataStart = headerOffset + 30 + nameLength + extraLength;
+          const dataEnd = dataStart + entry.compressedSize;
+          if (dataEnd > this.buffer.byteLength) {
+            throw new Error('ZIP entry extends beyond archive bounds: ' + path);
+          }
+          return { entry, dataStart, dataEnd };
+        }
+
+        async readArrayBuffer(path) {
+          const { entry, dataStart, dataEnd } = this._getEntryDataWindow(path);
+          const compressedBuffer = this.buffer.slice(dataStart, dataEnd);
+          return await decompressEntry(compressedBuffer, entry.compressionMethod);
+        }
+
+        async readRange(path, start, endExclusive) {
+          const { entry, dataStart } = this._getEntryDataWindow(path);
+          if (entry.compressionMethod !== 0) {
+            throw new Error('Byte-range reads require ZIP stored entries');
+          }
+          const maxBytes = entry.uncompressedSize;
+          const safeStart = Math.max(0, Math.min(maxBytes, Number(start) || 0));
+          const safeEnd = Math.max(safeStart, Math.min(maxBytes, Number(endExclusive) || 0));
+          return this.buffer.slice(dataStart + safeStart, dataStart + safeEnd);
+        }
+
+        async readText(path) {
+          const decoder = new TextDecoder('utf-8');
+          return decoder.decode(await this.readArrayBuffer(path));
+        }
+
+        async readJson(path) {
+          return JSON.parse(await this.readText(path));
+        }
+
+        async fetch(path) {
+          const normalized = normalizePackagePath(path);
+          const data = await this.readArrayBuffer(normalized);
+          return buildPackageResponse(normalized, data);
+        }
+      }
+
+      class LazyZipArchive {
+        constructor(file, entries) {
+          this.file = file;
+          this.entries = entries;
+        }
+
+        has(path) {
+          const normalized = normalizePackagePath(path);
+          return !!(normalized && this.entries[normalized]);
+        }
+
+        list() {
+          return Object.keys(this.entries);
+        }
+
+        getEntry(path) {
+          const normalized = normalizePackagePath(path);
+          const entry = normalized ? this.entries[normalized] : null;
+          if (!entry) {
+            throw new Error('Package asset not found: ' + path);
+          }
+          return { normalized, entry };
+        }
+
+        stat(path) {
+          const { normalized, entry } = this.getEntry(path);
+          return {
+            path: normalized,
+            compressedSize: entry.compressedSize,
+            uncompressedSize: entry.uncompressedSize,
+            compressionMethod: entry.compressionMethod,
+            directory: entry.directory,
+          };
+        }
+
+        supportsRange(path) {
+          const { entry } = this.getEntry(path);
+          return !entry.directory && entry.compressionMethod === 0;
+        }
+
+        async _getEntryDataWindow(path) {
+          const { entry } = this.getEntry(path);
+          if (entry.directory) {
+            throw new Error('Cannot read directory as file: ' + path);
+          }
+          const headerOffset = entry.localHeaderOffset;
+          const localHeaderBuffer = await readBlobSlice(this.file, headerOffset, headerOffset + 30);
+          const localHeaderView = new DataView(localHeaderBuffer);
+          if (localHeaderView.byteLength < 30 || localHeaderView.getUint32(0, true) !== ZIP_LOCAL_FILE_HEADER) {
+            throw new Error('ZIP local file header missing for ' + path);
+          }
+          const nameLength = localHeaderView.getUint16(26, true);
+          const extraLength = localHeaderView.getUint16(28, true);
+          const dataStart = headerOffset + 30 + nameLength + extraLength;
+          const dataEnd = dataStart + entry.compressedSize;
+          if (dataEnd > this.file.size) {
+            throw new Error('ZIP entry extends beyond archive bounds: ' + path);
+          }
+          return { entry, dataStart, dataEnd };
+        }
+
+        async readArrayBuffer(path) {
+          const { entry, dataStart, dataEnd } = await this._getEntryDataWindow(path);
+          const compressedBuffer = await readBlobSlice(this.file, dataStart, dataEnd);
+          return await decompressEntry(compressedBuffer, entry.compressionMethod);
+        }
+
+        async readRange(path, start, endExclusive) {
+          const { entry, dataStart } = await this._getEntryDataWindow(path);
+          if (entry.compressionMethod !== 0) {
+            throw new Error('Byte-range reads require ZIP stored entries');
+          }
+          const maxBytes = entry.uncompressedSize;
+          const safeStart = Math.max(0, Math.min(maxBytes, Number(start) || 0));
+          const safeEnd = Math.max(safeStart, Math.min(maxBytes, Number(endExclusive) || 0));
+          return await readBlobSlice(this.file, dataStart + safeStart, dataStart + safeEnd);
+        }
+
+        async readText(path) {
+          const decoder = new TextDecoder('utf-8');
+          return decoder.decode(await this.readArrayBuffer(path));
+        }
+
+        async readJson(path) {
+          return JSON.parse(await this.readText(path));
+        }
+
+        async fetch(path) {
+          const normalized = normalizePackagePath(path);
+          const data = await this.readArrayBuffer(normalized);
+          return buildPackageResponse(normalized, data);
+        }
+      }
+
+      function parseCentralDirectoryEntries(buffer, startOffset, entryCount) {
+        const view = new DataView(buffer);
+        const decoder = new TextDecoder('utf-8');
+        const entries = Object.create(null);
+        let offset = startOffset;
+
+        for (let index = 0; index < entryCount; index += 1) {
+          if (view.getUint32(offset, true) !== ZIP_CENTRAL_DIRECTORY) {
+            throw new Error('ZIP central directory entry missing at offset ' + offset);
+          }
+          const compressionMethod = view.getUint16(offset + 10, true);
+          const compressedSize = view.getUint32(offset + 20, true);
+          const uncompressedSize = view.getUint32(offset + 24, true);
+          const nameLength = view.getUint16(offset + 28, true);
+          const extraLength = view.getUint16(offset + 30, true);
+          const commentLength = view.getUint16(offset + 32, true);
+          const localHeaderOffset = view.getUint32(offset + 42, true);
+          const rawName = decoder.decode(new Uint8Array(buffer, offset + 46, nameLength));
+          const name = normalizePackagePath(rawName);
+          if (name) {
+            entries[name] = {
+              compressionMethod,
+              compressedSize,
+              uncompressedSize,
+              localHeaderOffset,
+              directory: rawName.endsWith('/'),
+            };
+          }
+          offset += 46 + nameLength + extraLength + commentLength;
+        }
+
+        return entries;
+      }
+
+      function parseZipArchive(buffer) {
+        const view = new DataView(buffer);
+        const centralDirectoryEnd = findEndOfCentralDirectory(view);
+        const entryCount = view.getUint16(centralDirectoryEnd + 10, true);
+        const centralDirectorySize = view.getUint32(centralDirectoryEnd + 12, true);
+        const centralDirectoryOffset = view.getUint32(centralDirectoryEnd + 16, true);
+        if (
+          entryCount === 0xffff ||
+          centralDirectorySize === 0xffffffff ||
+          centralDirectoryOffset === 0xffffffff
+        ) {
+          throw new Error('ZIP64 .karospace packages are not supported by this loader yet');
+        }
+        const entries = parseCentralDirectoryEntries(buffer, centralDirectoryOffset, entryCount);
+        return new ZipArchive(buffer, entries);
+      }
+
+      async function parseLazyZipArchive(file) {
+        const minimumLength = 22;
+        const maxCommentLength = 0xffff;
+        const tailLength = Math.min(file.size, minimumLength + maxCommentLength);
+        const tailStart = Math.max(0, file.size - tailLength);
+        const tailBuffer = await readBlobSlice(file, tailStart, file.size);
+        const tailView = new DataView(tailBuffer);
+        const centralDirectoryEnd = findEndOfCentralDirectory(tailView);
+        const entryCount = tailView.getUint16(centralDirectoryEnd + 10, true);
+        const centralDirectorySize = tailView.getUint32(centralDirectoryEnd + 12, true);
+        const centralDirectoryOffset = tailView.getUint32(centralDirectoryEnd + 16, true);
+        if (
+          entryCount === 0xffff ||
+          centralDirectorySize === 0xffffffff ||
+          centralDirectoryOffset === 0xffffffff
+        ) {
+          throw new Error('ZIP64 .karospace packages are not supported by this loader yet');
+        }
+        const centralDirectoryBuffer = await readBlobSlice(
+          file,
+          centralDirectoryOffset,
+          centralDirectoryOffset + centralDirectorySize
+        );
+        const entries = parseCentralDirectoryEntries(centralDirectoryBuffer, 0, entryCount);
+        return new LazyZipArchive(file, entries);
+      }
+
+      async function openZipArchive(file, options = {}) {
+        const forceEager = !!(options && options.forceEager);
+        if (!forceEager && file.size > LAZY_ARCHIVE_THRESHOLD_BYTES) {
+          const archive = await parseLazyZipArchive(file);
+          archive.mode = 'lazy';
+          return archive;
+        }
+        const archive = parseZipArchive(await file.arrayBuffer());
+        archive.mode = 'eager';
+        return archive;
+      }
+
+      function shouldRetryWithEagerArchive(file, archive, error) {
+        if (!archive || archive.mode !== 'lazy') return false;
+        if (!file || !Number.isFinite(file.size) || file.size > EAGER_ARCHIVE_COMPAT_MAX_BYTES) return false;
+        const message = error && error.message ? String(error.message) : '';
+        if (
+          message.includes('ZIP local file header missing') ||
+          message.includes('ZIP entry extends beyond archive bounds')
+        ) return true;
+        // Stale File reference (Safari: "could not be read", Chrome: "not allowed")
+        // or DataView out-of-bounds from truncated blob reads
+        if (error instanceof DOMException || error instanceof RangeError) return true;
+        if (message.includes('could not be read') || message.includes('not allowed')) return true;
+        return false;
+      }
+
+      async function prepareArchiveSession(file, archive) {
+        if (!archive.has(PACKAGE_MANIFEST_PATH)) {
+          throw new Error('karospace-package.json is missing');
+        }
+
+        const manifest = await archive.readJson(PACKAGE_MANIFEST_PATH);
+        const validated = validatePackageManifest(manifest, archive);
+        const packagedGeneManifest = await archive.readJson(validated.geneManifestPath);
+        if (
+          !packagedGeneManifest ||
+          (packagedGeneManifest.format !== 'karospace-gene-sidecar-manifest-v2' &&
+           packagedGeneManifest.format !== 'karospace-gene-sidecar-manifest-v3' &&
+           packagedGeneManifest.format !== 'karospace-gene-sidecar-manifest-v4')
+        ) {
+          throw new Error('Packaged gene manifest format is not supported');
+        }
+
+        return {
+          manifest,
+          validated,
+          packagedGeneManifest,
+          entryHtml: await archive.readText(validated.entryHtml),
+        };
+      }
+
+      function validatePackageManifest(manifest, archive) {
+        if (!manifest || manifest.format !== 'karospace-package-v1') {
+          throw new Error('Unsupported package format');
+        }
+        if (manifest.package_version !== 1) {
+          throw new Error('Unsupported package version: ' + manifest.package_version);
+        }
+        const entryHtml = normalizePackagePath(manifest.entry_html || '');
+        if (!entryHtml || !archive.has(entryHtml)) {
+          throw new Error('Package entry HTML is missing');
+        }
+        const viewer = manifest.viewer || {};
+        if (viewer.mode !== 'sidecar-package') {
+          throw new Error('Unsupported viewer mode: ' + String(viewer.mode || ''));
+        }
+        if (viewer.gene_storage !== 'sidecar') {
+          throw new Error('Package viewer must declare gene_storage=sidecar');
+        }
+        const geneManifestPath = normalizePackagePath(viewer.gene_manifest_path || '');
+        if (!geneManifestPath || !archive.has(geneManifestPath)) {
+          throw new Error('Packaged gene manifest is missing');
+        }
+        const shardDir = normalizePackagePath(viewer.gene_shard_dir || '');
+        if (!shardDir) {
+          throw new Error('Package shard directory is missing');
+        }
+        const declaredFiles = manifest.files || {};
+        if (!declaredFiles[entryHtml] || !declaredFiles[geneManifestPath]) {
+          throw new Error('Package manifest files section is incomplete');
+        }
+        return {
+          entryHtml,
+          geneManifestPath,
+          shardDir,
+        };
+      }
+
+      function buildPackageBootstrap(sessionId) {
+        return [
+          '<scr' + 'ipt>',
+          '(function () {',
+          "  'use strict';",
+          '  const SESSION_ID = ' + JSON.stringify(sessionId) + ';',
+          '  const originalFetch = window.fetch.bind(window);',
+          '  function getPackageSession() {',
+          '    if (window.__karospacePackageSession) return window.__karospacePackageSession;',
+          '    try {',
+          '      const registry = window.parent && window.parent.__karospacePackageSessions;',
+          '      return (registry && registry[SESSION_ID]) || null;',
+          '    } catch (error) {',
+          '      return null;',
+          '    }',
+          '  }',
+          '  function normalizePackagePath(path) {',
+          "    if (typeof path !== 'string') return null;",
+          "    const trimmed = path.trim().replace(/\\\\/g, '/');",
+          '    if (!trimmed) return null;',
+          "    if (/^(?:https?:|blob:|data:|about:|javascript:|mailto:|tel:)/i.test(trimmed)) return null;",
+          "    const withoutQuery = trimmed.split('#')[0].split('?')[0];",
+          "    const rawParts = withoutQuery.split('/');",
+          '    const parts = [];',
+          '    for (const part of rawParts) {',
+          "      if (!part || part === '.') continue;",
+          "      if (part === '..') return null;",
+          '      parts.push(part);',
+          '    }',
+          "    return parts.join('/');",
+          '  }',
+          '  async function resolvePackageResponse(input) {',
+          '    const session = getPackageSession();',
+          '    if (!session) return null;',
+          "    const raw = typeof input === 'string' ? input : (input && typeof input.url === 'string' ? input.url : '');",
+          '    const normalized = normalizePackagePath(raw);',
+          '    if (!normalized || !session.has(normalized)) return null;',
+          '    return session.fetch(normalized);',
+          '  }',
+          '  window.fetch = function packageAwareFetch(input, init) {',
+          '    return resolvePackageResponse(input).then((response) => response || originalFetch(input, init));',
+          '  };',
+          '  window.__karospacePackageMode = true;',
+          '})();',
+          '</scr' + 'ipt>'
+        ].join('\n');
+      }
+
+      function injectBootstrap(htmlText, sessionId) {
+        const bootstrap = buildPackageBootstrap(sessionId);
+        if (htmlText.includes('<head>')) {
+          return htmlText.replace('<head>', '<head>\n' + bootstrap + '\n');
+        }
+        return bootstrap + '\n' + htmlText;
+      }
+
+      async function launchPackage(file) {
+        clearCurrentViewer();
+        hideToast();
+        setLoadingText(file.size > LAZY_ARCHIVE_THRESHOLD_BYTES ? 'reading package index\u2026' : 'reading package\u2026');
+
+        let archive = await openZipArchive(file);
+        let prepared;
+        try {
+          setLoadingText('validating\u2026');
+          prepared = await prepareArchiveSession(file, archive);
+        } catch (error) {
+          if (!shouldRetryWithEagerArchive(file, archive, error)) {
+            throw error;
+          }
+          setLoadingText('retrying in compatibility mode\u2026');
+          archive = await openZipArchive(file, { forceEager: true });
+          setLoadingText('validating\u2026');
+          prepared = await prepareArchiveSession(file, archive);
+        }
+        const { validated, entryHtml } = prepared;
+
+        const sessionId = 'pkg-' + (++sessionCounter);
+        currentSessionId = sessionId;
+        window.__karospacePackageSessions[sessionId] = {
+          fileName: file.name,
+          archive,
+          async ensureArchiveCompatibility(error) {
+            if (!shouldRetryWithEagerArchive(file, this.archive, error)) {
+              throw error;
+            }
+            console.warn('Retrying .karospace package in compatibility mode after lazy archive read failed:', error);
+            this.archive = await openZipArchive(file, { forceEager: true });
+            return this.archive;
+          },
+          async withArchiveRetry(operation) {
+            try {
+              return await operation(this.archive);
+            } catch (error) {
+              const compatibleArchive = await this.ensureArchiveCompatibility(error);
+              return operation(compatibleArchive);
+            }
+          },
+          has(path) {
+            try {
+              return this.archive.has(path);
+            } catch (error) {
+              return false;
+            }
+          },
+          fetch(path) {
+            return this.withArchiveRetry((activeArchive) => activeArchive.fetch(path));
+          },
+          stat(path) {
+            return this.archive.stat(path);
+          },
+          supportsRange(path) {
+            try {
+              return this.archive.supportsRange(path);
+            } catch (error) {
+              return false;
+            }
+          },
+          readRange(path, start, endExclusive) {
+            return this.withArchiveRetry((activeArchive) => activeArchive.readRange(path, start, endExclusive));
+          },
+        };
+
+        setLoadingText('launching\u2026');
+        const hydratedHtml = injectBootstrap(entryHtml, sessionId);
+        window.__karospacePackageSession = window.__karospacePackageSessions[sessionId];
+        document.open();
+        document.write(hydratedHtml);
+        document.close();
+      }
+
+      async function handleFile(file) {
+        if (!file) return;
+        hideToast();
+        clearButton.hidden = false;
+        try {
+          await launchPackage(file);
+        } catch (error) {
+          clearCurrentViewer();
+          console.error('Failed to open .karospace package:', error);
+          setLoadingText(IDLE_TEXT);
+          showToast('Failed to open package: ' + (error && error.message ? error.message : 'Unknown error'), 'error');
+        }
+      }
+
+      fileInput.addEventListener('change', (event) => {
+        const file = event.target.files && event.target.files[0];
+        void handleFile(file);
+      });
+
+      clearButton.addEventListener('click', () => {
+        fileInput.value = '';
+        clearCurrentViewer();
+        hideToast();
+        setLoadingText(IDLE_TEXT);
+        clearButton.hidden = true;
+      });
+
+      ['dragenter', 'dragover'].forEach((eventName) => {
+        dropzone.addEventListener(eventName, (event) => {
+          event.preventDefault();
+          dropzone.classList.add('drag-over');
+          setLoadingText('release to open');
+        });
+      });
+
+      ['dragleave', 'drop'].forEach((eventName) => {
+        dropzone.addEventListener(eventName, (event) => {
+          event.preventDefault();
+          dropzone.classList.remove('drag-over');
+        });
+      });
+
+      dropzone.addEventListener('dragleave', () => {
+        setLoadingText(IDLE_TEXT);
+      });
+
+      dropzone.addEventListener('drop', (event) => {
+        const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
+        void handleFile(file);
+      });
+
+    })();
+  </script>
+</body>
+</html>

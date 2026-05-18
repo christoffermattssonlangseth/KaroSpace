@@ -5,10 +5,39 @@ Command-line interface for KaroSpace.
 import argparse
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional
 
 
-def main():
+def _parse_section_rotations_arg(raw: str) -> Optional[Dict[str, float]]:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+
+    rotations: Dict[str, float] = {}
+    for item in text.split(","):
+        token = item.strip()
+        if not token:
+            continue
+        if ":" not in token:
+            raise ValueError(
+                "each section rotation must use section_id:angle format"
+            )
+        section_id, angle_text = token.split(":", 1)
+        section_id = section_id.strip()
+        angle_text = angle_text.strip()
+        if not section_id:
+            raise ValueError("section rotation entries must include a section_id")
+        try:
+            rotations[section_id] = float(angle_text)
+        except ValueError as exc:
+            raise ValueError(
+                f"invalid angle for section {section_id!r}: {angle_text!r}"
+            ) from exc
+
+    return rotations or None
+
+
+def _run_export_cli(argv=None):
     parser = argparse.ArgumentParser(
         description="Generate HTML viewer for Xenium spatial transcriptomics data"
     )
@@ -72,6 +101,27 @@ def main():
         help="Gene vector encoding. 'sparse' stores only non-zero indices/values (smaller HTML for zero-inflated data). (default: auto)"
     )
     parser.add_argument(
+        "--gene-storage",
+        choices=["embedded", "sidecar"],
+        default="embedded",
+        help="Store genes in the HTML (`embedded`) or write non-embedded genes to an auxiliary JSON sidecar (`sidecar`). (default: embedded)"
+    )
+    parser.add_argument(
+        "--gene-aux-path",
+        type=str,
+        default=None,
+        help="Optional output path for the gene sidecar JSON when --gene-storage sidecar."
+    )
+    parser.add_argument(
+        "--modalities",
+        type=str,
+        default=None,
+        help=(
+            "Comma-separated list of modalities to export (e.g. 'rna,protein'). "
+            "Defaults to all detected. Non-default modalities require --gene-storage sidecar."
+        ),
+    )
+    parser.add_argument(
         "--gene-sparse-zero-threshold",
         type=float,
         default=0.8,
@@ -115,8 +165,62 @@ def main():
         default="",
         help="Comma-separated obs columns to compute contact-conditioned interaction markers for. Empty disables (default)."
     )
+    parser.add_argument(
+        "--cluster-de-groupby",
+        type=str,
+        default="",
+        help="Comma-separated categorical obs columns to precompute cluster-vs-cluster differential expression for. Empty disables (default)."
+    )
+    parser.add_argument(
+        "--cluster-de-top-n",
+        type=int,
+        default=20,
+        help="Top N genes to keep per pairwise cluster DE result. (default: 20)"
+    )
+    parser.add_argument(
+        "--cluster-de-method",
+        type=str,
+        default="wilcoxon",
+        help="Method for pairwise cluster DE via scanpy.tl.rank_genes_groups (default: wilcoxon)."
+    )
+    parser.add_argument(
+        "--cluster-de-layer",
+        type=str,
+        default="normalized",
+        help="AnnData layer to use for pairwise cluster DE when present. (default: normalized)"
+    )
+    parser.add_argument(
+        "--cluster-de-min-cells",
+        type=int,
+        default=20,
+        help="Minimum cells required in both clusters to report pairwise DE. (default: 20)"
+    )
+    parser.add_argument(
+        "--section-rotations",
+        type=str,
+        default="",
+        help="Comma-separated section_id:angle pairs for initial per-section rotations with exact degree values (example: S1:37.5,S2:-90)."
+    )
+    parser.add_argument(
+        "--gene-correlation-top-n",
+        type=int,
+        default=10,
+        help="Number of top correlated genes to show per embedded gene in the discovery panel. Use 0 to disable. (default: 10)"
+    )
+    parser.add_argument(
+        "--spatial-variable-genes-n",
+        type=int,
+        default=200,
+        help="Number of top variable genes to score with Moran's I spatial autocorrelation. Requires spatial graph in obsp. Use 0 to disable. (default: 200)"
+    )
+    parser.add_argument(
+        "--scalebar-unit",
+        type=str,
+        default="μm",
+        help="Unit label for the scalebar (default: μm). Assumes spatial coordinates are in this unit."
+    )
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     # Check input file
     input_path = Path(args.input)
@@ -164,6 +268,12 @@ def main():
         neighbor_stats_groupby = _parse_csv(args.neighbor_stats_groupby)
     marker_genes_groupby = _parse_csv(args.marker_genes_groupby)
     interaction_markers_groupby = _parse_csv(args.interaction_markers_groupby)
+    cluster_de_groupby = _parse_csv(args.cluster_de_groupby)
+    try:
+        section_rotations = _parse_section_rotations_arg(args.section_rotations)
+    except ValueError as exc:
+        print(f"Error: --section-rotations {exc}", file=sys.stderr)
+        sys.exit(2)
 
     # Load and export
     print(f"Loading data from: {args.input}")
@@ -172,17 +282,24 @@ def main():
         groupby=args.groupby,
     )
 
+    modalities_arg: Optional[List[str]] = None
+    if args.modalities:
+        modalities_arg = [m.strip() for m in args.modalities.split(",") if m.strip()]
+
     print(f"Exporting to HTML...")
     output_path = export_to_html(
         dataset,
         output_path=args.output,
         color=args.color,
         title=args.title,
+        modalities=modalities_arg,
         min_panel_size=args.min_panel_size,
         spot_size=spot_size_value,
         downsample=args.downsample,
         theme=args.theme,
         gene_encoding=args.gene_encoding,
+        gene_storage=args.gene_storage,
+        gene_aux_path=args.gene_aux_path,
         gene_sparse_zero_threshold=args.gene_sparse_zero_threshold,
         pack_arrays=args.pack_arrays,
         pack_arrays_min_len=args.pack_arrays_min_len,
@@ -190,9 +307,81 @@ def main():
         neighbor_stats_groupby=neighbor_stats_groupby,
         marker_genes_groupby=marker_genes_groupby,
         interaction_markers_groupby=interaction_markers_groupby,
+        cluster_de_groupby=cluster_de_groupby,
+        cluster_de_top_n=args.cluster_de_top_n,
+        cluster_de_method=args.cluster_de_method,
+        cluster_de_layer=args.cluster_de_layer,
+        cluster_de_min_cells=args.cluster_de_min_cells,
+        section_rotations=section_rotations,
+        gene_correlation_top_n=args.gene_correlation_top_n,
+        spatial_variable_genes_n=args.spatial_variable_genes_n,
+        scalebar_unit=args.scalebar_unit,
     )
 
     print(f"Done! Open {output_path} in a browser to view.")
+
+
+def _run_package_sidecar_cli(argv=None):
+    parser = argparse.ArgumentParser(
+        description="Package an existing KaroSpace sidecar viewer into a .karospace archive"
+    )
+    parser.add_argument(
+        "html",
+        type=str,
+        help="Path to an existing sidecar HTML viewer",
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        type=str,
+        default=None,
+        help="Output .karospace file path (default: <html stem>.karospace)",
+    )
+    parser.add_argument(
+        "--gene-aux-path",
+        type=str,
+        default=None,
+        help="Optional actual path to the sidecar gene manifest JSON if it differs from the path referenced in the HTML.",
+    )
+    parser.add_argument(
+        "--gene-shard-dir",
+        type=str,
+        default=None,
+        help="Optional actual path to the sidecar shard directory if it differs from the manifest stem directory.",
+    )
+    parser.add_argument(
+        "--loader-output",
+        type=str,
+        default=None,
+        help="Optional output path for the companion .loader.html file.",
+    )
+
+    args = parser.parse_args(argv)
+
+    html_path = Path(args.html)
+    if not html_path.exists():
+        print(f"Error: Sidecar HTML not found: {args.html}", file=sys.stderr)
+        sys.exit(1)
+
+    from .exporter import package_sidecar_viewer
+
+    print(f"Packaging existing sidecar viewer: {args.html}")
+    package_path = package_sidecar_viewer(
+        html_path,
+        output_path=args.output,
+        gene_manifest_path=args.gene_aux_path,
+        gene_shard_dir=args.gene_shard_dir,
+        loader_output_path=args.loader_output,
+    )
+    print(f"Done! Share {package_path} together with its .loader.html opener.")
+
+
+def main():
+    argv = list(sys.argv[1:])
+    if argv and argv[0] in {"package-sidecar", "package"}:
+        _run_package_sidecar_cli(argv[1:])
+        return
+    _run_export_cli(argv)
 
 
 if __name__ == "__main__":

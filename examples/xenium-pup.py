@@ -5,11 +5,18 @@ This script demonstrates how to load Xenium spatial transcriptomics data
 and export it to an interactive HTML viewer.
 """
 
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from karospace import load_spatial_data, export_to_html
 
 # Path to your h5ad file
 # Update this path to point to your EAE/MANA data
-H5AD_PATH = '/Users/chrislangseth/work/karolinska_institutet/projects/xenium_mouse_embryo/derived_scanpy/step0_clustered.h5ad'#'/Volumes/processing2/RRmap/data/EAE_proseg_clustered_louvain_leiden_all_sections_annotated_rotated_scVI_mana_embedding_clustered.h5ad'
+H5AD_PATH = '/tmp/xenium_mouse_embryo.companion.ready.h5ad'#'/Volumes/processing2/xenium_mouse_embryo/derived_scanpy/step0_clustered.h5ad'#'/Volumes/processing2/RRmap/data/EAE_proseg_clustered_louvain_leiden_all_sections_annotated_rotated_scVI_mana_embedding_clustered.h5ad'
 
 # Load the dataset
 # - groupby: column in adata.obs that identifies each section
@@ -33,12 +40,13 @@ print(f"Available color columns: {dataset.obs_columns[:10]}...")  # first 10
 # - False: use the explicit genes list below
 USE_HVGS = True
 OUTLINE_BY = "condition"
+OUTPUT_PATH = "xenium-mouse-pup.html"
 
 # Export to HTML with full features
 # For your 107 sections with course/region metadata:
 export_to_html(
     dataset,
-    output_path="xenium-mouse-pup.html",
+    output_path=OUTPUT_PATH,
     color='leiden_0.5',  # Initial color (categorical)
     title="KaroSpace",
     min_panel_size=120,  # minimum panel width in pixels, grid auto-adjusts
@@ -76,7 +84,7 @@ export_to_html(
 # 4. Click to expand sections with zoom/pan
 # 5. Toggle categories on/off in the legend
 
-print("\nDone! Open eae_mana_viewer.html in a browser.")
+print(f"\nDone! Open {OUTPUT_PATH} in a browser.")
 print("Use the filter chips to show only specific courses (e.g., peak_III)")
 print("Use the Color dropdown to switch between different annotations")
 print("Type a gene name to view expression (must be in the genes list)")

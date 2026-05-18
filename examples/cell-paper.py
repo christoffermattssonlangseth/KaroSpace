@@ -5,6 +5,13 @@ This script demonstrates how to load Xenium spatial transcriptomics data
 and export it to an interactive HTML viewer.
 """
 
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from karospace import load_spatial_data, export_to_html
 
 # Path to your h5ad file
@@ -84,7 +91,7 @@ export_to_html(
 # 4. Click to expand sections with zoom/pan
 # 5. Toggle categories on/off in the legend
 
-print("\nDone! Open eae_mana_viewer.html in a browser.")
+print("\nDone! Open CELL-PAPER.html in a browser.")
 print("Use the filter chips to show only specific courses (e.g., peak_III)")
 print("Use the Color dropdown to switch between different annotations")
 print("Type a gene name to view expression (must be in the genes list)")

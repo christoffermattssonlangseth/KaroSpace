@@ -5,14 +5,241 @@ Handles loading h5ad files with scanpy and extracting spatial coordinates,
 gene expression, and metadata for visualization.
 """
 
+import json
+import os
+import shutil
+import tempfile
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple, Union
+
 import numpy as np
 import pandas as pd
 import scanpy as sc
-from scipy.sparse import issparse
 import scipy.sparse as sp
-from typing import Dict, List, Optional, Tuple, Union
-from dataclasses import dataclass, field
-import json
+from pandas.api.types import CategoricalDtype
+from scipy.sparse import issparse
+
+
+COMPANION_ANALYTICS_STORAGE = "json-string-v1"
+COMPANION_ANALYTICS_JSON_FIELDS = {
+    "marker_genes_json": "marker_genes",
+    "cluster_de_json": "cluster_de",
+    "neighbor_stats_json": "neighbor_stats",
+    "interaction_markers_json": "interaction_markers",
+    "gene_correlations_json": "gene_correlations",
+    "spatial_variable_genes_json": "spatial_variable_genes",
+    "cluster_gene_means_json": "cluster_gene_means",
+}
+
+
+def _extract_rank_genes_groups_values(
+    obj: Union[pd.DataFrame, np.ndarray, List],
+    group: str,
+    n: int,
+    cast=None,
+) -> List:
+    vals = []
+    if obj is None:
+        return vals
+    if isinstance(obj, pd.DataFrame):
+        if group in obj.columns:
+            vals = obj[group].tolist()
+        elif obj.shape[1] > 0:
+            vals = obj.iloc[:, 0].tolist()
+    elif isinstance(obj, np.ndarray) and obj.dtype.names:
+        g = group if group in obj.dtype.names else obj.dtype.names[0]
+        vals = list(obj[g])
+    else:
+        vals = list(np.asarray(obj).ravel())
+    vals = vals[:n]
+    if cast is None:
+        return vals
+    out = []
+    for v in vals:
+        try:
+            out.append(cast(v))
+        except Exception:
+            out.append(None)
+    return out
+
+
+def _compute_positive_fraction(
+    matrix,
+    mask: np.ndarray,
+    gene_positions: List[Optional[int]],
+) -> List[Optional[float]]:
+    out: List[Optional[float]] = [None] * len(gene_positions)
+    if matrix is None:
+        return out
+    mask = np.asarray(mask, dtype=bool)
+    if matrix.shape[0] == 0 or not mask.any():
+        return [0.0 if pos is not None and pos >= 0 else None for pos in gene_positions]
+
+    valid = [(idx, pos) for idx, pos in enumerate(gene_positions) if pos is not None and pos >= 0]
+    if not valid:
+        return out
+
+    valid_indices = [int(pos) for _, pos in valid]
+    subset = matrix[mask][:, valid_indices]
+    if issparse(subset):
+        pct = np.asarray((subset > 0).mean(axis=0)).ravel()
+    else:
+        pct = np.mean(np.asarray(subset) > 0, axis=0)
+    for (out_idx, _), value in zip(valid, np.asarray(pct).ravel()):
+        out[out_idx] = float(value)
+    return out
+
+
+def _strip_null_encoded_h5ad_entries(src_path: str) -> Tuple[str, List[str]]:
+    """Copy an h5ad file and remove null-encoded datasets unsupported by older anndata builds."""
+    import h5py
+
+    fd, tmp_path = tempfile.mkstemp(suffix=".h5ad")
+    os.close(fd)
+    shutil.copy2(src_path, tmp_path)
+
+    removed_paths: List[str] = []
+    with h5py.File(tmp_path, "r+") as handle:
+        def _walk(group, prefix: str = "") -> None:
+            for key in list(group.keys()):
+                obj = group[key]
+                path = f"{prefix}/{key}" if prefix else f"/{key}"
+                if obj.attrs.get("encoding-type") == "null":
+                    removed_paths.append(path)
+                    del group[key]
+                    continue
+                if isinstance(obj, h5py.Group):
+                    _walk(obj, path)
+
+        _walk(handle)
+
+    return tmp_path, removed_paths
+
+
+def _read_h5ad_with_fallback(path: str) -> sc.AnnData:
+    """Read h5ad, retrying with null-encoded uns entries stripped if needed."""
+    try:
+        return sc.read_h5ad(path)
+    except PermissionError as exc:
+        message = f"Unable to read h5ad file: {path}."
+        if str(path).startswith("/Volumes/"):
+            message += (
+                " macOS denied access to the mounted volume. Grant your terminal or IDE access "
+                "to external/removable volumes or Full Disk Access, or copy the file to a local "
+                "path such as ~/Downloads and retry."
+            )
+        else:
+            message += (
+                " The OS denied access. Check file permissions for the current process or copy "
+                "the file to a readable local path and retry."
+            )
+        raise PermissionError(message) from exc
+    except Exception as exc:
+        if "encoding_type='null'" not in str(exc):
+            raise
+
+        print("  Detected unsupported null-encoded H5AD fields; retrying with a sanitized temporary copy...")
+        temp_path = None
+        try:
+            temp_path, removed_paths = _strip_null_encoded_h5ad_entries(path)
+            if removed_paths:
+                print(f"  Removed {len(removed_paths)} null field(s): {', '.join(removed_paths)}")
+            return sc.read_h5ad(temp_path)
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                os.remove(temp_path)
+
+
+def _normalize_uns_scalar(value: Any) -> Any:
+    """Normalize AnnData uns scalars/arrays to plain Python values when possible."""
+    while isinstance(value, np.ndarray) and value.ndim == 0:
+        value = value.item()
+    if isinstance(value, np.ndarray):
+        if value.size == 1:
+            return value.reshape(()).item()
+        return value
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, memoryview):
+        return value.tobytes()
+    if isinstance(value, bytearray):
+        return bytes(value)
+    return value
+
+
+def _normalize_uns_text(value: Any) -> Optional[str]:
+    value = _normalize_uns_scalar(value)
+    if value is None:
+        return None
+    if isinstance(value, np.ndarray):
+        if value.size != 1:
+            return None
+        value = value.reshape(()).item()
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
+def _normalize_uns_text_list(value: Any) -> List[str]:
+    value = _normalize_uns_scalar(value)
+    if value is None:
+        return []
+    if isinstance(value, np.ndarray):
+        items = value.ravel().tolist()
+    elif isinstance(value, (list, tuple)):
+        items = list(value)
+    else:
+        items = [value]
+
+    normalized: List[str] = []
+    for item in items:
+        text = _normalize_uns_text(item)
+        if text is None:
+            continue
+        text = text.strip()
+        if text:
+            normalized.append(text)
+    return normalized
+
+
+def _load_companion_analytics(adata) -> Dict[str, Any]:
+    """Load precomputed viewer analytics emitted by KaroSpaceCompanion from adata.uns."""
+    uns = getattr(adata, "uns", None)
+    if uns is None or "karospace_companion" not in uns:
+        return {}
+
+    companion = uns.get("karospace_companion")
+    if companion is None:
+        return {}
+    if not hasattr(companion, "get"):
+        try:
+            companion = dict(companion)
+        except Exception:
+            return {}
+
+    storage = _normalize_uns_text(companion.get("analytics_storage"))
+    if storage != COMPANION_ANALYTICS_STORAGE:
+        return {}
+
+    analytics: Dict[str, Any] = {}
+    if "analytics_columns" in companion:
+        analytics["analytics_columns"] = _normalize_uns_text_list(companion.get("analytics_columns"))
+
+    for uns_key, analytics_key in COMPANION_ANALYTICS_JSON_FIELDS.items():
+        if uns_key not in companion:
+            continue
+        raw = _normalize_uns_text(companion.get(uns_key))
+        if raw is None or not raw.strip():
+            continue
+        try:
+            analytics[analytics_key] = json.loads(raw)
+        except Exception as exc:
+            print(
+                f"  Warning: Could not parse KaroSpaceCompanion analytics field "
+                f"'{uns_key}': {exc}"
+            )
+
+    return analytics
 
 
 @dataclass
@@ -38,6 +265,38 @@ class SectionData:
 
 
 @dataclass
+class Modality:
+    """One modality (RNA, protein, etc.) — n_cells × n_features matrix + var."""
+    name: str
+    matrix: Any
+    var: pd.DataFrame
+    layers: Dict[str, Any] = field(default_factory=dict)
+    value_kind: str = "counts"  # 'counts' (RNA-like) or 'intensity' (protein-like)
+    label: Optional[str] = None
+
+    @property
+    def feature_names(self) -> List[str]:
+        return list(self.var.index)
+
+    @property
+    def n_features(self) -> int:
+        return int(self.matrix.shape[1])
+
+    def feature_position(self, name: str) -> int:
+        return self.feature_names.index(name)
+
+    def get_feature_vector(self, name: str) -> np.ndarray:
+        idx = self.feature_position(name)
+        source = self.layers.get("normalized")
+        if source is None:
+            source = self.matrix
+        col = source[:, idx]
+        if issparse(col):
+            return np.asarray(col.toarray()).ravel()
+        return np.asarray(col).ravel()
+
+
+@dataclass
 class SpatialDataset:
     """Container for spatial transcriptomics dataset."""
     adata: sc.AnnData
@@ -47,6 +306,8 @@ class SpatialDataset:
     var_names: List[str]
     metadata_columns: List[str]
     metadata_value_order: Optional[Dict[str, List[str]]] = None
+    modalities: Dict[str, Modality] = field(default_factory=dict)
+    default_modality: str = "rna"
 
     @property
     def n_sections(self) -> int:
@@ -61,11 +322,22 @@ class SpatialDataset:
         """Check if UMAP coordinates are available."""
         return "X_umap" in self.adata.obsm
 
+    def get_companion_analytics(self) -> Dict[str, Any]:
+        """Return normalized KaroSpaceCompanion analytics embedded in adata.uns."""
+        return _load_companion_analytics(self.adata)
+
+    def _resolve_modality(self, modality: Optional[str]) -> Optional[Modality]:
+        if not self.modalities:
+            return None
+        name = modality or self.default_modality
+        return self.modalities.get(name)
+
     def get_color_data(
         self,
         color: str,
         vmin: Optional[float] = None,
-        vmax: Optional[float] = None
+        vmax: Optional[float] = None,
+        modality: Optional[str] = None,
     ) -> Tuple[np.ndarray, bool, Optional[List[str]]]:
         """
         Get color values for all cells.
@@ -73,9 +345,11 @@ class SpatialDataset:
         Parameters
         ----------
         color : str
-            Column in obs or gene name
+            Column in obs or feature name within the active modality
         vmin, vmax : float, optional
             Min/max for continuous data
+        modality : str, optional
+            Modality name to look up the feature in. Defaults to ``default_modality``.
 
         Returns
         -------
@@ -88,7 +362,7 @@ class SpatialDataset:
         """
         if color in self.adata.obs.columns:
             col = self.adata.obs[color]
-            if pd.api.types.is_categorical_dtype(col):
+            if isinstance(col.dtype, CategoricalDtype):
                 categories = list(col.cat.categories)
                 values = col.cat.codes.to_numpy().astype(float)
                 # Handle NaN codes (-1)
@@ -104,8 +378,13 @@ class SpatialDataset:
                 values = cat.cat.codes.to_numpy().astype(float)
                 values[values < 0] = np.nan
                 return values, False, categories
-        elif color in self.adata.var_names:
-            # Gene expression (prefer normalized layer when available)
+
+        mod = self._resolve_modality(modality)
+        if mod is not None and color in mod.feature_names:
+            return mod.get_feature_vector(color), True, None
+
+        if color in self.adata.var_names:
+            # Back-compat fallback when modality registry is unpopulated.
             gene_idx = self.adata.var_names.get_loc(color)
             expr_layer = None
             if "normalized" in self.adata.layers:
@@ -116,8 +395,8 @@ class SpatialDataset:
             else:
                 values = np.asarray(x).ravel()
             return values, True, None
-        else:
-            raise KeyError(f"{color!r} not found in obs columns or var_names")
+
+        raise KeyError(f"{color!r} not found in obs columns or modality {modality or self.default_modality!r}")
 
     def get_section_indices(self) -> Dict[str, np.ndarray]:
         """Get cell indices for each section."""
@@ -161,6 +440,450 @@ class SpatialDataset:
                     filters[col] = sorted(unique_vals)
         return filters
 
+    def _get_export_section_indices(self, downsample: Optional[int] = None) -> Dict[str, np.ndarray]:
+        """Return per-section obs indices used for export, including deterministic downsampling."""
+        section_indices = self.get_section_indices()
+        export_indices: Dict[str, np.ndarray] = {}
+        for section in self.sections:
+            idx = section_indices[section.section_id]
+            if downsample and len(idx) > downsample:
+                rng = np.random.default_rng(42)
+                idx = rng.choice(idx, size=downsample, replace=False)
+                idx = np.sort(idx)
+            export_indices[section.section_id] = np.asarray(idx)
+        return export_indices
+
+    def _collect_gene_data(
+        self,
+        genes: Optional[List[str]] = None,
+        modality: Optional[str] = None,
+    ) -> Dict[str, Dict[str, Union[np.ndarray, float]]]:
+        """Collect feature vectors and ranges for export within a modality."""
+        gene_data: Dict[str, Dict[str, Union[np.ndarray, float]]] = {}
+        mod = self._resolve_modality(modality)
+        feature_set = set(mod.feature_names) if mod is not None else set(self.adata.var_names)
+        for gene in genes or []:
+            if gene not in feature_set:
+                continue
+            try:
+                vals, _, _ = self.get_color_data(gene, modality=modality)
+                finite = np.isfinite(vals)
+                gene_vmin = float(np.nanmin(vals[finite])) if finite.any() else 0.0
+                gene_vmax = float(np.nanmax(vals[finite])) if finite.any() else 1.0
+                gene_data[gene] = {
+                    "values": vals,
+                    "vmin": gene_vmin,
+                    "vmax": gene_vmax,
+                }
+            except Exception as e:
+                print(f"  Warning: Could not load feature '{gene}': {e}")
+        return gene_data
+
+    @staticmethod
+    def _resolve_gene_encodings(
+        gene_data: Dict[str, Dict[str, Union[np.ndarray, float]]],
+        gene_encoding: str,
+        gene_sparse_zero_threshold: float,
+    ) -> Dict[str, str]:
+        gene_encodings: Dict[str, str] = {}
+        for gene, gdata in gene_data.items():
+            if gene_encoding == "dense":
+                gene_encodings[gene] = "dense"
+            elif gene_encoding == "sparse":
+                gene_encodings[gene] = "sparse"
+            else:
+                vals = np.asarray(gdata["values"])
+                finite = np.isfinite(vals)
+                nonzero = finite & (vals != 0)
+                zero_frac = 1.0
+                if vals.size:
+                    zero_frac = 1.0 - (float(np.count_nonzero(nonzero)) / float(vals.size))
+                gene_encodings[gene] = "sparse" if zero_frac >= float(gene_sparse_zero_threshold) else "dense"
+        return gene_encodings
+
+    @staticmethod
+    def _validate_gene_export_options(
+        gene_encoding: str,
+        gene_sparse_zero_threshold: float,
+        gene_sparse_pack_min_nnz: int,
+    ) -> None:
+        gene_encoding = str(gene_encoding or "auto").lower()
+        if gene_encoding not in {"auto", "dense", "sparse"}:
+            raise ValueError("gene_encoding must be one of: 'auto', 'dense', 'sparse'")
+        if not (0.0 <= float(gene_sparse_zero_threshold) <= 1.0):
+            raise ValueError("gene_sparse_zero_threshold must be between 0 and 1")
+        if int(gene_sparse_pack_min_nnz) < 0:
+            raise ValueError("gene_sparse_pack_min_nnz must be >= 0")
+
+    @staticmethod
+    def _validate_gene_value_encoding(gene_value_encoding: str) -> str:
+        normalized = str(gene_value_encoding or "float32").lower()
+        if normalized not in {"float32", "uint16", "uint8"}:
+            raise ValueError("gene_value_encoding must be one of: 'float32', 'uint16', 'uint8'")
+        return normalized
+
+    @staticmethod
+    def _quantize_to_uint(values: np.ndarray, vmin: float, vmax: float, max_code: int, dtype) -> np.ndarray:
+        arr = np.asarray(values, dtype=np.float32)
+        finite = np.isfinite(arr)
+        out = np.zeros(arr.shape, dtype=dtype)
+        if not finite.any():
+            return out
+        if not np.isfinite(vmin):
+            vmin = float(np.nanmin(arr[finite])) if finite.any() else 0.0
+        if not np.isfinite(vmax):
+            vmax = float(np.nanmax(arr[finite])) if finite.any() else vmin
+        if vmax <= vmin:
+            return out
+        max_code = int(max_code)
+        scale = np.float32(max_code / (float(vmax) - float(vmin)))
+        clipped = np.clip(np.rint((arr[finite] - np.float32(vmin)) * scale), 0, max_code)
+        out[finite] = clipped.astype(dtype, copy=False)
+        return out
+
+    @classmethod
+    def _quantize_values(cls, values: np.ndarray, vmin: float, vmax: float, value_encoding: str) -> np.ndarray:
+        if value_encoding == "uint16":
+            return cls._quantize_to_uint(values, vmin, vmax, 65535, np.uint16)
+        if value_encoding == "uint8":
+            return cls._quantize_to_uint(values, vmin, vmax, 255, np.uint8)
+        raise ValueError(f"Unsupported quantized gene value encoding: {value_encoding}")
+
+    @staticmethod
+    def _estimate_packed_dense_bytes(n_values: int, nan_count: int = 0, value_bytes: int = 4) -> int:
+        return max(0, int(n_values)) * max(1, int(value_bytes)) + max(0, int(nan_count)) * 4
+
+    @staticmethod
+    def _estimate_packed_sparse_bytes(nnz: int, nan_count: int = 0, value_bytes: int = 4) -> int:
+        return max(0, int(nnz)) * (4 + max(1, int(value_bytes))) + max(0, int(nan_count)) * 4
+
+    @staticmethod
+    def _gene_value_encoding_bytes(gene_value_encoding: str) -> int:
+        if gene_value_encoding == "uint16":
+            return 2
+        if gene_value_encoding == "uint8":
+            return 1
+        return 4
+
+    @classmethod
+    def _resolve_sidecar_gene_encoding_mode(
+        cls,
+        resolved_gene_encoding: str,
+        n_values: int,
+        nonzero_count: int,
+        nan_count: int,
+        gene_sparse_zero_threshold: float,
+        gene_value_encoding: str,
+    ) -> str:
+        if resolved_gene_encoding == "dense":
+            return "dense"
+        if resolved_gene_encoding == "sparse":
+            return "sparse"
+
+        zero_frac = 1.0
+        if n_values:
+            zero_frac = 1.0 - (float(nonzero_count) / float(n_values))
+
+        # Sidecar payloads compare packed dense float32 buffers against packed
+        # sparse index/value buffers. Prefer sparse whenever it is explicitly
+        # requested via zero-threshold or whenever it is estimated to be smaller.
+        value_bytes = cls._gene_value_encoding_bytes(gene_value_encoding)
+        dense_bytes = cls._estimate_packed_dense_bytes(n_values, nan_count, value_bytes=value_bytes)
+        sparse_bytes = cls._estimate_packed_sparse_bytes(nonzero_count, nan_count, value_bytes=value_bytes)
+        if zero_frac >= float(gene_sparse_zero_threshold) or sparse_bytes <= dense_bytes:
+            return "sparse"
+        return "dense"
+
+    @staticmethod
+    def _serialize_gene_section_values(
+        section_vals: np.ndarray,
+        mode: str,
+        gene_sparse_pack: bool,
+        gene_sparse_pack_min_nnz: int,
+        b64_encoder,
+    ) -> Dict:
+        if mode == "sparse":
+            finite = np.isfinite(section_vals)
+            nonzero = finite & (section_vals != 0)
+            nz_idx = np.flatnonzero(nonzero).astype(np.uint32)
+            nz_vals = np.asarray(section_vals[nonzero], dtype=np.float32)
+            if bool(gene_sparse_pack) and int(nz_idx.size) >= int(gene_sparse_pack_min_nnz):
+                sparse_entry = {
+                    "ib64": b64_encoder(np.asarray(nz_idx, dtype="<u4")),
+                    "vb64": b64_encoder(np.asarray(nz_vals, dtype="<f4")),
+                }
+            else:
+                sparse_entry = {
+                    "i": nz_idx.astype(int).tolist(),
+                    "v": nz_vals.astype(float).tolist(),
+                }
+            nan_idx = np.flatnonzero(np.isnan(section_vals)).astype(int)
+            if nan_idx.size:
+                sparse_entry["nan"] = nan_idx.tolist()
+            return {"sparse": sparse_entry}
+
+        return {
+            "dense": [float(v) if np.isfinite(v) else None for v in section_vals]
+        }
+
+    def to_gene_sidecar_data(
+        self,
+        genes: Optional[List[str]] = None,
+        downsample: Optional[int] = None,
+        export_indices: Optional[Dict[str, np.ndarray]] = None,
+        gene_encoding: str = "auto",
+        gene_value_encoding: str = "float32",
+        gene_sparse_zero_threshold: float = 0.8,
+        gene_sparse_pack: bool = True,
+        gene_sparse_pack_min_nnz: int = 256,
+        modality: Optional[str] = None,
+    ) -> Dict:
+        """Export a gene-major sidecar payload for downstream viewer loading."""
+        self._validate_gene_export_options(gene_encoding, gene_sparse_zero_threshold, gene_sparse_pack_min_nnz)
+        resolved_value_encoding = self._validate_gene_value_encoding(gene_value_encoding)
+        export_indices = export_indices or self._get_export_section_indices(downsample=downsample)
+
+        mod = self._resolve_modality(modality)
+        if mod is not None:
+            feature_pos = {n: i for i, n in enumerate(mod.feature_names)}
+            source_matrix = mod.layers.get("normalized", mod.matrix)
+        else:
+            feature_pos = {n: i for i, n in enumerate(self.adata.var_names)}
+            source_matrix = self.adata.layers["normalized"] if "normalized" in self.adata.layers else self.adata.X
+
+        unique_genes = []
+        seen = set()
+        for gene in genes or []:
+            if gene in seen or gene not in feature_pos:
+                continue
+            seen.add(gene)
+            unique_genes.append(gene)
+
+        def _b64(arr: np.ndarray) -> str:
+            import base64
+
+            carr = np.ascontiguousarray(arr)
+            return base64.b64encode(carr.tobytes(order="C")).decode("ascii")
+
+        genes_payload = {}
+        genes_meta = {}
+        gene_encodings: Dict[str, str] = {}
+        gene_value_encodings: Dict[str, str] = {}
+        if unique_genes:
+            gene_indices = [feature_pos[gene] for gene in unique_genes]
+            expr_layer = source_matrix
+            batch = expr_layer[:, gene_indices]
+            resolved_gene_encoding = str(gene_encoding or "auto").lower()
+
+            if issparse(batch):
+                batch_csr = batch.tocsr()
+                batch_csc = batch.tocsc()
+                section_batches = {
+                    section.section_id: batch_csr[export_indices[section.section_id], :].tocsc()
+                    for section in self.sections
+                }
+                n_obs = int(batch.shape[0])
+                for gene_pos, gene in enumerate(unique_genes):
+                    col = batch_csc.getcol(gene_pos)
+                    raw_vals = np.asarray(col.data, dtype=float).ravel()
+                    finite_vals = raw_vals[np.isfinite(raw_vals)]
+                    if finite_vals.size:
+                        raw_min = float(np.min(finite_vals))
+                        raw_max = float(np.max(finite_vals))
+                        has_implicit_zeros = int(np.count_nonzero(col.data != 0)) < n_obs
+                        gene_vmin = min(0.0, raw_min) if has_implicit_zeros else raw_min
+                        gene_vmax = max(0.0, raw_max) if has_implicit_zeros else raw_max
+                    else:
+                        gene_vmin = 0.0
+                        gene_vmax = 0.0
+
+                    if resolved_gene_encoding == "dense":
+                        mode = "dense"
+                    elif resolved_gene_encoding == "sparse":
+                        mode = "sparse"
+                    else:
+                        finite_mask = np.isfinite(raw_vals)
+                        nonzero_mask = finite_mask & (raw_vals != 0)
+                        mode = self._resolve_sidecar_gene_encoding_mode(
+                            resolved_gene_encoding=resolved_gene_encoding,
+                            n_values=n_obs,
+                            nonzero_count=int(np.count_nonzero(nonzero_mask)),
+                            nan_count=int(raw_vals.size - np.count_nonzero(finite_mask)),
+                            gene_sparse_zero_threshold=gene_sparse_zero_threshold,
+                            gene_value_encoding=resolved_value_encoding,
+                        )
+                    gene_encodings[gene] = mode
+                    gene_value_encodings[gene] = resolved_value_encoding
+
+                    sections_payload = {}
+                    for section in self.sections:
+                        sec_col = section_batches[section.section_id].getcol(gene_pos)
+                        if mode == "sparse":
+                            section_vals = np.asarray(sec_col.data, dtype=float).ravel()
+                            section_idx = np.asarray(sec_col.indices, dtype=np.int64).ravel()
+                            finite = np.isfinite(section_vals)
+                            nonzero = finite & (section_vals != 0)
+                            nz_idx = section_idx[nonzero].astype(np.uint32, copy=False)
+                            nz_vals = section_vals[nonzero].astype(np.float32, copy=False)
+                            if resolved_value_encoding in {"uint16", "uint8"}:
+                                quantized = self._quantize_values(nz_vals, gene_vmin, gene_vmax, resolved_value_encoding)
+                                sparse_entry = {
+                                    "ib64": _b64(np.asarray(nz_idx, dtype="<u4")),
+                                    ("vq16b64" if resolved_value_encoding == "uint16" else "vq8b64"): _b64(
+                                        np.asarray(
+                                            quantized,
+                                            dtype="<u2" if resolved_value_encoding == "uint16" else "u1",
+                                        )
+                                    ),
+                                }
+                            else:
+                                if bool(gene_sparse_pack) and int(nz_idx.size) >= int(gene_sparse_pack_min_nnz):
+                                    sparse_entry = {
+                                        "ib64": _b64(np.asarray(nz_idx, dtype="<u4")),
+                                        "vb64": _b64(np.asarray(nz_vals, dtype="<f4")),
+                                    }
+                                else:
+                                    sparse_entry = {
+                                        "i": nz_idx.astype(int).tolist(),
+                                        "v": nz_vals.astype(float).tolist(),
+                                    }
+                            nan_idx = section_idx[np.isnan(section_vals)].astype(int, copy=False)
+                            if nan_idx.size:
+                                sparse_entry["nan"] = nan_idx.tolist()
+                            sections_payload[section.section_id] = {"sparse": sparse_entry}
+                        else:
+                            dense_vals = np.asarray(sec_col.toarray(), dtype=np.float32).ravel()
+                            finite_mask = np.isfinite(dense_vals)
+                            if resolved_value_encoding in {"uint16", "uint8"}:
+                                quantized = self._quantize_values(
+                                    np.where(finite_mask, dense_vals, 0.0),
+                                    gene_vmin,
+                                    gene_vmax,
+                                    resolved_value_encoding,
+                                )
+                                dense_entry = {
+                                    ("dq16b64" if resolved_value_encoding == "uint16" else "dq8b64"): _b64(
+                                        np.asarray(
+                                            quantized,
+                                            dtype="<u2" if resolved_value_encoding == "uint16" else "u1",
+                                        )
+                                    )
+                                }
+                            else:
+                                dense_entry = {
+                                    "db64": _b64(
+                                        np.asarray(
+                                            np.where(finite_mask, dense_vals, 0.0),
+                                            dtype="<f4",
+                                        )
+                                    )
+                                }
+                            if not finite_mask.all():
+                                dense_entry["nan"] = np.flatnonzero(~finite_mask).astype(int).tolist()
+                            sections_payload[section.section_id] = dense_entry
+
+                    genes_payload[gene] = {"sections": sections_payload}
+                    genes_meta[gene] = {"vmin": gene_vmin, "vmax": gene_vmax}
+            else:
+                batch_dense = np.asarray(batch)
+                if batch_dense.ndim == 1:
+                    batch_dense = batch_dense.reshape(-1, 1)
+                for gene_pos, gene in enumerate(unique_genes):
+                    vals = np.asarray(batch_dense[:, gene_pos], dtype=float).ravel()
+                    finite = np.isfinite(vals)
+                    gene_vmin = float(np.nanmin(vals[finite])) if finite.any() else 0.0
+                    gene_vmax = float(np.nanmax(vals[finite])) if finite.any() else 0.0
+                    if resolved_gene_encoding == "dense":
+                        mode = "dense"
+                    elif resolved_gene_encoding == "sparse":
+                        mode = "sparse"
+                    else:
+                        nonzero = finite & (vals != 0)
+                        mode = self._resolve_sidecar_gene_encoding_mode(
+                            resolved_gene_encoding=resolved_gene_encoding,
+                            n_values=int(vals.size),
+                            nonzero_count=int(np.count_nonzero(nonzero)),
+                            nan_count=int(vals.size - np.count_nonzero(finite)),
+                            gene_sparse_zero_threshold=gene_sparse_zero_threshold,
+                            gene_value_encoding=resolved_value_encoding,
+                        )
+                    gene_encodings[gene] = mode
+                    gene_value_encodings[gene] = resolved_value_encoding
+
+                    sections_payload = {}
+                    for section in self.sections:
+                        idx = export_indices[section.section_id]
+                        section_vals = np.asarray(batch_dense[idx, gene_pos], dtype=np.float32).ravel()
+                        if mode == "dense":
+                            finite_mask = np.isfinite(section_vals)
+                            if resolved_value_encoding in {"uint16", "uint8"}:
+                                quantized = self._quantize_values(
+                                    np.where(finite_mask, section_vals, 0.0),
+                                    gene_vmin,
+                                    gene_vmax,
+                                    resolved_value_encoding,
+                                )
+                                dense_entry = {
+                                    ("dq16b64" if resolved_value_encoding == "uint16" else "dq8b64"): _b64(
+                                        np.asarray(
+                                            quantized,
+                                            dtype="<u2" if resolved_value_encoding == "uint16" else "u1",
+                                        )
+                                    )
+                                }
+                            else:
+                                dense_entry = {
+                                    "db64": _b64(
+                                        np.asarray(
+                                            np.where(finite_mask, section_vals, 0.0),
+                                            dtype="<f4",
+                                        )
+                                    )
+                                }
+                            if not finite_mask.all():
+                                dense_entry["nan"] = np.flatnonzero(~finite_mask).astype(int).tolist()
+                            sections_payload[section.section_id] = dense_entry
+                        else:
+                            finite_vals = np.isfinite(section_vals)
+                            nonzero = finite_vals & (section_vals != 0)
+                            nz_idx = np.flatnonzero(nonzero).astype(np.uint32)
+                            nz_vals = np.asarray(section_vals[nonzero], dtype=np.float32)
+                            if resolved_value_encoding in {"uint16", "uint8"}:
+                                quantized = self._quantize_values(nz_vals, gene_vmin, gene_vmax, resolved_value_encoding)
+                                sparse_entry = {
+                                    "ib64": _b64(np.asarray(nz_idx, dtype="<u4")),
+                                    ("vq16b64" if resolved_value_encoding == "uint16" else "vq8b64"): _b64(
+                                        np.asarray(
+                                            quantized,
+                                            dtype="<u2" if resolved_value_encoding == "uint16" else "u1",
+                                        )
+                                    ),
+                                }
+                            else:
+                                sections_payload[section.section_id] = self._serialize_gene_section_values(
+                                    section_vals=section_vals,
+                                    mode=mode,
+                                    gene_sparse_pack=gene_sparse_pack,
+                                    gene_sparse_pack_min_nnz=gene_sparse_pack_min_nnz,
+                                    b64_encoder=_b64,
+                                )
+                                continue
+                            nan_idx = np.flatnonzero(np.isnan(section_vals)).astype(int)
+                            if nan_idx.size:
+                                sparse_entry["nan"] = nan_idx.tolist()
+                            sections_payload[section.section_id] = {"sparse": sparse_entry}
+                    genes_payload[gene] = {"sections": sections_payload}
+                    genes_meta[gene] = {"vmin": gene_vmin, "vmax": gene_vmax}
+
+        return {
+            "format": "karospace-gene-sidecar-v1",
+            "modality": (mod.name if mod is not None else "rna"),
+            "genes_meta": genes_meta,
+            "gene_encodings": gene_encodings,
+            "gene_value_encodings": gene_value_encodings,
+            "genes": genes_payload,
+        }
+
     def to_json_data(
         self,
         color: str,
@@ -177,6 +900,11 @@ class SpatialDataset:
         section_array_pack_min_len: int = 1024,
         marker_genes_groupby: Optional[List[str]] = None,
         marker_genes_top_n: int = 30,
+        cluster_de_groupby: Optional[List[str]] = None,
+        cluster_de_top_n: int = 20,
+        cluster_de_method: str = "wilcoxon",
+        cluster_de_layer: Optional[str] = "normalized",
+        cluster_de_min_cells: int = 20,
         neighbor_stats_groupby: Optional[List[str]] = None,
         neighbor_stats_permutations: int = 0,
         neighbor_stats_seed: int = 0,
@@ -187,6 +915,8 @@ class SpatialDataset:
         interaction_markers_min_neighbors: int = 1,
         interaction_markers_method: str = "wilcoxon",
         interaction_markers_layer: Optional[str] = "normalized",
+        section_rotations: Optional[Dict[str, float]] = None,
+        deconvolutions: Optional[Dict[str, str]] = None,
     ) -> Dict:
         """
         Export dataset to JSON-serializable format for the HTML viewer.
@@ -226,6 +956,16 @@ class SpatialDataset:
             Obs columns to compute marker genes for (categorical only)
         marker_genes_top_n : int
             Number of top marker genes to keep per group
+        cluster_de_groupby : list, optional
+            Obs columns to compute pairwise cluster DE for (categorical only)
+        cluster_de_top_n : int
+            Number of top DE genes to keep per cluster pair
+        cluster_de_method : str
+            Differential expression method for scanpy.tl.rank_genes_groups (e.g. "wilcoxon", "t-test").
+        cluster_de_layer : str, optional
+            AnnData layer to use for cluster DE, if available (default: "normalized").
+        cluster_de_min_cells : int
+            Minimum cells required in both clusters to report pairwise DE.
         neighbor_stats_groupby : list, optional
             Obs columns to compute neighbor composition stats for (categorical only)
         neighbor_stats_permutations : int
@@ -254,20 +994,26 @@ class SpatialDataset:
             JSON-serializable data structure
         """
         coords = np.asarray(self.adata.obsm["spatial"])[:, :2]
-        section_indices = self.get_section_indices()
+        export_section_indices = self._get_export_section_indices(downsample=downsample)
 
         # Get UMAP coordinates if available
         umap_coords = None
         umap_bounds = None
         if self.has_umap:
             umap_coords = np.asarray(self.adata.obsm["X_umap"])[:, :2]
-            # Compute global UMAP bounds for consistent scaling across all sections
-            umap_bounds = {
-                "xmin": float(umap_coords[:, 0].min()),
-                "xmax": float(umap_coords[:, 0].max()),
-                "ymin": float(umap_coords[:, 1].min()),
-                "ymax": float(umap_coords[:, 1].max()),
-            }
+            finite_umap_mask = np.isfinite(umap_coords).all(axis=1)
+            if finite_umap_mask.any():
+                finite_umap = umap_coords[finite_umap_mask]
+                # Compute global UMAP bounds from finite rows only so a few bad
+                # embedding values do not poison the entire exported viewer.
+                umap_bounds = {
+                    "xmin": float(finite_umap[:, 0].min()),
+                    "xmax": float(finite_umap[:, 0].max()),
+                    "ymin": float(finite_umap[:, 1].min()),
+                    "ymax": float(finite_umap[:, 1].max()),
+                }
+            else:
+                umap_coords = None
 
         # Get neighborhood graph if available
         neighbor_graph = None
@@ -323,31 +1069,50 @@ class SpatialDataset:
             except Exception as e:
                 print(f"  Warning: Could not load color '{col}': {e}")
 
+        # Pre-compute deconvolution proportion matrices (per-cell × K cell types)
+        # deconvolutions: {display_name: obsm_key} where adata.obsm[obsm_key] is (N, K)
+        decon_data: Dict[str, Dict[str, Any]] = {}
+        if deconvolutions:
+            for decon_name, obsm_key in deconvolutions.items():
+                if not isinstance(obsm_key, str) or obsm_key not in self.adata.obsm:
+                    print(f"  Warning: deconvolution obsm key '{obsm_key}' not found; skipping '{decon_name}'.")
+                    continue
+                raw = self.adata.obsm[obsm_key]
+                if hasattr(raw, "columns"):
+                    cat_labels = [str(c) for c in raw.columns]
+                    matrix = np.asarray(raw.to_numpy(), dtype=np.float32)
+                else:
+                    matrix = np.asarray(raw, dtype=np.float32)
+                    uns_cols_key = f"{obsm_key}_columns"
+                    if uns_cols_key in self.adata.uns:
+                        cat_labels = [str(c) for c in self.adata.uns[uns_cols_key]]
+                    else:
+                        cat_labels = [f"comp_{i}" for i in range(matrix.shape[1])]
+                if matrix.ndim != 2 or matrix.shape[0] != self.adata.n_obs:
+                    print(f"  Warning: deconvolution '{decon_name}' has bad shape {matrix.shape}; skipping.")
+                    continue
+                if len(cat_labels) != matrix.shape[1]:
+                    cat_labels = [f"comp_{i}" for i in range(matrix.shape[1])]
+                # Row-normalize so wedges sum to 1; tolerate already-normalized inputs.
+                row_sums = matrix.sum(axis=1, keepdims=True)
+                row_sums = np.where(np.isfinite(row_sums) & (row_sums > 0), row_sums, 1.0)
+                matrix = matrix / row_sums
+                # Compute dominant component per cell (categorical code, NaN where row is all-zero/NaN)
+                dominant = np.argmax(matrix, axis=1).astype(np.float32)
+                row_max = matrix.max(axis=1)
+                dominant[~np.isfinite(row_max) | (row_max <= 0)] = np.nan
+                decon_data[decon_name] = {
+                    "matrix": matrix.astype(np.float32, copy=False),
+                    "categories": cat_labels,
+                    "k": int(matrix.shape[1]),
+                    "dominant": dominant,
+                }
+
         # Pre-compute gene expression data
-        gene_data = {}
-        if genes:
-            for gene in genes:
-                if gene in self.adata.var_names:
-                    try:
-                        vals, _, _ = self.get_color_data(gene)
-                        finite = np.isfinite(vals)
-                        gene_vmin = float(np.nanmin(vals[finite])) if finite.any() else 0.0
-                        gene_vmax = float(np.nanmax(vals[finite])) if finite.any() else 1.0
-                        gene_data[gene] = {
-                            "values": vals,
-                            "vmin": gene_vmin,
-                            "vmax": gene_vmax,
-                        }
-                    except Exception as e:
-                        print(f"  Warning: Could not load gene '{gene}': {e}")
+        gene_data = self._collect_gene_data(genes)
 
         gene_encoding = str(gene_encoding or "auto").lower()
-        if gene_encoding not in {"auto", "dense", "sparse"}:
-            raise ValueError("gene_encoding must be one of: 'auto', 'dense', 'sparse'")
-        if not (0.0 <= float(gene_sparse_zero_threshold) <= 1.0):
-            raise ValueError("gene_sparse_zero_threshold must be between 0 and 1")
-        if int(gene_sparse_pack_min_nnz) < 0:
-            raise ValueError("gene_sparse_pack_min_nnz must be >= 0")
+        self._validate_gene_export_options(gene_encoding, gene_sparse_zero_threshold, gene_sparse_pack_min_nnz)
         if int(section_array_pack_min_len) < 0:
             raise ValueError("section_array_pack_min_len must be >= 0")
         if int(interaction_markers_top_targets) < 1:
@@ -358,22 +1123,12 @@ class SpatialDataset:
             raise ValueError("interaction_markers_min_cells must be >= 1")
         if int(interaction_markers_min_neighbors) < 1:
             raise ValueError("interaction_markers_min_neighbors must be >= 1")
+        if int(cluster_de_top_n) < 1:
+            raise ValueError("cluster_de_top_n must be >= 1")
+        if int(cluster_de_min_cells) < 1:
+            raise ValueError("cluster_de_min_cells must be >= 1")
 
-        gene_encodings: Dict[str, str] = {}
-        if gene_data:
-            for gene, gdata in gene_data.items():
-                if gene_encoding == "dense":
-                    gene_encodings[gene] = "dense"
-                elif gene_encoding == "sparse":
-                    gene_encodings[gene] = "sparse"
-                else:
-                    vals = np.asarray(gdata["values"])
-                    finite = np.isfinite(vals)
-                    nonzero = finite & (vals != 0)
-                    zero_frac = 1.0
-                    if vals.size:
-                        zero_frac = 1.0 - (float(np.count_nonzero(nonzero)) / float(vals.size))
-                    gene_encodings[gene] = "sparse" if zero_frac >= float(gene_sparse_zero_threshold) else "dense"
+        gene_encodings = self._resolve_gene_encodings(gene_data, gene_encoding, gene_sparse_zero_threshold)
 
         def _b64(arr: np.ndarray) -> str:
             import base64
@@ -396,19 +1151,207 @@ class SpatialDataset:
 
         # Get metadata filters
         metadata_filters = self.get_metadata_filters()
+        companion_analytics = self.get_companion_analytics()
+
+        def _prepare_neighbor_stats_groupby(
+            groupby_name: str,
+            precomputed_entry: Optional[dict] = None,
+        ) -> Tuple[Optional[dict], Optional[dict]]:
+            if groupby_name not in self.adata.obs.columns:
+                print(f"  Warning: neighbor stats groupby '{groupby_name}' not found in obs.")
+                return None, None
+
+            col = self.adata.obs[groupby_name]
+            if pd.api.types.is_numeric_dtype(col):
+                print(f"  Warning: neighbor stats '{groupby_name}' is numeric; skipping.")
+                return None, None
+            if not isinstance(col.dtype, CategoricalDtype):
+                col = col.astype("category")
+
+            categories = [str(cat) for cat in col.cat.categories]
+            codes = col.cat.codes.to_numpy()
+            valid_mask = codes >= 0
+            if not valid_mask.any():
+                print(f"  Warning: neighbor stats '{groupby_name}' has no valid categories.")
+                return None, None
+
+            if valid_mask.all():
+                graph = neighbor_graph
+                labels = codes
+                obs_idx = np.arange(self.adata.n_obs, dtype=np.int64)
+            else:
+                obs_idx = np.flatnonzero(valid_mask).astype(np.int64)
+                graph = neighbor_graph[obs_idx][:, obs_idx]
+                labels = codes[valid_mask]
+
+            n_cells = np.bincount(labels, minlength=len(categories)).astype(int)
+            if graph is None or graph.shape[0] == 0:
+                print(f"  Warning: neighbor stats '{groupby_name}' has empty graph.")
+                return None, None
+
+            def _build_context(entry_counts, entry_zscore, entry_n_cells, entry_mean_degree):
+                return {
+                    "categories": categories,
+                    "labels": labels.astype(np.int32, copy=False),
+                    "graph": graph.tocsr(),
+                    "obs_idx": obs_idx,
+                    "counts": entry_counts,
+                    "zscore": entry_zscore,
+                    "n_cells": entry_n_cells,
+                    "mean_degree": entry_mean_degree,
+                }
+
+            if precomputed_entry is not None:
+                companion_categories = [
+                    str(cat) for cat in (precomputed_entry.get("categories") or [])
+                ]
+                if companion_categories and companion_categories != categories:
+                    print(
+                        f"  Warning: companion neighbor stats '{groupby_name}' "
+                        "category mismatch; recomputing."
+                    )
+                else:
+                    try:
+                        counts = np.asarray(precomputed_entry.get("counts"), dtype=float)
+                        if counts.shape != (len(categories), len(categories)):
+                            raise ValueError("counts shape mismatch")
+
+                        n_cells_ctx = n_cells
+                        if precomputed_entry.get("n_cells") is not None:
+                            n_cells_ctx = np.asarray(precomputed_entry.get("n_cells"), dtype=int)
+                            if n_cells_ctx.shape != (len(categories),):
+                                raise ValueError("n_cells shape mismatch")
+
+                        if precomputed_entry.get("mean_degree") is None:
+                            mean_degree = np.zeros(len(categories), dtype=float)
+                            valid_cells = n_cells_ctx > 0
+                            mean_degree[valid_cells] = (
+                                counts.sum(axis=1)[valid_cells] / n_cells_ctx[valid_cells]
+                            )
+                        else:
+                            mean_degree = np.asarray(
+                                precomputed_entry.get("mean_degree"),
+                                dtype=float,
+                            )
+                            if mean_degree.shape != (len(categories),):
+                                raise ValueError("mean_degree shape mismatch")
+
+                        zscore = None
+                        if precomputed_entry.get("zscore") is not None:
+                            zscore = np.asarray(precomputed_entry.get("zscore"), dtype=float)
+                            if zscore.shape != counts.shape:
+                                raise ValueError("zscore shape mismatch")
+
+                        entry = {
+                            "categories": categories,
+                            "counts": counts.tolist(),
+                            "n_cells": n_cells_ctx.astype(int).tolist(),
+                            "mean_degree": mean_degree.tolist(),
+                        }
+                        if precomputed_entry.get("perm_n") is not None:
+                            entry["perm_n"] = int(precomputed_entry.get("perm_n"))
+                        if zscore is not None:
+                            entry["zscore"] = zscore.tolist()
+
+                        return entry, _build_context(counts, zscore, n_cells_ctx, mean_degree)
+                    except Exception as exc:
+                        print(
+                            f"  Warning: companion neighbor stats '{groupby_name}' "
+                            f"malformed; recomputing ({exc})."
+                        )
+
+            onehot = sp.csr_matrix(
+                (np.ones(len(labels), dtype=float), (np.arange(len(labels)), labels)),
+                shape=(len(labels), len(categories)),
+            )
+            counts = onehot.T.dot(graph).dot(onehot)
+            if issparse(counts):
+                counts = counts.toarray()
+            counts = np.asarray(counts, dtype=float)
+            row_sums = counts.sum(axis=1)
+            mean_degree = np.zeros(len(categories), dtype=float)
+            valid_cells = n_cells > 0
+            mean_degree[valid_cells] = row_sums[valid_cells] / n_cells[valid_cells]
+
+            zscore = None
+            entry = {
+                "categories": categories,
+                "counts": counts.tolist(),
+                "n_cells": n_cells.tolist(),
+                "mean_degree": mean_degree.tolist(),
+            }
+            if neighbor_stats_permutations and neighbor_stats_permutations > 0:
+                rng = np.random.default_rng(int(neighbor_stats_seed))
+                perm_mean = np.zeros_like(counts, dtype=float)
+                perm_m2 = np.zeros_like(counts, dtype=float)
+                for i in range(int(neighbor_stats_permutations)):
+                    perm_labels = rng.permutation(labels)
+                    perm_onehot = sp.csr_matrix(
+                        (
+                            np.ones(len(perm_labels), dtype=float),
+                            (np.arange(len(perm_labels)), perm_labels),
+                        ),
+                        shape=(len(perm_labels), len(categories)),
+                    )
+                    perm_counts = perm_onehot.T.dot(graph).dot(perm_onehot)
+                    if issparse(perm_counts):
+                        perm_counts = perm_counts.toarray()
+                    perm_counts = np.asarray(perm_counts, dtype=float)
+                    delta = perm_counts - perm_mean
+                    perm_mean += delta / (i + 1)
+                    perm_m2 += delta * (perm_counts - perm_mean)
+                if neighbor_stats_permutations > 1:
+                    perm_var = perm_m2 / (neighbor_stats_permutations - 1)
+                else:
+                    perm_var = np.zeros_like(counts, dtype=float)
+                perm_std = np.sqrt(perm_var)
+                zscore = np.zeros_like(counts, dtype=float)
+                valid_std = perm_std > 0
+                zscore[valid_std] = (
+                    counts[valid_std] - perm_mean[valid_std]
+                ) / perm_std[valid_std]
+                entry["perm_n"] = int(neighbor_stats_permutations)
+                entry["zscore"] = zscore.tolist()
+
+            return entry, _build_context(counts, zscore, n_cells, mean_degree)
 
         # Compute marker genes for requested groupby columns
         marker_genes = {}
-        if marker_genes_groupby:
-            for groupby in marker_genes_groupby:
-                if groupby not in self.adata.obs.columns:
-                    print(f"  Warning: marker_genes groupby '{groupby}' not found in obs.")
+        pending_marker_groupby = list(marker_genes_groupby or [])
+        companion_marker_genes = companion_analytics.get("marker_genes")
+        if pending_marker_groupby and isinstance(companion_marker_genes, dict):
+            reused_marker_groupby = [
+                groupby_name
+                for groupby_name in pending_marker_groupby
+                if groupby_name in companion_marker_genes
+            ]
+            if reused_marker_groupby:
+                print(
+                    f"Using KaroSpaceCompanion marker genes for {len(reused_marker_groupby)} "
+                    f"groupby column{'s' if len(reused_marker_groupby) != 1 else ''}..."
+                )
+                for groupby_name in reused_marker_groupby:
+                    marker_genes[groupby_name] = companion_marker_genes[groupby_name]
+            pending_marker_groupby = [
+                groupby_name
+                for groupby_name in pending_marker_groupby
+                if groupby_name not in marker_genes
+            ]
+        if pending_marker_groupby:
+            print(
+                f"Computing marker genes for {len(pending_marker_groupby)} "
+                f"groupby column{'s' if len(pending_marker_groupby) != 1 else ''}..."
+            )
+            for groupby_name in pending_marker_groupby:
+                print(f"  - marker genes: {groupby_name}")
+                if groupby_name not in self.adata.obs.columns:
+                    print(f"  Warning: marker_genes groupby '{groupby_name}' not found in obs.")
                     continue
-                col = self.adata.obs[groupby]
-                if not pd.api.types.is_categorical_dtype(col):
-                    self.adata.obs[groupby] = col.astype("category")
-                key_added = f"rank_genes_groups_{groupby}"
-                alt_key_added = f"rank_genes_groups__{groupby}"
+                col = self.adata.obs[groupby_name]
+                if not isinstance(col.dtype, CategoricalDtype):
+                    self.adata.obs[groupby_name] = col.astype("category")
+                key_added = f"rank_genes_groups_{groupby_name}"
+                alt_key_added = f"rank_genes_groups__{groupby_name}"
                 existing_key = None
                 if key_added in self.adata.uns:
                     existing_key = key_added
@@ -419,140 +1362,309 @@ class SpatialDataset:
                     try:
                         sc.tl.rank_genes_groups(
                             self.adata,
-                            groupby=groupby,
+                            groupby=groupby_name,
                             reference="rest",
                             method="t-test",
                             pts=False,
                             key_added=key_added,
                         )
                     except Exception as e:
-                        print(f"  Warning: Could not compute marker genes for '{groupby}': {e}")
+                        print(f"  Warning: Could not compute marker genes for '{groupby_name}': {e}")
                         continue
 
                 rg = self.adata.uns.get(existing_key or key_added)
                 if not rg:
-                    print(f"  Warning: marker genes not found for '{groupby}'.")
+                    print(f"  Warning: marker genes not found for '{groupby_name}'.")
                     continue
 
                 names = rg.get("names")
                 if names is None:
-                    print(f"  Warning: marker genes missing names for '{groupby}'.")
+                    print(f"  Warning: marker genes missing names for '{groupby_name}'.")
                     continue
 
                 if isinstance(names, pd.DataFrame):
-                    marker_genes[groupby] = {
+                    marker_genes[groupby_name] = {
                         col_name: names[col_name].astype(str).tolist()[:marker_genes_top_n]
                         for col_name in names.columns
                     }
                 elif isinstance(names, np.ndarray) and names.dtype.names:
-                    marker_genes[groupby] = {
+                    marker_genes[groupby_name] = {
                         group: [str(x) for x in names[group][:marker_genes_top_n]]
                         for group in names.dtype.names
                     }
                 else:
-                    print(f"  Warning: Unrecognized marker gene format for '{groupby}'.")
+                    print(f"  Warning: Unrecognized marker gene format for '{groupby_name}'.")
+
+        cluster_de = {}
+        pending_cluster_de_groupby = list(cluster_de_groupby or [])
+        companion_cluster_de = companion_analytics.get("cluster_de")
+        if pending_cluster_de_groupby and isinstance(companion_cluster_de, dict):
+            reused_cluster_de_groupby = [
+                groupby_name
+                for groupby_name in pending_cluster_de_groupby
+                if groupby_name in companion_cluster_de
+            ]
+            if reused_cluster_de_groupby:
+                print(
+                    f"Using KaroSpaceCompanion cluster DE for {len(reused_cluster_de_groupby)} "
+                    f"groupby column{'s' if len(reused_cluster_de_groupby) != 1 else ''}..."
+                )
+                for groupby_name in reused_cluster_de_groupby:
+                    cluster_de[groupby_name] = companion_cluster_de[groupby_name]
+            pending_cluster_de_groupby = [
+                groupby_name
+                for groupby_name in pending_cluster_de_groupby
+                if groupby_name not in cluster_de
+            ]
+        if pending_cluster_de_groupby:
+            print(
+                f"Computing cluster DE for {len(pending_cluster_de_groupby)} "
+                f"groupby column{'s' if len(pending_cluster_de_groupby) != 1 else ''}..."
+            )
+            cluster_de_method_name = str(cluster_de_method or "wilcoxon")
+            cluster_de_n = int(cluster_de_top_n)
+            cluster_de_min_n = int(cluster_de_min_cells)
+            cluster_de_layer_name = None
+            if cluster_de_layer:
+                if cluster_de_layer in self.adata.layers:
+                    cluster_de_layer_name = str(cluster_de_layer)
+                else:
+                    print(
+                        f"  Warning: cluster DE layer '{cluster_de_layer}' not found; "
+                        "using adata.X."
+                    )
+
+            for groupby_name in pending_cluster_de_groupby:
+                print(f"  - cluster DE: {groupby_name}")
+                if groupby_name not in self.adata.obs.columns:
+                    print(f"  Warning: cluster DE groupby '{groupby_name}' not found in obs.")
+                    continue
+
+                col = self.adata.obs[groupby_name]
+                if pd.api.types.is_numeric_dtype(col):
+                    print(f"  Warning: cluster DE '{groupby_name}' is numeric; skipping.")
+                    continue
+                if not isinstance(col.dtype, CategoricalDtype):
+                    self.adata.obs[groupby_name] = col.astype("category")
+                    col = self.adata.obs[groupby_name]
+
+                categories = [str(cat) for cat in col.cat.categories]
+                if not categories:
+                    continue
+
+                codes = col.cat.codes.to_numpy()
+                groupby_results = {}
+                for source_idx, source_name in enumerate(categories):
+                    source_mask = codes == source_idx
+                    n_source = int(np.count_nonzero(source_mask))
+                    if n_source <= 0:
+                        continue
+
+                    source_results = {}
+                    for ref_idx, reference_name in enumerate(categories):
+                        if ref_idx == source_idx:
+                            continue
+
+                        reference_mask = codes == ref_idx
+                        n_reference = int(np.count_nonzero(reference_mask))
+                        if n_reference <= 0:
+                            continue
+
+                        if n_source < cluster_de_min_n or n_reference < cluster_de_min_n:
+                            source_results[reference_name] = {
+                                "available": False,
+                                "reason": "insufficient_cells",
+                                "genes": [],
+                                "logfoldchanges": [],
+                                "pvals_adj": [],
+                                "scores": [],
+                                "pct_source": [],
+                                "pct_reference": [],
+                                "n_source": n_source,
+                                "n_reference": n_reference,
+                                "min_cells_required": cluster_de_min_n,
+                            }
+                            continue
+
+                        selected_mask = source_mask | reference_mask
+                        selected_idx = np.flatnonzero(selected_mask)
+                        if selected_idx.size == 0:
+                            continue
+
+                        try:
+                            pair_adata = self.adata[selected_idx].copy()
+                            pair_labels = np.where(source_mask[selected_idx], "source", "reference")
+                            pair_adata.obs["_karospace_cluster_de_group"] = pd.Categorical(
+                                pair_labels,
+                                categories=["source", "reference"],
+                            )
+
+                            rg_kwargs = {
+                                "groupby": "_karospace_cluster_de_group",
+                                "groups": ["source"],
+                                "reference": "reference",
+                                "method": cluster_de_method_name,
+                                "pts": False,
+                                "key_added": "_karospace_cluster_de",
+                                "n_genes": cluster_de_n,
+                            }
+                            if cluster_de_layer_name is not None:
+                                rg_kwargs["layer"] = cluster_de_layer_name
+
+                            sc.tl.rank_genes_groups(pair_adata, **rg_kwargs)
+                            rg = pair_adata.uns.get("_karospace_cluster_de", {})
+
+                            genes = _extract_rank_genes_groups_values(
+                                rg.get("names"),
+                                "source",
+                                cluster_de_n,
+                                cast=str,
+                            )
+                            logfc = _extract_rank_genes_groups_values(
+                                rg.get("logfoldchanges"),
+                                "source",
+                                cluster_de_n,
+                                cast=lambda x: float(x) if np.isfinite(float(x)) else None,
+                            )
+                            pvals_adj = _extract_rank_genes_groups_values(
+                                rg.get("pvals_adj"),
+                                "source",
+                                cluster_de_n,
+                                cast=lambda x: float(x) if np.isfinite(float(x)) else None,
+                            )
+                            scores = _extract_rank_genes_groups_values(
+                                rg.get("scores"),
+                                "source",
+                                cluster_de_n,
+                                cast=lambda x: float(x) if np.isfinite(float(x)) else None,
+                            )
+
+                            gene_positions = []
+                            for gene_name in genes:
+                                if not gene_name:
+                                    gene_positions.append(None)
+                                    continue
+                                position = pair_adata.var_names.get_loc(gene_name)
+                                gene_positions.append(int(position))
+
+                            expr_matrix = (
+                                pair_adata.layers[cluster_de_layer_name]
+                                if cluster_de_layer_name is not None
+                                else pair_adata.X
+                            )
+                            pct_source = _compute_positive_fraction(
+                                expr_matrix,
+                                pair_labels == "source",
+                                gene_positions,
+                            )
+                            pct_reference = _compute_positive_fraction(
+                                expr_matrix,
+                                pair_labels == "reference",
+                                gene_positions,
+                            )
+
+                            source_results[reference_name] = {
+                                "available": True,
+                                "genes": genes,
+                                "logfoldchanges": logfc,
+                                "pvals_adj": pvals_adj,
+                                "scores": scores,
+                                "pct_source": pct_source,
+                                "pct_reference": pct_reference,
+                                "n_source": n_source,
+                                "n_reference": n_reference,
+                            }
+                        except Exception as e:
+                            print(
+                                f"  Warning: Could not compute cluster DE for "
+                                f"'{groupby_name}' ({source_name} vs {reference_name}): {e}"
+                            )
+                            source_results[reference_name] = {
+                                "available": False,
+                                "reason": "de_failed",
+                                "genes": [],
+                                "logfoldchanges": [],
+                                "pvals_adj": [],
+                                "scores": [],
+                                "pct_source": [],
+                                "pct_reference": [],
+                                "n_source": n_source,
+                                "n_reference": n_reference,
+                            }
+
+                    if source_results:
+                        groupby_results[source_name] = source_results
+
+                if groupby_results:
+                    cluster_de[groupby_name] = groupby_results
 
         # Compute neighbor composition stats
         neighbor_stats = {}
         neighbor_stats_context = {}
-        if neighbor_graph is not None and neighbor_stats_groupby:
-            for groupby in neighbor_stats_groupby:
-                if groupby not in self.adata.obs.columns:
-                    print(f"  Warning: neighbor stats groupby '{groupby}' not found in obs.")
-                    continue
-                col = self.adata.obs[groupby]
-                if pd.api.types.is_numeric_dtype(col):
-                    print(f"  Warning: neighbor stats '{groupby}' is numeric; skipping.")
-                    continue
-                if not pd.api.types.is_categorical_dtype(col):
-                    col = col.astype("category")
-                categories = list(col.cat.categories)
-                codes = col.cat.codes.to_numpy()
-                valid_mask = codes >= 0
-                if not valid_mask.any():
-                    print(f"  Warning: neighbor stats '{groupby}' has no valid categories.")
-                    continue
-
-                if valid_mask.all():
-                    graph = neighbor_graph
-                    labels = codes
-                else:
-                    valid_idx = np.flatnonzero(valid_mask)
-                    graph = neighbor_graph[valid_idx][:, valid_idx]
-                    labels = codes[valid_mask]
-
-                n_cells = np.bincount(labels, minlength=len(categories)).astype(int)
-                if graph is None or graph.shape[0] == 0:
-                    print(f"  Warning: neighbor stats '{groupby}' has empty graph.")
-                    continue
-
-                onehot = sp.csr_matrix(
-                    (np.ones(len(labels), dtype=float), (np.arange(len(labels)), labels)),
-                    shape=(len(labels), len(categories)),
+        requested_neighbor_stats_groupby = list(neighbor_stats_groupby or [])
+        requested_neighbor_stats_groupby_set = set(requested_neighbor_stats_groupby)
+        companion_neighbor_stats = companion_analytics.get("neighbor_stats")
+        if requested_neighbor_stats_groupby and isinstance(companion_neighbor_stats, dict):
+            reused_neighbor_groupby = [
+                groupby_name
+                for groupby_name in requested_neighbor_stats_groupby
+                if groupby_name in companion_neighbor_stats
+            ]
+            if reused_neighbor_groupby:
+                print(
+                    f"Using KaroSpaceCompanion neighbor stats for {len(reused_neighbor_groupby)} "
+                    f"groupby column{'s' if len(reused_neighbor_groupby) != 1 else ''}..."
                 )
-                counts = onehot.T.dot(graph).dot(onehot)
-                if issparse(counts):
-                    counts = counts.toarray()
-                counts = np.asarray(counts, dtype=float)
-                row_sums = counts.sum(axis=1)
-                mean_degree = np.zeros(len(categories), dtype=float)
-                valid_cells = n_cells > 0
-                mean_degree[valid_cells] = row_sums[valid_cells] / n_cells[valid_cells]
+                for groupby_name in reused_neighbor_groupby:
+                    neighbor_stats[groupby_name] = companion_neighbor_stats[groupby_name]
 
-                zscore = None
-                entry = {
-                    "categories": categories,
-                    "counts": counts.tolist(),
-                    "n_cells": n_cells.tolist(),
-                    "mean_degree": mean_degree.tolist(),
-                }
-                if neighbor_stats_permutations and neighbor_stats_permutations > 0:
-                    rng = np.random.default_rng(int(neighbor_stats_seed))
-                    perm_mean = np.zeros_like(counts, dtype=float)
-                    perm_m2 = np.zeros_like(counts, dtype=float)
-                    for i in range(int(neighbor_stats_permutations)):
-                        perm_labels = rng.permutation(labels)
-                        perm_onehot = sp.csr_matrix(
-                            (np.ones(len(perm_labels), dtype=float), (np.arange(len(perm_labels)), perm_labels)),
-                            shape=(len(perm_labels), len(categories)),
-                        )
-                        perm_counts = perm_onehot.T.dot(graph).dot(perm_onehot)
-                        if issparse(perm_counts):
-                            perm_counts = perm_counts.toarray()
-                        perm_counts = np.asarray(perm_counts, dtype=float)
-                        delta = perm_counts - perm_mean
-                        perm_mean += delta / (i + 1)
-                        perm_m2 += delta * (perm_counts - perm_mean)
-                    if neighbor_stats_permutations > 1:
-                        perm_var = perm_m2 / (neighbor_stats_permutations - 1)
-                    else:
-                        perm_var = np.zeros_like(counts, dtype=float)
-                    perm_std = np.sqrt(perm_var)
-                    zscore = np.zeros_like(counts, dtype=float)
-                    valid_std = perm_std > 0
-                    zscore[valid_std] = (counts[valid_std] - perm_mean[valid_std]) / perm_std[valid_std]
-                    entry["perm_n"] = int(neighbor_stats_permutations)
-                    entry["zscore"] = zscore.tolist()
-                neighbor_stats[groupby] = entry
-                neighbor_stats_context[groupby] = {
-                    "categories": categories,
-                    "labels": labels.astype(np.int32, copy=False),
-                    "graph": graph.tocsr(),
-                    "obs_idx": (
-                        np.arange(self.adata.n_obs, dtype=np.int64)
-                        if valid_mask.all()
-                        else np.flatnonzero(valid_mask).astype(np.int64)
-                    ),
-                    "counts": counts,
-                    "zscore": zscore,
-                    "n_cells": n_cells,
-                    "mean_degree": mean_degree,
-                }
+        pending_neighbor_stats_groupby = [
+            groupby_name
+            for groupby_name in requested_neighbor_stats_groupby
+            if groupby_name not in neighbor_stats
+        ]
+        if neighbor_graph is not None and pending_neighbor_stats_groupby:
+            print(
+                f"Computing neighbor stats for {len(pending_neighbor_stats_groupby)} "
+                f"groupby column{'s' if len(pending_neighbor_stats_groupby) != 1 else ''}..."
+            )
+            for groupby_name in pending_neighbor_stats_groupby:
+                print(f"  - neighbor stats: {groupby_name}")
+                entry, context = _prepare_neighbor_stats_groupby(groupby_name)
+                if entry is None or context is None:
+                    continue
+                neighbor_stats[groupby_name] = entry
+                neighbor_stats_context[groupby_name] = context
 
         # Compute contact-conditioned interaction markers:
         # for source S and target T, compare source cells contacting T vs source cells not contacting T.
         interaction_markers = {}
-        if neighbor_graph is not None and interaction_markers_groupby:
+        pending_interaction_markers_groupby = list(interaction_markers_groupby or [])
+        companion_interaction_markers = companion_analytics.get("interaction_markers")
+        if pending_interaction_markers_groupby and isinstance(companion_interaction_markers, dict):
+            reused_interaction_groupby = [
+                groupby_name
+                for groupby_name in pending_interaction_markers_groupby
+                if groupby_name in companion_interaction_markers
+            ]
+            if reused_interaction_groupby:
+                print(
+                    f"Using KaroSpaceCompanion interaction markers for "
+                    f"{len(reused_interaction_groupby)} "
+                    f"groupby column{'s' if len(reused_interaction_groupby) != 1 else ''}..."
+                )
+                for groupby_name in reused_interaction_groupby:
+                    interaction_markers[groupby_name] = companion_interaction_markers[groupby_name]
+            pending_interaction_markers_groupby = [
+                groupby_name
+                for groupby_name in pending_interaction_markers_groupby
+                if groupby_name not in interaction_markers
+            ]
+        if neighbor_graph is not None and pending_interaction_markers_groupby:
+            print(
+                f"Computing interaction markers for {len(pending_interaction_markers_groupby)} "
+                f"groupby column{'s' if len(pending_interaction_markers_groupby) != 1 else ''}..."
+            )
             method = str(interaction_markers_method or "wilcoxon")
             top_targets = int(interaction_markers_top_targets)
             top_genes = int(interaction_markers_top_genes)
@@ -568,41 +1680,29 @@ class SpatialDataset:
                         "using adata.X."
                     )
 
-            def _extract_group_values(
-                obj: Union[pd.DataFrame, np.ndarray, List],
-                group: str,
-                n: int,
-                cast=None,
-            ) -> List:
-                vals = []
-                if obj is None:
-                    return vals
-                if isinstance(obj, pd.DataFrame):
-                    if group in obj.columns:
-                        vals = obj[group].tolist()
-                    elif obj.shape[1] > 0:
-                        vals = obj.iloc[:, 0].tolist()
-                elif isinstance(obj, np.ndarray) and obj.dtype.names:
-                    g = group if group in obj.dtype.names else obj.dtype.names[0]
-                    vals = list(obj[g])
-                else:
-                    vals = list(np.asarray(obj).ravel())
-                vals = vals[:n]
-                if cast is None:
-                    return vals
-                out = []
-                for v in vals:
-                    try:
-                        out.append(cast(v))
-                    except Exception:
-                        out.append(None)
-                return out
+            for groupby_name in pending_interaction_markers_groupby:
+                print(f"  - interaction markers: {groupby_name}")
+                if groupby_name not in neighbor_stats_context:
+                    companion_neighbor_entry = None
+                    if isinstance(companion_neighbor_stats, dict):
+                        companion_neighbor_entry = companion_neighbor_stats.get(groupby_name)
+                    entry, context = _prepare_neighbor_stats_groupby(
+                        groupby_name,
+                        precomputed_entry=companion_neighbor_entry,
+                    )
+                    if context is not None:
+                        neighbor_stats_context[groupby_name] = context
+                    if (
+                        entry is not None
+                        and groupby_name in requested_neighbor_stats_groupby_set
+                        and groupby_name not in neighbor_stats
+                    ):
+                        neighbor_stats[groupby_name] = entry
 
-            for groupby in interaction_markers_groupby:
-                ctx = neighbor_stats_context.get(groupby)
+                ctx = neighbor_stats_context.get(groupby_name)
                 if ctx is None:
                     print(
-                        f"  Warning: interaction markers '{groupby}' unavailable "
+                        f"  Warning: interaction markers '{groupby_name}' unavailable "
                         "(missing neighbor stats for this groupby)."
                     )
                     continue
@@ -617,7 +1717,7 @@ class SpatialDataset:
 
                 if graph.shape[0] != len(labels):
                     print(
-                        f"  Warning: interaction markers '{groupby}' graph/label size mismatch; skipping."
+                        f"  Warning: interaction markers '{groupby_name}' graph/label size mismatch; skipping."
                     )
                     continue
 
@@ -697,7 +1797,11 @@ class SpatialDataset:
                         adata_idx = obs_idx[selected_idx]
                         try:
                             pair_adata = self.adata[adata_idx].copy()
-                            contact_labels = np.where(pos_mask[selected_idx], "contact+", "contact-")
+                            contact_labels = np.where(
+                                pos_mask[selected_idx],
+                                "contact+",
+                                "contact-",
+                            )
                             pair_adata.obs["_karospace_contact_group"] = pd.Categorical(
                                 contact_labels,
                                 categories=["contact+", "contact-"],
@@ -717,14 +1821,19 @@ class SpatialDataset:
                             sc.tl.rank_genes_groups(pair_adata, **rg_kwargs)
                             rg = pair_adata.uns.get("_karospace_interaction_markers", {})
 
-                            genes = _extract_group_values(rg.get("names"), "contact+", top_genes, cast=str)
-                            logfc = _extract_group_values(
+                            genes = _extract_rank_genes_groups_values(
+                                rg.get("names"),
+                                "contact+",
+                                top_genes,
+                                cast=str,
+                            )
+                            logfc = _extract_rank_genes_groups_values(
                                 rg.get("logfoldchanges"),
                                 "contact+",
                                 top_genes,
                                 cast=lambda x: float(x) if np.isfinite(float(x)) else None,
                             )
-                            pvals_adj = _extract_group_values(
+                            pvals_adj = _extract_rank_genes_groups_values(
                                 rg.get("pvals_adj"),
                                 "contact+",
                                 top_genes,
@@ -757,7 +1866,7 @@ class SpatialDataset:
                             }
                         except Exception as e:
                             print(
-                                f"  Warning: interaction markers failed for '{groupby}' "
+                                f"  Warning: interaction markers failed for '{groupby_name}' "
                                 f"{source_name}->{target_name}: {e}"
                             )
 
@@ -765,17 +1874,13 @@ class SpatialDataset:
                         group_interactions[source_name] = source_result
 
                 if group_interactions:
-                    interaction_markers[groupby] = group_interactions
+                    interaction_markers[groupby_name] = group_interactions
 
         # Build section data with all color layers
         sections_data = []
         for section in self.sections:
-            idx = section_indices[section.section_id]
-
-            if downsample and len(idx) > downsample:
-                rng = np.random.default_rng(42)
-                idx = rng.choice(idx, size=downsample, replace=False)
-                idx = np.sort(idx)
+            idx = export_section_indices[section.section_id]
+            rotation_deg = float((section_rotations or {}).get(section.section_id, 0.0))
 
             section_coords = coords_f4[idx]
 
@@ -798,40 +1903,47 @@ class SpatialDataset:
                         float(v) if np.isfinite(v) else None for v in section_vals
                     ]
 
+            # Deconvolution proportions: store per-section as flat row-major float32,
+            # plus the dominant-component code array (used for legend/filter pipeline).
+            section_proportions_b64: Dict[str, Dict[str, Any]] = {}
+            for decon_name, ddata in decon_data.items():
+                sec_matrix = ddata["matrix"][idx]  # (n_section, K)
+                sec_dominant = ddata["dominant"][idx]
+                # Dominant code feeds the existing categorical color pipeline.
+                if bool(section_array_pack) and int(len(idx)) >= int(section_array_pack_min_len):
+                    section_colors_b64[decon_name] = _b64(sec_dominant.astype("<f4", copy=False))
+                else:
+                    section_colors[decon_name] = [
+                        float(v) if np.isfinite(v) else None for v in sec_dominant
+                    ]
+                section_proportions_b64[decon_name] = {
+                    "k": ddata["k"],
+                    "b64": _b64(np.ascontiguousarray(sec_matrix, dtype="<f4")),
+                }
+
             # Build gene expression values for this section
             section_genes_dense = {}
             section_genes_sparse = {}
             for gene, gdata in gene_data.items():
                 section_vals = gdata["values"][idx]
                 mode = gene_encodings.get(gene, "dense")
-                if mode == "sparse":
-                    finite = np.isfinite(section_vals)
-                    nonzero = finite & (section_vals != 0)
-                    nz_idx = np.flatnonzero(nonzero).astype(np.uint32)
-                    nz_vals = np.asarray(section_vals[nonzero], dtype=np.float32)
-                    if bool(gene_sparse_pack) and int(nz_idx.size) >= int(gene_sparse_pack_min_nnz):
-                        sparse_entry = {
-                            "ib64": _b64(np.asarray(nz_idx, dtype="<u4")),
-                            "vb64": _b64(np.asarray(nz_vals, dtype="<f4")),
-                        }
-                    else:
-                        sparse_entry = {
-                            "i": nz_idx.astype(int).tolist(),
-                            "v": nz_vals.astype(float).tolist(),
-                        }
-                    nan_idx = np.flatnonzero(np.isnan(section_vals)).astype(int)
-                    if nan_idx.size:
-                        sparse_entry["nan"] = nan_idx.tolist()
-                    section_genes_sparse[gene] = sparse_entry
+                payload = self._serialize_gene_section_values(
+                    section_vals=np.asarray(section_vals),
+                    mode=mode,
+                    gene_sparse_pack=gene_sparse_pack,
+                    gene_sparse_pack_min_nnz=gene_sparse_pack_min_nnz,
+                    b64_encoder=_b64,
+                )
+                if "sparse" in payload:
+                    section_genes_sparse[gene] = payload["sparse"]
                 else:
-                    section_genes_dense[gene] = [
-                        float(v) if np.isfinite(v) else None for v in section_vals
-                    ]
+                    section_genes_dense[gene] = payload["dense"]
 
             section_entry = {
                 "id": section.section_id,
                 "metadata": section.metadata,
                 "n_cells": int(len(idx)),
+                "rotation_deg": rotation_deg,
                 "x": None,
                 "y": None,
                 "xb64": None,
@@ -840,6 +1952,7 @@ class SpatialDataset:
                 "obs_idxb64": None,
                 "colors": section_colors,
                 "colors_b64": section_colors_b64,
+                "proportions_b64": section_proportions_b64,
                 "genes": section_genes_dense,
                 "genes_sparse": section_genes_sparse,
                 "bounds": {
@@ -875,8 +1988,15 @@ class SpatialDataset:
                 section_entry["y"] = section_coords[:, 1].tolist()
                 section_entry["obs_idx"] = np.asarray(idx, dtype=int).tolist()
                 if section_umap is not None:
-                    section_entry["umap_x"] = section_umap[:, 0].tolist()
-                    section_entry["umap_y"] = section_umap[:, 1].tolist()
+                    valid_umap_mask = np.isfinite(section_umap).all(axis=1)
+                    section_entry["umap_x"] = [
+                        float(v) if is_valid else None
+                        for v, is_valid in zip(section_umap[:, 0], valid_umap_mask)
+                    ]
+                    section_entry["umap_y"] = [
+                        float(v) if is_valid else None
+                        for v, is_valid in zip(section_umap[:, 1], valid_umap_mask)
+                    ]
 
             if neighbor_graph is not None:
                 subgraph = neighbor_graph[idx][:, idx]
@@ -901,12 +2021,32 @@ class SpatialDataset:
 
         # Build color metadata
         colors_meta = {}
+        uns = getattr(self.adata, "uns", {}) or {}
         for col, cdata in color_data.items():
-            colors_meta[col] = {
+            meta = {
                 "is_continuous": cdata["is_continuous"],
                 "categories": cdata["categories"],
                 "vmin": cdata["vmin"],
                 "vmax": cdata["vmax"],
+            }
+            if not cdata["is_continuous"]:
+                uns_palette = uns.get(f"{col}_colors")
+                cats = cdata.get("categories") or []
+                if uns_palette is not None and len(uns_palette) == len(cats) and len(cats) > 0:
+                    try:
+                        meta["palette"] = [str(c) for c in uns_palette]
+                    except Exception:
+                        pass
+            colors_meta[col] = meta
+        # Deconvolution proportion entries: appear as additional categorical color modes.
+        for decon_name, ddata in decon_data.items():
+            colors_meta[decon_name] = {
+                "is_continuous": False,
+                "is_proportions": True,
+                "categories": list(ddata["categories"]),
+                "n_components": ddata["k"],
+                "vmin": None,
+                "vmax": None,
             }
 
         # Build gene metadata
@@ -927,9 +2067,11 @@ class SpatialDataset:
             "n_sections": len(sections_data),
             "total_cells": sum(s["n_cells"] for s in sections_data),
             "sections": sections_data,
-            "available_colors": list(color_data.keys()),
+            "available_colors": list(color_data.keys()) + list(decon_data.keys()),
+            "available_deconvolutions": list(decon_data.keys()),
             "available_genes": list(gene_data.keys()),
             "marker_genes": marker_genes,
+            "cluster_de": cluster_de,
             "has_umap": umap_coords is not None,
             "umap_bounds": umap_bounds,
             "has_neighbors": neighbor_graph is not None,
@@ -937,6 +2079,71 @@ class SpatialDataset:
             "neighbor_stats": neighbor_stats,
             "interaction_markers": interaction_markers,
         }
+
+
+_MODALITY_OBSM_SKIP_KEYS = {"spatial", "deconvolutions"}
+_MODALITY_OBSM_SKIP_PREFIXES = ("X_",)
+
+
+def _coerce_modality_var(uns_var: Any, expected_rows: int) -> Optional[pd.DataFrame]:
+    if uns_var is None:
+        return None
+    if isinstance(uns_var, pd.DataFrame):
+        df = uns_var.copy()
+    else:
+        try:
+            df = pd.DataFrame(uns_var)
+        except Exception:
+            return None
+    if df.shape[0] != expected_rows:
+        return None
+    if df.index.name is None:
+        for cand in ("protein", "gene", "feature", "name"):
+            if cand in df.columns:
+                df = df.set_index(cand)
+                break
+    df.index = df.index.map(str)
+    return df
+
+
+def _detect_modalities(adata: sc.AnnData) -> Dict[str, Modality]:
+    modalities: Dict[str, Modality] = {}
+    rna_var = adata.var.copy()
+    rna_layers: Dict[str, Any] = {}
+    if "normalized" in adata.layers:
+        rna_layers["normalized"] = adata.layers["normalized"]
+    if "counts" in adata.layers:
+        rna_layers["counts"] = adata.layers["counts"]
+    modalities["rna"] = Modality(
+        name="rna",
+        matrix=adata.X,
+        var=rna_var,
+        layers=rna_layers,
+        value_kind="counts",
+        label="RNA",
+    )
+
+    for key in list(adata.obsm.keys()):
+        if key in _MODALITY_OBSM_SKIP_KEYS:
+            continue
+        if any(key.startswith(p) for p in _MODALITY_OBSM_SKIP_PREFIXES):
+            continue
+        matrix = adata.obsm[key]
+        shape = getattr(matrix, "shape", None)
+        if shape is None or len(shape) != 2 or shape[1] <= 0:
+            continue
+        var_df = _coerce_modality_var(adata.uns.get(f"{key}_var"), int(shape[1]))
+        if var_df is None:
+            continue
+        modalities[key] = Modality(
+            name=key,
+            matrix=matrix,
+            var=var_df,
+            layers={},
+            value_kind="intensity",
+            label=key.replace("_", " "),
+        )
+    return modalities
 
 
 def load_spatial_data(
@@ -976,7 +2183,7 @@ def load_spatial_data(
         Loaded dataset ready for visualization
     """
     print(f"Loading {path}...")
-    adata = sc.read_h5ad(path)
+    adata = _read_h5ad_with_fallback(path)
     print(f"  Loaded {adata.n_obs:,} cells, {adata.n_vars:,} genes")
 
     if spatial_key not in adata.obsm:
@@ -1009,7 +2216,7 @@ def load_spatial_data(
                     return (0, desired_index[meta_value], sid)
                 return (1, meta_value, sid)
             section_ids = [sid for sid, _ in sorted(section_ids, key=_order_key)]
-        elif pd.api.types.is_categorical_dtype(gser) and gser.cat.ordered:
+        elif isinstance(gser.dtype, CategoricalDtype) and gser.cat.ordered:
             section_ids = [str(c) for c in gser.cat.categories if str(c) in gser_str.unique()]
         else:
             section_ids = sorted(gser_str.unique())
@@ -1052,9 +2259,15 @@ def load_spatial_data(
     # Get available columns for coloring
     obs_columns = [
         col for col in adata.obs.columns
-        if pd.api.types.is_categorical_dtype(adata.obs[col])
+        if isinstance(adata.obs[col].dtype, CategoricalDtype)
         or pd.api.types.is_numeric_dtype(adata.obs[col])
     ]
+
+    modalities = _detect_modalities(adata)
+    default_modality = "rna" if "rna" in modalities else next(iter(modalities))
+    extra_modalities = [m for m in modalities if m != default_modality]
+    if extra_modalities:
+        print(f"  Modalities: {default_modality} (default) + {', '.join(extra_modalities)}")
 
     return SpatialDataset(
         adata=adata,
@@ -1064,4 +2277,6 @@ def load_spatial_data(
         var_names=list(adata.var_names),
         metadata_columns=metadata_columns,
         metadata_value_order=metadata_value_order,
+        modalities=modalities,
+        default_modality=default_modality,
     )
