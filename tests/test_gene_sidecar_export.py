@@ -172,8 +172,8 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert "G2" in shard["genes"]
     assert "sparse" in shard["genes"]["G2"]["sections"]["S1"]
     assert "async function ensureGeneAvailable" in html_text
-    assert "function requestModalBlendGene(gene)" in html_text
-    assert "requestModalBlendGene(gene);" in html_text
+    assert "function requestModalBlendGene(gene, modality = null)" in html_text
+    assert "requestModalBlendGene(gene, modName);" in html_text
     assert 'id="modal-controls-toggle"' in html_text
     assert ".modal-controls.hidden" in html_text
     assert 'data-modal-group="view"' in html_text
@@ -201,7 +201,7 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert "Genes in selection" in html_text
     assert 'id="genes-tab-spatial"' in html_text
     assert 'id="genes-tab-dotplot"' not in html_text
-    assert 'id="genes-tab-cell-de"' in html_text
+    assert 'id="compare-tab-cell-de"' in html_text
     assert 'id="dotplot-groupby"' not in html_text
     assert 'id="dotplot-genes"' not in html_text
     assert 'id="dotplot-grid"' not in html_text
@@ -576,7 +576,7 @@ def test_binary_sidecar_export_writes_indexed_bin_shards(tmp_path):
     assert entries["G2"]["payload_offset"] + entries["G2"]["payload_length"] <= len(blob)
     assert "function parseBinaryShardIndexBuffer(buffer)" in html_text
     assert "async function readBinaryGenePayload(shardUrl, gene, indexInfo = null)" in html_text
-    assert "function hydrateGeneFromBinary(gene, geneEntry)" in html_text
+    assert "function hydrateGeneFromBinary(gene, geneEntry, modality = null)" in html_text
 
 
 def test_binary_karospace_package_stores_bin_shards_uncompressed(tmp_path):
@@ -902,7 +902,7 @@ def test_cli_passes_section_rotations_to_export(monkeypatch, tmp_path):
     input_path.write_text("placeholder", encoding="utf-8")
     captured = {}
 
-    def fake_load(path, groupby):
+    def fake_load(path, groupby, spatial_key="spatial"):
         captured["load"] = {"path": path, "groupby": groupby}
         return _build_dataset()
 
@@ -934,7 +934,7 @@ def test_cli_accepts_fractional_section_rotations(monkeypatch, tmp_path):
     input_path.write_text("placeholder", encoding="utf-8")
     captured = {}
 
-    def fake_load(path, groupby):
+    def fake_load(path, groupby, spatial_key="spatial"):
         return _build_dataset()
 
     def fake_export(dataset, **kwargs):
@@ -964,7 +964,7 @@ def test_cli_passes_cluster_de_options_to_export(monkeypatch, tmp_path):
     input_path.write_text("placeholder", encoding="utf-8")
     captured = {}
 
-    def fake_load(path, groupby):
+    def fake_load(path, groupby, spatial_key="spatial"):
         return _build_dataset()
 
     def fake_export(dataset, **kwargs):
@@ -1074,7 +1074,7 @@ def test_cli_passes_gene_correlation_top_n_to_export(monkeypatch, tmp_path):
     input_path.write_text("placeholder", encoding="utf-8")
     captured = {}
 
-    def fake_load(path, groupby):
+    def fake_load(path, groupby, spatial_key="spatial"):
         return _build_dataset()
 
     def fake_export(dataset, **kwargs):
@@ -1210,7 +1210,7 @@ def test_cli_passes_spatial_variable_genes_n_to_export(monkeypatch, tmp_path):
     input_path.write_text("placeholder", encoding="utf-8")
     captured = {}
 
-    def fake_load(path, groupby):
+    def fake_load(path, groupby, spatial_key="spatial"):
         return _build_dataset()
 
     def fake_export(dataset, **kwargs):
@@ -1435,7 +1435,11 @@ def test_load_spatial_data_handles_null_encoded_uns_entries(tmp_path):
     assert dataset.var_names == ["G1", "G2"]
     assert dataset.adata.uns["dataset_source"]["chunksize"] == 256
     assert dataset.adata.uns["dataset_source"]["expression_path"] == "expr.h5"
-    assert "selected_fovs" not in dataset.adata.uns["dataset_source"]
+    # Older anndata builds crash on null-encoded fields, so we strip them (see
+    # _strip_null_encoded_h5ad_entries, covered by the sibling fallback test);
+    # newer builds read them natively as None. Either way the entry must not
+    # carry a garbage value and the surrounding fields must stay intact.
+    assert dataset.adata.uns["dataset_source"].get("selected_fovs") is None
 
 
 def test_read_h5ad_with_fallback_uses_sanitized_copy_and_cleans_it_up(tmp_path, monkeypatch):

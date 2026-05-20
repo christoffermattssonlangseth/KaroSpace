@@ -72,6 +72,13 @@ def _run_export_cli(argv=None):
         help="Column to group sections by (default: sample_id)"
     )
     parser.add_argument(
+        "--spatial-key",
+        type=str,
+        default="spatial",
+        help="Key in obsm containing spatial coordinates (default: spatial)"
+    )
+
+    parser.add_argument(
         "--min-panel-size",
         type=int,
         default=150,
@@ -287,6 +294,7 @@ def _run_export_cli(argv=None):
     dataset = load_spatial_data(
         args.input,
         groupby=args.groupby,
+        spatial_key=args.spatial_key,
     )
 
     modalities_arg: Optional[List[str]] = None

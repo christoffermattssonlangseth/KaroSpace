@@ -274,11 +274,13 @@ class KaroSpaceExportGUI:
 
         self._obs_columns: List[str] = []
         self._var_names: List[str] = []
+        self._obsm_keys: List[str] = []
         self._is_busy = False
 
         self.input_path = tk.StringVar(value=initial_input or "")
         self.output_path = tk.StringVar(value=initial_output or "karospace.html")
         self.groupby = tk.StringVar(value="sample_id")
+        self.spatial_key = tk.StringVar(value="spatial")
         self.color = tk.StringVar(value="leiden")
         self.outline_by = tk.StringVar(value="condition")
         self.title = tk.StringVar(value="KaroSpace")
@@ -609,6 +611,11 @@ class KaroSpaceExportGUI:
             font=("Helvetica", 10),
         )
 
+        ttk.Label(dataset_group, text="Spatial key").grid(row=2, column=0, sticky="w", pady=4)
+        self.spatial_key_combo = ttk.Combobox(dataset_group, textvariable=self.spatial_key, state="normal")
+        self.spatial_key_combo.grid(row=2, column=1, sticky="ew", padx=(8, 16), pady=4)
+
+
         colors_group = ttk.LabelFrame(colors_tab, text="Color Layers", padding=12, style="Card.TLabelframe")
         colors_group.pack(fill="x", pady=(0, 10))
         self.additional_colors_editor = SearchableListEditor(
@@ -849,6 +856,7 @@ class KaroSpaceExportGUI:
             "theme": "light",
             "title": "KaroSpace",
             "groupby": "sample_id",
+            "spatial_key": "spatial",
             "outline_by": "condition",
             "spot_size": "auto",
             "gene_encoding": "auto",
@@ -1108,18 +1116,22 @@ class KaroSpaceExportGUI:
                 adata = sc.read_h5ad(str(source), backed="r")
                 obs_columns = [str(c) for c in adata.obs.columns]
                 var_names = [str(v) for v in adata.var_names]
+                obsm_keys = [str(k) for k in adata.obsm.keys()]
                 if getattr(adata, "isbacked", False):
                     adata.file.close()
-                self.root.after(0, lambda: self._on_inspect_success(obs_columns, var_names))
+                self.root.after(0, lambda: self._on_inspect_success(obs_columns, var_names, obsm_keys))
             except Exception as exc:
                 self.root.after(0, lambda: self._on_inspect_error(exc))
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _on_inspect_success(self, obs_columns: Sequence[str], var_names: Sequence[str]) -> None:
+    def _on_inspect_success(
+        self, obs_columns: Sequence[str], var_names: Sequence[str], obsm_keys: Sequence[str]
+    ) -> None:
         values = sorted(set(str(col) for col in obs_columns))
         self._obs_columns = list(values)
         self._var_names = sorted(set(str(g) for g in var_names))
+        self._obsm_keys = sorted(set(str(k) for k in obsm_keys))
 
         self.groupby_combo.configure(values=self._obs_columns)
         self.color_combo.configure(values=self._obs_columns)
@@ -1129,6 +1141,25 @@ class KaroSpaceExportGUI:
         self.marker_genes_groupby_editor.set_choices(self._obs_columns)
         self.interaction_markers_groupby_editor.set_choices(self._obs_columns)
         self.genes_editor.set_choices(self._var_names)
+        self.spatial_key_combo.configure(values=self._obsm_keys)
+
+        if self.spatial_key.get() not in self._obsm_keys:
+            fallback_candidates = [
+                "spatial",
+                "X_spatial",
+                "spatial_coords",
+                "X_spatial_coords",
+                "Spatial",
+                "spatialcoords",
+            ]
+            found_fallback = False
+            for fb in fallback_candidates:
+                if fb in self._obsm_keys:
+                    self.spatial_key.set(fb)
+                    found_fallback = True
+                    break
+            if not found_fallback and self._obsm_keys:
+                self.spatial_key.set(self._obsm_keys[0])
 
         if self.groupby.get() not in self._obs_columns:
             if "sample_id" in self._obs_columns:
@@ -1250,6 +1281,7 @@ class KaroSpaceExportGUI:
             "metadata_columns": metadata_columns,
             "metadata_value_order": metadata_value_order,
             "metadata_max_columns": metadata_max_columns,
+            "spatial_key": self.spatial_key.get().strip() or "spatial",
         }
 
         export_kwargs = {

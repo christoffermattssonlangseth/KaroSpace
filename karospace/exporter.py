@@ -21278,7 +21278,11 @@ def export_to_html(
         else:
             resolved_gene_aux_path = output_path_obj.with_suffix(".genes.json")
         if not resolved_gene_aux_path.is_absolute():
-            resolved_gene_aux_path = (output_path_obj.parent / resolved_gene_aux_path).resolve()
+            resolved_gene_aux_path = output_path_obj.parent / resolved_gene_aux_path
+        # Always resolve so relative paths derived later (gene_aux_url, gene_to_shard)
+        # share the same base as the resolved output path. Otherwise platform symlinks
+        # (e.g. macOS /var -> /private/var) make os.path.relpath emit broken ../ chains.
+        resolved_gene_aux_path = resolved_gene_aux_path.resolve()
         resolved_gene_aux_dir = resolved_gene_aux_path.with_suffix("")
 
     if outline_by and outline_by not in dataset.metadata_columns:

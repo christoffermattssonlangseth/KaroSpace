@@ -32,6 +32,53 @@ COMPANION_ANALYTICS_JSON_FIELDS = {
 }
 
 
+# Common conventions for spatial coordinates in adata.obsm, tried in order when
+# the requested key is absent. "spatial" is the squidpy/scanpy standard.
+_SPATIAL_KEY_FALLBACKS = (
+    "spatial",
+    "X_spatial",
+    "spatial_coords",
+    "X_spatial_coords",
+    "Spatial",
+    "spatialcoords",
+)
+
+
+def _resolve_spatial_key(adata, spatial_key: str = "spatial") -> str:
+    """Return a usable spatial-coordinate key in ``adata.obsm``.
+
+    Uses ``spatial_key`` when present; otherwise falls back to common naming
+    conventions (``X_spatial``, ``spatial_coords``, ...). Raises a clear error
+    listing the available keys when nothing usable is found.
+    """
+    def _is_usable(key: str) -> bool:
+        if key not in adata.obsm:
+            return False
+        arr = np.asarray(adata.obsm[key])
+        return arr.ndim == 2 and arr.shape[1] >= 2
+
+    if spatial_key in adata.obsm:
+        if not _is_usable(spatial_key):
+            raise ValueError(
+                f"adata.obsm['{spatial_key}'] is not a 2D array with at least two columns."
+            )
+        return spatial_key
+
+    for candidate in _SPATIAL_KEY_FALLBACKS:
+        if candidate != spatial_key and _is_usable(candidate):
+            print(
+                f"  Note: '{spatial_key}' not in adata.obsm; using '{candidate}' for spatial coordinates."
+            )
+            return candidate
+
+    available = ", ".join(sorted(adata.obsm.keys())) or "(none)"
+    raise ValueError(
+        f"Spatial coordinates not found in adata.obsm['{spatial_key}']. "
+        f"Available obsm keys: {available}. "
+        f"Pass spatial_key=... to select one."
+    )
+
+
 def _numeric_category_perm(categories: List) -> Optional[List[int]]:
     """Return a permutation ordering ``categories`` numerically, or ``None``.
 
@@ -332,6 +379,7 @@ class SpatialDataset:
     metadata_value_order: Optional[Dict[str, List[str]]] = None
     modalities: Dict[str, Modality] = field(default_factory=dict)
     default_modality: str = "rna"
+    spatial_key: str = "spatial"
 
     @property
     def n_sections(self) -> int:
@@ -1017,7 +1065,7 @@ class SpatialDataset:
         dict
             JSON-serializable data structure
         """
-        coords = np.asarray(self.adata.obsm["spatial"])[:, :2]
+        coords = np.asarray(self.adata.obsm[self.spatial_key])[:, :2]
         export_section_indices = self._get_export_section_indices(downsample=downsample)
 
         # Get UMAP coordinates if available
@@ -2229,8 +2277,7 @@ def load_spatial_data(
     adata = _read_h5ad_with_fallback(path)
     print(f"  Loaded {adata.n_obs:,} cells, {adata.n_vars:,} genes")
 
-    if spatial_key not in adata.obsm:
-        raise ValueError(f"Spatial coordinates not found in adata.obsm['{spatial_key}']")
+    spatial_key = _resolve_spatial_key(adata, spatial_key)
 
     if groupby not in adata.obs.columns:
         raise ValueError(f"Groupby column '{groupby}' not found in adata.obs")
@@ -2322,4 +2369,5 @@ def load_spatial_data(
         metadata_value_order=metadata_value_order,
         modalities=modalities,
         default_modality=default_modality,
+        spatial_key=spatial_key,
     )
