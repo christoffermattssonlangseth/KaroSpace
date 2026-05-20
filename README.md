@@ -13,13 +13,16 @@ Originally developed at Karolinska Institutet for visualizing Xenium spatial tra
 - **Grid + modal exploration** — Browse many sections in a responsive grid, then zoom and pan any section in detail
 - **Per-section rotation** — Set exact initial section angles at export time and adjust them interactively
 - **Linked UMAP + section selection** — Magic Wand lasso works in UMAP and modal view with synced highlights
-- **Selection summaries** — Selected-cell totals and per-type counts with expandable scrollable lists
+- **Selection summaries** — Selected-cell totals and per-type counts with expandable scrollable lists; minimize the panel to a compact header to keep the view clear
 - **Polygon annotation workflow** — Draw persistent polygons, manage labels, and export JSON for downstream `adata` integration
 - **Region-to-region DE** — Compare drawn annotations directly in the viewer, export JSON/CSV reports, and search top hits
 - **Split compare slider** — Compare two variables side-by-side in the modal (`Cell type` or `Gene`, including `All categories`), draggable directly on the canvas
 - **Legend controls + spotlight** — Toggle/hide categories and spotlight one class across grid and UMAP
 - **Flexible coloring + gene discovery** — Switch between annotation columns, fuzzy-search genes, and reuse recent or saved gene panels
 - **Insights panel** — `Summary`, `Compare`, `Genes`, `Neighborhood`, and `Regions` tabs with marker genes, pairwise cluster DE, neighbor composition, interaction markers, and region comparison
+- **Marker-gene CSV export** — Download the top marker genes for every cluster of the current color as a tidy CSV
+- **Annotation river plot** — `Insights → Compare → River` draws a Sankey of how two annotations correspond (e.g. `leiden_1` ↔ `leiden_2`); click a node to recolor and spotlight it, or export the crosstab as CSV
+- **Numeric category ordering** — Numeric cluster labels sort naturally (`2` before `10`) in legends, dropdowns, and plots, with `adata.uns` palettes kept aligned
 - **Modal selection workflow** — Lasso in the sample view, open a focused subview, browse `Genes in selection`, and use `Space` + drag to pan while Select or Annotate is active
 - **Shareable packages** — Export as `.karospace` bundles (ZIP + viewer HTML) for offline sharing; open via the hosted loader at [karospace.se/open](https://karospace.se/open) or a local `loader.html`. See [KAROSPACE_PACKAGE_FORMAT_SPEC.md](KAROSPACE_PACKAGE_FORMAT_SPEC.md)
 - **Compact sidecar options** — JSON and binary shard formats, sparse-first encoding, and optional `uint16`/`uint8` quantization for large datasets
@@ -157,6 +160,7 @@ karospace your_data.h5ad -o viewer.html --color leiden
 |--------|-------------|---------|
 | `-o, --output` | Output HTML file path | `karospace.html` |
 | `-c, --color` | Initial color column | `leiden` |
+| `--additional-colors` | Comma-separated extra obs columns to embed as selectable colors (needed to compare two annotations in the River plot) | empty |
 | `-g, --groupby` | Column to group sections by | `sample_id` |
 | `--min-panel-size` | Minimum panel width in pixels | `150` |
 | `--spot-size` | Cell/spot size (`auto` or positive number) | `auto` |

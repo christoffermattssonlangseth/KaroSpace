@@ -53,12 +53,20 @@ tmp_hydrated_script_*.js
 # Keep unpublished local exports out of git
 BALO.html
 
-# Viewer-generated downloads (session state, data bundles, region DE exports)
+# Viewer-generated downloads (session state, data bundles, DE / marker / river exports)
 karospace-session-*.json
 karospace-export-*.tar.gz
 karospace-export-*.tar
 karospace-region-de-*.csv
+karospace-group-de-*.csv
+karospace-cell-de-*.csv
+karospace-marker-genes-*.csv
+karospace-river-*.csv
 karospace-annotations-*.json
+unique_visitors_*.csv
+
+# Editor/agent scratch dirs
+.antigravitycli/
 
 # OS
 .DS_Store
