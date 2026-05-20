@@ -32,6 +32,30 @@ COMPANION_ANALYTICS_JSON_FIELDS = {
 }
 
 
+def _numeric_category_perm(categories: List) -> Optional[List[int]]:
+    """Return a permutation ordering ``categories`` numerically, or ``None``.
+
+    Many cluster annotations are stored as string categories ("0", "1", "10", ...),
+    which pandas orders lexicographically so "10" sorts before "2". When *every*
+    label parses as a number, return ``order`` such that ``order[new_idx] = old_idx``
+    gives an ascending-numeric ordering. Returns ``None`` for non-numeric labels
+    (preserving any intentional categorical order) or when already sorted.
+    """
+    strs = [str(c) for c in categories]
+    nums: List[float] = []
+    for s in strs:
+        try:
+            nums.append(float(s))
+        except (TypeError, ValueError):
+            return None
+    if len(nums) <= 1:
+        return None
+    order = sorted(range(len(strs)), key=lambda i: (nums[i], strs[i]))
+    if order == list(range(len(strs))):
+        return None
+    return order
+
+
 def _extract_rank_genes_groups_values(
     obj: Union[pd.DataFrame, np.ndarray, List],
     group: str,
@@ -1053,6 +1077,18 @@ class SpatialDataset:
         for col in all_colors:
             try:
                 vals, is_cont, cats = self.get_color_data(col)
+                cat_perm = None
+                if not is_cont and cats:
+                    cat_perm = _numeric_category_perm(cats)
+                    if cat_perm is not None:
+                        old_to_new = np.empty(len(cats), dtype=np.int64)
+                        for new_idx, old_idx in enumerate(cat_perm):
+                            old_to_new[old_idx] = new_idx
+                        cats = [cats[old_idx] for old_idx in cat_perm]
+                        finite = np.isfinite(vals)
+                        remapped = vals.copy()
+                        remapped[finite] = old_to_new[vals[finite].astype(np.int64)]
+                        vals = remapped
                 if is_cont:
                     finite = np.isfinite(vals)
                     col_vmin = float(np.nanmin(vals[finite])) if finite.any() else 0.0
@@ -1065,6 +1101,7 @@ class SpatialDataset:
                     "categories": cats,
                     "vmin": col_vmin,
                     "vmax": col_vmax,
+                    "_cat_perm": cat_perm,
                 }
             except Exception as e:
                 print(f"  Warning: Could not load color '{col}': {e}")
@@ -2034,7 +2071,13 @@ class SpatialDataset:
                 cats = cdata.get("categories") or []
                 if uns_palette is not None and len(uns_palette) == len(cats) and len(cats) > 0:
                     try:
-                        meta["palette"] = [str(c) for c in uns_palette]
+                        palette_list = [str(c) for c in uns_palette]
+                        # uns palettes are aligned to the original category order;
+                        # follow the same numeric reorder applied to the categories.
+                        perm = cdata.get("_cat_perm")
+                        if perm is not None and len(perm) == len(palette_list):
+                            palette_list = [palette_list[old_idx] for old_idx in perm]
+                        meta["palette"] = palette_list
                     except Exception:
                         pass
             colors_meta[col] = meta

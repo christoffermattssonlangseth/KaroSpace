@@ -59,6 +59,13 @@ def _run_export_cli(argv=None):
         help="Initial color column or gene (default: leiden)"
     )
     parser.add_argument(
+        "--additional-colors",
+        type=str,
+        default="",
+        help="Comma-separated extra obs columns to embed as selectable colors "
+             "(e.g. a second clustering). Needed to compare annotations in the River plot."
+    )
+    parser.add_argument(
         "-g", "--groupby",
         type=str,
         default="sample_id",
@@ -291,6 +298,7 @@ def _run_export_cli(argv=None):
         dataset,
         output_path=args.output,
         color=args.color,
+        additional_colors=_parse_csv(args.additional_colors),
         title=args.title,
         modalities=modalities_arg,
         min_panel_size=args.min_panel_size,

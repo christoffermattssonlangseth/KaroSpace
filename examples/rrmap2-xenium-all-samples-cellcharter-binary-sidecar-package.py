@@ -1,7 +1,7 @@
 """
 Example usage of KaroSpace with binary sidecar and .karospace export targets.
 
-This script is configured for the optic_nerve_merged companion-ready h5ad and writes:
+This script is configured for the RRMAP2 Xenium All Samples (CellCharter) companion-ready h5ad and writes:
 1. an unpacked binary sidecar viewer bundle
 2. a packaged .karospace bundle with matching settings
 """
@@ -21,50 +21,47 @@ os.environ.setdefault("MPLCONFIGDIR", "/tmp/karospace-mpl-cache")
 from karospace import export_to_html, load_spatial_data
 
 H5AD_PATH = os.environ.get(
-    "OPTIC_NERVE_MERGED_H5AD_PATH",
-    "/Users/chrislangseth/Downloads/optic_nerve_merged.scanpy.companion.ready_with_polygons.h5ad",
+    "RRMAP2_XENIUM_ALL_SAMPLES_CELLCHARTER_H5AD_PATH",
+    "/Users/chrislangseth/Downloads/RRMAP2_xenium_all_samples.cellcharter.companion.ready.with_metadata.h5ad",
 )
 
-PRIMARY_COLOR = "leiden"
+PRIMARY_COLOR = "leiden_2.5"
 ADDITIONAL_COLORS = [
-    "leiden",
-    "leiden_0_2",
-    "leiden_0_4",
-    "leiden_0_6",
-    "leiden_0_8",
-    "leiden_1_0",
-    "leiden_1_5",
-    "leiden_2_0",
-    "leiden_2_5",
-    "leiden_3_0",
-    "leiden_3_5",
-    "leiden_4_0",
-    "CellCharter_6",
-    "CellCharter_8",
     "CellCharter_10",
-    "CellCharter_12",
     "CellCharter_15",
     "CellCharter_20",
     "CellCharter_25",
     "CellCharter_30",
-    
+    "CellCharter_35",
+    "CellCharter_40",
+    "CellCharter_45",
+    "CellCharter_5",
+    "CellCharter_50",
+    "leiden_0.5",
+    "leiden_1",
+    "leiden_1.5",
+    "leiden_2",
+    "leiden_2.5",
+    "leiden_3",
+    "leiden_3.5",
+    "leiden_4.0",
 ]
-SIDECAR_OUTPUT = "optic-nerve-merged-binary-sidecar.html"
-PACKAGE_OUTPUT = "optic-nerve-merged-binary.karospace"
-GENE_AUX_PATH = "optic-nerve-merged-binary.genes.json"
+SIDECAR_OUTPUT = "rrmap2-xenium-all-samples-cellcharter-binary-sidecar.html"
+PACKAGE_OUTPUT = "rrmap2-xenium-all-samples-cellcharter-binary.karospace"
+GENE_AUX_PATH = "rrmap2-xenium-all-samples-cellcharter-binary.genes.json"
 
 if not Path(H5AD_PATH).exists():
     raise SystemExit(
-        "optic_nerve_merged h5ad not found. Set OPTIC_NERVE_MERGED_H5AD_PATH before running "
-        "examples/optic-nerve-merged-binary-sidecar-package.py."
+        "RRMAP2 Xenium All Samples (CellCharter) h5ad not found. Set RRMAP2_XENIUM_ALL_SAMPLES_CELLCHARTER_H5AD_PATH before running "
+        "examples/rrmap2-xenium-all-samples-cellcharter-binary-sidecar-package.py."
     )
 
 dataset = load_spatial_data(
     H5AD_PATH,
-    groupby="karospace_polygon_labels",
+    groupby="meta_sample_id",
     spatial_key="spatial",
     metadata_columns=[
-       'animal','condition','timepoint'
+        'stage', 'condition', 'day_of_sacrifice', 'score_sacrifice', 'region', 'sex', 'model'
     ],
 )
 
@@ -73,7 +70,7 @@ print(f"Available color columns: {dataset.obs_columns[:10]}...")
 
 common_kwargs = dict(
     color=PRIMARY_COLOR,
-    title="optic_nerve_merged",
+    title="RRMAP2 Xenium All Samples (CellCharter)",
     min_panel_size=120,
     spot_size="auto",
     downsample=10_000_000,
@@ -90,74 +87,70 @@ common_kwargs = dict(
     gene_aux_path=GENE_AUX_PATH,
     gene_sidecar_shard_size=128,
     marker_genes_groupby=[
-        "leiden",
-    "leiden_0_2",
-    "leiden_0_4",
-    "leiden_0_6",
-    "leiden_0_8",
-    "leiden_1_0",
-    "leiden_1_5",
-    "leiden_2_0",
-    "leiden_2_5",
-    "leiden_3_0",
-    "leiden_3_5",
-    "leiden_4_0",
-    "CellCharter_6",
-    "CellCharter_8",
-    "CellCharter_10",
-    "CellCharter_12",
+        "leiden_2.5",
+        "CellCharter_10",
     "CellCharter_15",
     "CellCharter_20",
     "CellCharter_25",
     "CellCharter_30",
+    "CellCharter_35",
+    "CellCharter_40",
+    "CellCharter_45",
+    "CellCharter_5",
+    "CellCharter_50",
+    "leiden_0.5",
+    "leiden_1",
+    "leiden_1.5",
+    "leiden_2",
+    "leiden_2.5",
+    "leiden_3",
+    "leiden_3.5",
+    "leiden_4.0",
     ],
     marker_genes_top_n=30,
     neighbor_stats_groupby=[
-       "leiden",
-    "leiden_0_2",
-    "leiden_0_4",
-    "leiden_0_6",
-    "leiden_0_8",
-    "leiden_1_0",
-    "leiden_1_5",
-    "leiden_2_0",
-    "leiden_2_5",
-    "leiden_3_0",
-    "leiden_3_5",
-    "leiden_4_0",
-    "CellCharter_6",
-    "CellCharter_8",
-    "CellCharter_10",
-    "CellCharter_12",
+        "leiden_2.5",
+       "CellCharter_10",
     "CellCharter_15",
     "CellCharter_20",
     "CellCharter_25",
     "CellCharter_30",
+    "CellCharter_35",
+    "CellCharter_40",
+    "CellCharter_45",
+    "CellCharter_5",
+    "CellCharter_50",
+    "leiden_0.5",
+    "leiden_1",
+    "leiden_1.5",
+    "leiden_2",
+    "leiden_2.5",
+    "leiden_3",
+    "leiden_3.5",
+    "leiden_4.0",
     ],
     neighbor_stats_permutations=0,
     neighbor_stats_seed=42,
     cluster_de_groupby=[
-        "leiden",
-    "leiden_0_2",
-    "leiden_0_4",
-    "leiden_0_6",
-    "leiden_0_8",
-    "leiden_1_0",
-    "leiden_1_5",
-    "leiden_2_0",
-    "leiden_2_5",
-    "leiden_3_0",
-    "leiden_3_5",
-    "leiden_4_0",
-    "CellCharter_6",
-    "CellCharter_8",
-    "CellCharter_10",
-    "CellCharter_12",
+        "leiden_2.5",
+"CellCharter_10",
     "CellCharter_15",
     "CellCharter_20",
     "CellCharter_25",
     "CellCharter_30",
-    ],
+    "CellCharter_35",
+    "CellCharter_40",
+    "CellCharter_45",
+    "CellCharter_5",
+    "CellCharter_50",
+    "leiden_0.5",
+    "leiden_1",
+    "leiden_1.5",
+    "leiden_2",
+    "leiden_2.5",
+    "leiden_3",
+    "leiden_3.5",
+    "leiden_4.0",    ],
     cluster_de_top_n=20,
     cluster_de_method="t-test",
     cluster_de_layer=None,

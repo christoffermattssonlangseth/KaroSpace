@@ -1625,6 +1625,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             color: var(--text-color);
             font-size: 11px;
         }}
+        .marker-genes-export {{ display: flex; justify-content: flex-end; }}
         .marker-group-title {{ font-size: 11px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; border-radius: 3px; padding: 1px 3px; margin: -1px -3px; }}
         .marker-group-title:hover {{ background: var(--hover-bg); }}
         .marker-group-title.is-spotlit {{ background: color-mix(in srgb, var(--accent-color, #4a9eff) 15%, transparent); }}
@@ -2263,6 +2264,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .samples-view-toggle {{ display: flex; gap: 4px; }}
         .samples-chart-container {{ position: relative; overflow: auto; max-height: 440px; }}
         .samples-svg {{ display: block; }}
+        .river-plot {{ margin-top: 8px; overflow-x: auto; }}
+        .river-svg {{ display: block; overflow: visible; }}
+        .river-link {{ opacity: 0.42; transition: opacity 0.12s; }}
+        .river-link:hover {{ opacity: 0.82; }}
+        .river-link.dim {{ opacity: 0.07; }}
+        .river-node {{ cursor: pointer; stroke: var(--panel-bg); stroke-width: 0.5; }}
+        .river-node:hover {{ stroke: var(--text-color); stroke-width: 1; }}
+        .river-label {{ font-size: 8px; fill: var(--text-color); pointer-events: none; }}
+        .river-header {{ font-size: 9px; font-weight: 600; fill: var(--muted-color); text-transform: uppercase; letter-spacing: 0.03em; }}
         .samples-tooltip {{
             position: absolute;
             background: var(--panel-bg);
@@ -2994,6 +3004,46 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         .selection-summary.expanded {{
             max-height: min(82%, 560px);
+        }}
+        .selection-summary.minimized {{
+            max-height: none;
+            overflow: visible;
+            width: auto;
+        }}
+        .selection-summary-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+        }}
+        .selection-summary:not(.minimized) .selection-summary-header {{
+            margin-bottom: 6px;
+        }}
+        .selection-summary-header-title {{
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: var(--muted-color);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }}
+        .selection-summary-minimize {{
+            flex: 0 0 auto;
+            width: 18px;
+            height: 18px;
+            padding: 0;
+            line-height: 1;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: var(--header-bg);
+            color: var(--text-color);
+            font-size: 13px;
+            cursor: pointer;
+            pointer-events: auto;
+        }}
+        .selection-summary-minimize:hover {{
+            background: var(--hover-bg);
         }}
         .selection-summary-title {{
             margin: 2px 0 6px;
@@ -4621,6 +4671,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let insightsGenesTab = 'markers';
     let insightsCompareTab = 'groups';
     let insightsNeighborsTab = 'enrichment';
+    let riverLeftColumn = null;
+    let riverRightColumn = null;
     let geneDistributionGroupBy = '';
     let geneDistributionSortKey = 'mean';
     let geneDistributionSortDir = 'desc';
@@ -4725,6 +4777,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let lassoModeB = false;  // Next lasso draw fills region B
     let selectionSummaryColor = DATA.initial_color;
     let selectionSummaryExpanded = false;
+    let selectionSummaryMinimized = false;
     const MAX_SELECTION_QUERY_MATCHES = 150000;
     let selectionQueryExpanded = false;
     let selectionQueryText = '';
@@ -9405,6 +9458,39 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         downloadTextFile(csvText, filename, 'text/csv;charset=utf-8');
     }}
 
+    function buildMarkerGenesCsv(colorCol) {{
+        const markers = DATA.marker_genes || {{}};
+        const groupMarkers = markers[colorCol];
+        if (!groupMarkers || Object.keys(groupMarkers).length === 0) return '';
+        const colorMeta = DATA.colors_meta?.[colorCol];
+        const categories = (colorMeta && colorMeta.categories) || Object.keys(groupMarkers);
+        const rows = [['color_column', 'cluster', 'rank', 'gene']];
+        categories.forEach((cat) => {{
+            const key = String(cat);
+            const genes = getMarkerGenesForColorCategory(colorCol, key) || [];
+            genes.forEach((gene, idx) => {{
+                const g = String(gene || '').trim();
+                if (!g) return;
+                rows.push([colorCol, key, idx + 1, g]);
+            }});
+        }});
+        if (rows.length <= 1) return '';
+        return rows
+            .map((row) => row.map((value) => escapeCsvCell(value)).join(','))
+            .join('\\n');
+    }}
+
+    function exportMarkerGenesCsv() {{
+        const csvText = buildMarkerGenesCsv(currentColor);
+        if (!csvText) {{
+            alert('No marker genes are available for this color to export.');
+            return;
+        }}
+        const colorLabel = sanitizeFilenamePart(currentColor || 'color');
+        const filename = `karospace-marker-genes-${{colorLabel}}-${{getScreenshotTimestamp()}}.csv`;
+        downloadTextFile(csvText, filename, 'text/csv;charset=utf-8');
+    }}
+
     function formatSelectionQueryLiteral(value) {{
         if (typeof value === 'number' && Number.isFinite(value)) return String(value);
         if (typeof value === 'boolean') return value ? 'true' : 'false';
@@ -9614,14 +9700,32 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return html + renderSelectionQueryPanelHtml();
     }}
 
+    function renderSelectionSummaryHeaderHtml(summary) {{
+        const count = summary && summary.total ? summary.total : 0;
+        const label = count
+            ? `${{count.toLocaleString()}} cells selected`
+            : 'Selection';
+        const icon = selectionSummaryMinimized ? '▢' : '–';
+        const title = selectionSummaryMinimized ? 'Expand selection panel' : 'Minimize selection panel';
+        return `<div class="selection-summary-header">
+            <span class="selection-summary-header-title">${{label}}</span>
+            <button class="selection-summary-minimize" type="button" data-selection-minimize title="${{title}}" aria-label="${{title}}">${{icon}}</button>
+        </div>`;
+    }}
+
     function renderSelectionSummaryHtml(summary, options = {{}}) {{
         if (!summary || summary.total === 0) {{
             return '<div class="selection-summary-meta">Draw a region with Magic Wand to inspect selected cells.</div>' + renderSelectionQueryPanelHtml();
         }}
 
+        const header = renderSelectionSummaryHeaderHtml(summary);
+        if (selectionSummaryMinimized) {{
+            return header;
+        }}
+
         // Comparison mode: two regions drawn
         if (selectedCellsB.size > 0) {{
-            return renderSelectionComparisonHtml(summary);
+            return header + renderSelectionComparisonHtml(summary);
         }}
 
         const topSections = summary.sections.slice(0, 3).map(([sid, count]) => `${{sid}} (${{count.toLocaleString()}})`);
@@ -9703,7 +9807,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             html += `<div class="selection-summary-actions">${{actionButtons.join('')}}</div>`;
         }}
 
-        return html + renderSelectionQueryPanelHtml();
+        return header + html + renderSelectionQueryPanelHtml();
     }}
 
     function bindSelectionSummaryInteractions(container) {{
@@ -9742,6 +9846,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 updateSelectionInfo();
             }});
         }});
+        const minimizeBtn = container.querySelector('[data-selection-minimize]');
+        if (minimizeBtn) {{
+            minimizeBtn.addEventListener('click', (e) => {{
+                e.preventDefault();
+                e.stopPropagation();
+                selectionSummaryMinimized = !selectionSummaryMinimized;
+                updateSelectionInfo();
+            }});
+        }}
         const queryToggle = container.querySelector('[data-selection-query-toggle]');
         if (queryToggle) {{
             queryToggle.addEventListener('click', (e) => {{
@@ -12099,6 +12212,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             umapSummary.style.display = hasSelection ? '' : 'none';
             if (hasSelection) {{
                 umapSummary.classList.toggle('expanded', selectionSummaryExpanded);
+                umapSummary.classList.toggle('minimized', selectionSummaryMinimized);
                 umapSummary.innerHTML = renderSelectionSummaryHtml(summary);
                 bindSelectionSummaryInteractions(umapSummary);
             }}
@@ -12106,6 +12220,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const modalSummary = document.getElementById('modal-selection-summary');
         if (modalSummary) {{
             modalSummary.classList.toggle('expanded', selectionSummaryExpanded);
+            modalSummary.classList.toggle('minimized', selectionSummaryMinimized && selectedCells.size > 0);
             modalSummary.innerHTML = renderSelectionSummaryHtml(summary, {{ allowFocusSubview: true, allowGenePanel: true }});
             bindSelectionSummaryInteractions(modalSummary);
         }}
@@ -12118,6 +12233,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         selectedCellsB.clear();
         lassoModeB = false;
         selectionSummaryExpanded = false;
+        selectionSummaryMinimized = false;
         hideModalGeneDiscoveryPanel();
         updateSelectionInfo();
         renderUMAP();
@@ -13869,7 +13985,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     const INSIGHTS_SUBTABS = {{
         overview: ['summary', 'sections'],
         genes: ['markers', 'spatial', 'distribution'],
-        compare: ['groups', 'regions', 'cell-de'],
+        compare: ['groups', 'regions', 'cell-de', 'river'],
         neighbors: ['enrichment', 'interactions'],
     }};
 
@@ -13948,6 +14064,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 renderAnnotationComparison();
             }} else if (insightsCompareTab === 'cell-de') {{
                 renderClusterDE();
+            }} else if (insightsCompareTab === 'river') {{
+                renderAnnotationRiver();
             }} else {{
                 renderGroupDE();
             }}
@@ -14465,6 +14583,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         <button class="color-tab active" id="compare-tab-groups" data-insights-parent="compare" data-insights-subtab="groups" type="button">Groups</button>
                         <button class="color-tab" id="compare-tab-regions" data-insights-parent="compare" data-insights-subtab="regions" type="button">Regions</button>
                         <button class="color-tab" id="compare-tab-cell-de" data-insights-parent="compare" data-insights-subtab="cell-de" type="button">Cell DE</button>
+                        <button class="color-tab" id="compare-tab-river" data-insights-parent="compare" data-insights-subtab="river" type="button">River</button>
                     </div>
                     <div class="color-tab-content active" id="compare-tab-groups-content">
                         <div class="agg-group-meta" id="group-de-summary">Compare samples, metadata groups, or annotations.</div>
@@ -14501,6 +14620,26 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         <div class="color-aggregation" id="cluster-de-results">
                             <div class="agg-group-meta">Choose two categories to compare.</div>
                         </div>
+                    </div>
+                    <div class="color-tab-content" id="compare-tab-river-content">
+                        <div class="cluster-de-controls">
+                            <div class="cluster-de-select-row">
+                                <div>
+                                    <label>From</label>
+                                    <select id="river-left"></select>
+                                </div>
+                                <div>
+                                    <label>To</label>
+                                    <select id="river-right"></select>
+                                </div>
+                            </div>
+                            <div style="display: flex; justify-content: flex-end; gap: 6px;">
+                                <button class="legend-btn" id="river-swap" type="button">Swap</button>
+                                <button class="legend-btn" id="river-export" type="button">Export CSV</button>
+                            </div>
+                        </div>
+                        <div class="agg-group-meta" id="river-summary">Pick two annotations to see how their categories correspond.</div>
+                        <div class="river-plot" id="river-plot"></div>
                     </div>
                 </div>
                 <div class="color-tab-content" id="color-tab-neighbors-content">
@@ -14666,6 +14805,30 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             renderClusterDE();
         }});
 
+        const riverLeftSelect = document.getElementById('river-left');
+        const riverRightSelect = document.getElementById('river-right');
+        const riverSwap = document.getElementById('river-swap');
+        const riverExport = document.getElementById('river-export');
+        syncRiverControls();
+        riverLeftSelect?.addEventListener('change', () => {{
+            riverLeftColumn = riverLeftSelect.value || null;
+            renderAnnotationRiver();
+        }});
+        riverRightSelect?.addEventListener('change', () => {{
+            riverRightColumn = riverRightSelect.value || null;
+            renderAnnotationRiver();
+        }});
+        riverSwap?.addEventListener('click', () => {{
+            const tmp = riverLeftColumn;
+            riverLeftColumn = riverRightColumn;
+            riverRightColumn = tmp;
+            renderAnnotationRiver();
+        }});
+        riverExport?.addEventListener('click', (e) => {{
+            e.preventDefault();
+            exportRiverCsv();
+        }});
+
         // Keep initial load fast: only render the list. Other Insights content is computed on-demand
         // when the panel/tab is opened.
         renderColorList('');
@@ -14780,6 +14943,211 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         renderGeneDiscoveryPanel();
         renderColorList(document.getElementById('color-search')?.value || '');
         renderActiveInsightsPanel();
+    }}
+
+    function getRiverColumns() {{
+        return getCategoricalColorColumns();
+    }}
+
+    function syncRiverControls() {{
+        const cols = getRiverColumns();
+        if (!cols.length) return;
+        if (!riverLeftColumn || !cols.includes(riverLeftColumn)) {{
+            const meta = DATA.colors_meta?.[currentColor];
+            riverLeftColumn = (meta && !meta.is_continuous && cols.includes(currentColor)) ? currentColor : cols[0];
+        }}
+        if (!riverRightColumn || !cols.includes(riverRightColumn) || riverRightColumn === riverLeftColumn) {{
+            riverRightColumn = cols.find((c) => c !== riverLeftColumn) || riverLeftColumn;
+        }}
+        const options = cols.map((c) => ({{ value: c, label: formatMetadataLabel(c) }}));
+        setSelectOptions(document.getElementById('river-left'), options, riverLeftColumn);
+        setSelectOptions(document.getElementById('river-right'), options, riverRightColumn);
+    }}
+
+    function computeAnnotationCrossTab(leftCol, rightCol) {{
+        const leftCats = getCategoriesForColorColumn(leftCol).map(String);
+        const rightCats = getCategoriesForColorColumn(rightCol).map(String);
+        if (!leftCats.length || !rightCats.length) return null;
+        const nL = leftCats.length, nR = rightCats.length;
+        const matrix = Array.from({{ length: nL }}, () => new Float64Array(nR));
+        let total = 0, missing = 0;
+        (DATA.sections || []).forEach((section) => {{
+            const lv = getSectionColorValues(section, leftCol);
+            const rv = getSectionColorValues(section, rightCol);
+            if (!lv || !rv) return;
+            const n = Math.min(lv.length, rv.length);
+            for (let i = 0; i < n; i++) {{
+                const li = Math.round(lv[i]);
+                const ri = Math.round(rv[i]);
+                if (li >= 0 && li < nL && ri >= 0 && ri < nR) {{
+                    matrix[li][ri]++;
+                    total++;
+                }} else {{
+                    missing++;
+                }}
+            }}
+        }});
+        const leftTotals = leftCats.map((_, li) => matrix[li].reduce((s, v) => s + v, 0));
+        const rightTotals = rightCats.map((_, ri) => {{
+            let s = 0;
+            for (let li = 0; li < nL; li++) s += matrix[li][ri];
+            return s;
+        }});
+        return {{ leftCol, rightCol, leftCats, rightCats, matrix, leftTotals, rightTotals, total, missing }};
+    }}
+
+    function buildRiverSvg(xtab) {{
+        const {{ leftCol, rightCol, leftCats, rightCats, matrix, leftTotals, rightTotals, total }} = xtab;
+        const nL = leftCats.length, nR = rightCats.length;
+        const W = 320, NODE_W = 12, GAP = 6, PAD_T = 18, PAD_B = 8;
+        const leftX = 96, rightX = W - 96 - NODE_W;
+        const barBudget = Math.max(200, Math.min(620, 30 * Math.max(nL, nR)));
+        const scale = total > 0 ? barBudget / total : 0;
+        const leftGaps = Math.max(0, nL - 1) * GAP;
+        const rightGaps = Math.max(0, nR - 1) * GAP;
+        const innerH = Math.max(barBudget + leftGaps, barBudget + rightGaps);
+        const H = PAD_T + innerH + PAD_B;
+        const minNode = 1;
+        function layout(cats, totals, gaps, x) {{
+            const colH = barBudget + gaps;
+            let y = PAD_T + (innerH - colH) / 2;
+            return cats.map((cat, i) => {{
+                const h = totals[i] > 0 ? Math.max(totals[i] * scale, minNode) : 0;
+                const node = {{ cat, i, x, top: y, h, total: totals[i] }};
+                y += h + GAP;
+                return node;
+            }});
+        }}
+        const leftNodes = layout(leftCats, leftTotals, leftGaps, leftX);
+        const rightNodes = layout(rightCats, rightTotals, rightGaps, rightX);
+        const parts = ['<svg class="river-svg" viewBox="0 0 ' + W + ' ' + H + '" width="100%" preserveAspectRatio="xMidYMid meet">'];
+        const rightOffset = rightNodes.map(() => 0);
+        leftNodes.forEach((ln) => {{
+            let lo = 0;
+            rightNodes.forEach((rn) => {{
+                const v = matrix[ln.i][rn.i];
+                if (!(v > 0)) return;
+                const th = v * scale;
+                const y0 = ln.top + lo;
+                const y1 = rn.top + rightOffset[rn.i];
+                lo += th;
+                rightOffset[rn.i] += th;
+                const x0 = ln.x + NODE_W, x1 = rn.x, xm = (x0 + x1) / 2;
+                const color = getCategoryColorForValue(leftCol, ln.cat);
+                const d = `M${{x0}},${{y0}} C${{xm}},${{y0}} ${{xm}},${{y1}} ${{x1}},${{y1}} L${{x1}},${{y1 + th}} C${{xm}},${{y1 + th}} ${{xm}},${{y0 + th}} ${{x0}},${{y0 + th}} Z`;
+                const pct = ln.total > 0 ? Math.round(100 * v / ln.total) : 0;
+                parts.push(`<path class="river-link" d="${{d}}" fill="${{color}}" data-li="${{ln.i}}" data-ri="${{rn.i}}"><title>${{escapeHtml(ln.cat)}} → ${{escapeHtml(rn.cat)}}: ${{v.toLocaleString()}} cells (${{pct}}% of ${{escapeHtml(ln.cat)}})</title></path>`);
+            }});
+        }});
+        function drawNodes(nodes, col, side) {{
+            nodes.forEach((nd) => {{
+                if (nd.h <= 0) return;
+                const color = getCategoryColorForValue(col, nd.cat);
+                parts.push(`<rect class="river-node" x="${{nd.x}}" y="${{nd.top}}" width="${{NODE_W}}" height="${{nd.h}}" fill="${{color}}" data-side="${{side}}" data-cat="${{escapeHtml(nd.cat)}}"><title>${{escapeHtml(nd.cat)}}: ${{nd.total.toLocaleString()}} cells</title></rect>`);
+                const ty = nd.top + nd.h / 2;
+                if (side === 'left') {{
+                    parts.push(`<text class="river-label" x="${{nd.x - 4}}" y="${{ty}}" text-anchor="end" dominant-baseline="middle">${{escapeHtml(nd.cat)}}</text>`);
+                }} else {{
+                    parts.push(`<text class="river-label" x="${{nd.x + NODE_W + 4}}" y="${{ty}}" text-anchor="start" dominant-baseline="middle">${{escapeHtml(nd.cat)}}</text>`);
+                }}
+            }});
+        }}
+        drawNodes(leftNodes, leftCol, 'left');
+        drawNodes(rightNodes, rightCol, 'right');
+        parts.push(`<text class="river-header" x="${{leftX + NODE_W / 2}}" y="12" text-anchor="middle">${{escapeHtml(formatMetadataLabel(leftCol))}}</text>`);
+        parts.push(`<text class="river-header" x="${{rightX + NODE_W / 2}}" y="12" text-anchor="middle">${{escapeHtml(formatMetadataLabel(rightCol))}}</text>`);
+        parts.push('</svg>');
+        return parts.join('');
+    }}
+
+    function bindRiverInteractions(container, xtab) {{
+        container.querySelectorAll('.river-node').forEach((rect) => {{
+            const side = rect.getAttribute('data-side');
+            const cat = rect.getAttribute('data-cat');
+            const col = side === 'left' ? xtab.leftCol : xtab.rightCol;
+            const cats = side === 'left' ? xtab.leftCats : xtab.rightCats;
+            const idx = cats.indexOf(cat);
+            const attr = side === 'left' ? 'data-li' : 'data-ri';
+            rect.addEventListener('mouseenter', () => {{
+                container.querySelectorAll('.river-link').forEach((p) => {{
+                    p.classList.toggle('dim', p.getAttribute(attr) !== String(idx));
+                }});
+            }});
+            rect.addEventListener('mouseleave', () => {{
+                container.querySelectorAll('.river-link').forEach((p) => p.classList.remove('dim'));
+            }});
+            rect.addEventListener('click', () => {{
+                if (!col || !cat) return;
+                linkedSpotlightEnabled = true;
+                neighborNetworkFocusCategories = null;
+                spotlightPinnedCategory = cat;
+                spotlightHoverCategory = null;
+                if (currentColor !== col) {{
+                    setViewerColorColumn(col);
+                }} else {{
+                    updateAllLegendSpotlightClasses();
+                    rerenderForSpotlightChange();
+                }}
+            }});
+        }});
+    }}
+
+    function renderAnnotationRiver() {{
+        const container = document.getElementById('river-plot');
+        if (!container) return;
+        const summaryEl = document.getElementById('river-summary');
+        const cols = getRiverColumns();
+        if (cols.length < 2) {{
+            if (summaryEl) summaryEl.textContent = 'Need at least two categorical annotations to draw a river plot.';
+            container.innerHTML = '<div class="agg-group-meta">No categorical annotation pairs available.</div>';
+            return;
+        }}
+        syncRiverControls();
+        const leftCol = riverLeftColumn, rightCol = riverRightColumn;
+        if (!leftCol || !rightCol || leftCol === rightCol) {{
+            container.innerHTML = '<div class="agg-group-meta">Pick two different annotations.</div>';
+            return;
+        }}
+        const xtab = computeAnnotationCrossTab(leftCol, rightCol);
+        if (!xtab || xtab.total === 0) {{
+            if (summaryEl) summaryEl.textContent = 'No overlapping cells between these annotations.';
+            container.innerHTML = '<div class="agg-group-meta">No data to plot.</div>';
+            return;
+        }}
+        if (summaryEl) {{
+            const missingNote = xtab.missing > 0 ? ` · ${{xtab.missing.toLocaleString()}} cells skipped (missing in one annotation)` : '';
+            summaryEl.innerHTML = `${{xtab.total.toLocaleString()}} cells · ${{xtab.leftCats.length}} ${{escapeHtml(formatMetadataLabel(leftCol))}} → ${{xtab.rightCats.length}} ${{escapeHtml(formatMetadataLabel(rightCol))}} categories${{missingNote}}. Click a node to color &amp; spotlight it.`;
+        }}
+        container.innerHTML = buildRiverSvg(xtab);
+        bindRiverInteractions(container, xtab);
+    }}
+
+    function buildRiverCsv(xtab) {{
+        const rows = [['from_column', 'from_category', 'to_column', 'to_category', 'cells', 'pct_of_from']];
+        xtab.leftCats.forEach((lc, li) => {{
+            xtab.rightCats.forEach((rc, ri) => {{
+                const v = xtab.matrix[li][ri];
+                if (!(v > 0)) return;
+                const pct = xtab.leftTotals[li] > 0 ? (100 * v / xtab.leftTotals[li]) : 0;
+                rows.push([xtab.leftCol, lc, xtab.rightCol, rc, v, pct.toFixed(2)]);
+            }});
+        }});
+        return rows.map((r) => r.map((value) => escapeCsvCell(value)).join(',')).join('\\n');
+    }}
+
+    function exportRiverCsv() {{
+        const cols = getRiverColumns();
+        if (cols.length < 2 || !riverLeftColumn || !riverRightColumn || riverLeftColumn === riverRightColumn) {{
+            alert('Pick two different annotations to export.');
+            return;
+        }}
+        const xtab = computeAnnotationCrossTab(riverLeftColumn, riverRightColumn);
+        if (!xtab || xtab.total === 0) {{
+            alert('No correspondence data to export.');
+            return;
+        }}
+        const filename = `karospace-river-${{sanitizeFilenamePart(riverLeftColumn)}}-to-${{sanitizeFilenamePart(riverRightColumn)}}-${{getScreenshotTimestamp()}}.csv`;
+        downloadTextFile(buildRiverCsv(xtab), filename, 'text/csv;charset=utf-8');
     }}
 
     function computeSectionComposition(colorCol) {{
@@ -15221,8 +15589,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ? `<div class="agg-group-meta">Loaded gene: <strong>${{escapeHtml(currentGene)}}</strong>. Click another marker gene to switch.</div>`
             : '<div class="agg-group-meta">Click a marker gene to load it in the viewer. Genes not embedded in this viewer are shown as names only.</div>';
 
-        container.innerHTML = loadedGeneNote + rows.join('');
+        const exportBar = `<div class="marker-genes-export"><button class="selection-summary-compare-btn" type="button" id="marker-genes-export-btn" title="Download marker genes for every ${{escapeHtml(formatMetadataLabel(currentColor))}} cluster as a CSV">Export marker genes (CSV)</button></div>`;
+
+        container.innerHTML = loadedGeneNote + exportBar + rows.join('');
         bindGeneActivateButtons(container, renderMarkerGenes);
+
+        const exportBtn = container.querySelector('#marker-genes-export-btn');
+        if (exportBtn) {{
+            exportBtn.addEventListener('click', (e) => {{
+                e.preventDefault();
+                e.stopPropagation();
+                exportMarkerGenesCsv();
+            }});
+        }}
 
         container.querySelectorAll('[data-marker-category]').forEach(title => {{
             title.addEventListener('click', () => {{

@@ -1155,10 +1155,11 @@ class KaroSpaceExportGUI:
 
     def _on_inspect_error(self, exc: Exception) -> None:
         assert messagebox is not None
+        tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)).strip()
         self._log("Inspect failed:")
-        self._log(traceback.format_exc().strip())
+        self._log(tb if tb else f"{type(exc).__name__}: {exc}")
         self._set_busy(False, "Inspect failed.")
-        messagebox.showerror("Inspect failed", str(exc))
+        messagebox.showerror("Inspect failed", f"{type(exc).__name__}: {exc}")
 
     def _validate_and_collect(self) -> Tuple[str, dict, dict]:
         input_raw = self.input_path.get().strip()
