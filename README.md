@@ -161,6 +161,7 @@ karospace your_data.h5ad -o viewer.html --color leiden
 | `-o, --output` | Output HTML file path | `karospace.html` |
 | `-c, --color` | Initial color column | `leiden` |
 | `--additional-colors` | Comma-separated extra obs columns to embed as selectable colors (needed to compare two annotations in the River plot) | empty |
+| `--metadata-labels` | JSON object mapping metadata/obs column keys to display labels in the viewer UI | empty |
 | `-g, --groupby` | Column to group sections by | `sample_id` |
 | `--min-panel-size` | Minimum panel width in pixels | `150` |
 | `--spot-size` | Cell/spot size (`auto` or positive number) | `auto` |

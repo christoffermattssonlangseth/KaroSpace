@@ -1178,6 +1178,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .main-container {{ display: flex; flex: 1; min-height: 0; }}
         .content-column {{
             flex: 1;
+            min-width: 0;
             min-height: 0;
             display: flex;
             flex-direction: column;
@@ -1299,10 +1300,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .section-canvas {{ display: block; width: 100%; aspect-ratio: 1; }}
 
         .legend-container {{
-            width: 200px;
+            width: clamp(140px, 15vw, 200px);
+            flex-shrink: 0;
             padding: 12px;
             background: var(--panel-bg);
             border-left: 1px solid var(--border-color);
+            overflow-x: hidden;
             overflow-y: auto;
             font-size: 12px;
             transition: background 0.3s, border-color 0.3s, width 0.3s, padding 0.3s;
@@ -1313,6 +1316,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             overflow: hidden;
             border-left: none;
         }}
+        .legend-resizer {{
+            width: 6px;
+            flex-shrink: 0;
+            cursor: col-resize;
+            background: transparent;
+            transition: background 0.15s;
+        }}
+        .legend-resizer:hover, .legend-resizer.dragging {{
+            background: var(--accent-strong);
+        }}
+        .legend-resizer.hidden {{ display: none; }}
+        body.legend-resizing {{ cursor: col-resize; user-select: none; }}
         .color-panel {{
             width: 300px;
             padding: 12px;
@@ -2365,6 +2380,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             background: transparent;
             padding: 0;
             cursor: pointer;
+        }}
+        .legend-label-editor {{
+            min-width: 0;
+            flex: 1 1 auto;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 2px 6px;
+            font: inherit;
+            color: var(--text-color);
+            background: var(--input-bg);
         }}
         .split-legend-list {{
             display: flex;
@@ -3861,6 +3886,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             <button class="graph-toggle" id="annotations-overview-toggle" title="Show polygon annotations in the overview" style="display: none;">
                 Annotations
             </button>
+            <button class="graph-toggle" id="annotations-overview-export" title="Export all polygon annotations as JSON" style="display: none;">
+                Export annotations
+            </button>
             <button class="umap-toggle" id="umap-toggle" title="Toggle UMAP view" data-help="Show or hide the UMAP panel for a global embedding view with shared selection tools." style="display: none;">
                 UMAP
             </button>
@@ -3954,6 +3982,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             </div>
         </div>
         <div class="color-panel collapsed" id="color-panel"></div>
+        <div class="legend-resizer" id="legend-resizer" title="Drag to resize the legend"></div>
         <div class="legend-container" id="legend"></div>
     </div>
 
@@ -5001,7 +5030,46 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!legend || !btn) return;
         legend.classList.toggle('collapsed');
         btn.classList.toggle('active');
+        const resizer = document.getElementById('legend-resizer');
+        if (resizer) resizer.classList.toggle('hidden', legend.classList.contains('collapsed'));
         requestAnimationFrame(renderAllSections);
+    }}
+
+    const LEGEND_MIN_WIDTH = 120;
+    const LEGEND_MAX_WIDTH = 480;
+    function initLegendResizer() {{
+        const resizer = document.getElementById('legend-resizer');
+        const legend = document.getElementById('legend');
+        if (!resizer || !legend) return;
+        let startX = 0;
+        let startWidth = 0;
+        const onMove = (event) => {{
+            // Legend is docked on the right, so dragging left widens it.
+            const delta = startX - event.clientX;
+            const next = Math.max(LEGEND_MIN_WIDTH, Math.min(LEGEND_MAX_WIDTH, startWidth + delta));
+            legend.style.width = `${{next}}px`;
+        }};
+        const onUp = () => {{
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            resizer.classList.remove('dragging');
+            document.body.classList.remove('legend-resizing');
+            requestAnimationFrame(renderAllSections);
+        }};
+        resizer.addEventListener('mousedown', (event) => {{
+            if (legend.classList.contains('collapsed')) return;
+            event.preventDefault();
+            startX = event.clientX;
+            startWidth = legend.getBoundingClientRect().width;
+            resizer.classList.add('dragging');
+            document.body.classList.add('legend-resizing');
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+        }});
+        resizer.addEventListener('dblclick', () => {{
+            legend.style.width = '';
+            requestAnimationFrame(renderAllSections);
+        }});
     }}
 
     function toggleInsightsPanel() {{
@@ -5933,6 +6001,149 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function exportColorPalette() {{
         const payload = buildColorPaletteExport();
         downloadJsonFile(payload, `karospace-colors-${{getScreenshotTimestamp()}}.json`);
+    }}
+
+    function ensureColorColumnCategoryState(colorCol) {{
+        if (!colorCol) return null;
+        const meta = DATA.colors_meta?.[colorCol];
+        if (!meta || meta.is_continuous || !Array.isArray(meta.categories)) return null;
+        meta.categories = meta.categories.map((value) => String(value));
+        if (!Array.isArray(meta.original_categories) || meta.original_categories.length !== meta.categories.length) {{
+            meta.original_categories = meta.categories.slice();
+        }} else {{
+            meta.original_categories = meta.original_categories.map((value) => String(value));
+        }}
+        return meta;
+    }}
+
+    function getRawCategoriesForColorColumn(colorCol) {{
+        const meta = ensureColorColumnCategoryState(colorCol);
+        if (!meta) return [];
+        return meta.original_categories.slice();
+    }}
+
+    function resolveRawCategoryValue(colorCol, category) {{
+        const token = String(category ?? '');
+        const meta = ensureColorColumnCategoryState(colorCol);
+        if (!meta) return token;
+        const displayIdx = meta.categories.findIndex((value) => String(value) === token);
+        if (displayIdx >= 0) return String(meta.original_categories[displayIdx]);
+        const rawIdx = meta.original_categories.findIndex((value) => String(value) === token);
+        if (rawIdx >= 0) return String(meta.original_categories[rawIdx]);
+        return token;
+    }}
+
+    function formatCategoryLabel(colorCol, category) {{
+        const token = String(category ?? '');
+        const meta = ensureColorColumnCategoryState(colorCol);
+        if (!meta) return token;
+        const displayIdx = meta.categories.findIndex((value) => String(value) === token);
+        if (displayIdx >= 0) return String(meta.categories[displayIdx]);
+        const rawIdx = meta.original_categories.findIndex((value) => String(value) === token);
+        if (rawIdx >= 0) return String(meta.categories[rawIdx]);
+        return token;
+    }}
+
+    function updateCategoryLabelStateReferences(colorCol, oldLabel, newLabel) {{
+        if (!colorCol || oldLabel === newLabel) return;
+        if (hiddenCategories.has(oldLabel)) {{
+            hiddenCategories.delete(oldLabel);
+            hiddenCategories.add(newLabel);
+        }}
+        if (modalSelectedCategory === oldLabel) modalSelectedCategory = newLabel;
+        if (spotlightPinnedCategory === oldLabel) spotlightPinnedCategory = newLabel;
+        if (spotlightHoverCategory === oldLabel) spotlightHoverCategory = newLabel;
+        if (interactionSourceCategory === oldLabel && currentColor === colorCol) interactionSourceCategory = newLabel;
+        if (clusterDeGroupby === colorCol) {{
+            if (clusterDeSourceCategory === oldLabel) clusterDeSourceCategory = newLabel;
+            if (clusterDeReferenceCategory === oldLabel) clusterDeReferenceCategory = newLabel;
+        }}
+        if (riverLeftColumn === colorCol && celltypeTrendTarget === oldLabel) celltypeTrendTarget = newLabel;
+        if (riverRightColumn === colorCol && celltypeTrendTarget === oldLabel) celltypeTrendTarget = newLabel;
+        if (neighborNetworkFocusCategories?.has(oldLabel)) {{
+            const next = new Set();
+            neighborNetworkFocusCategories.forEach((value) => {{
+                next.add(value === oldLabel ? newLabel : value);
+            }});
+            neighborNetworkFocusCategories = next;
+        }}
+    }}
+
+    function setCategoryLabelOverride(colorCol, categoryIdx, nextLabel) {{
+        const meta = ensureColorColumnCategoryState(colorCol);
+        if (!meta) return {{ ok: false, reason: 'invalid-column' }};
+        const idx = Number(categoryIdx);
+        if (!Number.isInteger(idx) || idx < 0 || idx >= meta.categories.length) {{
+            return {{ ok: false, reason: 'invalid-category' }};
+        }}
+        const rawLabel = String(meta.original_categories[idx]);
+        const candidate = String(nextLabel ?? '').trim() || rawLabel;
+        const duplicateIdx = meta.categories.findIndex((label, labelIdx) => labelIdx !== idx && String(label) === candidate);
+        if (duplicateIdx >= 0) {{
+            return {{ ok: false, reason: 'duplicate-label', label: candidate }};
+        }}
+        const oldLabel = String(meta.categories[idx]);
+        if (oldLabel === candidate) return {{ ok: true, changed: false, label: candidate }};
+        meta.categories[idx] = candidate;
+        updateCategoryLabelStateReferences(colorCol, oldLabel, candidate);
+        return {{ ok: true, changed: true, label: candidate, raw: rawLabel }};
+    }}
+
+    function buildCategoryLabelExport() {{
+        const categoricalColumns = getCategoricalColorColumns();
+        const columns = {{}};
+        categoricalColumns.forEach((colorCol) => {{
+            const meta = ensureColorColumnCategoryState(colorCol);
+            if (!meta) return;
+            columns[colorCol] = meta.original_categories.map((rawValue, idx) => ({{
+                old_value: String(rawValue),
+                new_value: String(meta.categories[idx]),
+            }}));
+        }});
+        return {{
+            format: 'karospace-category-labels-v1',
+            created_at: new Date().toISOString(),
+            active_color_column: currentColor || null,
+            columns,
+        }};
+    }}
+
+    function exportCategoryLabels() {{
+        const payload = buildCategoryLabelExport();
+        downloadJsonFile(payload, `karospace-category-labels-${{getScreenshotTimestamp()}}.json`);
+    }}
+
+    function buildSessionCategoryLabelState() {{
+        return buildCategoryLabelExport().columns;
+    }}
+
+    function applySessionCategoryLabelState(columns) {{
+        if (!columns || typeof columns !== 'object') return 0;
+        let applied = 0;
+        Object.entries(columns).forEach(([colorCol, rows]) => {{
+            const meta = ensureColorColumnCategoryState(colorCol);
+            if (!meta || !Array.isArray(rows)) return;
+            let touched = false;
+            rows.forEach((row) => {{
+                const rawValue = String(row?.old_value ?? '');
+                const newValue = String(row?.new_value ?? '').trim();
+                const idx = meta.original_categories.findIndex((value) => String(value) === rawValue);
+                if (idx < 0) return;
+                const candidate = newValue || rawValue;
+                if (meta.categories[idx] === candidate) return;
+                const duplicateIdx = meta.categories.findIndex((label, labelIdx) => labelIdx !== idx && String(label) === candidate);
+                if (duplicateIdx >= 0) return;
+                const oldLabel = String(meta.categories[idx]);
+                meta.categories[idx] = candidate;
+                updateCategoryLabelStateReferences(colorCol, oldLabel, candidate);
+                touched = true;
+            }});
+            if (touched) {{
+                comparisonCountsCache.delete(String(colorCol));
+                applied++;
+            }}
+        }});
+        return applied;
     }}
 
     function buildSessionPaletteState() {{
@@ -7625,8 +7836,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function getCategoriesForColorColumn(colorCol) {{
-        const meta = DATA.colors_meta?.[colorCol];
-        if (!meta || meta.is_continuous || !Array.isArray(meta.categories)) return [];
+        const meta = ensureColorColumnCategoryState(colorCol);
+        if (!meta) return [];
         return meta.categories;
     }}
 
@@ -7733,7 +7944,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         const colLabel = spec.color ? formatMetadataLabel(spec.color) : 'Cell type';
         if (spec.category === BLEND_ALL_CATEGORIES) return `${{colLabel}}: All`;
-        return spec.category ? `${{colLabel}}: ${{spec.category}}` : colLabel;
+        return spec.category ? `${{colLabel}}: ${{formatCategoryLabel(spec.color, spec.category)}}` : colLabel;
     }}
 
     function getModalSplitLegendEntry(side) {{
@@ -7765,7 +7976,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const categories = getCategoriesForColorColumn(colorCol);
         const colLabel = colorCol ? formatMetadataLabel(colorCol) : 'Cell type';
         const categoryEntries = categories.map((cat, idx) => ({{
-            label: cat,
+            label: formatCategoryLabel(colorCol, cat),
             color: getCategoryColor(idx, colorCol),
         }}));
         if (spec.category && spec.category !== BLEND_ALL_CATEGORIES) {{
@@ -7774,7 +7985,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 return {{
                     side,
                     sideLabel,
-                    label: `${{colLabel}}: ${{spec.category}}`,
+                    label: `${{colLabel}}: ${{formatCategoryLabel(colorCol, spec.category)}}`,
                     detail: 'Selected category',
                     swatchClass: 'split-legend-swatch-dot',
                     swatchBackground: getCategoryColor(catIdx, colorCol),
@@ -11031,11 +11242,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!colorCol || category === null || category === undefined || category === BLEND_ALL_CATEGORIES) return [];
         const byColor = (DATA.marker_genes || {{}})[colorCol];
         if (!byColor || typeof byColor !== 'object') return [];
+        const rawCategory = resolveRawCategoryValue(colorCol, category);
         if (Array.isArray(byColor[category])) return byColor[category];
+        if (Array.isArray(byColor[rawCategory])) return byColor[rawCategory];
         const catKey = String(category);
+        const rawKey = String(rawCategory);
         if (Array.isArray(byColor[catKey])) return byColor[catKey];
+        if (Array.isArray(byColor[rawKey])) return byColor[rawKey];
         const matchedKey = Object.keys(byColor).find(k => String(k).toLowerCase() === catKey.toLowerCase());
         if (matchedKey && Array.isArray(byColor[matchedKey])) return byColor[matchedKey];
+        const matchedRawKey = Object.keys(byColor).find(k => String(k).toLowerCase() === rawKey.toLowerCase());
+        if (matchedRawKey && Array.isArray(byColor[matchedRawKey])) return byColor[matchedRawKey];
         return [];
     }}
 
@@ -11051,7 +11268,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function getClusterDECategories(colorCol) {{
         if (!colorCol) return [];
         const fromMeta = getCategoriesForColorColumn(colorCol).map(value => String(value));
-        const fromData = Object.keys((DATA.cluster_de || {{}})[colorCol] || {{}});
+        const fromData = Object.keys((DATA.cluster_de || {{}})[colorCol] || {{}})
+            .map((value) => formatCategoryLabel(colorCol, value));
         return Array.from(new Set([...fromMeta, ...fromData]));
     }}
 
@@ -11125,7 +11343,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function getCategoryColorForValue(colorCol, category) {{
         const categories = getCategoriesForColorColumn(colorCol).map(value => String(value));
-        const idx = categories.indexOf(String(category));
+        let idx = categories.indexOf(String(category));
+        if (idx < 0) {{
+            const rawCategories = getRawCategoriesForColorColumn(colorCol).map(value => String(value));
+            idx = rawCategories.indexOf(String(category));
+        }}
         return idx >= 0 ? getCategoryColor(idx, colorCol) : '#999';
     }}
 
@@ -11133,8 +11355,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const stats = (DATA.neighbor_stats || {{}})[colorCol];
         if (!stats || !stats.counts || !stats.categories) return null;
         const categories = (stats.categories || []).map(category => String(category));
-        const sourceIdx = categories.indexOf(String(sourceCategory));
-        const targetIdx = categories.indexOf(String(targetCategory));
+        const sourceIdx = categories.indexOf(resolveRawCategoryValue(colorCol, sourceCategory));
+        const targetIdx = categories.indexOf(resolveRawCategoryValue(colorCol, targetCategory));
         if (sourceIdx < 0 || targetIdx < 0) return null;
 
         const row = Array.isArray(stats.counts[sourceIdx]) ? stats.counts[sourceIdx] : [];
@@ -11158,7 +11380,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function getInteractionPairSummary(colorCol, sourceCategory, targetCategory) {{
         const colorData = (DATA.interaction_markers || {{}})[colorCol] || {{}};
-        const result = (colorData[String(sourceCategory)] || {{}})[String(targetCategory)];
+        const rawSource = resolveRawCategoryValue(colorCol, sourceCategory);
+        const rawTarget = resolveRawCategoryValue(colorCol, targetCategory);
+        const result = (colorData[String(rawSource)] || {{}})[String(rawTarget)];
         if (!result) return null;
         return {{
             sourceCategory: String(sourceCategory),
@@ -11169,7 +11393,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function getPairwiseClusterDEResult(colorCol, sourceCategory, referenceCategory) {{
-        return (((DATA.cluster_de || {{}})[colorCol] || {{}})[sourceCategory] || {{}})[referenceCategory] || null;
+        const rawSource = resolveRawCategoryValue(colorCol, sourceCategory);
+        const rawReference = resolveRawCategoryValue(colorCol, referenceCategory);
+        return (((DATA.cluster_de || {{}})[colorCol] || {{}})[rawSource] || {{}})[rawReference] || null;
     }}
 
     function getGeneSuggestionGroups() {{
@@ -11457,6 +11683,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         btn.style.display = n > 0 ? '' : 'none';
         btn.textContent = `Annotations (${{n}})`;
         btn.classList.toggle('active', showOverviewAnnotations);
+        const exportBtn = document.getElementById('annotations-overview-export');
+        if (exportBtn) exportBtn.style.display = n > 0 ? '' : 'none';
         if (n === 0 && showOverviewAnnotations) {{
             showOverviewAnnotations = false;
         }}
@@ -11558,6 +11786,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             color_column: currentColor || null,
             active_gene: currentGene || null,
             color_palettes: buildSessionPaletteState(),
+            category_labels: buildSessionCategoryLabelState(),
             hidden_categories: Array.from(hiddenCategories),
             linked_spotlight_enabled: !!linkedSpotlightEnabled,
             spotlight_pinned_category: spotlightPinnedCategory || null,
@@ -11629,6 +11858,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
 
         let rotationsApplied = 0;
+        const labelUpdatesApplied = applySessionCategoryLabelState(state.category_labels);
         const paletteUpdatesApplied = applySessionPaletteState(state.color_palettes);
         if (state.section_rotations && typeof state.section_rotations === 'object') {{
             Object.entries(state.section_rotations).forEach(([sectionId, deg]) => {{
@@ -11673,6 +11903,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             if (typeof umapVisible !== 'undefined' && umapVisible) renderUMAP();
             renderActiveInsightsPanel();
             const summary = [];
+            if (labelUpdatesApplied) summary.push(`${{labelUpdatesApplied}} label set${{labelUpdatesApplied === 1 ? '' : 's'}}`);
             if (paletteUpdatesApplied) summary.push(`${{paletteUpdatesApplied}} palette${{paletteUpdatesApplied === 1 ? '' : 's'}}`);
             if (rotationsApplied) summary.push(`${{rotationsApplied}} rotation${{rotationsApplied === 1 ? '' : 's'}}`);
             if (annResult.restored) summary.push(`${{annResult.restored}} annotation${{annResult.restored === 1 ? '' : 's'}}`);
@@ -12190,6 +12421,21 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         downloadJsonFile(payload, `karospace-annotations-${{getScreenshotTimestamp()}}.json`);
     }}
 
+    function makeUniqueAnnotationLabel(desiredLabel, excludeId) {{
+        const base = String(desiredLabel || '').trim();
+        if (!base) return base;
+        const taken = new Set();
+        modalAnnotations.forEach((annotation) => {{
+            if (annotation.id === excludeId) return;
+            const label = String(annotation.label || '').trim();
+            if (label) taken.add(label);
+        }});
+        if (!taken.has(base)) return base;
+        let suffix = 0;
+        while (taken.has(`${{base}}-${{suffix}}`)) suffix++;
+        return `${{base}}-${{suffix}}`;
+    }}
+
     function renderModalAnnotationPanel() {{
         const listEl = document.getElementById('modal-annotation-list');
         if (!listEl) return;
@@ -12228,8 +12474,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             input.addEventListener('change', () => {{
                 const annotation = getModalAnnotationById(input.dataset.annotationLabel);
                 if (!annotation) return;
-                const nextLabel = String(input.value || '').trim();
-                annotation.label = nextLabel || `Annotation ${{annotation.id}}`;
+                const typed = String(input.value || '').trim();
+                annotation.label = typed
+                    ? makeUniqueAnnotationLabel(typed, annotation.id)
+                    : `Annotation ${{annotation.id}}`;
                 renderModalAnnotationPanel();
                 if (modalSection) renderModalSection();
             }});
@@ -13999,6 +14247,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <button class="legend-btn" id="${{targetId}}-hide-all">Hide All</button>
                     <button class="legend-btn ${{linkedSpotlightEnabled ? 'active' : ''}}" id="${{targetId}}-spotlight-toggle" title="Hover or click a category to spotlight">Spotlight</button>
                     ${{targetId === 'legend' ? `<button class="legend-btn" id="${{targetId}}-export-colors" title="Export current categorical palettes as JSON">Export Colors</button>` : ''}}
+                    ${{targetId === 'legend' ? `<button class="legend-btn" id="${{targetId}}-export-labels" title="Export original and renamed category labels as JSON">Export Labels</button>` : ''}}
                 </div>
             `;
             (config.categories || []).forEach((cat, idx) => {{
@@ -14009,7 +14258,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const currentHex = normalizeHexColor(getCategoryColor(idx, config.colorCol)) || '#999999';
                 html += `<div class="legend-item ${{hiddenClass}} ${{selectedClass}} ${{spotlightClass}} ${{dimmedClass}}" data-category="${{cat}}">
                     <div class="legend-color" style="background: ${{getCategoryColor(idx, config.colorCol)}}"></div>
-                    <span>${{cat}}</span>
+                    ${{targetId === 'legend'
+                        ? `<input type="text" class="legend-label-editor" data-category-label-idx="${{idx}}" value="${{escapeHtml(String(cat))}}" title="Rename this category label">`
+                        : `<span>${{escapeHtml(String(cat))}}</span>`}}
                     ${{targetId === 'legend'
                         ? `<input type="color" class="legend-color-editor" data-category-color="${{escapeHtml(String(cat))}}" value="${{currentHex}}" title="Change color for this category">`
                         : ''}}
@@ -14056,6 +14307,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             document.getElementById(`${{targetId}}-export-colors`)?.addEventListener('click', () => {{
                 exportColorPalette();
             }});
+            document.getElementById(`${{targetId}}-export-labels`)?.addEventListener('click', () => {{
+                exportCategoryLabels();
+            }});
 
             legend.querySelectorAll('[data-category-color]').forEach((input) => {{
                 input.addEventListener('click', (event) => event.stopPropagation());
@@ -14068,6 +14322,35 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         input.value = normalizeHexColor(getCategoryColorForValue(config.colorCol, cat)) || '#999999';
                         return;
                     }}
+                    renderLegend('legend');
+                    renderLegend('modal-legend');
+                    renderAllSections();
+                    if (modalSection) renderModalSection();
+                    if (umapVisible) renderUMAP();
+                    renderActiveInsightsPanel();
+                }});
+            }});
+
+            legend.querySelectorAll('[data-category-label-idx]').forEach((input) => {{
+                input.addEventListener('click', (event) => event.stopPropagation());
+                input.addEventListener('keydown', (event) => event.stopPropagation());
+                input.addEventListener('change', (event) => {{
+                    event.stopPropagation();
+                    const idx = input.getAttribute('data-category-label-idx');
+                    if (idx === null || !config.colorCol) return;
+                    const result = setCategoryLabelOverride(config.colorCol, Number(idx), input.value);
+                    if (!result.ok) {{
+                        if (result.reason === 'duplicate-label') {{
+                            alert(`Category label "${{result.label}}" is already in use for this annotation.`);
+                        }}
+                        input.value = String((config.categories || [])[Number(idx)] || '');
+                        return;
+                    }}
+                    if (!result.changed) {{
+                        input.value = result.label || input.value;
+                        return;
+                    }}
+                    comparisonCountsCache.delete(String(config.colorCol || ''));
                     renderLegend('legend');
                     renderLegend('modal-legend');
                     renderAllSections();
@@ -17893,7 +18176,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             return {{ error: 'No neighbor stats available for this color.' }};
         }}
 
-        const categories = (stats.categories || []).map((category) => String(category));
+        const categories = (stats.categories || []).map((category) => formatCategoryLabel(currentColor, category));
         const counts = stats.counts || [];
         const nCells = stats.n_cells || [];
         const meanDegree = stats.mean_degree || [];
@@ -19337,7 +19620,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             return;
         }}
 
-        const categories = (stats.categories || []).map(cat => String(cat));
+        const categories = (stats.categories || []).map(cat => formatCategoryLabel(currentColor, cat));
         const counts = stats.counts || [];
         const zscores = stats.zscore || null;
         const nCells = stats.n_cells || [];
@@ -19381,12 +19664,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             container.innerHTML = '<div class="agg-group-meta">Choose a source cell type.</div>';
             return;
         }}
-        const sourceInteractionMarkers = interactionMarkersByColor[source] || {{}};
+        const rawSource = resolveRawCategoryValue(currentColor, source);
+        const sourceInteractionMarkers = interactionMarkersByColor[rawSource] || {{}};
 
         const row = counts[sourceIdx] || [];
         const total = row.reduce((sum, value) => sum + (Number.isFinite(value) ? value : 0), 0);
         const targetQuery = (document.getElementById('interaction-search')?.value || '').trim().toLowerCase();
-        const sourceMarkers = (markers[source] || []).slice(0, 6);
+        const sourceMarkers = (markers[rawSource] || []).slice(0, 6);
         const sortedEntries = categories
             .map((target, targetIdx) => {{
                 const count = Number(row[targetIdx] ?? 0);
@@ -19394,8 +19678,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const z = (zscores && zscores[sourceIdx] && Number.isFinite(zscores[sourceIdx][targetIdx]))
                     ? Number(zscores[sourceIdx][targetIdx])
                     : null;
-                const targetMarkers = (markers[target] || []).slice(0, 4);
-                const contact = sourceInteractionMarkers[target] || null;
+                const rawTarget = resolveRawCategoryValue(currentColor, target);
+                const targetMarkers = (markers[rawTarget] || []).slice(0, 4);
+                const contact = sourceInteractionMarkers[rawTarget] || null;
                 const contactMarkers = contact && Array.isArray(contact.genes)
                     ? contact.genes.slice(0, 4).filter(Boolean)
                     : [];
@@ -20331,6 +20616,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             renderAllSections();
         }});
 
+        document.getElementById('annotations-overview-export')?.addEventListener('click', exportModalAnnotations);
+
         document.getElementById('screenshot-btn').addEventListener('click', screenshotFullPage);
 
         document.getElementById('save-session-btn')?.addEventListener('click', () => {{
@@ -20353,6 +20640,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         // Legend toggle
         document.getElementById('legend-toggle').addEventListener('click', toggleLegendPanel);
+        initLegendResizer();
 
         // Insights panel toggle
         buildColorPanel();
@@ -21178,6 +21466,7 @@ def export_to_html(
     vmin: Optional[float] = None,
     vmax: Optional[float] = None,
     outline_by: Optional[str] = "course",
+    metadata_labels: Optional[Mapping[str, str]] = None,
     viewer_info_html: Optional[str] = None,
     additional_colors: Optional[List[str]] = None,
     genes: Optional[List[str]] = None,
@@ -21245,6 +21534,9 @@ def export_to_html(
         Min/max for continuous color scale
     outline_by : str, optional
         Metadata column used to color panel outlines (default: "course")
+    metadata_labels : mapping, optional
+        Optional mapping of column keys to display labels used across the viewer
+        UI without renaming the underlying obs/metadata columns.
     viewer_info_html : str, optional
         HTML string shown in the Info tab of the color panel.
     additional_colors : list, optional
@@ -21632,10 +21924,15 @@ def export_to_html(
     )
 
     # Generate HTML
-    metadata_labels = {
-        "last_score": "disease score",
-        "last_day": "day of sacrifice",
-    }
+    resolved_metadata_labels = {}
+    if metadata_labels:
+        resolved_metadata_labels.update(
+            {
+                str(key): str(value)
+                for key, value in metadata_labels.items()
+                if str(key).strip() and value is not None
+            }
+        )
     max_panel_size = int(min_panel_size * 2)
 
     data_json_safe = json.dumps(
@@ -21651,7 +21948,7 @@ def export_to_html(
         spot_size=resolved_spot_size,
         data_json=data_json_safe,
         palette_json=json.dumps(DEFAULT_CATEGORICAL_PALETTE),
-        metadata_labels_json=json.dumps(metadata_labels),
+        metadata_labels_json=json.dumps(resolved_metadata_labels),
         outline_by_json=json.dumps(outline_by),
         viewer_info_html_json=json.dumps(viewer_info_html),
         viewer_info_html=viewer_info_html_safe,

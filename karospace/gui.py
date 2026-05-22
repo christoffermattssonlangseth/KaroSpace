@@ -96,6 +96,9 @@ Dataset Loading Options
 - Metadata value order (JSON): Dict mapping metadata column -> ordered values.
   Example:
   {"condition": ["naive", "treated"], "stage": ["early", "late"]}
+- Metadata labels (JSON): Dict mapping column key -> display name in the viewer.
+  Example:
+  {"sample_id": "Sample", "last_score": "Disease score"}
 
 Color & Gene Content
 - Additional colors: Comma/newline-separated obs columns to include in color dropdown.
@@ -287,6 +290,7 @@ class KaroSpaceExportGUI:
         self.theme = tk.StringVar(value="light")
         self.metadata_columns = tk.StringVar(value="condition")
         self.metadata_max_columns = tk.StringVar(value="")
+        self.metadata_labels = tk.StringVar(value='{\n  "condition": "Condition"\n}')
         self.min_panel_size = tk.StringVar(value="150")
         self.spot_size = tk.StringVar(value="auto")
         self.downsample = tk.StringVar(value="")
@@ -611,9 +615,25 @@ class KaroSpaceExportGUI:
             font=("Helvetica", 10),
         )
 
-        ttk.Label(dataset_group, text="Spatial key").grid(row=2, column=0, sticky="w", pady=4)
+        ttk.Label(dataset_group, text="Metadata labels (JSON)").grid(row=2, column=0, sticky="nw", pady=4)
+        self.metadata_labels_text = tk.Text(dataset_group, height=4, wrap="word")
+        self.metadata_labels_text.grid(row=2, column=1, columnspan=3, sticky="ew", pady=4)
+        self.metadata_labels_text.insert("1.0", self.metadata_labels.get())
+        self.metadata_labels_text.configure(
+            bg=UI_COLORS["input_bg"],
+            fg=UI_COLORS["text"],
+            insertbackground=UI_COLORS["text"],
+            relief="solid",
+            bd=1,
+            highlightthickness=0,
+            padx=8,
+            pady=6,
+            font=("Helvetica", 10),
+        )
+
+        ttk.Label(dataset_group, text="Spatial key").grid(row=3, column=0, sticky="w", pady=4)
         self.spatial_key_combo = ttk.Combobox(dataset_group, textvariable=self.spatial_key, state="normal")
-        self.spatial_key_combo.grid(row=2, column=1, sticky="ew", padx=(8, 16), pady=4)
+        self.spatial_key_combo.grid(row=3, column=1, sticky="ew", padx=(8, 16), pady=4)
 
 
         colors_group = ttk.LabelFrame(colors_tab, text="Color Layers", padding=12, style="Card.TLabelframe")
@@ -849,6 +869,34 @@ class KaroSpaceExportGUI:
         widget.delete("1.0", "end")
         widget.insert("1.0", str(content))
 
+    @staticmethod
+    def _parse_json_object_or_none(text: str):
+        """Parse `text` as a JSON object, returning None if it isn't one."""
+        stripped = str(text or "").strip()
+        if not stripped:
+            return {}
+        try:
+            parsed = json.loads(stripped)
+        except json.JSONDecodeError:
+            return None
+        return parsed if isinstance(parsed, dict) else None
+
+    def _merge_json_text_widget(self, widget: tk.Text, content: str) -> None:
+        """Merge JSON object `content` into the widget's existing JSON.
+
+        Existing keys win on conflict so manual edits are never clobbered, and
+        any keys the user already added are preserved. Falls back to plain
+        overwrite if either side isn't a valid JSON object.
+        """
+        incoming = self._parse_json_object_or_none(content)
+        existing = self._parse_json_object_or_none(widget.get("1.0", "end"))
+        if incoming is None or existing is None:
+            self._set_text_widget(widget, content)
+            return
+        merged = dict(incoming)
+        merged.update(existing)
+        self._set_text_widget(widget, json.dumps(merged, indent=2))
+
     def _apply_preset(self, preset: str, *, log: bool = True) -> None:
         name = str(preset or "").strip().lower()
 
@@ -885,6 +933,7 @@ class KaroSpaceExportGUI:
             self.metadata_columns.set("condition")
             self.metadata_max_columns.set("")
             self._set_text_widget(self.metadata_value_order_text, '{\n  "stage": []\n}')
+            self._merge_json_text_widget(self.metadata_labels_text, '{\n  "condition": "Condition",\n  "stage": "Stage"\n}')
 
             pancreas_colors = [
                 "leiden_0.5",
@@ -948,6 +997,7 @@ class KaroSpaceExportGUI:
             self.metadata_columns.set("condition")
             self.metadata_max_columns.set("2")
             self._set_text_widget(self.metadata_value_order_text, '{\n  "condition": ["control", "treated"]\n}')
+            self._merge_json_text_widget(self.metadata_labels_text, '{\n  "condition": "Condition"\n}')
 
             self.additional_colors_editor.set_items(["leiden_1"])
             self.genes_editor.set_items(["Cd4", "Cd8a", "Mki67"])
@@ -980,6 +1030,7 @@ class KaroSpaceExportGUI:
             self.metadata_columns.set("condition")
             self.metadata_max_columns.set("")
             self._set_text_widget(self.metadata_value_order_text, '{\n  "condition": ["control", "treated"]\n}')
+            self._merge_json_text_widget(self.metadata_labels_text, '{\n  "condition": "Condition"\n}')
 
             self.additional_colors_editor.set_items(["leiden_1", "leiden_2", "gmm_mana_10"])
             self.genes_editor.set_items(["Cd4", "Cd8a", "Gfap", "Mki67"])
@@ -1245,6 +1296,21 @@ class KaroSpaceExportGUI:
                     raise ValueError("Each metadata value order entry must be a list.")
             metadata_value_order = normalized
 
+        metadata_labels_raw = self.metadata_labels_text.get("1.0", "end").strip()
+        metadata_labels = None
+        if metadata_labels_raw and metadata_labels_raw != "{}":
+            try:
+                parsed = json.loads(metadata_labels_raw)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"Metadata labels must be valid JSON: {exc}") from exc
+            if not isinstance(parsed, dict):
+                raise ValueError("Metadata labels JSON must be an object/dictionary.")
+            metadata_labels = {
+                str(key): str(value)
+                for key, value in parsed.items()
+                if str(key).strip() and value is not None
+            } or None
+
         min_panel_size = _parse_positive_int("Min panel size", self.min_panel_size.get())
         spot_size = _parse_spot_size(self.spot_size.get())
 
@@ -1293,6 +1359,7 @@ class KaroSpaceExportGUI:
             "downsample": downsample,
             "theme": self.theme.get().strip() or "light",
             "outline_by": outline_by,
+            "metadata_labels": metadata_labels,
             "additional_colors": additional_colors,
             "genes": genes,
             "use_hvgs": use_hvgs,

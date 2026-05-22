@@ -3,6 +3,7 @@ Command-line interface for KaroSpace.
 """
 
 import argparse
+import json
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -76,6 +77,15 @@ def _run_export_cli(argv=None):
         type=str,
         default="spatial",
         help="Key in obsm containing spatial coordinates (default: spatial)"
+    )
+    parser.add_argument(
+        "--metadata-labels",
+        type=str,
+        default="",
+        help=(
+            "JSON object mapping metadata/obs column keys to display names in the viewer "
+            '(example: {"sample_id":"Sample","last_score":"Disease score"}).'
+        ),
     )
 
     parser.add_argument(
@@ -283,6 +293,21 @@ def _run_export_cli(argv=None):
     marker_genes_groupby = _parse_csv(args.marker_genes_groupby)
     interaction_markers_groupby = _parse_csv(args.interaction_markers_groupby)
     cluster_de_groupby = _parse_csv(args.cluster_de_groupby)
+    metadata_labels = None
+    if str(args.metadata_labels or "").strip():
+        try:
+            parsed_metadata_labels = json.loads(args.metadata_labels)
+        except json.JSONDecodeError as exc:
+            print(f"Error: --metadata-labels must be valid JSON: {exc}", file=sys.stderr)
+            sys.exit(2)
+        if not isinstance(parsed_metadata_labels, dict):
+            print("Error: --metadata-labels must be a JSON object/dictionary", file=sys.stderr)
+            sys.exit(2)
+        metadata_labels = {
+            str(key): str(value)
+            for key, value in parsed_metadata_labels.items()
+            if str(key).strip() and value is not None
+        } or None
     try:
         section_rotations = _parse_section_rotations_arg(args.section_rotations)
     except ValueError as exc:
@@ -313,6 +338,7 @@ def _run_export_cli(argv=None):
         spot_size=spot_size_value,
         downsample=args.downsample,
         theme=args.theme,
+        metadata_labels=metadata_labels,
         gene_encoding=args.gene_encoding,
         gene_storage=args.gene_storage,
         gene_aux_path=args.gene_aux_path,
