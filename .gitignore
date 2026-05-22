@@ -49,6 +49,11 @@ output/
 *.karospace
 *.genes.json
 *.genes/
+*.bin
+*.loader.html
+*sidecar.html
+*-binary.genes-spont/
+*-binary.genes-spont.json
 tmp_hydrated_script_*.js
 # Keep unpublished local exports out of git
 BALO.html
@@ -63,7 +68,13 @@ karospace-cell-de-*.csv
 karospace-marker-genes-*.csv
 karospace-river-*.csv
 karospace-annotations-*.json
+spatial-viewer-*.png
 unique_visitors_*.csv
+*.zip.download/
+
+# Local documents / ad hoc reports
+KaroSpace_*.docx
+Unique cloners in last 14 days.png
 
 # Editor/agent scratch dirs
 .antigravitycli/
