@@ -1147,6 +1147,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .filter-group label {{ font-size: 10px; color: var(--muted-color); text-transform: capitalize; }}
         .filter-chips {{ display: flex; gap: 3px; flex-wrap: wrap; }}
         .filter-chip {{
+            display: inline-flex;
+            align-items: center;
             padding: 2px 6px;
             font-size: 10px;
             border: 1px solid var(--border-color);
@@ -1159,6 +1161,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .filter-chip:hover {{ background: var(--hover-bg); }}
         .filter-chip.active {{ background: var(--accent-strong); color: white; border-color: var(--accent-strong); }}
         .filter-chip.inactive {{ opacity: 0.4; }}
+        .meta-color-dot {{
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+            vertical-align: middle;
+            margin-right: 3px;
+            box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18);
+        }}
         .filter-reset-btn {{
             padding: 2px 8px;
             font-size: 10px;
@@ -4630,6 +4642,30 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         const hue = Math.abs(hash) % 360;
         return `hsla(${{hue}}, 65%, 50%, 0.5)`;
+    }}
+
+    // Color tag for a metadata value: reuse the spatial categorical palette when
+    // the metadata key is also a color layer, otherwise derive a stable distinct
+    // color from the value text so the same value always gets the same tag.
+    function getMetadataValueColor(key, value) {{
+        if (key == null || value == null || value === '') return null;
+        const token = String(value);
+        const meta = DATA.colors_meta?.[key];
+        if (meta && !meta.is_continuous && Array.isArray(meta.categories)) {{
+            const color = getCategoryColorForValue(key, token);
+            if (color && color !== '#999') return color;
+        }}
+        let hash = 0;
+        for (let i = 0; i < token.length; i++) {{
+            hash = token.charCodeAt(i) + ((hash << 5) - hash);
+        }}
+        const hue = Math.abs(hash) % 360;
+        return `hsl(${{hue}}, 62%, 52%)`;
+    }}
+
+    function renderMetadataColorDot(key, value) {{
+        const color = getMetadataValueColor(key, value);
+        return color ? `<span class="meta-color-dot" style="background:${{color}}"></span>` : '';
     }}
 
     // State
@@ -19795,7 +19831,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             html += `<div class="filter-group">
                 <label>${{formatMetadataLabel(key)}}:</label>
                 <div class="filter-chips" data-filter="${{key}}">
-                    ${{values.map(v => `<span class="filter-chip" data-value="${{v}}">${{v}}</span>`).join('')}}
+                    ${{values.map(v => `<span class="filter-chip" data-value="${{v}}">${{renderMetadataColorDot(key, v)}}${{v}}</span>`).join('')}}
                 </div>
             </div>`;
         }}
@@ -20071,7 +20107,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
 
             const metaParts = Object.entries(section.metadata || {{}})
-                .map(([k, v]) => `${{formatMetadataLabel(k)}}: ${{v}}`).join(' | ');
+                .map(([k, v]) => `${{formatMetadataLabel(k)}}: ${{renderMetadataColorDot(k, v)}}${{v}}`).join(' | ');
             const metaHtml = metaParts ? `<div class="section-meta">${{metaParts}}</div>` : '';
             const rotationLabel = formatRotationLabel(getSectionRotationDeg(section));
 
