@@ -68,6 +68,8 @@ karospace-cell-de-*.csv
 karospace-marker-genes-*.csv
 karospace-river-*.csv
 karospace-annotations-*.json
+karospace-colors-*.json
+karospace-category-labels-*.json
 spatial-viewer-*.png
 unique_visitors_*.csv
 *.zip.download/
