@@ -1158,18 +1158,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             cursor: pointer;
             transition: all 0.15s;
         }}
-        .filter-chip:hover {{ background: var(--hover-bg); }}
-        .filter-chip.active {{ background: var(--accent-strong); color: white; border-color: var(--accent-strong); }}
+        .filter-chip:hover {{ filter: brightness(1.08); }}
+        .filter-chip.active {{
+            border-color: var(--accent-strong);
+            box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-strong) 45%, transparent);
+            font-weight: 600;
+        }}
         .filter-chip.inactive {{ opacity: 0.4; }}
-        .meta-color-dot {{
+        .meta-color-tag {{
             display: inline-block;
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            flex-shrink: 0;
-            vertical-align: middle;
-            margin-right: 3px;
-            box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18);
+            padding: 0 5px;
+            border-radius: 6px;
+            line-height: 1.45;
+            white-space: nowrap;
         }}
         .filter-reset-btn {{
             padding: 2px 8px;
@@ -4644,9 +4645,31 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return `hsla(${{hue}}, 65%, 50%, 0.5)`;
     }}
 
+    // Ordered list of distinct values for a metadata key, used to assign evenly
+    // spaced hues so values that share a prefix (CM1, CM2, ...) stay distinct.
+    const _metadataValueOrderCache = {{}};
+    function getMetadataValueOrder(key) {{
+        if (_metadataValueOrderCache[key]) return _metadataValueOrderCache[key];
+        let values = [];
+        const filterValues = (DATA.metadata_filters || {{}})[key];
+        if (Array.isArray(filterValues) && filterValues.length) {{
+            values = filterValues.map(String);
+        }} else {{
+            const seen = new Set();
+            (DATA.sections || []).forEach((section) => {{
+                const v = section.metadata?.[key];
+                if (v == null || v === '') return;
+                const token = String(v);
+                if (!seen.has(token)) {{ seen.add(token); values.push(token); }}
+            }});
+        }}
+        _metadataValueOrderCache[key] = values;
+        return values;
+    }}
+
     // Color tag for a metadata value: reuse the spatial categorical palette when
-    // the metadata key is also a color layer, otherwise derive a stable distinct
-    // color from the value text so the same value always gets the same tag.
+    // the metadata key is also a color layer, otherwise spread distinct hues by
+    // the value's index so the same value always gets the same tag.
     function getMetadataValueColor(key, value) {{
         if (key == null || value == null || value === '') return null;
         const token = String(value);
@@ -4655,17 +4678,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const color = getCategoryColorForValue(key, token);
             if (color && color !== '#999') return color;
         }}
-        let hash = 0;
-        for (let i = 0; i < token.length; i++) {{
-            hash = token.charCodeAt(i) + ((hash << 5) - hash);
-        }}
-        const hue = Math.abs(hash) % 360;
+        const order = getMetadataValueOrder(key);
+        const n = Math.max(order.length, 1);
+        const idx = order.indexOf(token);
+        const hue = Math.round(((idx >= 0 ? idx : 0) * 360) / n);
         return `hsl(${{hue}}, 62%, 52%)`;
     }}
 
-    function renderMetadataColorDot(key, value) {{
+    function getMetadataValueTagBg(key, value) {{
         const color = getMetadataValueColor(key, value);
-        return color ? `<span class="meta-color-dot" style="background:${{color}}"></span>` : '';
+        return color ? `color-mix(in srgb, ${{color}} 24%, transparent)` : '';
+    }}
+
+    function renderMetadataValueTag(key, value) {{
+        const safe = escapeHtml(String(value ?? ''));
+        const bg = getMetadataValueTagBg(key, value);
+        if (!bg) return safe;
+        return `<span class="meta-color-tag" style="background: ${{bg}}">${{safe}}</span>`;
     }}
 
     // State
@@ -19831,7 +19860,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             html += `<div class="filter-group">
                 <label>${{formatMetadataLabel(key)}}:</label>
                 <div class="filter-chips" data-filter="${{key}}">
-                    ${{values.map(v => `<span class="filter-chip" data-value="${{v}}">${{renderMetadataColorDot(key, v)}}${{v}}</span>`).join('')}}
+                    ${{values.map(v => {{
+                        const bg = getMetadataValueTagBg(key, v);
+                        const style = bg ? ` style="background: ${{bg}}"` : '';
+                        return `<span class="filter-chip" data-value="${{v}}"${{style}}>${{escapeHtml(String(v))}}</span>`;
+                    }}).join('')}}
                 </div>
             </div>`;
         }}
@@ -20107,7 +20140,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
 
             const metaParts = Object.entries(section.metadata || {{}})
-                .map(([k, v]) => `${{formatMetadataLabel(k)}}: ${{renderMetadataColorDot(k, v)}}${{v}}`).join(' | ');
+                .map(([k, v]) => `${{formatMetadataLabel(k)}}: ${{renderMetadataValueTag(k, v)}}`).join(' | ');
             const metaHtml = metaParts ? `<div class="section-meta">${{metaParts}}</div>` : '';
             const rotationLabel = formatRotationLabel(getSectionRotationDeg(section));
 
