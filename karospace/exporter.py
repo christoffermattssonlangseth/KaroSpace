@@ -2356,6 +2356,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .legend-item.selected .legend-color {{
             border-color: var(--accent-strong);
         }}
+        .legend-color-editor {{
+            margin-left: auto;
+            width: 24px;
+            height: 18px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: transparent;
+            padding: 0;
+            cursor: pointer;
+        }}
         .split-legend-list {{
             display: flex;
             flex-direction: column;
@@ -5850,6 +5860,109 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             if (pal && idx >= 0 && idx < pal.length) return pal[idx];
         }}
         return PALETTE[idx % PALETTE.length];
+    }}
+
+    function isValidHexColor(value) {{
+        return /^#([0-9a-fA-F]{{6}})$/.test(String(value || '').trim());
+    }}
+
+    function normalizeHexColor(value) {{
+        const token = String(value || '').trim();
+        if (!token) return null;
+        const short = token.match(/^#([0-9a-fA-F]{{3}})$/);
+        if (short) {{
+            return `#${{short[1][0]}}${{short[1][0]}}${{short[1][1]}}${{short[1][1]}}${{short[1][2]}}${{short[1][2]}}`.toLowerCase();
+        }}
+        if (isValidHexColor(token)) return token.toLowerCase();
+        return null;
+    }}
+
+    function ensureColorColumnPalette(colorCol) {{
+        if (!colorCol) return null;
+        const meta = DATA.colors_meta?.[colorCol];
+        if (!meta || meta.is_continuous) return null;
+        if (!Array.isArray(meta.categories) || !meta.categories.length) return null;
+        const expectedLength = meta.categories.length;
+        if (!Array.isArray(meta.palette)) meta.palette = [];
+        for (let i = 0; i < expectedLength; i++) {{
+            const existing = normalizeHexColor(meta.palette[i]);
+            meta.palette[i] = existing || normalizeHexColor(PALETTE[i % PALETTE.length]) || '#999999';
+        }}
+        if (meta.palette.length !== expectedLength) meta.palette = meta.palette.slice(0, expectedLength);
+        return meta.palette;
+    }}
+
+    function setCategoryColorOverride(colorCol, category, nextColor) {{
+        const palette = ensureColorColumnPalette(colorCol);
+        if (!palette) return false;
+        const categories = getCategoriesForColorColumn(colorCol).map((value) => String(value));
+        const idx = categories.indexOf(String(category));
+        if (idx < 0 || idx >= palette.length) return false;
+        const normalized = normalizeHexColor(nextColor);
+        if (!normalized) return false;
+        if (palette[idx] === normalized) return false;
+        palette[idx] = normalized;
+        return true;
+    }}
+
+    function buildColorPaletteExport() {{
+        const colorsMeta = DATA.colors_meta || {{}};
+        const categoricalColumns = (DATA.available_colors || []).filter((col) => {{
+            const meta = colorsMeta[col];
+            return meta && !meta.is_continuous && Array.isArray(meta.categories) && meta.categories.length > 0;
+        }});
+        const palettes = {{}};
+        categoricalColumns.forEach((col) => {{
+            const meta = colorsMeta[col];
+            const palette = ensureColorColumnPalette(col) || [];
+            const categories = meta.categories.map((cat) => String(cat));
+            palettes[col] = {{
+                categories,
+                palette,
+                mapping: Object.fromEntries(categories.map((cat, idx) => [cat, palette[idx] || '#999999'])),
+            }};
+        }});
+        return {{
+            format: 'karospace-color-palettes-v1',
+            created_at: new Date().toISOString(),
+            active_color_column: currentColor || null,
+            palettes,
+        }};
+    }}
+
+    function exportColorPalette() {{
+        const payload = buildColorPaletteExport();
+        downloadJsonFile(payload, `karospace-colors-${{getScreenshotTimestamp()}}.json`);
+    }}
+
+    function buildSessionPaletteState() {{
+        return buildColorPaletteExport().palettes;
+    }}
+
+    function applySessionPaletteState(palettes) {{
+        if (!palettes || typeof palettes !== 'object') return 0;
+        let applied = 0;
+        Object.entries(palettes).forEach(([colorCol, paletteState]) => {{
+            const meta = DATA.colors_meta?.[colorCol];
+            if (!meta || meta.is_continuous || !Array.isArray(meta.categories) || !meta.categories.length) return;
+            const nextPalette = Array.isArray(paletteState?.palette)
+                ? paletteState.palette
+                : Array.isArray(paletteState)
+                    ? paletteState
+                    : null;
+            if (!nextPalette) return;
+            const normalizedPalette = ensureColorColumnPalette(colorCol);
+            if (!normalizedPalette) return;
+            let touched = false;
+            for (let i = 0; i < meta.categories.length; i++) {{
+                const normalized = normalizeHexColor(nextPalette[i]);
+                if (!normalized || normalizedPalette[i] === normalized) continue;
+                normalizedPalette[i] = normalized;
+                touched = true;
+            }}
+            if (touched) applied++;
+        }});
+        return applied;
     }}
 
     const cssColorRgbCache = new Map();
@@ -11444,6 +11557,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             created_at: new Date().toISOString(),
             color_column: currentColor || null,
             active_gene: currentGene || null,
+            color_palettes: buildSessionPaletteState(),
             hidden_categories: Array.from(hiddenCategories),
             linked_spotlight_enabled: !!linkedSpotlightEnabled,
             spotlight_pinned_category: spotlightPinnedCategory || null,
@@ -11515,6 +11629,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
 
         let rotationsApplied = 0;
+        const paletteUpdatesApplied = applySessionPaletteState(state.color_palettes);
         if (state.section_rotations && typeof state.section_rotations === 'object') {{
             Object.entries(state.section_rotations).forEach(([sectionId, deg]) => {{
                 const section = sectionById.get(sectionId);
@@ -11558,6 +11673,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             if (typeof umapVisible !== 'undefined' && umapVisible) renderUMAP();
             renderActiveInsightsPanel();
             const summary = [];
+            if (paletteUpdatesApplied) summary.push(`${{paletteUpdatesApplied}} palette${{paletteUpdatesApplied === 1 ? '' : 's'}}`);
             if (rotationsApplied) summary.push(`${{rotationsApplied}} rotation${{rotationsApplied === 1 ? '' : 's'}}`);
             if (annResult.restored) summary.push(`${{annResult.restored}} annotation${{annResult.restored === 1 ? '' : 's'}}`);
             if (annResult.skipped) summary.push(`${{annResult.skipped}} skipped (missing section)`);
@@ -13882,6 +13998,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <button class="legend-btn" id="${{targetId}}-show-all">Show All</button>
                     <button class="legend-btn" id="${{targetId}}-hide-all">Hide All</button>
                     <button class="legend-btn ${{linkedSpotlightEnabled ? 'active' : ''}}" id="${{targetId}}-spotlight-toggle" title="Hover or click a category to spotlight">Spotlight</button>
+                    ${{targetId === 'legend' ? `<button class="legend-btn" id="${{targetId}}-export-colors" title="Export current categorical palettes as JSON">Export Colors</button>` : ''}}
                 </div>
             `;
             (config.categories || []).forEach((cat, idx) => {{
@@ -13889,9 +14006,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const selectedClass = modalSelectedCategory && cat === modalSelectedCategory ? 'selected' : '';
                 const spotlightClass = activeSpotlight && cat === activeSpotlight ? 'spotlight' : '';
                 const dimmedClass = activeSpotlight && cat !== activeSpotlight ? 'dimmed' : '';
+                const currentHex = normalizeHexColor(getCategoryColor(idx, config.colorCol)) || '#999999';
                 html += `<div class="legend-item ${{hiddenClass}} ${{selectedClass}} ${{spotlightClass}} ${{dimmedClass}}" data-category="${{cat}}">
                     <div class="legend-color" style="background: ${{getCategoryColor(idx, config.colorCol)}}"></div>
                     <span>${{cat}}</span>
+                    ${{targetId === 'legend'
+                        ? `<input type="color" class="legend-color-editor" data-category-color="${{escapeHtml(String(cat))}}" value="${{currentHex}}" title="Change color for this category">`
+                        : ''}}
                 </div>`;
             }});
             legend.innerHTML = html;
@@ -13930,6 +14051,30 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 neighborNetworkFocusCategories = null;
                 updateAllLegendSpotlightClasses();
                 rerenderForSpotlightChange();
+            }});
+
+            document.getElementById(`${{targetId}}-export-colors`)?.addEventListener('click', () => {{
+                exportColorPalette();
+            }});
+
+            legend.querySelectorAll('[data-category-color]').forEach((input) => {{
+                input.addEventListener('click', (event) => event.stopPropagation());
+                input.addEventListener('change', (event) => {{
+                    event.stopPropagation();
+                    const cat = input.getAttribute('data-category-color');
+                    const nextColor = input.value;
+                    if (!cat || !config.colorCol) return;
+                    if (!setCategoryColorOverride(config.colorCol, cat, nextColor)) {{
+                        input.value = normalizeHexColor(getCategoryColorForValue(config.colorCol, cat)) || '#999999';
+                        return;
+                    }}
+                    renderLegend('legend');
+                    renderLegend('modal-legend');
+                    renderAllSections();
+                    if (modalSection) renderModalSection();
+                    if (umapVisible) renderUMAP();
+                    renderActiveInsightsPanel();
+                }});
             }});
 
             legend.querySelectorAll('.legend-item').forEach(item => {{
