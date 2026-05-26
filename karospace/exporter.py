@@ -1318,10 +1318,25 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             padding: 12px;
             background: var(--panel-bg);
             border-left: 1px solid var(--border-color);
-            overflow-x: hidden;
-            overflow-y: auto;
+            overflow: hidden;
             font-size: 12px;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
             transition: background 0.3s, border-color 0.3s, width 0.3s, padding 0.3s;
+        }}
+        .legend-list {{
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow-y: auto;
+            overflow-x: hidden;
+            margin: 0 -12px -12px;
+            padding: 0 12px 12px;
+        }}
+        .legend-container > .legend-title,
+        .legend-container > .legend-subtitle,
+        .legend-container > .legend-actions {{
+            flex-shrink: 0;
         }}
         .legend-container.collapsed {{
             width: 0;
@@ -1657,6 +1672,24 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .marker-group-title {{ font-size: 11px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; border-radius: 3px; padding: 1px 3px; margin: -1px -3px; }}
         .marker-group-title:hover {{ background: var(--hover-bg); }}
         .marker-group-title.is-spotlit {{ background: color-mix(in srgb, var(--accent-color, #4a9eff) 15%, transparent); }}
+        .marker-group-label-editor {{
+            min-width: 0;
+            flex: 1 1 auto;
+            border: 1px solid transparent;
+            border-radius: 3px;
+            padding: 1px 4px;
+            font: inherit;
+            font-weight: 600;
+            color: var(--text-color);
+            background: transparent;
+            cursor: text;
+        }}
+        .marker-group-label-editor:hover {{ border-color: var(--border-color); }}
+        .marker-group-label-editor:focus {{
+            border-color: var(--accent-strong, var(--border-color));
+            background: var(--input-bg);
+            outline: none;
+        }}
         .marker-genes .gene-token-grid {{ gap: 4px; }}
         .marker-genes .gene-token-btn {{
             gap: 4px;
@@ -2408,6 +2441,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             display: flex;
             flex-direction: column;
             gap: 8px;
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow-y: auto;
+            overflow-x: hidden;
+            margin: 0 -12px -12px;
+            padding: 0 12px 12px;
         }}
         .split-legend-item {{
             border: 1px solid var(--border-color);
@@ -2724,8 +2763,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             width: 180px;
             padding: 12px;
             border-left: 1px solid var(--border-color);
-            overflow-y: auto;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
             transition: border-color 0.3s, width 0.2s ease;
+        }}
+        .modal-legend > .legend-title,
+        .modal-legend > .legend-subtitle,
+        .modal-legend > .legend-actions {{
+            flex-shrink: 0;
         }}
         .modal-legend.split-expanded {{ width: 280px; }}
         .zoom-info {{ font-size: 10px; color: var(--muted-color); margin-left: 6px; }}
@@ -3901,6 +3948,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             </button>
             <button class="graph-toggle" id="annotations-overview-export" title="Export all polygon annotations as JSON" style="display: none;">
                 Export annotations
+            </button>
+            <button class="graph-toggle" id="cluster-annotations-export" title="Export cluster annotations and colors (renamed labels + palette) as JSON">
+                Export clusters
             </button>
             <button class="umap-toggle" id="umap-toggle" title="Toggle UMAP view" data-help="Show or hide the UMAP panel for a global embedding view with shared selection tools." style="display: none;">
                 UMAP
@@ -6066,6 +6116,39 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function exportColorPalette() {{
         const payload = buildColorPaletteExport();
         downloadJsonFile(payload, `karospace-colors-${{getScreenshotTimestamp()}}.json`);
+    }}
+
+    function exportClusterAnnotationsAndColors() {{
+        const palettes = buildColorPaletteExport().palettes;
+        const labelColumns = buildCategoryLabelExport().columns;
+        const columns = {{}};
+        const colorsMeta = DATA.colors_meta || {{}};
+        const colorCols = new Set([...Object.keys(palettes), ...Object.keys(labelColumns)]);
+        colorCols.forEach((col) => {{
+            const meta = colorsMeta[col];
+            const paletteEntry = palettes[col];
+            const labelEntry = labelColumns[col] || [];
+            const labelByIdx = new Map(labelEntry.map((row, idx) => [idx, row]));
+            const palette = (paletteEntry && paletteEntry.palette) || [];
+            const originals = meta && Array.isArray(meta.original_categories)
+                ? meta.original_categories
+                : (meta && Array.isArray(meta.categories) ? meta.categories : []);
+            const current = meta && Array.isArray(meta.categories) ? meta.categories : originals;
+            const categories = originals.map((rawValue, idx) => ({{
+                index: idx,
+                original_value: String(rawValue),
+                annotation: String((labelByIdx.get(idx) || {{}}).new_value ?? current[idx] ?? rawValue),
+                color: palette[idx] || '#999999',
+            }}));
+            columns[col] = {{ categories }};
+        }});
+        const payload = {{
+            format: 'karospace-cluster-annotations-v1',
+            created_at: new Date().toISOString(),
+            active_color_column: currentColor || null,
+            columns,
+        }};
+        downloadJsonFile(payload, `karospace-cluster-annotations-${{getScreenshotTimestamp()}}.json`);
     }}
 
     function ensureColorColumnCategoryState(colorCol) {{
@@ -14314,6 +14397,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     ${{targetId === 'legend' ? `<button class="legend-btn" id="${{targetId}}-export-colors" title="Export current categorical palettes as JSON">Export Colors</button>` : ''}}
                     ${{targetId === 'legend' ? `<button class="legend-btn" id="${{targetId}}-export-labels" title="Export original and renamed category labels as JSON">Export Labels</button>` : ''}}
                 </div>
+                <div class="legend-list">
             `;
             (config.categories || []).forEach((cat, idx) => {{
                 const hiddenClass = hiddenCategories.has(cat) ? 'hidden' : '';
@@ -14331,6 +14415,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         : ''}}
                 </div>`;
             }});
+            html += '</div>';
             legend.innerHTML = html;
 
             document.getElementById(`${{targetId}}-show-all`)?.addEventListener('click', () => {{
@@ -16031,7 +16116,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
 
         const categories = colorMeta.categories || Object.keys(groupMarkers);
-        const rows = categories.map(cat => {{
+        const rows = categories.map((cat, catIdx) => {{
             const key = String(cat);
             const categoryColor = getCategoryColorForValue(currentColor, key);
             const genes = getMarkerGenesForColorCategory(currentColor, key)
@@ -16067,7 +16152,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const isSpotlit = linkedSpotlightEnabled && spotlightPinnedCategory === key;
             return `
                 <div class="marker-group">
-                    <div class="marker-group-title${{isSpotlit ? ' is-spotlit' : ''}}" data-marker-category="${{escapeHtml(key)}}" title="Click to highlight this annotation in the viewer"><span class="agg-dot" style="background: ${{categoryColor}}"></span>${{escapeHtml(key)}}</div>
+                    <div class="marker-group-title${{isSpotlit ? ' is-spotlit' : ''}}" data-marker-category="${{escapeHtml(key)}}" title="Click to highlight this annotation in the viewer"><span class="agg-dot" style="background: ${{categoryColor}}"></span><input type="text" class="marker-group-label-editor" data-marker-category-label-idx="${{catIdx}}" value="${{escapeHtml(key)}}" title="Rename this annotation; the new name propagates to the legend and viewer"></div>
                     <div class="gene-token-grid">${{geneButtons}}</div>
                 </div>
             `;
@@ -16097,7 +16182,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
 
         container.querySelectorAll('[data-marker-category]').forEach(title => {{
-            title.addEventListener('click', () => {{
+            title.addEventListener('click', (event) => {{
+                if (event.target && event.target.closest('.marker-group-label-editor')) return;
                 const cat = title.getAttribute('data-marker-category');
                 if (!cat) return;
                 linkedSpotlightEnabled = true;
@@ -16107,6 +16193,44 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 updateAllLegendSpotlightClasses();
                 rerenderForSpotlightChange();
                 renderMarkerGenes();
+            }});
+        }});
+
+        container.querySelectorAll('.marker-group-label-editor').forEach((input) => {{
+            input.addEventListener('click', (event) => event.stopPropagation());
+            input.addEventListener('mousedown', (event) => event.stopPropagation());
+            input.addEventListener('keydown', (event) => {{
+                event.stopPropagation();
+                if (event.key === 'Enter') input.blur();
+                if (event.key === 'Escape') {{
+                    const idx = Number(input.getAttribute('data-marker-category-label-idx'));
+                    input.value = String((colorMeta.categories || [])[idx] || '');
+                    input.blur();
+                }}
+            }});
+            input.addEventListener('change', (event) => {{
+                event.stopPropagation();
+                const idx = Number(input.getAttribute('data-marker-category-label-idx'));
+                if (!Number.isInteger(idx) || !currentColor) return;
+                const result = setCategoryLabelOverride(currentColor, idx, input.value);
+                if (!result.ok) {{
+                    if (result.reason === 'duplicate-label') {{
+                        alert(`Category label "${{result.label}}" is already in use for this annotation.`);
+                    }}
+                    input.value = String((colorMeta.categories || [])[idx] || '');
+                    return;
+                }}
+                if (!result.changed) {{
+                    input.value = result.label || input.value;
+                    return;
+                }}
+                comparisonCountsCache.delete(String(currentColor || ''));
+                renderLegend('legend');
+                renderLegend('modal-legend');
+                renderAllSections();
+                if (modalSection) renderModalSection();
+                if (umapVisible) renderUMAP();
+                renderActiveInsightsPanel();
             }});
         }});
     }}
@@ -20686,6 +20810,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }});
 
         document.getElementById('annotations-overview-export')?.addEventListener('click', exportModalAnnotations);
+        document.getElementById('cluster-annotations-export')?.addEventListener('click', exportClusterAnnotationsAndColors);
 
         document.getElementById('screenshot-btn').addEventListener('click', screenshotFullPage);
 

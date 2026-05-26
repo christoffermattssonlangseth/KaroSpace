@@ -1,0 +1,3099 @@
+{
+  "format": "karospace-cluster-annotations-v1",
+  "created_at": "2026-05-26T13:16:39.573Z",
+  "active_color_column": "leiden",
+  "columns": {
+    "leiden": {
+      "categories": [
+        {
+          "index": 0,
+          "original_value": "0",
+          "annotation": "astrocytes",
+          "color": "#7c2a00"
+        },
+        {
+          "index": 1,
+          "original_value": "1",
+          "annotation": "1",
+          "color": "#ff7f0e"
+        },
+        {
+          "index": 2,
+          "original_value": "2",
+          "annotation": "2",
+          "color": "#2ca02c"
+        },
+        {
+          "index": 3,
+          "original_value": "3",
+          "annotation": "3",
+          "color": "#d62728"
+        },
+        {
+          "index": 4,
+          "original_value": "4",
+          "annotation": "4",
+          "color": "#9467bd"
+        },
+        {
+          "index": 5,
+          "original_value": "5",
+          "annotation": "5",
+          "color": "#8c564b"
+        },
+        {
+          "index": 6,
+          "original_value": "6",
+          "annotation": "6",
+          "color": "#e377c2"
+        },
+        {
+          "index": 7,
+          "original_value": "7",
+          "annotation": "7",
+          "color": "#7f7f7f"
+        },
+        {
+          "index": 8,
+          "original_value": "8",
+          "annotation": "8",
+          "color": "#bcbd22"
+        },
+        {
+          "index": 9,
+          "original_value": "9",
+          "annotation": "9",
+          "color": "#17becf"
+        },
+        {
+          "index": 10,
+          "original_value": "10",
+          "annotation": "10",
+          "color": "#aec7e8"
+        },
+        {
+          "index": 11,
+          "original_value": "11",
+          "annotation": "11",
+          "color": "#ffbb78"
+        },
+        {
+          "index": 12,
+          "original_value": "12",
+          "annotation": "12",
+          "color": "#98df8a"
+        },
+        {
+          "index": 13,
+          "original_value": "13",
+          "annotation": "13",
+          "color": "#ff9896"
+        },
+        {
+          "index": 14,
+          "original_value": "14",
+          "annotation": "14",
+          "color": "#c5b0d5"
+        },
+        {
+          "index": 15,
+          "original_value": "15",
+          "annotation": "15",
+          "color": "#c49c94"
+        },
+        {
+          "index": 16,
+          "original_value": "16",
+          "annotation": "16",
+          "color": "#f7b6d2"
+        }
+      ]
+    },
+    "leiden_0_2": {
+      "categories": [
+        {
+          "index": 0,
+          "original_value": "0",
+          "annotation": "0",
+          "color": "#1f77b4"
+        },
+        {
+          "index": 1,
+          "original_value": "1",
+          "annotation": "1",
+          "color": "#ff7f0e"
+        },
+        {
+          "index": 2,
+          "original_value": "2",
+          "annotation": "2",
+          "color": "#2ca02c"
+        },
+        {
+          "index": 3,
+          "original_value": "3",
+          "annotation": "3",
+          "color": "#d62728"
+        },
+        {
+          "index": 4,
+          "original_value": "4",
+          "annotation": "4",
+          "color": "#9467bd"
+        },
+        {
+          "index": 5,
+          "original_value": "5",
+          "annotation": "5",
+          "color": "#8c564b"
+        },
+        {
+          "index": 6,
+          "original_value": "6",
+          "annotation": "6",
+          "color": "#e377c2"
+        },
+        {
+          "index": 7,
+          "original_value": "7",
+          "annotation": "7",
+          "color": "#7f7f7f"
+        },
+        {
+          "index": 8,
+          "original_value": "8",
+          "annotation": "8",
+          "color": "#bcbd22"
+        }
+      ]
+    },
+    "leiden_0_4": {
+      "categories": [
+        {
+          "index": 0,
+          "original_value": "0",
+          "annotation": "0",
+          "color": "#1f77b4"
+        },
+        {
+          "index": 1,
+          "original_value": "1",
+          "annotation": "1",
+          "color": "#ff7f0e"
+        },
+        {
+          "index": 2,
+          "original_value": "2",
+          "annotation": "2",
+          "color": "#aa40fc"
+        },
+        {
+          "index": 3,
+          "original_value": "3",
+          "annotation": "3",
+          "color": "#8c564b"
+        },
+        {
+          "index": 4,
+          "original_value": "4",
+          "annotation": "4",
+          "color": "#e377c2"
+        },
+        {
+          "index": 5,
+          "original_value": "5",
+          "annotation": "5",
+          "color": "#b5bd61"
+        },
+        {
+          "index": 6,
+          "original_value": "6",
+          "annotation": "6",
+          "color": "#17becf"
+        },
+        {
+          "index": 7,
+          "original_value": "7",
+          "annotation": "7",
+          "color": "#aec7e8"
+        },
+        {
+          "index": 8,
+          "original_value": "8",
+          "annotation": "8",
+          "color": "#ffbb78"
+        },
+        {
+          "index": 9,
+          "original_value": "9",
+          "annotation": "9",
+          "color": "#98df8a"
+        },
+        {
+          "index": 10,
+          "original_value": "10",
+          "annotation": "10",
+          "color": "#279e68"
+        },
+        {
+          "index": 11,
+          "original_value": "11",
+          "annotation": "11",
+          "color": "#d62728"
+        }
+      ]
+    },
+    "leiden_0_6": {
+      "categories": [
+        {
+          "index": 0,
+          "original_value": "0",
+          "annotation": "0",
+          "color": "#1f77b4"
+        },
+        {
+          "index": 1,
+          "original_value": "1",
+          "annotation": "1",
+          "color": "#ff7f0e"
+        },
+        {
+          "index": 2,
+          "original_value": "2",
+          "annotation": "2",
+          "color": "#2ca02c"
+        },
+        {
+          "index": 3,
+          "original_value": "3",
+          "annotation": "3",
+          "color": "#d62728"
+        },
+        {
+          "index": 4,
+          "original_value": "4",
+          "annotation": "4",
+          "color": "#9467bd"
+        },
+        {
+          "index": 5,
+          "original_value": "5",
+          "annotation": "5",
+          "color": "#8c564b"
+        },
+        {
+          "index": 6,
+          "original_value": "6",
+          "annotation": "6",
+          "color": "#e377c2"
+        },
+        {
+          "index": 7,
+          "original_value": "7",
+          "annotation": "7",
+          "color": "#7f7f7f"
+        },
+        {
+          "index": 8,
+          "original_value": "8",
+          "annotation": "8",
+          "color": "#bcbd22"
+        },
+        {
+          "index": 9,
+          "original_value": "9",
+          "annotation": "9",
+          "color": "#17becf"
+        },
+        {
+          "index": 10,
+          "original_value": "10",
+          "annotation": "10",
+          "color": "#aec7e8"
+        },
+        {
+          "index": 11,
+          "original_value": "11",
+          "annotation": "11",
+          "color": "#ffbb78"
+        },
+        {
+          "index": 12,
+          "original_value": "12",
+          "annotation": "12",
+          "color": "#98df8a"
+        },
+        {
+          "index": 13,
+          "original_value": "13",
+          "annotation": "13",
+          "color": "#ff9896"
+        }
+      ]
+    },
+    "leiden_0_8": {
+      "categories": [
+        {
+          "index": 0,
+          "original_value": "0",
+          "annotation": "0",
+          "color": "#1f77b4"
+        },
+        {
+          "index": 1,
+          "original_value": "1",
+          "annotation": "1",
+          "color": "#ff7f0e"
+        },
+        {
+          "index": 2,
+          "original_value": "2",
+          "annotation": "2",
+          "color": "#aec7e8"
+        },
+        {
+          "index": 3,
+          "original_value": "3",
+          "annotation": "3",
+          "color": "#ffbb78"
+        },
+        {
+          "index": 4,
+          "original_value": "4",
+          "annotation": "4",
+          "color": "#98df8a"
+        },
+        {
+          "index": 5,
+          "original_value": "5",
+          "annotation": "5",
+          "color": "#ff9896"
+        },
+        {
+          "index": 6,
+          "original_value": "6",
+          "annotation": "6",
+          "color": "#c5b0d5"
+        },
+        {
+          "index": 7,
+          "original_value": "7",
+          "annotation": "7",
+          "color": "#c49c94"
+        },
+        {
+          "index": 8,
+          "original_value": "8",
+          "annotation": "8",
+          "color": "#f7b6d2"
+        },
+        {
+          "index": 9,
+          "original_value": "9",
+          "annotation": "9",
+          "color": "#dbdb8d"
+        },
+        {
+          "index": 10,
+          "original_value": "10",
+          "annotation": "10",
+          "color": "#279e68"
+        },
+        {
+          "index": 11,
+          "original_value": "11",
+          "annotation": "11",
+          "color": "#d62728"
+        },
+        {
+          "index": 12,
+          "original_value": "12",
+          "annotation": "12",
+          "color": "#aa40fc"
+        },
+        {
+          "index": 13,
+          "original_value": "13",
+          "annotation": "13",
+          "color": "#8c564b"
+        },
+        {
+          "index": 14,
+          "original_value": "14",
+          "annotation": "14",
+          "color": "#e377c2"
+        },
+        {
+          "index": 15,
+          "original_value": "15",
+          "annotation": "15",
+          "color": "#b5bd61"
+        },
+        {
+          "index": 16,
+          "original_value": "16",
+          "annotation": "16",
+          "color": "#17becf"
+        }
+      ]
+    },
+    "leiden_1_0": {
+      "categories": [
+        {
+          "index": 0,
+          "original_value": "0",
+          "annotation": "0",
+          "color": "#1f77b4"
+        },
+        {
+          "index": 1,
+          "original_value": "1",
+          "annotation": "1",
+          "color": "#ff7f0e"
+        },
+        {
+          "index": 2,
+          "original_value": "2",
+          "annotation": "2",
+          "color": "#2ca02c"
+        },
+        {
+          "index": 3,
+          "original_value": "3",
+          "annotation": "3",
+          "color": "#d62728"
+        },
+        {
+          "index": 4,
+          "original_value": "4",
+          "annotation": "4",
+          "color": "#9467bd"
+        },
+        {
+          "index": 5,
+          "original_value": "5",
+          "annotation": "5",
+          "color": "#8c564b"
+        },
+        {
+          "index": 6,
+          "original_value": "6",
+          "annotation": "6",
+          "color": "#e377c2"
+        },
+        {
+          "index": 7,
+          "original_value": "7",
+          "annotation": "7",
+          "color": "#7f7f7f"
+        },
+        {
+          "index": 8,
+          "original_value": "8",
+          "annotation": "8",
+          "color": "#bcbd22"
+        },
+        {
+          "index": 9,
+          "original_value": "9",
+          "annotation": "9",
+          "color": "#17becf"
+        },
+        {
+          "index": 10,
+          "original_value": "10",
+          "annotation": "10",
+          "color": "#aec7e8"
+        },
+        {
+          "index": 11,
+          "original_value": "11",
+          "annotation": "11",
+          "color": "#ffbb78"
+        },
+        {
+          "index": 12,
+          "original_value": "12",
+          "annotation": "12",
+          "color": "#98df8a"
+        },
+        {
+          "index": 13,
+          "original_value": "13",
+          "annotation": "13",
+          "color": "#ff9896"
+        },
+        {
+          "index": 14,
+          "original_value": "14",
+          "annotation": "14",
+          "color": "#c5b0d5"
+        },
+        {
+          "index": 15,
+          "original_value": "15",
+          "annotation": "15",
+          "color": "#c49c94"
+        },
+        {
+          "index": 16,
+          "original_value": "16",
+          "annotation": "16",
+          "color": "#f7b6d2"
+        },
+        {
+          "index": 17,
+          "original_value": "17",
+          "annotation": "17",
+          "color": "#c7c7c7"
+        },
+        {
+          "index": 18,
+          "original_value": "18",
+          "annotation": "18",
+          "color": "#dbdb8d"
+        },
+        {
+          "index": 19,
+          "original_value": "19",
+          "annotation": "19",
+          "color": "#9edae5"
+        }
+      ]
+    },
+    "leiden_1_5": {
+      "categories": [
+        {
+          "index": 0,
+          "original_value": "0",
+          "annotation": "0",
+          "color": "#ffff00"
+        },
+        {
+          "index": 1,
+          "original_value": "1",
+          "annotation": "1",
+          "color": "#1ce6ff"
+        },
+        {
+          "index": 2,
+          "original_value": "2",
+          "annotation": "2",
+          "color": "#004d43"
+        },
+        {
+          "index": 3,
+          "original_value": "3",
+          "annotation": "3",
+          "color": "#ff2f80"
+        },
+        {
+          "index": 4,
+          "original_value": "4",
+          "annotation": "4",
+          "color": "#61615a"
+        },
+        {
+          "index": 5,
+          "original_value": "5",
+          "annotation": "5",
+          "color": "#ba0900"
+        },
+        {
+          "index": 6,
+          "original_value": "6",
+          "annotation": "6",
+          "color": "#6b7900"
+        },
+        {
+          "index": 7,
+          "original_value": "7",
+          "annotation": "7",
+          "color": "#00c2a0"
+        },
+        {
+          "index": 8,
+          "original_value": "8",
+          "annotation": "8",
+          "color": "#ffaa92"
+        },
+        {
+          "index": 9,
+          "original_value": "9",
+          "annotation": "9",
+          "color": "#ff90c9"
+        },
+        {
+          "index": 10,
+          "original_value": "10",
+          "annotation": "10",
+          "color": "#ff34ff"
+        },
+        {
+          "index": 11,
+          "original_value": "11",
+          "annotation": "11",
+          "color": "#ff4a46"
+        },
+        {
+          "index": 12,
+          "original_value": "12",
+          "annotation": "12",
+          "color": "#008941"
+        },
+        {
+          "index": 13,
+          "original_value": "13",
+          "annotation": "13",
+          "color": "#006fa6"
+        },
+        {
+          "index": 14,
+          "original_value": "14",
+          "annotation": "14",
+          "color": "#a30059"
+        },
+        {
+          "index": 15,
+          "original_value": "15",
+          "annotation": "15",
+          "color": "#ffdbe5"
+        },
+        {
+          "index": 16,
+          "original_value": "16",
+          "annotation": "16",
+          "color": "#7a4900"
+        },
+        {
+          "index": 17,
+          "original_value": "17",
+          "annotation": "17",
+          "color": "#0000a6"
+        },
+        {
+          "index": 18,
+          "original_value": "18",
+          "annotation": "18",
+          "color": "#63ffac"
+        },
+        {
+          "index": 19,
+          "original_value": "19",
+          "annotation": "19",
+          "color": "#b79762"
+        },
+        {
+          "index": 20,
+          "original_value": "20",
+          "annotation": "20",
+          "color": "#8fb0ff"
+        },
+        {
+          "index": 21,
+          "original_value": "21",
+          "annotation": "21",
+          "color": "#997d87"
+        },
+        {
+          "index": 22,
+          "original_value": "22",
+          "annotation": "22",
+          "color": "#5a0007"
+        },
+        {
+          "index": 23,
+          "original_value": "23",
+          "annotation": "23",
+          "color": "#809693"
+        },
+        {
+          "index": 24,
+          "original_value": "24",
+          "annotation": "24",
+          "color": "#6a3a4c"
+        },
+        {
+          "index": 25,
+          "original_value": "25",
+          "annotation": "25",
+          "color": "#1b4400"
+        },
+        {
+          "index": 26,
+          "original_value": "26",
+          "annotation": "26",
+          "color": "#4fc601"
+        },
+        {
+          "index": 27,
+          "original_value": "27",
+          "annotation": "27",
+          "color": "#3b5dff"
+        },
+        {
+          "index": 28,
+          "original_value": "28",
+          "annotation": "28",
+          "color": "#4a3b53"
+        }
+      ]
+    },
+    "leiden_2_0": {
+      "categories": [
+        {
+          "index": 0,
+          "original_value": "0",
+          "annotation": "0",
+          "color": "#1f77b4"
+        },
+        {
+          "index": 1,
+          "original_value": "1",
+          "annotation": "1",
+          "color": "#ff7f0e"
+        },
+        {
+          "index": 2,
+          "original_value": "2",
+          "annotation": "2",
+          "color": "#2ca02c"
+        },
+        {
+          "index": 3,
+          "original_value": "3",
+          "annotation": "3",
+          "color": "#d62728"
+        },
+        {
+          "index": 4,
+          "original_value": "4",
+          "annotation": "4",
+          "color": "#9467bd"
+        },
+        {
+          "index": 5,
+          "original_value": "5",
+          "annotation": "5",
+          "color": "#8c564b"
+        },
+        {
+          "index": 6,
+          "original_value": "6",
+          "annotation": "6",
+          "color": "#e377c2"
+        },
+        {
+          "index": 7,
+          "original_value": "7",
+          "annotation": "7",
+          "color": "#7f7f7f"
+        },
+        {
+          "index": 8,
+          "original_value": "8",
+          "annotation": "8",
+          "color": "#bcbd22"
+        },
+        {
+          "index": 9,
+          "original_value": "9",
+          "annotation": "9",
+          "color": "#17becf"
+        },
+        {
+          "index": 10,
+          "original_value": "10",
+          "annotation": "10",
+          "color": "#aec7e8"
+        },
+        {
+          "index": 11,
+          "original_value": "11",
+          "annotation": "11",
+          "color": "#ffbb78"
+        },
+        {
+          "index": 12,
+          "original_value": "12",
+          "annotation": "12",
+          "color": "#98df8a"
+        },
+        {
+          "index": 13,
+          "original_value": "13",
+          "annotation": "13",
+          "color": "#ff9896"
+        },
+        {
+          "index": 14,
+          "original_value": "14",
+          "annotation": "14",
+          "color": "#c5b0d5"
+        },
+        {
+          "index": 15,
+          "original_value": "15",
+          "annotation": "15",
+          "color": "#c49c94"
+        },
+        {
+          "index": 16,
+          "original_value": "16",
+          "annotation": "16",
+          "color": "#f7b6d2"
+        },
+        {
+          "index": 17,
+          "original_value": "17",
+          "annotation": "17",
+          "color": "#c7c7c7"
+        },
+        {
+          "index": 18,
+          "original_value": "18",
+          "annotation": "18",
+          "color": "#dbdb8d"
+        },
+        {
+          "index": 19,
+          "original_value": "19",
+          "annotation": "19",
+          "color": "#9edae5"
+        },
+        {
+          "index": 20,
+          "original_value": "20",
+          "annotation": "20",
+          "color": "#393b79"
+        },
+        {
+          "index": 21,
+          "original_value": "21",
+          "annotation": "21",
+          "color": "#5254a3"
+        },
+        {
+          "index": 22,
+          "original_value": "22",
+          "annotation": "22",
+          "color": "#6b6ecf"
+        },
+        {
+          "index": 23,
+          "original_value": "23",
+          "annotation": "23",
+          "color": "#9c9ede"
+        },
+        {
+          "index": 24,
+          "original_value": "24",
+          "annotation": "24",
+          "color": "#637939"
+        },
+        {
+          "index": 25,
+          "original_value": "25",
+          "annotation": "25",
+          "color": "#8ca252"
+        },
+        {
+          "index": 26,
+          "original_value": "26",
+          "annotation": "26",
+          "color": "#b5cf6b"
+        },
+        {
+          "index": 27,
+          "original_value": "27",
+          "annotation": "27",
+          "color": "#cedb9c"
+        },
+        {
+          "index": 28,
+          "original_value": "28",
+          "annotation": "28",
+          "color": "#8c6d31"
+        },
+        {
+          "index": 29,
+          "original_value": "29",
+          "annotation": "29",
+          "color": "#bd9e39"
+        },
+        {
+          "index": 30,
+          "original_value": "30",
+          "annotation": "30",
+          "color": "#e7ba52"
+        },
+        {
+          "index": 31,
+          "original_value": "31",
+          "annotation": "31",
+          "color": "#e7cb94"
+        },
+        {
+          "index": 32,
+          "original_value": "32",
+          "annotation": "32",
+          "color": "#843c39"
+        },
+        {
+          "index": 33,
+          "original_value": "33",
+          "annotation": "33",
+          "color": "#ad494a"
+        },
+        {
+          "index": 34,
+          "original_value": "34",
+          "annotation": "34",
+          "color": "#d6616b"
+        },
+        {
+          "index": 35,
+          "original_value": "35",
+          "annotation": "35",
+          "color": "#e7969c"
+        }
+      ]
+    },
+    "leiden_2_5": {
+      "categories": [
+        {
+          "index": 0,
+          "original_value": "0",
+          "annotation": "0",
+          "color": "#1f77b4"
+        },
+        {
+          "index": 1,
+          "original_value": "1",
+          "annotation": "1",
+          "color": "#aec7e8"
+        },
+        {
+          "index": 2,
+          "original_value": "2",
+          "annotation": "2",
+          "color": "#e377c2"
+        },
+        {
+          "index": 3,
+          "original_value": "3",
+          "annotation": "3",
+          "color": "#ffbb78"
+        },
+        {
+          "index": 4,
+          "original_value": "4",
+          "annotation": "4",
+          "color": "#7f7f7f"
+        },
+        {
+          "index": 5,
+          "original_value": "5",
+          "annotation": "5",
+          "color": "#9edae5"
+        },
+        {
+          "index": 6,
+          "original_value": "6",
+          "annotation": "6",
+          "color": "#1f77b4"
+        },
+        {
+          "index": 7,
+          "original_value": "7",
+          "annotation": "7",
+          "color": "#aec7e8"
+        },
+        {
+          "index": 8,
+          "original_value": "8",
+          "annotation": "8",
+          "color": "#ff7f0e"
+        },
+        {
+          "index": 9,
+          "original_value": "9",
+          "annotation": "9",
+          "color": "#ffbb78"
+        },
+        {
+          "index": 10,
+          "original_value": "10",
+          "annotation": "10",
+          "color": "#ff7f0e"
+        },
+        {
+          "index": 11,
+          "original_value": "11",
+          "annotation": "11",
+          "color": "#ffbb78"
+        },
+        {
+          "index": 12,
+          "original_value": "12",
+          "annotation": "12",
+          "color": "#2ca02c"
+        },
+        {
+          "index": 13,
+          "original_value": "13",
+          "annotation": "13",
+          "color": "#98df8a"
+        },
+        {
+          "index": 14,
+          "original_value": "14",
+          "annotation": "14",
+          "color": "#d62728"
+        },
+        {
+          "index": 15,
+          "original_value": "15",
+          "annotation": "15",
+          "color": "#ff9896"
+        },
+        {
+          "index": 16,
+          "original_value": "16",
+          "annotation": "16",
+          "color": "#9467bd"
+        },
+        {
+          "index": 17,
+          "original_value": "17",
+          "annotation": "17",
+          "color": "#c5b0d5"
+        },
+        {
+          "index": 18,
+          "original_value": "18",
+          "annotation": "18",
+          "color": "#8c564b"
+        },
+        {
+          "index": 19,
+          "original_value": "19",
+          "annotation": "19",
+          "color": "#c49c94"
+        },
+        {
+          "index": 20,
+          "original_value": "20",
+          "annotation": "20",
+          "color": "#f7b6d2"
+        },
+        {
+          "index": 21,
+          "original_value": "21",
+          "annotation": "21",
+          "color": "#7f7f7f"
+        },
+        {
+          "index": 22,
+          "original_value": "22",
+          "annotation": "22",
+          "color": "#c7c7c7"
+        },
+        {
+          "index": 23,
+          "original_value": "23",
+          "annotation": "23",
+          "color": "#bcbd22"
+        },
+        {
+          "index": 24,
+          "original_value": "24",
+          "annotation": "24",
+          "color": "#dbdb8d"
+        },
+        {
+          "index": 25,
+          "original_value": "25",
+          "annotation": "25",
+          "color": "#17becf"
+        },
+        {
+          "index": 26,
+          "original_value": "26",
+          "annotation": "26",
+          "color": "#9edae5"
+        },
+        {
+          "index": 27,
+          "original_value": "27",
+          "annotation": "27",
+          "color": "#1f77b4"
+        },
+        {
+          "index": 28,
+          "original_value": "28",
+          "annotation": "28",
+          "color": "#aec7e8"
+        },
+        {
+          "index": 29,
+          "original_value": "29",
+          "annotation": "29",
+          "color": "#ff7f0e"
+        },
+        {
+          "index": 30,
+          "original_value": "30",
+          "annotation": "30",
+          "color": "#2ca02c"
+        },
+        {
+          "index": 31,
+          "original_value": "31",
+          "annotation": "31",
+          "color": "#98df8a"
+        },
+        {
+          "index": 32,
+          "original_value": "32",
+          "annotation": "32",
+          "color": "#d62728"
+        },
+        {
+          "index": 33,
+          "original_value": "33",
+          "annotation": "33",
+          "color": "#ff9896"
+        },
+        {
+          "index": 34,
+          "original_value": "34",
+          "annotation": "34",
+          "color": "#9467bd"
+        },
+        {
+          "index": 35,
+          "original_value": "35",
+          "annotation": "35",
+          "color": "#c5b0d5"
+        },
+        {
+          "index": 36,
+          "original_value": "36",
+          "annotation": "36",
+          "color": "#8c564b"
+        },
+        {
+          "index": 37,
+          "original_value": "37",
+          "annotation": "37",
+          "color": "#c49c94"
+        },
+        {
+          "index": 38,
+          "original_value": "38",
+          "annotation": "38",
+          "color": "#e377c2"
+        },
+        {
+          "index": 39,
+          "original_value": "39",
+          "annotation": "39",
+          "color": "#f7b6d2"
+        },
+        {
+          "index": 40,
+          "original_value": "40",
+          "annotation": "40",
+          "color": "#c7c7c7"
+        },
+        {
+          "index": 41,
+          "original_value": "41",
+          "annotation": "41",
+          "color": "#bcbd22"
+        },
+        {
+          "index": 42,
+          "original_value": "42",
+          "annotation": "42",
+          "color": "#dbdb8d"
+        },
+        {
+          "index": 43,
+          "original_value": "43",
+          "annotation": "43",
+          "color": "#17becf"
+        }
+      ]
+    },
+    "leiden_3_0": {
+      "categories": [
+        {
+          "index": 0,
+          "original_value": "0",
+          "annotation": "0",
+          "color": "#1f77b4"
+        },
+        {
+          "index": 1,
+          "original_value": "1",
+          "annotation": "1",
+          "color": "#aec7e8"
+        },
+        {
+          "index": 2,
+          "original_value": "2",
+          "annotation": "2",
+          "color": "#e377c2"
+        },
+        {
+          "index": 3,
+          "original_value": "3",
+          "annotation": "3",
+          "color": "#ffbb78"
+        },
+        {
+          "index": 4,
+          "original_value": "4",
+          "annotation": "4",
+          "color": "#7f7f7f"
+        },
+        {
+          "index": 5,
+          "original_value": "5",
+          "annotation": "5",
+          "color": "#2ca02c"
+        },
+        {
+          "index": 6,
+          "original_value": "6",
+          "annotation": "6",
+          "color": "#98df8a"
+        },
+        {
+          "index": 7,
+          "original_value": "7",
+          "annotation": "7",
+          "color": "#d62728"
+        },
+        {
+          "index": 8,
+          "original_value": "8",
+          "annotation": "8",
+          "color": "#ff9896"
+        },
+        {
+          "index": 9,
+          "original_value": "9",
+          "annotation": "9",
+          "color": "#9467bd"
+        },
+        {
+          "index": 10,
+          "original_value": "10",
+          "annotation": "10",
+          "color": "#ff7f0e"
+        },
+        {
+          "index": 11,
+          "original_value": "11",
+          "annotation": "11",
+          "color": "#ffbb78"
+        },
+        {
+          "index": 12,
+          "original_value": "12",
+          "annotation": "12",
+          "color": "#2ca02c"
+        },
+        {
+          "index": 13,
+          "original_value": "13",
+          "annotation": "13",
+          "color": "#98df8a"
+        },
+        {
+          "index": 14,
+          "original_value": "14",
+          "annotation": "14",
+          "color": "#d62728"
+        },
+        {
+          "index": 15,
+          "original_value": "15",
+          "annotation": "15",
+          "color": "#ff9896"
+        },
+        {
+          "index": 16,
+          "original_value": "16",
+          "annotation": "16",
+          "color": "#9467bd"
+        },
+        {
+          "index": 17,
+          "original_value": "17",
+          "annotation": "17",
+          "color": "#c5b0d5"
+        },
+        {
+          "index": 18,
+          "original_value": "18",
+          "annotation": "18",
+          "color": "#8c564b"
+        },
+        {
+          "index": 19,
+          "original_value": "19",
+          "annotation": "19",
+          "color": "#c49c94"
+        },
+        {
+          "index": 20,
+          "original_value": "20",
+          "annotation": "20",
+          "color": "#f7b6d2"
+        },
+        {
+          "index": 21,
+          "original_value": "21",
+          "annotation": "21",
+          "color": "#7f7f7f"
+        },
+        {
+          "index": 22,
+          "original_value": "22",
+          "annotation": "22",
+          "color": "#c7c7c7"
+        },
+        {
+          "index": 23,
+          "original_value": "23",
+          "annotation": "23",
+          "color": "#bcbd22"
+        },
+        {
+          "index": 24,
+          "original_value": "24",
+          "annotation": "24",
+          "color": "#dbdb8d"
+        },
+        {
+          "index": 25,
+          "original_value": "25",
+          "annotation": "25",
+          "color": "#17becf"
+        },
+        {
+          "index": 26,
+          "original_value": "26",
+          "annotation": "26",
+          "color": "#9edae5"
+        },
+        {
+          "index": 27,
+          "original_value": "27",
+          "annotation": "27",
+          "color": "#1f77b4"
+        },
+        {
+          "index": 28,
+          "original_value": "28",
+          "annotation": "28",
+          "color": "#aec7e8"
+        },
+        {
+          "index": 29,
+          "original_value": "29",
+          "annotation": "29",
+          "color": "#ff7f0e"
+        },
+        {
+          "index": 30,
+          "original_value": "30",
+          "annotation": "30",
+          "color": "#2ca02c"
+        },
+        {
+          "index": 31,
+          "original_value": "31",
+          "annotation": "31",
+          "color": "#98df8a"
+        },
+        {
+          "index": 32,
+          "original_value": "32",
+          "annotation": "32",
+          "color": "#d62728"
+        },
+        {
+          "index": 33,
+          "original_value": "33",
+          "annotation": "33",
+          "color": "#ff9896"
+        },
+        {
+          "index": 34,
+          "original_value": "34",
+          "annotation": "34",
+          "color": "#9467bd"
+        },
+        {
+          "index": 35,
+          "original_value": "35",
+          "annotation": "35",
+          "color": "#c5b0d5"
+        },
+        {
+          "index": 36,
+          "original_value": "36",
+          "annotation": "36",
+          "color": "#8c564b"
+        },
+        {
+          "index": 37,
+          "original_value": "37",
+          "annotation": "37",
+          "color": "#c49c94"
+        },
+        {
+          "index": 38,
+          "original_value": "38",
+          "annotation": "38",
+          "color": "#e377c2"
+        },
+        {
+          "index": 39,
+          "original_value": "39",
+          "annotation": "39",
+          "color": "#f7b6d2"
+        },
+        {
+          "index": 40,
+          "original_value": "40",
+          "annotation": "40",
+          "color": "#c7c7c7"
+        },
+        {
+          "index": 41,
+          "original_value": "41",
+          "annotation": "41",
+          "color": "#bcbd22"
+        },
+        {
+          "index": 42,
+          "original_value": "42",
+          "annotation": "42",
+          "color": "#dbdb8d"
+        },
+        {
+          "index": 43,
+          "original_value": "43",
+          "annotation": "43",
+          "color": "#17becf"
+        },
+        {
+          "index": 44,
+          "original_value": "44",
+          "annotation": "44",
+          "color": "#9edae5"
+        },
+        {
+          "index": 45,
+          "original_value": "45",
+          "annotation": "45",
+          "color": "#1f77b4"
+        },
+        {
+          "index": 46,
+          "original_value": "46",
+          "annotation": "46",
+          "color": "#aec7e8"
+        },
+        {
+          "index": 47,
+          "original_value": "47",
+          "annotation": "47",
+          "color": "#ff7f0e"
+        },
+        {
+          "index": 48,
+          "original_value": "48",
+          "annotation": "48",
+          "color": "#ffbb78"
+        }
+      ]
+    },
+    "leiden_3_5": {
+      "categories": [
+        {
+          "index": 0,
+          "original_value": "0",
+          "annotation": "0",
+          "color": "#1f77b4"
+        },
+        {
+          "index": 1,
+          "original_value": "1",
+          "annotation": "1",
+          "color": "#ff7f0e"
+        },
+        {
+          "index": 2,
+          "original_value": "2",
+          "annotation": "2",
+          "color": "#2ca02c"
+        },
+        {
+          "index": 3,
+          "original_value": "3",
+          "annotation": "3",
+          "color": "#d62728"
+        },
+        {
+          "index": 4,
+          "original_value": "4",
+          "annotation": "4",
+          "color": "#9467bd"
+        },
+        {
+          "index": 5,
+          "original_value": "5",
+          "annotation": "5",
+          "color": "#8c564b"
+        },
+        {
+          "index": 6,
+          "original_value": "6",
+          "annotation": "6",
+          "color": "#e377c2"
+        },
+        {
+          "index": 7,
+          "original_value": "7",
+          "annotation": "7",
+          "color": "#7f7f7f"
+        },
+        {
+          "index": 8,
+          "original_value": "8",
+          "annotation": "8",
+          "color": "#bcbd22"
+        },
+        {
+          "index": 9,
+          "original_value": "9",
+          "annotation": "9",
+          "color": "#17becf"
+        },
+        {
+          "index": 10,
+          "original_value": "10",
+          "annotation": "10",
+          "color": "#aec7e8"
+        },
+        {
+          "index": 11,
+          "original_value": "11",
+          "annotation": "11",
+          "color": "#ffbb78"
+        },
+        {
+          "index": 12,
+          "original_value": "12",
+          "annotation": "12",
+          "color": "#98df8a"
+        },
+        {
+          "index": 13,
+          "original_value": "13",
+          "annotation": "13",
+          "color": "#ff9896"
+        },
+        {
+          "index": 14,
+          "original_value": "14",
+          "annotation": "14",
+          "color": "#c5b0d5"
+        },
+        {
+          "index": 15,
+          "original_value": "15",
+          "annotation": "15",
+          "color": "#c49c94"
+        },
+        {
+          "index": 16,
+          "original_value": "16",
+          "annotation": "16",
+          "color": "#f7b6d2"
+        },
+        {
+          "index": 17,
+          "original_value": "17",
+          "annotation": "17",
+          "color": "#c7c7c7"
+        },
+        {
+          "index": 18,
+          "original_value": "18",
+          "annotation": "18",
+          "color": "#dbdb8d"
+        },
+        {
+          "index": 19,
+          "original_value": "19",
+          "annotation": "19",
+          "color": "#9edae5"
+        },
+        {
+          "index": 20,
+          "original_value": "20",
+          "annotation": "20",
+          "color": "#393b79"
+        },
+        {
+          "index": 21,
+          "original_value": "21",
+          "annotation": "21",
+          "color": "#5254a3"
+        },
+        {
+          "index": 22,
+          "original_value": "22",
+          "annotation": "22",
+          "color": "#6b6ecf"
+        },
+        {
+          "index": 23,
+          "original_value": "23",
+          "annotation": "23",
+          "color": "#9c9ede"
+        },
+        {
+          "index": 24,
+          "original_value": "24",
+          "annotation": "24",
+          "color": "#637939"
+        },
+        {
+          "index": 25,
+          "original_value": "25",
+          "annotation": "25",
+          "color": "#8ca252"
+        },
+        {
+          "index": 26,
+          "original_value": "26",
+          "annotation": "26",
+          "color": "#b5cf6b"
+        },
+        {
+          "index": 27,
+          "original_value": "27",
+          "annotation": "27",
+          "color": "#cedb9c"
+        },
+        {
+          "index": 28,
+          "original_value": "28",
+          "annotation": "28",
+          "color": "#8c6d31"
+        },
+        {
+          "index": 29,
+          "original_value": "29",
+          "annotation": "29",
+          "color": "#bd9e39"
+        },
+        {
+          "index": 30,
+          "original_value": "30",
+          "annotation": "30",
+          "color": "#e7ba52"
+        },
+        {
+          "index": 31,
+          "original_value": "31",
+          "annotation": "31",
+          "color": "#e7cb94"
+        },
+        {
+          "index": 32,
+          "original_value": "32",
+          "annotation": "32",
+          "color": "#843c39"
+        },
+        {
+          "index": 33,
+          "original_value": "33",
+          "annotation": "33",
+          "color": "#ad494a"
+        },
+        {
+          "index": 34,
+          "original_value": "34",
+          "annotation": "34",
+          "color": "#d6616b"
+        },
+        {
+          "index": 35,
+          "original_value": "35",
+          "annotation": "35",
+          "color": "#e7969c"
+        },
+        {
+          "index": 36,
+          "original_value": "36",
+          "annotation": "36",
+          "color": "#7b4173"
+        },
+        {
+          "index": 37,
+          "original_value": "37",
+          "annotation": "37",
+          "color": "#a55194"
+        },
+        {
+          "index": 38,
+          "original_value": "38",
+          "annotation": "38",
+          "color": "#ce6dbd"
+        },
+        {
+          "index": 39,
+          "original_value": "39",
+          "annotation": "39",
+          "color": "#de9ed6"
+        },
+        {
+          "index": 40,
+          "original_value": "40",
+          "annotation": "40",
+          "color": "#1f77b4"
+        },
+        {
+          "index": 41,
+          "original_value": "41",
+          "annotation": "41",
+          "color": "#ff7f0e"
+        },
+        {
+          "index": 42,
+          "original_value": "42",
+          "annotation": "42",
+          "color": "#2ca02c"
+        },
+        {
+          "index": 43,
+          "original_value": "43",
+          "annotation": "43",
+          "color": "#d62728"
+        },
+        {
+          "index": 44,
+          "original_value": "44",
+          "annotation": "44",
+          "color": "#9467bd"
+        },
+        {
+          "index": 45,
+          "original_value": "45",
+          "annotation": "45",
+          "color": "#8c564b"
+        },
+        {
+          "index": 46,
+          "original_value": "46",
+          "annotation": "46",
+          "color": "#e377c2"
+        },
+        {
+          "index": 47,
+          "original_value": "47",
+          "annotation": "47",
+          "color": "#7f7f7f"
+        },
+        {
+          "index": 48,
+          "original_value": "48",
+          "annotation": "48",
+          "color": "#bcbd22"
+        },
+        {
+          "index": 49,
+          "original_value": "49",
+          "annotation": "49",
+          "color": "#17becf"
+        },
+        {
+          "index": 50,
+          "original_value": "50",
+          "annotation": "50",
+          "color": "#aec7e8"
+        },
+        {
+          "index": 51,
+          "original_value": "51",
+          "annotation": "51",
+          "color": "#ffbb78"
+        },
+        {
+          "index": 52,
+          "original_value": "52",
+          "annotation": "52",
+          "color": "#98df8a"
+        },
+        {
+          "index": 53,
+          "original_value": "53",
+          "annotation": "53",
+          "color": "#ff9896"
+        },
+        {
+          "index": 54,
+          "original_value": "54",
+          "annotation": "54",
+          "color": "#c5b0d5"
+        },
+        {
+          "index": 55,
+          "original_value": "55",
+          "annotation": "55",
+          "color": "#c49c94"
+        },
+        {
+          "index": 56,
+          "original_value": "56",
+          "annotation": "56",
+          "color": "#f7b6d2"
+        },
+        {
+          "index": 57,
+          "original_value": "57",
+          "annotation": "57",
+          "color": "#c7c7c7"
+        },
+        {
+          "index": 58,
+          "original_value": "58",
+          "annotation": "58",
+          "color": "#dbdb8d"
+        },
+        {
+          "index": 59,
+          "original_value": "59",
+          "annotation": "59",
+          "color": "#9edae5"
+        },
+        {
+          "index": 60,
+          "original_value": "60",
+          "annotation": "60",
+          "color": "#393b79"
+        },
+        {
+          "index": 61,
+          "original_value": "61",
+          "annotation": "61",
+          "color": "#5254a3"
+        }
+      ]
+    },
+    "leiden_4_0": {
+      "categories": [
+        {
+          "index": 0,
+          "original_value": "0",
+          "annotation": "0",
+          "color": "#1f77b4"
+        },
+        {
+          "index": 1,
+          "original_value": "1",
+          "annotation": "1",
+          "color": "#ff7f0e"
+        },
+        {
+          "index": 2,
+          "original_value": "2",
+          "annotation": "2",
+          "color": "#2ca02c"
+        },
+        {
+          "index": 3,
+          "original_value": "3",
+          "annotation": "3",
+          "color": "#d62728"
+        },
+        {
+          "index": 4,
+          "original_value": "4",
+          "annotation": "4",
+          "color": "#9467bd"
+        },
+        {
+          "index": 5,
+          "original_value": "5",
+          "annotation": "5",
+          "color": "#8c564b"
+        },
+        {
+          "index": 6,
+          "original_value": "6",
+          "annotation": "6",
+          "color": "#e377c2"
+        },
+        {
+          "index": 7,
+          "original_value": "7",
+          "annotation": "7",
+          "color": "#7f7f7f"
+        },
+        {
+          "index": 8,
+          "original_value": "8",
+          "annotation": "8",
+          "color": "#bcbd22"
+        },
+        {
+          "index": 9,
+          "original_value": "9",
+          "annotation": "9",
+          "color": "#17becf"
+        },
+        {
+          "index": 10,
+          "original_value": "10",
+          "annotation": "10",
+          "color": "#aec7e8"
+        },
+        {
+          "index": 11,
+          "original_value": "11",
+          "annotation": "11",
+          "color": "#ffbb78"
+        },
+        {
+          "index": 12,
+          "original_value": "12",
+          "annotation": "12",
+          "color": "#98df8a"
+        },
+        {
+          "index": 13,
+          "original_value": "13",
+          "annotation": "13",
+          "color": "#ff9896"
+        },
+        {
+          "index": 14,
+          "original_value": "14",
+          "annotation": "14",
+          "color": "#c5b0d5"
+        },
+        {
+          "index": 15,
+          "original_value": "15",
+          "annotation": "15",
+          "color": "#c49c94"
+        },
+        {
+          "index": 16,
+          "original_value": "16",
+          "annotation": "16",
+          "color": "#f7b6d2"
+        },
+        {
+          "index": 17,
+          "original_value": "17",
+          "annotation": "17",
+          "color": "#c7c7c7"
+        },
+        {
+          "index": 18,
+          "original_value": "18",
+          "annotation": "18",
+          "color": "#dbdb8d"
+        },
+        {
+          "index": 19,
+          "original_value": "19",
+          "annotation": "19",
+          "color": "#9edae5"
+        },
+        {
+          "index": 20,
+          "original_value": "20",
+          "annotation": "20",
+          "color": "#393b79"
+        },
+        {
+          "index": 21,
+          "original_value": "21",
+          "annotation": "21",
+          "color": "#5254a3"
+        },
+        {
+          "index": 22,
+          "original_value": "22",
+          "annotation": "22",
+          "color": "#6b6ecf"
+        },
+        {
+          "index": 23,
+          "original_value": "23",
+          "annotation": "23",
+          "color": "#9c9ede"
+        },
+        {
+          "index": 24,
+          "original_value": "24",
+          "annotation": "24",
+          "color": "#637939"
+        },
+        {
+          "index": 25,
+          "original_value": "25",
+          "annotation": "25",
+          "color": "#8ca252"
+        },
+        {
+          "index": 26,
+          "original_value": "26",
+          "annotation": "26",
+          "color": "#b5cf6b"
+        },
+        {
+          "index": 27,
+          "original_value": "27",
+          "annotation": "27",
+          "color": "#cedb9c"
+        },
+        {
+          "index": 28,
+          "original_value": "28",
+          "annotation": "28",
+          "color": "#8c6d31"
+        },
+        {
+          "index": 29,
+          "original_value": "29",
+          "annotation": "29",
+          "color": "#bd9e39"
+        },
+        {
+          "index": 30,
+          "original_value": "30",
+          "annotation": "30",
+          "color": "#e7ba52"
+        },
+        {
+          "index": 31,
+          "original_value": "31",
+          "annotation": "31",
+          "color": "#e7cb94"
+        },
+        {
+          "index": 32,
+          "original_value": "32",
+          "annotation": "32",
+          "color": "#843c39"
+        },
+        {
+          "index": 33,
+          "original_value": "33",
+          "annotation": "33",
+          "color": "#ad494a"
+        },
+        {
+          "index": 34,
+          "original_value": "34",
+          "annotation": "34",
+          "color": "#d6616b"
+        },
+        {
+          "index": 35,
+          "original_value": "35",
+          "annotation": "35",
+          "color": "#e7969c"
+        },
+        {
+          "index": 36,
+          "original_value": "36",
+          "annotation": "36",
+          "color": "#7b4173"
+        },
+        {
+          "index": 37,
+          "original_value": "37",
+          "annotation": "37",
+          "color": "#a55194"
+        },
+        {
+          "index": 38,
+          "original_value": "38",
+          "annotation": "38",
+          "color": "#ce6dbd"
+        },
+        {
+          "index": 39,
+          "original_value": "39",
+          "annotation": "39",
+          "color": "#de9ed6"
+        },
+        {
+          "index": 40,
+          "original_value": "40",
+          "annotation": "40",
+          "color": "#1f77b4"
+        },
+        {
+          "index": 41,
+          "original_value": "41",
+          "annotation": "41",
+          "color": "#ff7f0e"
+        },
+        {
+          "index": 42,
+          "original_value": "42",
+          "annotation": "42",
+          "color": "#2ca02c"
+        },
+        {
+          "index": 43,
+          "original_value": "43",
+          "annotation": "43",
+          "color": "#d62728"
+        },
+        {
+          "index": 44,
+          "original_value": "44",
+          "annotation": "44",
+          "color": "#9467bd"
+        },
+        {
+          "index": 45,
+          "original_value": "45",
+          "annotation": "45",
+          "color": "#8c564b"
+        },
+        {
+          "index": 46,
+          "original_value": "46",
+          "annotation": "46",
+          "color": "#e377c2"
+        },
+        {
+          "index": 47,
+          "original_value": "47",
+          "annotation": "47",
+          "color": "#7f7f7f"
+        },
+        {
+          "index": 48,
+          "original_value": "48",
+          "annotation": "48",
+          "color": "#bcbd22"
+        },
+        {
+          "index": 49,
+          "original_value": "49",
+          "annotation": "49",
+          "color": "#17becf"
+        },
+        {
+          "index": 50,
+          "original_value": "50",
+          "annotation": "50",
+          "color": "#aec7e8"
+        },
+        {
+          "index": 51,
+          "original_value": "51",
+          "annotation": "51",
+          "color": "#ffbb78"
+        },
+        {
+          "index": 52,
+          "original_value": "52",
+          "annotation": "52",
+          "color": "#98df8a"
+        },
+        {
+          "index": 53,
+          "original_value": "53",
+          "annotation": "53",
+          "color": "#ff9896"
+        },
+        {
+          "index": 54,
+          "original_value": "54",
+          "annotation": "54",
+          "color": "#c5b0d5"
+        },
+        {
+          "index": 55,
+          "original_value": "55",
+          "annotation": "55",
+          "color": "#c49c94"
+        },
+        {
+          "index": 56,
+          "original_value": "56",
+          "annotation": "56",
+          "color": "#f7b6d2"
+        },
+        {
+          "index": 57,
+          "original_value": "57",
+          "annotation": "57",
+          "color": "#c7c7c7"
+        },
+        {
+          "index": 58,
+          "original_value": "58",
+          "annotation": "58",
+          "color": "#dbdb8d"
+        },
+        {
+          "index": 59,
+          "original_value": "59",
+          "annotation": "59",
+          "color": "#9edae5"
+        },
+        {
+          "index": 60,
+          "original_value": "60",
+          "annotation": "60",
+          "color": "#393b79"
+        },
+        {
+          "index": 61,
+          "original_value": "61",
+          "annotation": "61",
+          "color": "#5254a3"
+        },
+        {
+          "index": 62,
+          "original_value": "62",
+          "annotation": "62",
+          "color": "#6b6ecf"
+        },
+        {
+          "index": 63,
+          "original_value": "63",
+          "annotation": "63",
+          "color": "#9c9ede"
+        },
+        {
+          "index": 64,
+          "original_value": "64",
+          "annotation": "64",
+          "color": "#637939"
+        },
+        {
+          "index": 65,
+          "original_value": "65",
+          "annotation": "65",
+          "color": "#8ca252"
+        },
+        {
+          "index": 66,
+          "original_value": "66",
+          "annotation": "66",
+          "color": "#b5cf6b"
+        }
+      ]
+    },
+    "CellCharter_6": {
+      "categories": [
+        {
+          "index": 0,
+          "original_value": "0",
+          "annotation": "0",
+          "color": "#1f77b4"
+        },
+        {
+          "index": 1,
+          "original_value": "1",
+          "annotation": "1",
+          "color": "#ff7f0e"
+        },
+        {
+          "index": 2,
+          "original_value": "2",
+          "annotation": "2",
+          "color": "#2ca02c"
+        },
+        {
+          "index": 3,
+          "original_value": "3",
+          "annotation": "3",
+          "color": "#d62728"
+        },
+        {
+          "index": 4,
+          "original_value": "4",
+          "annotation": "4",
+          "color": "#9467bd"
+        },
+        {
+          "index": 5,
+          "original_value": "5",
+          "annotation": "5",
+          "color": "#8c564b"
+        }
+      ]
+    },
+    "CellCharter_8": {
+      "categories": [
+        {
+          "index": 0,
+          "original_value": "0",
+          "annotation": "0",
+          "color": "#1f77b4"
+        },
+        {
+          "index": 1,
+          "original_value": "1",
+          "annotation": "1",
+          "color": "#ff7f0e"
+        },
+        {
+          "index": 2,
+          "original_value": "2",
+          "annotation": "2",
+          "color": "#2ca02c"
+        },
+        {
+          "index": 3,
+          "original_value": "3",
+          "annotation": "3",
+          "color": "#d62728"
+        },
+        {
+          "index": 4,
+          "original_value": "4",
+          "annotation": "4",
+          "color": "#9467bd"
+        },
+        {
+          "index": 5,
+          "original_value": "5",
+          "annotation": "5",
+          "color": "#8c564b"
+        },
+        {
+          "index": 6,
+          "original_value": "6",
+          "annotation": "6",
+          "color": "#e377c2"
+        },
+        {
+          "index": 7,
+          "original_value": "7",
+          "annotation": "7",
+          "color": "#7f7f7f"
+        }
+      ]
+    },
+    "CellCharter_10": {
+      "categories": [
+        {
+          "index": 0,
+          "original_value": "0",
+          "annotation": "0",
+          "color": "#1f77b4"
+        },
+        {
+          "index": 1,
+          "original_value": "1",
+          "annotation": "1",
+          "color": "#ff7f0e"
+        },
+        {
+          "index": 2,
+          "original_value": "2",
+          "annotation": "2",
+          "color": "#2ca02c"
+        },
+        {
+          "index": 3,
+          "original_value": "3",
+          "annotation": "3",
+          "color": "#d62728"
+        },
+        {
+          "index": 4,
+          "original_value": "4",
+          "annotation": "4",
+          "color": "#9467bd"
+        },
+        {
+          "index": 5,
+          "original_value": "5",
+          "annotation": "5",
+          "color": "#8c564b"
+        },
+        {
+          "index": 6,
+          "original_value": "6",
+          "annotation": "6",
+          "color": "#e377c2"
+        },
+        {
+          "index": 7,
+          "original_value": "7",
+          "annotation": "7",
+          "color": "#7f7f7f"
+        },
+        {
+          "index": 8,
+          "original_value": "8",
+          "annotation": "8",
+          "color": "#bcbd22"
+        },
+        {
+          "index": 9,
+          "original_value": "9",
+          "annotation": "9",
+          "color": "#17becf"
+        }
+      ]
+    },
+    "CellCharter_12": {
+      "categories": [
+        {
+          "index": 0,
+          "original_value": "0",
+          "annotation": "0",
+          "color": "#1f77b4"
+        },
+        {
+          "index": 1,
+          "original_value": "1",
+          "annotation": "1",
+          "color": "#ff7f0e"
+        },
+        {
+          "index": 2,
+          "original_value": "2",
+          "annotation": "2",
+          "color": "#2ca02c"
+        },
+        {
+          "index": 3,
+          "original_value": "3",
+          "annotation": "3",
+          "color": "#d62728"
+        },
+        {
+          "index": 4,
+          "original_value": "4",
+          "annotation": "4",
+          "color": "#9467bd"
+        },
+        {
+          "index": 5,
+          "original_value": "5",
+          "annotation": "5",
+          "color": "#8c564b"
+        },
+        {
+          "index": 6,
+          "original_value": "6",
+          "annotation": "6",
+          "color": "#e377c2"
+        },
+        {
+          "index": 7,
+          "original_value": "7",
+          "annotation": "7",
+          "color": "#7f7f7f"
+        },
+        {
+          "index": 8,
+          "original_value": "8",
+          "annotation": "8",
+          "color": "#bcbd22"
+        },
+        {
+          "index": 9,
+          "original_value": "9",
+          "annotation": "9",
+          "color": "#17becf"
+        },
+        {
+          "index": 10,
+          "original_value": "10",
+          "annotation": "10",
+          "color": "#aec7e8"
+        },
+        {
+          "index": 11,
+          "original_value": "11",
+          "annotation": "11",
+          "color": "#ffbb78"
+        }
+      ]
+    },
+    "CellCharter_15": {
+      "categories": [
+        {
+          "index": 0,
+          "original_value": "0",
+          "annotation": "0",
+          "color": "#1f77b4"
+        },
+        {
+          "index": 1,
+          "original_value": "1",
+          "annotation": "1",
+          "color": "#ff7f0e"
+        },
+        {
+          "index": 2,
+          "original_value": "2",
+          "annotation": "2",
+          "color": "#b5bd61"
+        },
+        {
+          "index": 3,
+          "original_value": "3",
+          "annotation": "3",
+          "color": "#17becf"
+        },
+        {
+          "index": 4,
+          "original_value": "4",
+          "annotation": "4",
+          "color": "#aec7e8"
+        },
+        {
+          "index": 5,
+          "original_value": "5",
+          "annotation": "5",
+          "color": "#ffbb78"
+        },
+        {
+          "index": 6,
+          "original_value": "6",
+          "annotation": "6",
+          "color": "#98df8a"
+        },
+        {
+          "index": 7,
+          "original_value": "7",
+          "annotation": "7",
+          "color": "#ff9896"
+        },
+        {
+          "index": 8,
+          "original_value": "8",
+          "annotation": "8",
+          "color": "#c5b0d5"
+        },
+        {
+          "index": 9,
+          "original_value": "9",
+          "annotation": "9",
+          "color": "#c49c94"
+        },
+        {
+          "index": 10,
+          "original_value": "10",
+          "annotation": "10",
+          "color": "#279e68"
+        },
+        {
+          "index": 11,
+          "original_value": "11",
+          "annotation": "11",
+          "color": "#d62728"
+        },
+        {
+          "index": 12,
+          "original_value": "12",
+          "annotation": "12",
+          "color": "#aa40fc"
+        },
+        {
+          "index": 13,
+          "original_value": "13",
+          "annotation": "13",
+          "color": "#8c564b"
+        },
+        {
+          "index": 14,
+          "original_value": "14",
+          "annotation": "14",
+          "color": "#e377c2"
+        }
+      ]
+    },
+    "CellCharter_20": {
+      "categories": [
+        {
+          "index": 0,
+          "original_value": "0",
+          "annotation": "0",
+          "color": "#1f77b4"
+        },
+        {
+          "index": 1,
+          "original_value": "1",
+          "annotation": "1",
+          "color": "#ff7f0e"
+        },
+        {
+          "index": 2,
+          "original_value": "2",
+          "annotation": "2",
+          "color": "#ff9896"
+        },
+        {
+          "index": 3,
+          "original_value": "3",
+          "annotation": "3",
+          "color": "#c5b0d5"
+        },
+        {
+          "index": 4,
+          "original_value": "4",
+          "annotation": "4",
+          "color": "#c49c94"
+        },
+        {
+          "index": 5,
+          "original_value": "5",
+          "annotation": "5",
+          "color": "#f7b6d2"
+        },
+        {
+          "index": 6,
+          "original_value": "6",
+          "annotation": "6",
+          "color": "#dbdb8d"
+        },
+        {
+          "index": 7,
+          "original_value": "7",
+          "annotation": "7",
+          "color": "#9edae5"
+        },
+        {
+          "index": 8,
+          "original_value": "8",
+          "annotation": "8",
+          "color": "#ad494a"
+        },
+        {
+          "index": 9,
+          "original_value": "9",
+          "annotation": "9",
+          "color": "#8c6d31"
+        },
+        {
+          "index": 10,
+          "original_value": "10",
+          "annotation": "10",
+          "color": "#279e68"
+        },
+        {
+          "index": 11,
+          "original_value": "11",
+          "annotation": "11",
+          "color": "#d62728"
+        },
+        {
+          "index": 12,
+          "original_value": "12",
+          "annotation": "12",
+          "color": "#aa40fc"
+        },
+        {
+          "index": 13,
+          "original_value": "13",
+          "annotation": "13",
+          "color": "#8c564b"
+        },
+        {
+          "index": 14,
+          "original_value": "14",
+          "annotation": "14",
+          "color": "#e377c2"
+        },
+        {
+          "index": 15,
+          "original_value": "15",
+          "annotation": "15",
+          "color": "#b5bd61"
+        },
+        {
+          "index": 16,
+          "original_value": "16",
+          "annotation": "16",
+          "color": "#17becf"
+        },
+        {
+          "index": 17,
+          "original_value": "17",
+          "annotation": "17",
+          "color": "#aec7e8"
+        },
+        {
+          "index": 18,
+          "original_value": "18",
+          "annotation": "18",
+          "color": "#ffbb78"
+        },
+        {
+          "index": 19,
+          "original_value": "19",
+          "annotation": "19",
+          "color": "#98df8a"
+        }
+      ]
+    },
+    "CellCharter_25": {
+      "categories": [
+        {
+          "index": 0,
+          "original_value": "0",
+          "annotation": "0",
+          "color": "#1f77b4"
+        },
+        {
+          "index": 1,
+          "original_value": "1",
+          "annotation": "1",
+          "color": "#ff7f0e"
+        },
+        {
+          "index": 2,
+          "original_value": "2",
+          "annotation": "2",
+          "color": "#2ca02c"
+        },
+        {
+          "index": 3,
+          "original_value": "3",
+          "annotation": "3",
+          "color": "#d62728"
+        },
+        {
+          "index": 4,
+          "original_value": "4",
+          "annotation": "4",
+          "color": "#9467bd"
+        },
+        {
+          "index": 5,
+          "original_value": "5",
+          "annotation": "5",
+          "color": "#8c564b"
+        },
+        {
+          "index": 6,
+          "original_value": "6",
+          "annotation": "6",
+          "color": "#e377c2"
+        },
+        {
+          "index": 7,
+          "original_value": "7",
+          "annotation": "7",
+          "color": "#7f7f7f"
+        },
+        {
+          "index": 8,
+          "original_value": "8",
+          "annotation": "8",
+          "color": "#bcbd22"
+        },
+        {
+          "index": 9,
+          "original_value": "9",
+          "annotation": "9",
+          "color": "#17becf"
+        },
+        {
+          "index": 10,
+          "original_value": "10",
+          "annotation": "10",
+          "color": "#aec7e8"
+        },
+        {
+          "index": 11,
+          "original_value": "11",
+          "annotation": "11",
+          "color": "#ffbb78"
+        },
+        {
+          "index": 12,
+          "original_value": "12",
+          "annotation": "12",
+          "color": "#98df8a"
+        },
+        {
+          "index": 13,
+          "original_value": "13",
+          "annotation": "13",
+          "color": "#ff9896"
+        },
+        {
+          "index": 14,
+          "original_value": "14",
+          "annotation": "14",
+          "color": "#c5b0d5"
+        },
+        {
+          "index": 15,
+          "original_value": "15",
+          "annotation": "15",
+          "color": "#c49c94"
+        },
+        {
+          "index": 16,
+          "original_value": "16",
+          "annotation": "16",
+          "color": "#f7b6d2"
+        },
+        {
+          "index": 17,
+          "original_value": "17",
+          "annotation": "17",
+          "color": "#c7c7c7"
+        },
+        {
+          "index": 18,
+          "original_value": "18",
+          "annotation": "18",
+          "color": "#dbdb8d"
+        },
+        {
+          "index": 19,
+          "original_value": "19",
+          "annotation": "19",
+          "color": "#9edae5"
+        },
+        {
+          "index": 20,
+          "original_value": "20",
+          "annotation": "20",
+          "color": "#393b79"
+        },
+        {
+          "index": 21,
+          "original_value": "21",
+          "annotation": "21",
+          "color": "#5254a3"
+        },
+        {
+          "index": 22,
+          "original_value": "22",
+          "annotation": "22",
+          "color": "#6b6ecf"
+        },
+        {
+          "index": 23,
+          "original_value": "23",
+          "annotation": "23",
+          "color": "#9c9ede"
+        },
+        {
+          "index": 24,
+          "original_value": "24",
+          "annotation": "24",
+          "color": "#637939"
+        }
+      ]
+    },
+    "CellCharter_30": {
+      "categories": [
+        {
+          "index": 0,
+          "original_value": "0",
+          "annotation": "0",
+          "color": "#1f77b4"
+        },
+        {
+          "index": 1,
+          "original_value": "1",
+          "annotation": "1",
+          "color": "#ff7f0e"
+        },
+        {
+          "index": 2,
+          "original_value": "2",
+          "annotation": "2",
+          "color": "#2ca02c"
+        },
+        {
+          "index": 3,
+          "original_value": "3",
+          "annotation": "3",
+          "color": "#d62728"
+        },
+        {
+          "index": 4,
+          "original_value": "4",
+          "annotation": "4",
+          "color": "#9467bd"
+        },
+        {
+          "index": 5,
+          "original_value": "5",
+          "annotation": "5",
+          "color": "#8c564b"
+        },
+        {
+          "index": 6,
+          "original_value": "6",
+          "annotation": "6",
+          "color": "#e377c2"
+        },
+        {
+          "index": 7,
+          "original_value": "7",
+          "annotation": "7",
+          "color": "#7f7f7f"
+        },
+        {
+          "index": 8,
+          "original_value": "8",
+          "annotation": "8",
+          "color": "#bcbd22"
+        },
+        {
+          "index": 9,
+          "original_value": "9",
+          "annotation": "9",
+          "color": "#17becf"
+        },
+        {
+          "index": 10,
+          "original_value": "10",
+          "annotation": "10",
+          "color": "#aec7e8"
+        },
+        {
+          "index": 11,
+          "original_value": "11",
+          "annotation": "11",
+          "color": "#ffbb78"
+        },
+        {
+          "index": 12,
+          "original_value": "12",
+          "annotation": "12",
+          "color": "#98df8a"
+        },
+        {
+          "index": 13,
+          "original_value": "13",
+          "annotation": "13",
+          "color": "#ff9896"
+        },
+        {
+          "index": 14,
+          "original_value": "14",
+          "annotation": "14",
+          "color": "#c5b0d5"
+        },
+        {
+          "index": 15,
+          "original_value": "15",
+          "annotation": "15",
+          "color": "#c49c94"
+        },
+        {
+          "index": 16,
+          "original_value": "16",
+          "annotation": "16",
+          "color": "#f7b6d2"
+        },
+        {
+          "index": 17,
+          "original_value": "17",
+          "annotation": "17",
+          "color": "#c7c7c7"
+        },
+        {
+          "index": 18,
+          "original_value": "18",
+          "annotation": "18",
+          "color": "#dbdb8d"
+        },
+        {
+          "index": 19,
+          "original_value": "19",
+          "annotation": "19",
+          "color": "#9edae5"
+        },
+        {
+          "index": 20,
+          "original_value": "20",
+          "annotation": "20",
+          "color": "#393b79"
+        },
+        {
+          "index": 21,
+          "original_value": "21",
+          "annotation": "21",
+          "color": "#5254a3"
+        },
+        {
+          "index": 22,
+          "original_value": "22",
+          "annotation": "22",
+          "color": "#6b6ecf"
+        },
+        {
+          "index": 23,
+          "original_value": "23",
+          "annotation": "23",
+          "color": "#9c9ede"
+        },
+        {
+          "index": 24,
+          "original_value": "24",
+          "annotation": "24",
+          "color": "#637939"
+        },
+        {
+          "index": 25,
+          "original_value": "25",
+          "annotation": "25",
+          "color": "#8ca252"
+        },
+        {
+          "index": 26,
+          "original_value": "26",
+          "annotation": "26",
+          "color": "#b5cf6b"
+        },
+        {
+          "index": 27,
+          "original_value": "27",
+          "annotation": "27",
+          "color": "#cedb9c"
+        },
+        {
+          "index": 28,
+          "original_value": "28",
+          "annotation": "28",
+          "color": "#8c6d31"
+        },
+        {
+          "index": 29,
+          "original_value": "29",
+          "annotation": "29",
+          "color": "#bd9e39"
+        }
+      ]
+    }
+  }
+}

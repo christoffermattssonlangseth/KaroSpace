@@ -536,14 +536,35 @@
             throw new Error('ZIP central directory entry missing at offset ' + offset);
           }
           const compressionMethod = view.getUint16(offset + 10, true);
-          const compressedSize = view.getUint32(offset + 20, true);
-          const uncompressedSize = view.getUint32(offset + 24, true);
+          let compressedSize = view.getUint32(offset + 20, true);
+          let uncompressedSize = view.getUint32(offset + 24, true);
           const nameLength = view.getUint16(offset + 28, true);
           const extraLength = view.getUint16(offset + 30, true);
           const commentLength = view.getUint16(offset + 32, true);
-          const localHeaderOffset = view.getUint32(offset + 42, true);
+          let localHeaderOffset = view.getUint32(offset + 42, true);
           const rawName = decoder.decode(new Uint8Array(buffer, offset + 46, nameLength));
           const name = normalizePackagePath(rawName);
+          const extraStart = offset + 46 + nameLength;
+          let ex = extraStart;
+          const exEnd = extraStart + extraLength;
+          while (ex + 4 <= exEnd) {
+            const tag = view.getUint16(ex, true);
+            const size = view.getUint16(ex + 2, true);
+            if (tag === 0x0001) {
+              let p = ex + 4;
+              if (uncompressedSize === 0xffffffff && p + 8 <= ex + 4 + size) {
+                uncompressedSize = Number(view.getBigUint64(p, true)); p += 8;
+              }
+              if (compressedSize === 0xffffffff && p + 8 <= ex + 4 + size) {
+                compressedSize = Number(view.getBigUint64(p, true)); p += 8;
+              }
+              if (localHeaderOffset === 0xffffffff && p + 8 <= ex + 4 + size) {
+                localHeaderOffset = Number(view.getBigUint64(p, true)); p += 8;
+              }
+              break;
+            }
+            ex += 4 + size;
+          }
           if (name) {
             entries[name] = {
               compressionMethod,
