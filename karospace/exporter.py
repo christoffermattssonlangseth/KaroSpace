@@ -26,6 +26,127 @@ except Exception:  # pragma: no cover - optional dependency fallback
 
 from .data_loader import SpatialDataset
 
+
+def _read_image_for_embed(path: Path, max_px: int):
+    """
+    Return a PIL Image at or below max_px on the long edge.
+    For pyramidal TIFFs, reads the smallest pyramid level that still covers
+    max_px — avoiding decoding the full-resolution file entirely.
+    Falls back to plain PIL for non-pyramidal or non-TIFF files.
+    """
+    import contextlib
+    import io
+    import os
+    from PIL import Image as _PILImage
+    _PILImage.MAX_IMAGE_PIXELS = None
+
+    is_tiff = path.suffix.lower() in (".tif", ".tiff")
+    if is_tiff:
+        try:
+            import tifffile
+
+            # Suppress tifffile's internal stderr chatter (e.g. discontiguous storage warnings)
+            with open(os.devnull, "w") as devnull, contextlib.redirect_stderr(devnull):
+                tf = tifffile.TiffFile(str(path))
+
+            # --- Strategy 1: pyramid levels via series ---
+            try:
+                series = tf.series[0] if tf.series else None
+            except Exception:
+                series = None
+
+            if series and len(series.levels) > 1:
+                best = None
+                for level in reversed(series.levels):
+                    shape = level.shape
+                    h = shape[-3] if len(shape) >= 3 else shape[0]
+                    w = shape[-2] if len(shape) >= 3 else shape[1]
+                    if max(h, w) >= max_px:
+                        best = level
+                    else:
+                        break
+                if best is None:
+                    best = series.levels[-1]
+                shape = best.shape
+                h = shape[-3] if len(shape) >= 3 else shape[0]
+                w = shape[-2] if len(shape) >= 3 else shape[1]
+                print(f"    Pyramid level {w}×{h}px from {path.name}")
+                arr = best.asarray()
+                while arr.ndim > 3:
+                    arr = arr[0]
+                img = _PILImage.fromarray(arr).convert("RGB")
+                tf.close()
+                if max(img.size) > max_px:
+                    img.thumbnail((max_px, max_px), _PILImage.LANCZOS)
+                return img
+
+            # --- Strategy 2: SUBFILETYPE reduced-image pages (thumbnail pages) ---
+            reduced_pages = [
+                p for p in tf.pages
+                if getattr(p, "subfiletype", 0) & 0x1  # REDUCEDIMAGE flag
+            ]
+            if reduced_pages:
+                # Pick smallest reduced page that still covers max_px
+                best_page = None
+                for p in sorted(reduced_pages, key=lambda p: max(p.shape[:2])):
+                    if max(p.shape[:2]) >= max_px:
+                        best_page = p
+                        break
+                if best_page is None:
+                    best_page = reduced_pages[-1]
+                arr = best_page.asarray()
+                img = _PILImage.fromarray(arr).convert("RGB")
+                tf.close()
+                print(f"    Reduced-image page {img.size[0]}×{img.size[1]}px from {path.name}")
+                if max(img.size) > max_px:
+                    img.thumbnail((max_px, max_px), _PILImage.LANCZOS)
+                return img
+
+            tf.close()
+
+        except ImportError:
+            print(f"    tifffile not installed — falling back to PIL for {path.name}. "
+                  "Run: pip install tifffile")
+        except Exception as e:
+            print(f"    tifffile fallback for {path.name}: {e}")
+
+    # Plain PIL fallback
+    img = _PILImage.open(path).convert("RGB")
+    if max(img.size) > max_px:
+        img.thumbnail((max_px, max_px), _PILImage.LANCZOS)
+    return img
+
+
+def _embed_section_images(data: dict, section_images: Dict[str, str], max_px: int = 4096) -> None:
+    """Read image files, downsample if needed, and embed as base64 data URLs in section dicts."""
+    import io
+    try:
+        from PIL import Image as _PILImage  # noqa: F401
+        _has_pil = True
+    except ImportError:
+        _has_pil = False
+
+    section_by_id = {s["id"]: s for s in data.get("sections", [])}
+    for section_id, image_path in section_images.items():
+        if section_id not in section_by_id:
+            print(f"  Warning: section_images key '{section_id}' not found in sections — skipping.")
+            continue
+        path = Path(image_path)
+        if not path.exists():
+            print(f"  Warning: section image not found: {image_path} — skipping.")
+            continue
+        if not _has_pil:
+            print(f"  Warning: Pillow not installed — cannot embed {path.name}. Install Pillow.")
+            continue
+        img = _read_image_for_embed(path, max_px)
+        print(f"  Embedded {path.name} at {img.size[0]}×{img.size[1]}px for section '{section_id}'")
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=85)
+        raw = buf.getvalue()
+        section_by_id[section_id]["he_image"] = f"data:image/jpeg;base64,{base64.b64encode(raw).decode()}"
+        print(f"    → {len(raw) // 1024}KB embedded")
+
+
 GENE_SIDECAR_SHARD_SIZE = 256
 KAROSPACE_PACKAGE_MANIFEST = "karospace-package.json"
 KAROSPACE_PACKAGE_LOADER_FILENAME = "karospace-package-loader.html"
@@ -3972,6 +4093,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 <option value="2" selected>2x</option>
                 <option value="4">4x</option>
             </select>
+            <label style="font-size:11px; display:flex; align-items:center; gap:3px; cursor:pointer;" title="Export screenshot with transparent background (no fill)">
+                <input type="checkbox" id="screenshot-transparent-bg" style="cursor:pointer;">
+                Transparent
+            </label>
             <button class="export-btn" id="save-session-btn" title="Save current viewer state (rotations, annotations, color/gene, hidden categories, spotlight, samples view) to a JSON file">
                 Save session
             </button>
@@ -4213,7 +4338,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         <div class="modal-control-group" data-modal-group="actions">
                             <div class="modal-control-group-title">Actions</div>
                             <div class="modal-control-group-body">
-                                <button class="graph-toggle" id="modal-screenshot-btn" type="button" title="Download screenshot of this sample view">Screenshot</button>
+                                <button class="graph-toggle" id="modal-screenshot-btn" type="button" title="Download screenshot of this sample view (transparent bg if checked in toolbar)">Screenshot</button>
                                 <button class="graph-toggle" id="modal-clear-selection-btn" type="button" title="Clear selected cells" hidden>Clear sel.</button>
                                 <button class="graph-toggle" id="modal-exit-subview-btn" type="button" title="Return to the full section view" hidden>Back view</button>
                                 <div class="modal-gene-view-block" id="modal-gene-view-block" hidden>
@@ -4232,6 +4357,55 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                                     </div>
                                     <span class="modal-size-value" id="modal-spot-size-label">{spot_size}</span>
                                 </div>
+                            </div>
+                        </div>
+                        <div class="modal-control-group" data-modal-group="he-overlay">
+                            <div class="modal-control-group-title">H&amp;E Overlay</div>
+                            <div class="modal-control-group-body" style="flex-direction: column; gap: 5px;">
+                                <div style="display: flex; gap: 4px; align-items: center; flex-wrap: wrap;">
+                                    <button class="graph-toggle" id="modal-he-align-btn" type="button" title="Toggle alignment mode: drag to reposition image">Align</button>
+                                    <button class="graph-toggle" id="modal-he-fliph-btn" type="button" title="Flip image horizontally">Flip H</button>
+                                    <button class="graph-toggle" id="modal-he-export-btn" type="button" title="Export alignment transform as JSON">Export JSON</button>
+                                </div>
+                                <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                                    <div style="display: flex; gap: 3px; align-items: center;">
+                                        <label style="font-size: 10px; color: var(--muted-color);">Opacity</label>
+                                        <div class="size-control">
+                                            <button class="size-step" id="modal-he-opacity-dec" type="button">−</button>
+                                            <input type="range" id="modal-he-opacity" min="0" max="100" step="1" value="50" style="width: 60px;">
+                                            <button class="size-step" id="modal-he-opacity-inc" type="button">+</button>
+                                        </div>
+                                        <input type="number" id="modal-he-opacity-num" min="0" max="100" step="1" value="50" style="width: 38px; font-size: 10px; padding: 1px 3px; border: 1px solid var(--border-color); border-radius: 3px; background: var(--input-bg); color: var(--text-color);">
+                                    </div>
+                                    <div style="display: flex; gap: 3px; align-items: center;">
+                                        <label style="font-size: 10px; color: var(--muted-color);">Scale</label>
+                                        <div class="size-control">
+                                            <button class="size-step" id="modal-he-scale-dec" type="button">−</button>
+                                            <input type="range" id="modal-he-scale" min="-100" max="100" step="1" value="0" style="width: 60px;">
+                                            <button class="size-step" id="modal-he-scale-inc" type="button">+</button>
+                                        </div>
+                                        <input type="number" id="modal-he-scale-num" min="-100" max="100" step="1" value="0" style="width: 38px; font-size: 10px; padding: 1px 3px; border: 1px solid var(--border-color); border-radius: 3px; background: var(--input-bg); color: var(--text-color);">
+                                    </div>
+                                    <div style="display: flex; gap: 3px; align-items: center;">
+                                        <label style="font-size: 10px; color: var(--muted-color);">Rotate</label>
+                                        <div class="size-control">
+                                            <button class="size-step" id="modal-he-rotation-dec" type="button">−</button>
+                                            <input type="range" id="modal-he-rotation" min="-180" max="180" step="1" value="0" style="width: 60px;">
+                                            <button class="size-step" id="modal-he-rotation-inc" type="button">+</button>
+                                        </div>
+                                        <input type="number" id="modal-he-rotation-num" min="-180" max="180" step="1" value="0" style="width: 38px; font-size: 10px; padding: 1px 3px; border: 1px solid var(--border-color); border-radius: 3px; background: var(--input-bg); color: var(--text-color);">
+                                    </div>
+                                    <div style="display: flex; gap: 3px; align-items: center;">
+                                        <label style="font-size: 10px; color: var(--muted-color);">Cells</label>
+                                        <div class="size-control">
+                                            <button class="size-step" id="modal-cell-opacity-dec" type="button">−</button>
+                                            <input type="range" id="modal-cell-opacity" min="0" max="100" step="1" value="100" style="width: 60px;">
+                                            <button class="size-step" id="modal-cell-opacity-inc" type="button">+</button>
+                                        </div>
+                                        <input type="number" id="modal-cell-opacity-num" min="0" max="100" step="1" value="100" style="width: 38px; font-size: 10px; padding: 1px 3px; border: 1px solid var(--border-color); border-radius: 3px; background: var(--input-bg); color: var(--text-color);">
+                                    </div>
+                                </div>
+                                <div id="modal-he-status" style="font-size: 10px; color: var(--muted-color);"></div>
                             </div>
                         </div>
                     </div>
@@ -4463,6 +4637,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     const SAFARI_DPR_CAP = 1.0;
 
     let screenshotDprOverride = null;
+    let screenshotTransparentBg = false;
     function getRenderDpr() {{
         if (screenshotDprOverride) return screenshotDprOverride;
         const dpr = window.devicePixelRatio || 1;
@@ -4888,6 +5063,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let modalBlendRenderCache = null;
     let modalGeneDensityCache = null;
     let modalSubview = null;
+    let sectionImageStates = {{}};
+    let modalCellOpacity = 1.0;
+    let heAlignModeActive = false;
+    let heIsDragging = false;
+    let heDragStartX = 0, heDragStartY = 0;
+    let heDragStartCx = 0, heDragStartCy = 0;
     const BLEND_ALL_CATEGORIES = '__ALL__';
     let modalBlendSpec = {{
         a: {{ kind: 'cell', color: null, category: null, gene: '' }},
@@ -4950,6 +5131,33 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let annotationDeFullRun = null;
     const annotationDeFullCache = new Map();
     const sectionById = new Map((DATA.sections || []).map(section => [section.id, section]));
+
+    // Auto-load any H&E images embedded at export time
+    (DATA.sections || []).forEach((section) => {{
+        if (!section.he_image) return;
+        const img = new Image();
+        img.onload = () => {{
+            const b = section.bounds || {{}};
+            const dataWidth = (b.xmax - b.xmin) || 1;
+            const dataHeight = (b.ymax - b.ymin) || 1;
+            const imgDataScaleBase = Math.max(dataWidth / img.naturalWidth, dataHeight / img.naturalHeight);
+            sectionImageStates[section.id] = {{
+                img,
+                url: section.he_image,
+                cx: (b.xmin + b.xmax) / 2,
+                cy: (b.ymin + b.ymax) / 2,
+                imgDataScaleBase,
+                scaleSlider: 0,
+                rotation: 0,
+                opacity: 0.5,
+                visible: true,
+                flipH: false,
+            }};
+            renderAllSections();
+        }};
+        img.src = section.he_image;
+    }});
+
     const colorNameByLower = new Map((DATA.available_colors || []).map((name) => [String(name).toLowerCase(), String(name)]));
     const sectionMetadataKeyByLower = new Map();
     (DATA.sections || []).forEach((section) => {{
@@ -5837,8 +6045,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         composite.width = Math.round(totalW);
         composite.height = Math.round(totalH);
         const cctx = composite.getContext('2d');
-        cctx.fillStyle = getPanelBg();
-        cctx.fillRect(0, 0, totalW, totalH);
+        if (!screenshotTransparentBg) {{
+            cctx.fillStyle = getPanelBg();
+            cctx.fillRect(0, 0, totalW, totalH);
+        }}
 
         panels.forEach((panel, idx) => {{
             const col = idx % cols;
@@ -13035,8 +13245,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         ctx.scale(dpr, dpr);
 
         const width = rect.width, height = rect.height, padding = 8;
-        ctx.fillStyle = getPanelBg();
-        ctx.fillRect(0, 0, width, height);
+        if (!(screenshotTransparentBg && screenshotDprOverride !== null)) {{
+            ctx.fillStyle = getPanelBg();
+            ctx.fillRect(0, 0, width, height);
+        }}
 
         if (section.x.length === 0) return;
         const transform = createSectionViewTransform(section, {{
@@ -13046,6 +13258,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             isModal: false,
         }});
         if (!transform) return;
+
+        const heStateOv = sectionImageStates[section.id];
+        if (heStateOv && heStateOv.img && heStateOv.visible) {{
+            drawHistologyImage(ctx, transform, heStateOv);
+        }}
 
         const config = getColorConfig();
         const values = getSectionValues(section);
@@ -14007,6 +14224,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     // Modal rendering
+    function getHeImgDataScale(state) {{
+        return state.imgDataScaleBase * Math.pow(2, state.scaleSlider / 100);
+    }}
+
+    function drawHistologyImage(ctx, transform, state) {{
+        if (!state || !state.img || !state.visible) return;
+        const center = transform.dataToScreen(state.cx, state.cy);
+        const pixPerImgPx = transform.scale * getHeImgDataScale(state);
+        ctx.save();
+        ctx.globalAlpha = state.opacity;
+        ctx.translate(center.x, center.y);
+        ctx.rotate(transform.angleRad + state.rotation);
+        ctx.scale(state.flipH ? -pixPerImgPx : pixPerImgPx, -pixPerImgPx);
+        ctx.drawImage(state.img, -state.img.naturalWidth / 2, -state.img.naturalHeight / 2);
+        ctx.restore();
+    }}
+
     function renderModalSectionExact() {{
         if (!modalSection) return;
         ensureSectionXY(modalSection);
@@ -14022,8 +14256,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         ctx.scale(dpr, dpr);
 
         const width = rect.width, height = rect.height;
-        ctx.fillStyle = getPanelBg();
-        ctx.fillRect(0, 0, width, height);
+        if (!(screenshotTransparentBg && screenshotDprOverride !== null)) {{
+            ctx.fillStyle = getPanelBg();
+            ctx.fillRect(0, 0, width, height);
+        }}
 
         if (modalSection.x.length === 0) {{
             modalRenderedView = null;
@@ -14067,6 +14303,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 densityCandidateIndices,
             );
             drawGeneDensityLayer(ctx, width, height, densityCache);
+        }}
+
+        const heState = sectionImageStates[modalSection.id];
+        if (heState && heState.img && heState.visible) {{
+            drawHistologyImage(ctx, transform, heState);
         }}
 
         const modalEdges = getSectionEdgesPacked(modalSection);
@@ -14113,7 +14354,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const hasHidden = showGeneCells && !blendActive && hiddenCategories.size > 0 && !config.is_continuous;
         if (hasHidden) {{
             ctx.fillStyle = '#cccccc';
-            ctx.globalAlpha = 0.2;
+            ctx.globalAlpha = 0.2 * modalCellOpacity;
             for (let k = 0; k < nCandidates; k++) {{
                 const i = candidateIndices ? candidateIndices[k] : k;
                 const val = values[i];
@@ -14144,7 +14385,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 if (!transform.isPointVisible(x, y, adjustedSpotSize)) continue;
                 const runtime = x <= splitX ? blendRuntimes.a : blendRuntimes.b;
                 ctx.fillStyle = rgbToCss(getModalBlendCellRgb(runtime, i));
-                ctx.globalAlpha = 1;
+                ctx.globalAlpha = modalCellOpacity;
                 ctx.beginPath();
                 ctx.arc(x, y, adjustedSpotSize, 0, Math.PI * 2);
                 ctx.fill();
@@ -14176,7 +14417,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         const y = point.y;
                         if (!transform.isPointVisible(x, y, adjustedSpotSize)) continue;
                         const off = i * k;
-                        ctx.globalAlpha = 1;
+                        ctx.globalAlpha = modalCellOpacity;
                         drawProportionsPie(
                             ctx, x, y, adjustedSpotSize,
                             matrix.subarray(off, off + k), k, hiddenMask, paletteCss,
@@ -14194,7 +14435,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         const y = point.y;
                         if (!transform.isPointVisible(x, y, adjustedSpotSize)) continue;
                         ctx.fillStyle = paletteCss[catInfo.catIdx];
-                        ctx.globalAlpha = 1;
+                        ctx.globalAlpha = modalCellOpacity;
                         ctx.beginPath();
                         ctx.arc(x, y, adjustedSpotSize, 0, Math.PI * 2);
                         ctx.fill();
@@ -14231,10 +14472,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
                 if (hasTypeFocus && !isSelectedCat) {{
                     ctx.fillStyle = '#bbbbbb';
-                    ctx.globalAlpha = 0.15;
+                    ctx.globalAlpha = 0.15 * modalCellOpacity;
                 }} else {{
                     ctx.fillStyle = color;
-                    ctx.globalAlpha = 1;
+                    ctx.globalAlpha = modalCellOpacity;
                 }}
                 ctx.beginPath();
                 ctx.arc(x, y, adjustedSpotSize, 0, Math.PI * 2);
@@ -20898,6 +21139,113 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             resetSectionRotation(modalSection.id);
         }});
         document.getElementById('modal-screenshot-btn')?.addEventListener('click', screenshotModalView);
+
+        // Transparent background screenshot toggle
+        document.getElementById('screenshot-transparent-bg')?.addEventListener('change', (e) => {{
+            screenshotTransparentBg = e.target.checked;
+        }});
+
+        // H&E overlay controls
+        function updateHeSliderLabels() {{
+            if (!modalSection) return;
+            const state = sectionImageStates[modalSection.id];
+            const opNum = document.getElementById('modal-he-opacity-num');
+            const scNum = document.getElementById('modal-he-scale-num');
+            const rtNum = document.getElementById('modal-he-rotation-num');
+            if (opNum && state) opNum.value = String(Math.round(state.opacity * 100));
+            if (scNum && state) scNum.value = String(state.scaleSlider);
+            if (rtNum && state) rtNum.value = String(Math.round(state.rotation * 180 / Math.PI));
+        }}
+
+        function updateHeStatus() {{
+            const el = document.getElementById('modal-he-status');
+            if (!el) return;
+            if (!modalSection || !sectionImageStates[modalSection.id]?.img) {{
+                el.textContent = 'No image loaded';
+                return;
+            }}
+            const img = sectionImageStates[modalSection.id].img;
+            el.textContent = `${{img.naturalWidth}}×${{img.naturalHeight}}px — drag in Align mode to reposition`;
+        }}
+
+        function syncHeNum(numId, rangeId, apply) {{
+            const num = document.getElementById(numId);
+            const range = document.getElementById(rangeId);
+            range?.addEventListener('input', (e) => {{
+                if (num) num.value = e.target.value;
+                if (!modalSection || !sectionImageStates[modalSection.id]) return;
+                apply(sectionImageStates[modalSection.id], parseFloat(e.target.value));
+                renderModalSection();
+            }});
+            num?.addEventListener('input', (e) => {{
+                const v = Math.max(parseFloat(num.min || '-Infinity'), Math.min(parseFloat(num.max || 'Infinity'), parseFloat(e.target.value) || 0));
+                if (range) range.value = String(v);
+                if (!modalSection || !sectionImageStates[modalSection.id]) return;
+                apply(sectionImageStates[modalSection.id], v);
+                renderModalSection();
+            }});
+        }}
+
+        syncHeNum('modal-he-opacity-num', 'modal-he-opacity', (s, v) => s.opacity = v / 100);
+        syncHeNum('modal-he-scale-num',   'modal-he-scale',   (s, v) => s.scaleSlider = v);
+        syncHeNum('modal-he-rotation-num','modal-he-rotation',(s, v) => s.rotation = v * Math.PI / 180);
+
+        const heOpacityRange = document.getElementById('modal-he-opacity');
+        const heScaleRange = document.getElementById('modal-he-scale');
+        const heRotationRange = document.getElementById('modal-he-rotation');
+        const cellOpacityRange = document.getElementById('modal-cell-opacity');
+        document.getElementById('modal-he-opacity-dec')?.addEventListener('click', () => stepRange(heOpacityRange, -10));
+        document.getElementById('modal-he-opacity-inc')?.addEventListener('click', () => stepRange(heOpacityRange, 10));
+        document.getElementById('modal-he-scale-dec')?.addEventListener('click', () => stepRange(heScaleRange, -10));
+        document.getElementById('modal-he-scale-inc')?.addEventListener('click', () => stepRange(heScaleRange, 10));
+        document.getElementById('modal-he-rotation-dec')?.addEventListener('click', () => stepRange(heRotationRange, -5));
+        document.getElementById('modal-he-rotation-inc')?.addEventListener('click', () => stepRange(heRotationRange, 5));
+        document.getElementById('modal-cell-opacity-dec')?.addEventListener('click', () => stepRange(cellOpacityRange, -10));
+        document.getElementById('modal-cell-opacity-inc')?.addEventListener('click', () => stepRange(cellOpacityRange, 10));
+        const cellOpacityNum = document.getElementById('modal-cell-opacity-num');
+        cellOpacityRange?.addEventListener('input', (e) => {{
+            modalCellOpacity = parseInt(e.target.value) / 100;
+            if (cellOpacityNum) cellOpacityNum.value = e.target.value;
+            if (modalSection) renderModalSection();
+        }});
+        cellOpacityNum?.addEventListener('input', (e) => {{
+            const v = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0));
+            modalCellOpacity = v / 100;
+            if (cellOpacityRange) cellOpacityRange.value = String(v);
+            if (modalSection) renderModalSection();
+        }});
+
+        document.getElementById('modal-he-align-btn')?.addEventListener('click', () => {{
+            heAlignModeActive = !heAlignModeActive;
+            document.getElementById('modal-he-align-btn')?.classList.toggle('active', heAlignModeActive);
+            updateModalCanvasCursor();
+        }});
+
+        document.getElementById('modal-he-fliph-btn')?.addEventListener('click', () => {{
+            if (!modalSection || !sectionImageStates[modalSection.id]) return;
+            sectionImageStates[modalSection.id].flipH = !sectionImageStates[modalSection.id].flipH;
+            renderModalSection();
+            renderAllSections();
+        }});
+
+        document.getElementById('modal-he-export-btn')?.addEventListener('click', () => {{
+            if (!modalSection) return;
+            const state = sectionImageStates[modalSection.id];
+            if (!state?.img) {{ alert('No image loaded for this section.'); return; }}
+            const alignment = {{
+                section_id: modalSection.id,
+                cx: state.cx,
+                cy: state.cy,
+                imgDataScaleBase: state.imgDataScaleBase,
+                scaleMultiplier: Math.pow(2, state.scaleSlider / 100),
+                imgDataScaleFinal: getHeImgDataScale(state),
+                rotation_rad: state.rotation,
+                rotation_deg: state.rotation * 180 / Math.PI,
+                opacity: state.opacity,
+                flipH: state.flipH,
+            }};
+            downloadJsonFile(alignment, `he-alignment-${{modalSection.id}}.json`);
+        }});
         document.getElementById('modal-exit-subview-btn')?.addEventListener('click', () => {{
             exitModalSubview();
         }});
@@ -21005,6 +21353,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 canvas.style.cursor = 'ew-resize';
             }} else if (isDragging) {{
                 canvas.style.cursor = 'grabbing';
+            }} else if (heIsDragging) {{
+                canvas.style.cursor = 'move';
+            }} else if (heAlignModeActive) {{
+                canvas.style.cursor = 'move';
             }} else if (modalSpacePanActive) {{
                 canvas.style.cursor = 'grab';
             }} else if (modalMagicWandActive || modalAnnotationModeActive) {{
@@ -21381,6 +21733,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         canvas.addEventListener('mousedown', (e) => {{
             modalPointerMoved = false;
             hideTooltip();
+            if (heAlignModeActive && modalSection && sectionImageStates[modalSection.id]?.img) {{
+                const rect = container.getBoundingClientRect();
+                const state = sectionImageStates[modalSection.id];
+                heIsDragging = true;
+                heDragStartX = e.clientX - rect.left;
+                heDragStartY = e.clientY - rect.top;
+                heDragStartCx = state.cx;
+                heDragStartCy = state.cy;
+                updateModalCanvasCursor();
+                e.preventDefault();
+                return;
+            }}
             if (modalSpacePanActive) {{
                 if (isSplitDragging) return;
                 isDragging = true;
@@ -21494,6 +21858,21 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 }}
                 return;
             }}
+            if (heIsDragging && modalSection && sectionImageStates[modalSection.id]) {{
+                const rect = container.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
+                const transform = getModalViewTransform(rect);
+                if (transform) {{
+                    const p1 = transform.screenToData(heDragStartX, heDragStartY);
+                    const p2 = transform.screenToData(mouseX, mouseY);
+                    const state = sectionImageStates[modalSection.id];
+                    state.cx = heDragStartCx + (p2.x - p1.x);
+                    state.cy = heDragStartCy + (p2.y - p1.y);
+                    renderModalSection();
+                }}
+                return;
+            }}
             if (!isDragging) return;
             modalPanX = lastPanX + (e.clientX - dragStartX);
             modalPanY = lastPanY + (e.clientY - dragStartY);
@@ -21505,6 +21884,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             scheduleModalInteractionCommit(90);
         }});
         document.addEventListener('mouseup', () => {{
+            if (heIsDragging) {{
+                heIsDragging = false;
+                updateModalCanvasCursor();
+            }}
             if (isDrawingModalAnnotation) {{
                 isDrawingModalAnnotation = false;
                 createModalAnnotationFromPath();
@@ -21699,6 +22082,8 @@ def export_to_html(
     spatial_variable_genes_n: int = 200,
     scalebar_unit: str = "μm",
     modalities: Optional[List[str]] = None,
+    section_images: Optional[Dict[str, str]] = None,
+    section_images_max_px: int = 4096,
 ) -> str:
     """
     Export spatial dataset to a standalone HTML file.
@@ -21997,6 +22382,9 @@ def export_to_html(
         deconvolutions=deconvolutions,
     )
     data["scalebar_unit"] = str(scalebar_unit or "μm")
+
+    if section_images:
+        _embed_section_images(data, section_images, max_px=section_images_max_px)
 
     # Resolve which non-default modalities to export. Only meaningful when sidecar-based.
     available_modalities = list(getattr(dataset, "modalities", {}).keys())
