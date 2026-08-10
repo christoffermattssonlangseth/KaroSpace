@@ -6166,6 +6166,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             align-items: center;
             min-width: 0;
             max-width: 100%;
+            cursor: pointer;
         }}
         .modal-annotation-drag-handle {{
             width: 24px;
@@ -9053,6 +9054,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let tutorialAutoAdvanceTimer = null;
     let tutorialSplitExpressionGenePair = null;
     let tutorialRegionBClearStepStarted = false;
+    let tutorialSelectionFindMoreClicked = false;
+    let tutorialSelectionMarkersClicked = false;
+    let tutorialModuleCreateClicked = false;
+    let tutorialOverviewSummaryClicked = false;
     const tutorialSteps = [
         {{
             title: 'Overview of panels',
@@ -9294,9 +9299,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             step('UMAP selection', ['#umap-lasso-btn', '#umap-canvas'], [
                 'Cells selection via the lasso tool is also enabled directly in the UMAP.'
             ], {{ condition: () => !!DATA.has_umap, action: () => {{ if (DATA.has_umap && !umapVisible && typeof toggleUMAP === 'function') toggleUMAP(); }}, task: 'Create a selection on the UMAP with the lasso tool', requiresSelection: true, combineTargets: true, autoNextWhenGateSatisfied: true, nextLabel: tryIt }}),
+            step('Create annotation from UMAP selection', ['#selection-create-annotation-btn', '#visual-spatial-tools'], [
+                'Selected UMAP cells can be saved as a cell-set annotation.',
+                'Unlike a spatial lasso annotation, this stores the selected cells directly rather than a polygon tied to one section.'
+            ], {{ condition: () => !!DATA.has_umap, task: 'Create a cell-set annotation from the selected UMAP cells by clicking the annotation button.', requiresAnnotationCreated: true, nextLabel: tryIt }}),
             step('Insights panel overview', ['#color-toggle', '#color-panel'], [
-                'Insights is the right-side workspace for selected cells, region annotations, gene modules, and built-in analysis panels.',
-                'Use it when you want to interpret or compare what you selected in the spatial grid or UMAP.'
+                'Insights is the right-side workspace for selected cells, region annotations, gene modules, and built-in analysis panels.'
             ], {{ action: () => {{ if (typeof closeModal === 'function') closeModal(); if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); }}, nextLabel: tryIt }}),
             step('Insights Selection mode', ['#insights-mode-selection', '#insights-selection-panel'], [
                 'Selection contains the compact summary for cells selected by lasso, UMAP lasso, or query.',
@@ -9314,14 +9322,28 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'Exploration is the main navigation mode for built-in summaries.',
                 'It contains overview, gene, compare, pathway, neighborhood, and export-oriented analysis panels.'
             ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); }}, nextLabel: tryIt }}),
-            step('Insights Selection summary', ['#insights-mode-selection', '#insights-selection-panel'], [
-                'Insights > Selection summarizes the active cells selected by lasso or query.',
-                'Use it to check selected-cell composition and expression before running a broader comparison.'
-            ], {{ action: () => {{ if (typeof closeModal === 'function') closeModal(); if (typeof openInsightsMode === 'function') openInsightsMode('selection'); updateSelectionInfo?.(); }}, task: 'Review the selected-cell summary in Insights > Selection.', nextLabel: tryIt }}),
+            step('Select cells for Selection', ['#umap-lasso-btn', '#grid'], [
+                'Selection needs active cells before it can summarize them.'
+            ], {{ condition: () => selectedCells.size === 0 || tutorialSteps[tutorialStepIndex]?.title === 'Select cells for Selection', action: () => {{ if (typeof closeModal === 'function') closeModal(); if (typeof openInsightsMode === 'function') openInsightsMode('selection'); updateSelectionInfo?.(); updateUMAPLassoButtonState?.(); }}, task: 'Select cells with the lasso tool on one visible section to continue.', requiresSelection: true, combineTargets: true, nextStepTitle: 'Insights Selection', nextLabel: tryIt }}),
+            step('Insights Selection', ['#insights-selection-panel.color-panel-mode'], [
+                'Selection summarizes the active cells selection by section and main annotation.'
+            ], {{ action: () => {{ if (typeof closeModal === 'function') closeModal(); if (typeof openInsightsMode === 'function') openInsightsMode('selection'); updateSelectionInfo?.(); }}, nextLabel: tryIt }}),
             step('Selection Find More', ['[data-selection-find-more]', '#insights-selection-panel'], [
-                'Find More opens Insights > Exploration and jumps to Compare > Per cell > Selections.',
-                'Use it when the compact Selection summary is not enough and you want the full comparison panel.'
-            ], {{ action: () => {{ if (typeof closeModal === 'function') closeModal(); if (typeof openInsightsMode === 'function') openInsightsMode('selection'); updateSelectionInfo?.(); }}, task: 'Click Find More to open the full selection comparison view.', nextLabel: tryIt }}),
+                'Use the Find More button to explore gene markers of your selection.'
+            ], {{ action: () => {{ tutorialSelectionFindMoreClicked = false; if (typeof closeModal === 'function') closeModal(); if (typeof openInsightsMode === 'function') openInsightsMode('selection'); updateSelectionInfo?.(); }}, task: 'Click Find More to open the full selection comparison view.', requiresSelectionFindMoreClicked: true, nextLabel: tryIt }}),
+            step('Selection gene markers', ['#compare-selection-panel .selection-summary-title-row'], [
+                'Compare > Per cell > Selections is the detailed workspace for marker genes of the active selection.',
+                'The search icon starts the marker-gene calculation for the selected cells.'
+            ], {{ action: () => {{ tutorialSelectionMarkersClicked = false; selectionWelchButtonHidden = false; selectionWelchRunRequested = false; selectionWelchRunning = false; openTutorialInsightsPanel('compare', 'selection'); updateSelectionInfo?.(); }}, task: 'Click the search icon to calculate marker genes for the selected cells.', requiresSelectionMarkersClicked: true, nextLabel: tryIt }}),
+            step('Selection composition comparison', ['#compare-selection-panel .selection-comparison-composition', '#compare-selection-panel .selection-summary-row', '#compare-selection-panel'], [
+                'The composition result summarizes which main annotations are present in the selected cells.',
+                'When Region B exists, the panel shows Region A and Region B side by side.'
+            ], {{ action: () => {{ openTutorialInsightsPanel('compare', 'selection'); updateSelectionInfo?.(); }}, nextLabel: tryIt }}),
+            step('Selection expression comparison', ['#compare-selection-panel .selection-summary-expr', '#compare-selection-panel'], [
+                'Genes were selected by two sided Welch test.',
+                'The gene-expression area compares expression in the selected cells against the current reference.',
+                'Bars show mean expression and percent expressed for each displayed gene.'
+            ], {{ action: () => {{ openTutorialInsightsPanel('compare', 'selection'); updateSelectionInfo?.(); }}, nextLabel: tryIt }}),
             step('Pan mode', ['#umap-pan-btn', '#visual-spatial-tools'], [
                 'Pan mode is the default interaction mode for moving around the spatial view, and navigate without selecting cells.'
             ], {{ nextLabel: tryIt }}),
@@ -9339,10 +9361,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'When cells are selected, you can create a region annotation from them.',
                 'Region annotations are user-defined spatial cell sets stored in the viewer session.'
             ], {{ task: 'If you have a selection, create a small test annotation, by clicking the button.', requiresAnnotationCreated: true, nextLabel: tryIt }}),
-            step('Selection count chip', ['#umap-selection-info', '#umap-selection-info-text'], [
-                'After selecting cells, this chip reports how many cells are selected.',
-                'It also gives you a quick way to clear the active selection.'
-            ], {{ task: 'Clear the selection by clicking on the small red cross of the chip.', requiresNoSelection: true, nextLabel: tryIt }}),
+            step('Deselect selected cells', ['#umap-lasso-btn', '#umap-selection-info'], [
+                'Selected cells can be cleared from either the lasso button when it is shown as a cross or from the selection chip.',
+                'Both controls clear the active selected-cell set.'
+            ], {{ action: () => {{ updateSelectionInfo?.(); updateUMAPLassoButtonState?.(); }}, task: 'Deselect the cells by clicking the cross-format lasso button or the red cross in the selection chip.', requiresNoSelection: true, combineTargets: true, scroll: false, nextLabel: tryIt }}),
             step('Find cells by query', ['#umap-selection-query-panel', '#umap-query-toggle'], [
                 'The query tool finds cells using annotation values, genes, or section metadata.'
             ], {{ action: () => {{ const panel = document.getElementById('umap-selection-query-panel'); if (!panel?.classList.contains('visible')) safeTutorialClick('#umap-query-toggle'); }}, task: 'Select cells by searching a simple query.', requiresQuerySelection: true, nextLabel: tryIt }}),
@@ -9384,38 +9406,53 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'The image button opens H&E or image-overlay controls for the focused section.',
                 'Load adds an image layer. The parameter controls adjust how the overlay is drawn on top of cells.'
             ], {{ action: () => {{ if (!modalSection && Array.isArray(DATA.sections) && DATA.sections.length && typeof openModal === 'function') openModal(DATA.sections[0].id); const toolbar = document.getElementById('grid-side-toolbar'); toolbar?.classList.remove('visual-open', 'gene-open', 'neighbor-open'); resetFocusedModalTools?.('he'); setModalHeOptionsVisible(true); updateModalToolbarState?.(); refreshFocusedModalToolPanels?.(); }}, prepareDelay: 220, nextLabel: tryIt }}),
-            step('Region annotation mode', ['#insights-annotate-toggle', '#modal-annotation-section'], [
-                'Region mode organizes user-created spatial annotations.',
-                'Annotations can be drawn from lasso selections and later compared.'
-            ], {{ action: () => {{ if (!modalSection && Array.isArray(DATA.sections) && DATA.sections.length && typeof openModal === 'function') openModal(DATA.sections[0].id); if (typeof setInsightsMode === 'function') setInsightsMode('annotate'); }}, task: 'Switch to Region mode and inspect the annotation list.', nextLabel: tryIt }}),
-            step('Annotation list rows', ['#modal-annotation-list', '.modal-annotation-row'], [
-                'Each annotation row represents a saved spatial region or annotation group.',
-                'Rows can be selected, compared, recolored, grouped, exported, or deleted depending on the action.'
-            ], {{ action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('annotate'); }}, task: 'If you created a test annotation, select it in the list.', nextLabel: tryIt }}),
+            step('Select cells for Region', ['#umap-lasso-btn', '#grid'], [
+                'Region needs a selected cell set before a new region annotation can be created.'
+            ], {{ condition: () => modalAnnotations.length === 0 && selectedCells.size === 0, action: () => {{ if (!modalSection && Array.isArray(DATA.sections) && DATA.sections.length && typeof openModal === 'function') openModal(DATA.sections[0].id); if (typeof setInsightsMode === 'function') setInsightsMode('annotate'); updateSelectionInfo?.(); updateUMAPLassoButtonState?.(); }}, task: 'Select cells with the lasso tool on the modal section to continue.', requiresSelection: true, combineTargets: true, autoNextWhenGateSatisfied: true, nextLabel: tryIt }}),
+            step('Create first Region annotation', ['#selection-create-annotation-btn', '#visual-spatial-tools'], [
+                'The annotation button saves the active selected cells as a Region annotation.'
+            ], {{ condition: () => modalAnnotations.length === 0 && selectedCells.size > 0, action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('annotate'); updateSelectionCreateAnnotationButtonState?.(); }}, task: 'Click the polygon annotation button to annotate the selected region.', requiresAnnotationCreated: true, nextLabel: tryIt }}),
+            step('Insights Region', ['#modal-annotation-list', '.modal-annotation-row'], [
+                'Each region represents a saved spatial region or annotation group.',
+                'Click a region row to select its cells. Click a group row to select the union of cells from its nested regions.',
+                'Rows can also be recolored, grouped, exported, or deleted.'
+            ], {{ action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('annotate'); }}, nextLabel: tryIt }}),
             step('Create annotation groups', ['#modal-annotations-create-group', '#modal-annotation-section'], [
-                'Annotation groups help organize multiple regions into a hierarchy.',
-                'Use groups when reviewing many regions across one section.'
-            ], {{ action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('annotate'); }}, task: 'Click create group if you want to test grouping; otherwise just locate the button.', nextLabel: tryIt }}),
+                'Annotation groups help organize multiple regions into a hierarchy.'
+            ], {{ action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('annotate'); }}, nextLabel: tryIt }}),
+            step('Import annotations', ['#modal-annotations-import', '#modal-annotation-section'], [
+                'Annotation import uploads a Region annotation JSON and restores saved regions in the viewer.'
+            ], {{ action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('annotate'); }}, nextLabel: tryIt }}),
             step('Export annotations', ['#modal-annotations-export', '#modal-annotation-section'], [
-                'Annotation export downloads your user-created regions as JSON.',
-                'This lets you preserve manual work or transfer annotations to another viewer.'
-            ], {{ action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('annotate'); }}, task: 'Locate the annotation export button. Download only if you have annotations you want to keep.', nextLabel: tryIt }}),
-            step('Open Insights', ['#color-toggle', '#color-panel'], [
-                'Insights is the right-side analysis workspace.',
-                'It contains Overview, Genes, Compare, and Neighbors panels.'
-            ], {{ action: () => {{ if (typeof closeModal === 'function') closeModal(); if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); }}, task: 'Click Insights if the panel is not open.', nextLabel: tryIt }}),
-            step('Insights top modes', ['.insights-mode-switch', '#insights-exploration-panel'], [
-                'The top Insights switch changes between Selection, Region, Module, and Exploration workflows.',
-                'Exploration is the main navigation mode for built-in summaries.'
-            ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); }}, task: 'Click each top mode briefly, then return to Exploration.', nextLabel: tryIt }}),
+                'Annotation export downloads your user-created regions as JSON.'
+            ], {{ action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('annotate'); }}, nextLabel: tryIt }}),
+            step('Module gene picker', ['#gene-module-gene-picker', '#gene-module-draft-genes', '#insights-module-panel'], [
+                'The draft area shows which genes will be saved into the next module.'
+            ], {{ action: () => {{ if (typeof closeModal === 'function') closeModal(); if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); if (typeof setInsightsMode === 'function') setInsightsMode('module'); }}, task: 'Use the gene picker to add genes into the draft module list.', requiresModuleDraftGene: true, nextLabel: tryIt }}),
+            step('Create module', ['#gene-module-create', '#insights-module-panel'], [
+                'Each gene in the module will get a scaled expression and the average expression will be calculated.'
+            ], {{ action: () => {{ tutorialModuleCreateClicked = false; if (typeof setInsightsMode === 'function') setInsightsMode('module'); }}, task: 'Click on the sum button', requiresModuleCreateClicked: true, nextLabel: tryIt }}),
+            step('Load module score', ['[data-gene-module-load]', '#insights-module-panel'], [
+                'The load button activates a module score in the spatial viewer.',
+                'One can now display a module score like a gene expression.',
+                'Module scores are computed from the selected module genes and displayed like an expression layer.'
+            ], {{ action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('module'); }}, nextLabel: tryIt }}),
+            step('Module import export', ['#gene-module-upload', '#gene-module-download'], [
+                'Import and export buttons move module definitions as JSON files.'
+            ], {{ action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('module'); }}, combineTargets: true, nextLabel: tryIt }}),
             step('Exploration annotation selector', ['#exploration-color-select', '#exploration-color-label'], [
-                'This selector chooses which annotation the Insights panels summarize.',
-                'It can be independent from the main grid selector, depending on the panel.'
-            ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); }}, task: 'Change the selected annotation if multiple options exist.', nextLabel: tryIt }}),
+                'In Exploration, this selector chooses which annotation the panel summarize.',
+                'It is independent from the main grid selector.'
+            ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); }}, nextLabel: tryIt }}),
             step('Visualization menu tree', ['[data-insights-tree]', '[data-insights-tree-root]'], [
-                'The Visualization menu is the navigation tree for Insights.',
-                'It groups analyses by human workflow: overview, genes, comparisons, and neighbors.'
-            ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); }}, task: 'Open the Visualization menu and expand one branch.', nextLabel: tryIt }}),
+                'The Visualization menu is the navigation tree.'
+            ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); }}, onNext: () => {{ const tree = document.querySelector('[data-insights-tree]'); if (!tree?.classList.contains('is-open')) safeTutorialClick('[data-insights-tree-root]'); }}, nextLabel: tryIt }}),
+            step('Visualization menu options', ['.insights-tree-panel-content', '[data-insights-tree]'], [
+                'The menu options open Overview, Genes, Compare, and Neighbors panels.'
+            ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); const tree = document.querySelector('[data-insights-tree]'); if (!tree?.classList.contains('is-open')) safeTutorialClick('[data-insights-tree-root]'); }}, nextLabel: tryIt }}),
+            step('Open Overview summary', ['[data-insights-tree-branch="overview"]', '[data-insights-tree-leaf="summary"]'], [
+                'Overview contains summary views for section metadata and annotation composition.'
+            ], {{ action: () => {{ tutorialOverviewSummaryClicked = false; if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); const tree = document.querySelector('[data-insights-tree]'); if (!tree?.classList.contains('is-open')) safeTutorialClick('[data-insights-tree-root]'); const overview = document.querySelector('[data-insights-tree-branch="overview"]'); if (overview?.getAttribute('aria-expanded') !== 'true') overview.click(); }}, task: 'Click Summary in the Overview options.', requiresOverviewSummaryClicked: true, combineTargets: true, nextLabel: tryIt }}),
             step('Overview summary', ['#color-tab-overview-content', '#color-aggregation'], [
                 'Overview Summary aggregates cells across section metadata.',
                 'Use it to check whether categories differ by sample, condition, region, or other section-level metadata.'
@@ -9448,10 +9485,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'The means panel uses pseudobulk/category mean summaries to compare expression across categories.',
                 'It is a compact way to inspect category-level gene expression.'
             ], {{ action: () => openTutorialInsightsPanel('genes', 'means'), task: 'Load a gene, then inspect its category means.', nextLabel: tryIt }}),
-            step('Gene module mode', ['#insights-mode-module', '#insights-module-panel'], [
-                'Module mode lets users organize groups of genes as reusable modules.',
-                'Modules are useful for signatures or custom marker sets.'
-            ], {{ action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('module'); }}, task: 'Open Module mode and inspect available module actions.', nextLabel: tryIt }}),
             step('Compare: annotation groups', ['#group-de-panel', '#compare-tab-groups-content'], [
                 'Annotation comparison is an exploratory per-cell comparison between groups or annotations.',
                 'It can scan loaded genes quickly and can use sidecar genes for fuller runs when configured.'
@@ -9634,7 +9667,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             rawSteps.splice(insertBeforeUmapIndex, 0, ...selectionSteps);
         }}
         const modalStartIndex = rawSteps.findIndex(item => item.title === 'Open a section modal');
-        const modalEndIndex = rawSteps.findIndex(item => item.title === 'Region annotation mode');
+        const modalEndIndex = rawSteps.findIndex(item => item.title === 'Select cells for Region');
         const insertBeforeUmapIndexForModal = rawSteps.findIndex(item => item.title === 'UMAP toggle');
         if (modalStartIndex >= 0 && modalEndIndex > modalStartIndex && insertBeforeUmapIndexForModal >= 0 && modalStartIndex > insertBeforeUmapIndexForModal) {{
             const modalSteps = rawSteps.splice(modalStartIndex, modalEndIndex - modalStartIndex);
@@ -9649,15 +9682,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const insertBeforeUmapIndex = rawSteps.findIndex(item => item.title === 'UMAP toggle');
             rawSteps.splice(insertBeforeUmapIndex, 0, ...legendSteps);
         }}
-        const regionStartIndex = rawSteps.findIndex(item => item.title === 'Region annotation mode');
-        const regionEndIndex = rawSteps.findIndex(item => item.title === 'Open Insights');
-        const umapRegionAnchorTitle = rawSteps.findIndex(item => item.title === 'Selection Find More') >= 0
-            ? 'Selection Find More'
-            : (rawSteps.findIndex(item => item.title === 'UMAP selection') >= 0
+        const regionStartIndex = rawSteps.findIndex(item => item.title === 'Select cells for Region');
+        const regionEndIndex = rawSteps.findIndex(item => item.title === 'Module gene picker') >= 0
+            ? rawSteps.findIndex(item => item.title === 'Module gene picker')
+            : rawSteps.findIndex(item => item.title === 'Exploration annotation selector');
+        const umapRegionAnchorTitle = rawSteps.findIndex(item => item.title === 'Selection expression comparison') >= 0
+            ? 'Selection expression comparison'
+            : (rawSteps.findIndex(item => item.title === 'Selection Find More') >= 0
+                ? 'Selection Find More'
+                : (rawSteps.findIndex(item => item.title === 'UMAP selection') >= 0
                 ? 'UMAP selection'
                 : (rawSteps.findIndex(item => item.title === 'UMAP panel position and size') >= 0
                     ? 'UMAP panel position and size'
-                    : 'UMAP toggle'));
+                    : 'UMAP toggle')));
         const currentUmapEndIndex = rawSteps.findIndex(item => item.title === umapRegionAnchorTitle);
         if (regionStartIndex >= 0 && regionEndIndex > regionStartIndex && currentUmapEndIndex >= 0 && regionStartIndex !== currentUmapEndIndex + 1) {{
             const regionSteps = rawSteps.splice(regionStartIndex, regionEndIndex - regionStartIndex);
@@ -9673,11 +9710,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ['Pan mode', 'Spatial Selection'],
             ['UMAP toggle', 'UMAP'],
             ['Insights panel overview', 'Insights'],
-            ['Insights Selection summary', 'Selection'],
+            ['Select cells for Selection', 'Selection'],
             ['Legend panel toggle', 'Legend'],
             ['Open a section modal', 'Modal View'],
-            ['Region annotation mode', 'Region Annotation'],
-            ['Open Insights', 'Exploration'],
+            ['Select cells for Region', 'Region'],
+            ['Module gene picker', 'Module'],
+            ['Exploration annotation selector', 'Exploration'],
             ['Compare: Simple design', 'Pseudobulk DE'],
             ['Pathway Enrichment section', 'Pathway Enrichment'],
             ['Complex pseudobulk design', 'Compare Workflows'],
@@ -9987,7 +10025,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
         }}
 
-        if (chapter === 'Region Annotation') {{
+        if (chapter === 'Region') {{
             ensureTutorialModalOpen();
             if (typeof setInsightsMode === 'function') setInsightsMode('annotate');
         }}
@@ -10194,6 +10232,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (step.requiresNoSelection) return selectedCells.size === 0 && selectedCellsB.size === 0;
         if (step.requiresQuerySelection) return selectedCellsFromQuery && selectedCells.size > 0;
         if (step.requiresModalOpen) return !!modalSection;
+        if (step.requiresSelectionFindMoreClicked) return tutorialSelectionFindMoreClicked === true;
+        if (step.requiresSelectionMarkersClicked) return tutorialSelectionMarkersClicked === true;
+        if (step.requiresModuleDraftGene) return geneModuleDraftGenes.length > 0;
+        if (step.requiresModuleCreateClicked) return tutorialModuleCreateClicked === true;
+        if (step.requiresOverviewSummaryClicked) return tutorialOverviewSummaryClicked === true;
         return true;
     }}
 
@@ -10215,6 +10258,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         else if (blocked && step?.requiresNoSelection) next.title = 'Clear the selected cells to continue';
         else if (blocked && step?.requiresQuerySelection) next.title = 'Select cells with the query to continue';
         else if (blocked && step?.requiresModalOpen) next.title = 'Click the highlighted section to open the modal view';
+        else if (blocked && step?.requiresSelectionFindMoreClicked) next.title = 'Click Find More to continue';
+        else if (blocked && step?.requiresSelectionMarkersClicked) next.title = 'Click the marker search icon to continue';
+        else if (blocked && step?.requiresModuleDraftGene) next.title = 'Select at least one gene to continue';
+        else if (blocked && step?.requiresModuleCreateClicked) next.title = 'Click the module sum button to continue';
+        else if (blocked && step?.requiresOverviewSummaryClicked) next.title = 'Click Summary to continue';
         else next.removeAttribute('title');
         if (!blocked && step?.autoNextWhenGateSatisfied) {{
             const stepAtSchedule = step;
@@ -10410,7 +10458,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 }} catch (error) {{
                     console.warn('Tutorial next action failed', error);
                 }}
-                stepTutorial(1);
+                if (step.nextStepTitle) {{
+                    const targetIndex = tutorialSteps.findIndex(item => item.title === step.nextStepTitle);
+                    if (targetIndex >= 0) showTutorialStep(targetIndex, 1);
+                    else stepTutorial(1);
+                }} else {{
+                    stepTutorial(1);
+                }}
             }}
         }});
         document.getElementById('tutorial-chapter-select')?.addEventListener('change', (event) => {{
@@ -16566,6 +16620,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 event.preventDefault();
                 event.stopPropagation();
                 if (selectionWelchRunning || selectedCells.size === 0) return;
+                const advanceTutorialFromMarkerSearch = tutorialActive && tutorialSteps[tutorialStepIndex]?.requiresSelectionMarkersClicked;
+                if (tutorialActive && tutorialSteps[tutorialStepIndex]?.requiresSelectionMarkersClicked) {{
+                    tutorialSelectionMarkersClicked = true;
+                }}
                 selectionWelchRunning = true;
                 selectionWelchButtonHidden = true;
                 updateSelectionInfo();
@@ -16573,6 +16631,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     selectionWelchRunRequested = true;
                     selectionWelchRunning = false;
                     updateSelectionInfo();
+                    if (advanceTutorialFromMarkerSearch) {{
+                        window.setTimeout(() => {{
+                            if (!tutorialActive) return;
+                            if (!tutorialSteps[tutorialStepIndex]?.requiresSelectionMarkersClicked) return;
+                            document.getElementById('tutorial-next')?.click();
+                        }}, 80);
+                    }}
                 }}, 30);
             }});
         }});
@@ -16580,6 +16645,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             button.addEventListener('click', (event) => {{
                 event.preventDefault();
                 event.stopPropagation();
+                const advanceTutorialFromFindMore = tutorialActive && tutorialSteps[tutorialStepIndex]?.requiresSelectionFindMoreClicked;
+                if (tutorialActive && tutorialSteps[tutorialStepIndex]?.requiresSelectionFindMoreClicked) {{
+                    tutorialSelectionFindMoreClicked = true;
+                }}
                 insightsTreeSelectedLeaf = {{ topLevel: 'compare', subtab: 'selection' }};
                 insightsTreeOpen = false;
                 insightsTreeOpenBranch = null;
@@ -16587,6 +16656,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 insightsTreeOpenGenesBranch = null;
                 setInsightsMode('exploration');
                 activateInsightsSubtab('compare', 'selection');
+                updateTutorialStepGate?.();
+                if (advanceTutorialFromFindMore) {{
+                    window.setTimeout(() => {{
+                        if (!tutorialActive) return;
+                        if (!tutorialSteps[tutorialStepIndex]?.requiresSelectionFindMoreClicked) return;
+                        document.getElementById('tutorial-next')?.click();
+                    }}, 80);
+                }}
             }});
         }});
         container.querySelectorAll('[data-selection-composition-legend-toggle]').forEach((button) => {{
@@ -18764,6 +18841,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             return section ? {{ section, polygonData: selectedGridLassoPath, localIndices }} : null;
         }}
 
+        if (selectedLassoPath.length >= 3) {{
+            return {{
+                section: null,
+                sectionId: null,
+                polygonData: [],
+                localIndices: [],
+                cellKeys: Array.from(selectedCells),
+                fromSelectedCells: true,
+                sourceType: 'umap',
+            }};
+        }}
+
         const grouped = getSelectionLocalIndicesBySection();
         if (grouped.size !== 1) return null;
         const [sectionId, localIndices] = Array.from(grouped.entries())[0];
@@ -18777,6 +18866,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!selectedCells || selectedCells.size === 0 || selectedCellsB.size > 0) return false;
         if (selectedCellsFromModalLasso && selectedModalLassoSectionId && selectedModalLassoPath.length >= 3) return true;
         if (selectedCellsFromGridLasso && selectedGridLassoSectionId && selectedGridLassoPath.length >= 3) return true;
+        if (selectedLassoPath.length >= 3) return true;
         return getSelectionLocalIndicesBySection().size === 1;
     }}
 
@@ -18829,7 +18919,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         const {{ section, polygonData }} = candidate;
         let cells = {{ localIndices: [], globalIndices: [] }};
-        if (candidate.sourceType === 'query') {{
+        if (candidate.sourceType === 'query' || candidate.sourceType === 'umap') {{
             const grouped = getSelectionLocalIndicesBySection(new Set(candidate.cellKeys || []));
             const localIndices = [];
             const globalIndices = [];
@@ -18848,7 +18938,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }} else {{
             cells = computeCellsInsideDataPolygon(section, polygonData);
         }}
-        if (candidate.sourceType !== 'query' && candidate.fromSelectedCells && Array.isArray(candidate.localIndices)) {{
+        if (candidate.sourceType !== 'query' && candidate.sourceType !== 'umap' && candidate.fromSelectedCells && Array.isArray(candidate.localIndices)) {{
             ensureSectionObsIndices(section);
             const localIndices = candidate.localIndices
                 .filter((idx) => Number.isInteger(idx) && idx >= 0 && idx < (section.x?.length || 0));
@@ -18859,7 +18949,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }});
             cells = {{ localIndices, globalIndices }};
         }}
-        const selectedCellCount = candidate.sourceType === 'query'
+        const selectedCellCount = (candidate.sourceType === 'query' || candidate.sourceType === 'umap')
             ? (candidate.cellKeys || []).length
             : cells.localIndices.length;
         if (!selectedCellCount) {{
@@ -18880,7 +18970,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             vertices: polygonData,
             localCellIndices: cells.localIndices,
             globalCellIndices: cells.globalIndices,
-            cellKeys: candidate.sourceType === 'query' ? (candidate.cellKeys || []).slice() : [],
+            cellKeys: (candidate.sourceType === 'query' || candidate.sourceType === 'umap') ? (candidate.cellKeys || []).slice() : [],
         }};
         modalAnnotations.push(annotation);
         annotationCreatedForSelectionRevision = selectionRevision;
@@ -19023,6 +19113,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function selectCellsFromAnnotation(annotationId) {{
         const annotation = getModalAnnotationById(annotationId);
         if (!annotation) return;
+        markPrimarySelectionChanged();
         selectedCells = getAnnotationCellSet(annotation);
         clearRegionBSelection();
         lassoModeB = false;
@@ -19040,6 +19131,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         selectionSummaryExpanded = false;
         selectionSectionSummaryExpanded = false;
         hideModalGeneDiscoveryPanel();
+        updateSelectionInfo();
         openInsightsMode('selection');
         renderAllSections();
         if (umapVisible) renderUMAP();
@@ -19093,7 +19185,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }});
             return {{
                 id: annotation.id,
-                type: annotation.isGroup ? 'group' : (annotation.sourceType === 'query' ? 'cell-list' : 'polygon'),
+                type: annotation.isGroup ? 'group' : ((annotation.sourceType === 'query' || annotation.sourceType === 'umap') ? 'cell-list' : 'polygon'),
                 is_group: !!annotation.isGroup,
                 label: annotation.label || `region ${{annotation.id}}`,
                 color: annotation.color || getAnnotationColorById(annotation.id),
@@ -19237,7 +19329,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 restored++;
                 return;
             }}
-            if (poly.type === 'cell-list' || poly.source_type === 'query' || Array.isArray(poly.cell_keys)) {{
+            if (poly.type === 'cell-list' || poly.source_type === 'query' || poly.source_type === 'umap' || Array.isArray(poly.cell_keys)) {{
                 const cellKeys = Array.isArray(poly.cell_keys)
                     ? poly.cell_keys.map(key => String(key || '')).filter(key => key.includes(':'))
                     : [];
@@ -19263,7 +19355,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     color: poly.color || getAnnotationColorById(id),
                     parentId: normalizeAnnotationParentId(poly.parent_id),
                     createdAt: poly.created_at || new Date().toISOString(),
-                    sourceType: 'query',
+                    sourceType: poly.source_type === 'umap' ? 'umap' : 'query',
                     vertices: [],
                     localCellIndices,
                     globalCellIndices,
@@ -19899,6 +19991,46 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         downloadJsonFile(payload, `karospace-annotations-${{getScreenshotTimestamp()}}.json`);
     }}
 
+    function importModalAnnotationsFromFile(file) {{
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {{
+            try {{
+                const parsed = JSON.parse(String(reader.result || ''));
+                const payload = parsed?.annotations && Array.isArray(parsed.annotations.polygons)
+                    ? parsed.annotations
+                    : parsed;
+                const result = applyAnnotationsFromExport(payload);
+                if (!result.restored) {{
+                    alert('No valid Region annotations found in this JSON file.');
+                    return;
+                }}
+                if (selectedCellsFromAnnotation) {{
+                    selectedCells.clear();
+                    clearRegionBSelection();
+                    selectedCellsFromAnnotation = false;
+                    selectedAnnotationId = null;
+                    selectedAnnotationSelectionColor = '#4F0433';
+                    updateSelectionInfo();
+                }}
+                renderModalAnnotationPanel();
+                updateAnnotationComparisonTabVisibility();
+                renderAllSections();
+                if (umapVisible) renderUMAP();
+                if (modalSection) renderModalSection();
+                if (insightsTopLevelTab === 'compare' && insightsCompareTab === 'regions') renderAnnotationComparison();
+                const skippedText = result.skipped
+                    ? `; skipped ${{result.skipped.toLocaleString()}} invalid ${{result.skipped === 1 ? 'entry' : 'entries'}}`
+                    : '';
+                alert(`Imported ${{result.restored.toLocaleString()}} Region annotation${{result.restored === 1 ? '' : 's'}}${{skippedText}}.`);
+            }} catch (error) {{
+                alert(`Could not import Region annotations: ${{error.message || error}}`);
+            }}
+        }};
+        reader.onerror = () => alert('Could not read the selected Region annotation JSON file.');
+        reader.readAsText(file);
+    }}
+
     function makeUniqueAnnotationLabel(desiredLabel, excludeId) {{
         const base = String(desiredLabel || '').trim();
         if (!base) return base;
@@ -20026,9 +20158,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const childTitle = children.length
                 ? `${{children.length.toLocaleString()}} nested annotation${{children.length === 1 ? '' : 's'}}`
                 : (annotation.isGroup ? 'Drop annotation rows on this group to add them' : 'Annotation row');
+            const selectTitle = annotation.isGroup
+                ? 'Select all cells in this group'
+                : 'Select cells in this region';
             return `
                 <div class="${{rowClasses}}" data-annotation-id="${{annotation.id}}" data-annotation-depth="${{depth}}" draggable="true">
-                    <div class="modal-annotation-row-main">
+                    <div class="modal-annotation-row-main" data-annotation-select="${{annotation.id}}" role="button" tabindex="0" title="${{selectTitle}}" aria-label="${{selectTitle}}">
                         <span class="modal-annotation-drag-handle" data-annotation-drag-handle title="Drag to reorder or nest" aria-label="Drag to reorder or nest"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5h.01"></path><path d="M15 5h.01"></path><path d="M9 12h.01"></path><path d="M15 12h.01"></path><path d="M9 19h.01"></path><path d="M15 19h.01"></path></svg></span>
                         <input class="modal-annotation-label" type="text" value="${{label}}" data-annotation-label="${{annotation.id}}"${{labelStyle}}>
                         <div class="modal-annotation-row-actions">
@@ -20235,6 +20370,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     : `region ${{annotation.id}}`;
                 renderModalAnnotationPanel();
                 if (modalSection) renderModalSection();
+            }});
+        }});
+        listEl.querySelectorAll('[data-annotation-select]').forEach((rowMain) => {{
+            const selectAnnotation = () => {{
+                const annotationId = Number(rowMain.dataset.annotationSelect);
+                if (!Number.isFinite(annotationId)) return;
+                selectCellsFromAnnotation(annotationId);
+            }};
+            rowMain.addEventListener('click', (event) => {{
+                if (event.target?.closest?.('input, button, select, textarea, a, [contenteditable="true"], [data-annotation-drag-handle]')) return;
+                selectAnnotation();
+            }});
+            rowMain.addEventListener('keydown', (event) => {{
+                if (event.target !== rowMain) return;
+                if (event.key !== 'Enter' && event.key !== ' ') return;
+                event.preventDefault();
+                selectAnnotation();
             }});
         }});
         listEl.querySelectorAll('[data-annotation-color]').forEach((input) => {{
@@ -20512,6 +20664,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     // Clear selection
     function clearSelection() {{
+        const advanceDeselectTutorialIndex = (
+            tutorialActive && tutorialSteps[tutorialStepIndex]?.title === 'Deselect selected cells'
+        ) ? tutorialStepIndex : null;
         selectedCells.clear();
         clearRegionBSelection();
         lassoModeB = false;
@@ -20546,6 +20701,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         renderUMAP();
         renderAllSections();
         if (modalSection) renderModalSection();
+        if (advanceDeselectTutorialIndex !== null) {{
+            window.setTimeout(() => {{
+                if (!tutorialActive) return;
+                if (tutorialStepIndex !== advanceDeselectTutorialIndex) return;
+                if (selectedCells.size > 0 || selectedCellsB.size > 0) return;
+                stepTutorial(1);
+            }}, 0);
+        }}
     }}
 
     function clampUMAPPanelSize(size) {{
@@ -23650,6 +23813,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             if (gene && !geneModuleDraftGenes.includes(gene)) {{
                 geneModuleDraftGenes.push(gene);
                 renderGeneModulePanel();
+                updateTutorialStepGate?.();
             }} else {{
                 event.target.value = '';
             }}
@@ -23659,6 +23823,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const gene = btn.getAttribute('data-gene-module-draft-remove') || '';
                 geneModuleDraftGenes = geneModuleDraftGenes.filter(item => item !== gene);
                 renderGeneModulePanel();
+                updateTutorialStepGate?.();
             }});
         }});
         panel.querySelector('#gene-module-create')?.addEventListener('click', async () => {{
@@ -23667,12 +23832,22 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 alert('Select at least one valid gene for the module.');
                 return;
             }}
+            const advanceTutorialFromModuleCreate = tutorialActive && tutorialSteps[tutorialStepIndex]?.requiresModuleCreateClicked;
             const module = createGeneModule('', genes);
             if (module) {{
                 geneModuleDraftGenes = [];
                 await ensureGeneModuleAvailable(module, {{ showErrors: false }});
                 refreshAfterGeneModuleChange();
                 renderGeneModulePanel();
+                if (advanceTutorialFromModuleCreate) {{
+                    tutorialModuleCreateClicked = true;
+                    updateTutorialStepGate?.();
+                    window.setTimeout(() => {{
+                        if (!tutorialActive) return;
+                        if (!tutorialSteps[tutorialStepIndex]?.requiresModuleCreateClicked) return;
+                        document.getElementById('tutorial-next')?.click();
+                    }}, 80);
+                }}
             }}
         }});
 
@@ -23759,12 +23934,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <button class="selection-summary-compare-btn icon-only" id="modal-annotations-create-group" type="button" title="Create annotation group" aria-label="Create annotation group">
                         <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="7"></circle><circle cx="15" cy="15" r="7"></circle></svg>
                     </button>
-                    <button class="selection-summary-compare-btn icon-only" id="modal-annotations-export" type="button" title="Export all polygon annotations as JSON" aria-label="Export polygon annotations as JSON" data-requires-annotations>
+                    <button class="selection-summary-compare-btn icon-only" id="modal-annotations-import" type="button" title="Import Region annotations JSON" aria-label="Import Region annotations JSON">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 8 5-5 5 5"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path></svg>
+                    </button>
+                    <button class="selection-summary-compare-btn icon-only" id="modal-annotations-export" type="button" title="Export Region annotations JSON" aria-label="Export Region annotations JSON" data-requires-annotations>
                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path></svg>
                     </button>
                     <button class="selection-summary-compare-btn icon-only" id="modal-annotations-clear-all" type="button" title="Delete all annotations" aria-label="Delete all annotations" data-requires-annotations>
                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>
                     </button>
+                    <input type="file" id="modal-annotations-import-input" accept="application/json,.json" style="display:none">
                 </div>
             </div>
             <div class="color-panel-mode selection-summary umap-selection-summary" id="insights-selection-panel"></div>
@@ -24124,6 +24303,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 insightsTreeOpenCompareBranch = null;
                 insightsTreeOpenGenesBranch = null;
                 activateInsightsSubtab(topLevel, subtab);
+                if (tutorialActive && tutorialSteps[tutorialStepIndex]?.requiresOverviewSummaryClicked && topLevel === 'overview' && subtab === 'summary') {{
+                    tutorialOverviewSummaryClicked = true;
+                    updateTutorialStepGate?.();
+                    window.setTimeout(() => {{
+                        if (!tutorialActive) return;
+                        if (!tutorialSteps[tutorialStepIndex]?.requiresOverviewSummaryClicked) return;
+                        document.getElementById('tutorial-next')?.click();
+                    }}, 80);
+                }}
             }});
         }});
         const markerSearch = document.getElementById('marker-gene-search');
@@ -32006,7 +32194,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     // Controls
     function initControls() {{
-        document.getElementById('umap-selection-clear')?.addEventListener('click', () => {{
+        document.getElementById('umap-selection-clear')?.addEventListener('click', (event) => {{
+            event.preventDefault();
+            event.stopPropagation();
             clearSelection();
         }});
 
@@ -32878,6 +33068,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const modalGenePanel = document.getElementById('modal-gene-panel');
         const modalGenePanelCloseBtn = document.getElementById('modal-gene-panel-close');
         const modalAnnotationCreateGroupBtn = document.getElementById('modal-annotations-create-group');
+        const modalAnnotationImportBtn = document.getElementById('modal-annotations-import');
+        const modalAnnotationImportInput = document.getElementById('modal-annotations-import-input');
         const modalAnnotationExportBtn = document.getElementById('modal-annotations-export');
         const modalAnnotationClearAllBtn = document.getElementById('modal-annotations-clear-all');
 
@@ -32910,6 +33102,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         modalAnnotationCreateGroupBtn?.addEventListener('click', () => {{
             createModalAnnotationGroup();
+        }});
+        modalAnnotationImportBtn?.addEventListener('click', () => {{
+            modalAnnotationImportInput?.click();
+        }});
+        modalAnnotationImportInput?.addEventListener('change', () => {{
+            const file = modalAnnotationImportInput.files && modalAnnotationImportInput.files[0];
+            if (file) importModalAnnotationsFromFile(file);
+            modalAnnotationImportInput.value = '';
         }});
         modalAnnotationExportBtn?.addEventListener('click', () => {{
             exportModalAnnotations();
