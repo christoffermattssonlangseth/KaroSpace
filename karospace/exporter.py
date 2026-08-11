@@ -1187,6 +1187,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             --bar-control-active-text: #5b063a;
             --loading-text: #f5dbe7;
             --shadow-color: rgba(0, 0, 0, 0.18);
+            --spatial-gene-chip-bg: #e7f0fa;
+            --spatial-gene-chip-border: #5d8fcb;
+            --spatial-gene-chip-text: #14324d;
         }}
         :root.dark {{
             color-scheme: dark;
@@ -1249,6 +1252,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             --shadow-color: rgba(0, 0, 0, 0.42);
             --icon-hover-bg: #3a2635;
             --icon-blue-hover-bg: #14313d;
+            --spatial-gene-chip-bg: #12314d;
+            --spatial-gene-chip-border: #7dd3fc;
+            --spatial-gene-chip-text: #f8fbff;
         }}
         :root.light {{
             color-scheme: light;
@@ -9057,7 +9063,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let tutorialSelectionFindMoreClicked = false;
     let tutorialSelectionMarkersClicked = false;
     let tutorialModuleCreateClicked = false;
-    let tutorialOverviewSummaryClicked = false;
     const tutorialSteps = [
         {{
             title: 'Overview of panels',
@@ -9204,6 +9209,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             if (legend?.classList.contains('collapsed')) toggleLegendPanel?.();
             if (typeof renderLegend === 'function') renderLegend('legend');
         }};
+        const openTutorialVisualizationLeafMenu = (topLevel, subtab, nestedBranch = null) => {{
+            if (typeof closeModal === 'function') closeModal();
+            if (typeof openInsightsMode === 'function') openInsightsMode('exploration');
+            insightsTreeOpen = true;
+            insightsTreeOpenBranch = topLevel;
+            insightsTreeOpenCompareBranch = topLevel === 'compare' ? nestedBranch : null;
+            insightsTreeOpenGenesBranch = topLevel === 'genes' ? nestedBranch : null;
+            insightsTreeSelectedLeaf = null;
+            syncInsightsModeClasses?.();
+            syncInsightsTabClasses?.();
+        }};
         const rawSteps = [
             step('Welcome the KaroSpace', ['#grid-stage', '#grid', '.main-container'], [
                 'KaroSpace is a self-contained spatial viewer. The central grid is where you inspect sections, while the surrounding controls change color, expression, filters, and analysis panels.'
@@ -9216,8 +9232,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'The Info button contains viewer notes, dataset context, and shortcut reminders.'
             ], {{ nextLabel: tryIt }}),
             step('Button guide', ['#app-help-trigger', '#app-help-popover'], [
-                'The question-mark message icon opens a guide to the unique icon buttons used across the viewer.',
-                'Use it when an icon is unfamiliar but you do not want to search the whole interface.'
+                'The question-mark message icon opens a guide to the unique icon buttons used across the viewer.'
             ], {{ nextLabel: tryIt }}),
             step('Theme toggle', ['#theme-toggle', '#theme-icon'], [
                 'The theme button switches between light and dark mode.'
@@ -9227,8 +9242,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'It updates when filters, hidden sections, or some display choices change.'
             ], {{ nextLabel: tryIt }}),
             step('Screenshot menu', ['#screenshot-menu-wrap', '#screenshot-btn'], [
-                'The screenshot menu exports either the grid or the current screen view.',
-                'Resolution and transparent-background options let you prepare figures without changing the analysis.'
+                'The screenshot menu exports either the grid or the current screen view.'
             ], {{ nextLabel: tryIt }}),
             step('Save the viewer session', ['#save-session-btn'], [
                 'Session export saves interactive state JSON file containing annotations, hidden categories, and current views.'
@@ -9315,7 +9329,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'Use it to organize, group, compare, export, or reuse drawn regions.'
             ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); if (typeof setInsightsMode === 'function') setInsightsMode('annotate'); }}, nextLabel: tryIt }}),
             step('Insights Module mode', ['#insights-mode-module', '#insights-module-panel'], [
-                'Module is where user-defined gene sets are created and managed.',
+                'The module area combines gene expression to visualize associated genes or pathways.',
                 'Use it for signatures, custom marker lists, or repeated gene-set review.'
             ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); if (typeof setInsightsMode === 'function') setInsightsMode('module'); }}, nextLabel: tryIt }}),
             step('Insights Exploration mode', ['#insights-mode-exploration', '#insights-exploration-panel'], [
@@ -9332,12 +9346,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'Use the Find More button to explore gene markers of your selection.'
             ], {{ action: () => {{ tutorialSelectionFindMoreClicked = false; if (typeof closeModal === 'function') closeModal(); if (typeof openInsightsMode === 'function') openInsightsMode('selection'); updateSelectionInfo?.(); }}, task: 'Click Find More to open the full selection comparison view.', requiresSelectionFindMoreClicked: true, nextLabel: tryIt }}),
             step('Selection gene markers', ['#compare-selection-panel .selection-summary-title-row'], [
+                'This analysis is done in the Exploration panel.',
                 'Compare > Per cell > Selections is the detailed workspace for marker genes of the active selection.',
                 'The search icon starts the marker-gene calculation for the selected cells.'
             ], {{ action: () => {{ tutorialSelectionMarkersClicked = false; selectionWelchButtonHidden = false; selectionWelchRunRequested = false; selectionWelchRunning = false; openTutorialInsightsPanel('compare', 'selection'); updateSelectionInfo?.(); }}, task: 'Click the search icon to calculate marker genes for the selected cells.', requiresSelectionMarkersClicked: true, nextLabel: tryIt }}),
             step('Selection composition comparison', ['#compare-selection-panel .selection-comparison-composition', '#compare-selection-panel .selection-summary-row', '#compare-selection-panel'], [
                 'The composition result summarizes which main annotations are present in the selected cells.',
-                'When Region B exists, the panel shows Region A and Region B side by side.'
+                'When Region B exists, the panel shows Region A versus Region B.'
             ], {{ action: () => {{ openTutorialInsightsPanel('compare', 'selection'); updateSelectionInfo?.(); }}, nextLabel: tryIt }}),
             step('Selection expression comparison', ['#compare-selection-panel .selection-summary-expr', '#compare-selection-panel'], [
                 'Genes were selected by two sided Welch test.',
@@ -9345,18 +9360,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'Bars show mean expression and percent expressed for each displayed gene.'
             ], {{ action: () => {{ openTutorialInsightsPanel('compare', 'selection'); updateSelectionInfo?.(); }}, nextLabel: tryIt }}),
             step('Pan mode', ['#umap-pan-btn', '#visual-spatial-tools'], [
-                'Pan mode is the default interaction mode for moving around the spatial view, and navigate without selecting cells.'
+                'Pan mode is the default interaction mode for moving around the spatial view, and navigate without selecting cells.',
+                'It is useful to swap section panels in the central grid.'
             ], {{ nextLabel: tryIt }}),
-            step('Lasso selection mode', ['#umap-lasso-btn', '#visual-spatial-tools'], [
+            step('Lasso selection mode', ['#umap-lasso-btn', '#grid .section-panel:not(.filtered-out):nth-of-type(2)'], [
                 'Lasso mode lets you draw around cells directly on the spatial panels to select cells.'
-            ], {{ task: 'Select the lasso tool and draw a small selection on one visible section to continue.', requiresSelection: true, nextLabel: tryIt }}),
+            ], {{ task: 'Select the lasso tool and draw a small selection on one visible section to continue.', requiresSelection: true, combineTargets: true, autoNextWhenGateSatisfied: true, nextLabel: tryIt }}),
             step('Compare two selections', ['#umap-compare-btn', '#visual-spatial-tools'], [
                 'The compare button starts a Region A / Region B selection workflow.',
                 'Use it to compare two manually selected spatial cell sets before committing to annotations.'
-            ], {{ task: 'Click the compare button, then draw Region B to continue.', requiresRegionB: true, nextLabel: tryIt }}),
+            ], {{ task: 'Click the compare button, then draw Region B to continue.', requiresRegionB: true, autoNextWhenGateSatisfied: true, nextLabel: tryIt }}),
             step('Clear Region B selection', ['#umap-compare-btn', '#visual-spatial-tools'], [
                 'When Regions are selected, the compare buttons change to a cross to deselect the cells.'
-            ], {{ action: () => {{ tutorialRegionBClearStepStarted = selectedCellsB.size > 0; updateUMAPCompareButtonState?.(); }}, task: 'Click the cross to deselect Region B and return to a single active selection.', requiresRegionBCleared: true, nextLabel: tryIt }}),
+            ], {{ action: () => {{ tutorialRegionBClearStepStarted = selectedCellsB.size > 0; updateUMAPCompareButtonState?.(); }}, task: 'Click the cross to deselect Region B and return to a single active selection.', requiresRegionBCleared: true, autoNextWhenGateSatisfied: true, nextLabel: tryIt }}),
             step('Create annotation from selection', ['#selection-create-annotation-btn', '#visual-spatial-tools'], [
                 'When cells are selected, you can create a region annotation from them.',
                 'Region annotations are user-defined spatial cell sets stored in the viewer session.'
@@ -9373,6 +9389,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ], {{ action: () => safeTutorialClick('#default-source-gene'), nextLabel: tryIt }}),
             step('Gene discovery panel', ['#gene-discovery-panel', '#gene-input-shell'], [
                 'Gene discovery helps you search, activate genes, and inspect related gene information.',
+                'Suggestion for gene markers are displayed depending on the selected annotation.',
                 'It can include marker genes, spatial genes, correlations, and module tools depending on the exported payload.'
             ], {{ action: () => {{ safeTutorialClick('#default-source-gene'); document.getElementById('gene-input')?.focus(); }}, nextLabel: tryIt }}),
             step('Gene input field', ['#gene-input', '#gene-input-shell'], [
@@ -9403,8 +9420,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'Graph displays the stored neighbor edges. Neighbors highlights one-hop or two-hop neighbors around the cell under the cursor.'
             ], {{ condition: () => !!DATA.has_neighbors, action: () => {{ if (!modalSection && Array.isArray(DATA.sections) && DATA.sections.length && typeof openModal === 'function') openModal(DATA.sections[0].id); const toolbar = document.getElementById('grid-side-toolbar'); toolbar?.classList.add('neighbor-open'); toolbar?.classList.remove('visual-open', 'gene-open', 'he-open'); setModalHeOptionsVisible(false); updateModalToolbarState?.(); refreshFocusedModalToolPanels?.(); }}, prepareDelay: 220, nextLabel: tryIt }}),
             step('Modal H&E overlay controls', ['#focused-he-panel', '#focused-modal-he-toggle'], [
-                'The image button opens H&E or image-overlay controls for the focused section.',
-                'Load adds an image layer. The parameter controls adjust how the overlay is drawn on top of cells.'
+                'The image button opens H&E or an image to overlay. The parameter controls adjust how the overlay is drawn on top of cells.'
             ], {{ action: () => {{ if (!modalSection && Array.isArray(DATA.sections) && DATA.sections.length && typeof openModal === 'function') openModal(DATA.sections[0].id); const toolbar = document.getElementById('grid-side-toolbar'); toolbar?.classList.remove('visual-open', 'gene-open', 'neighbor-open'); resetFocusedModalTools?.('he'); setModalHeOptionsVisible(true); updateModalToolbarState?.(); refreshFocusedModalToolPanels?.(); }}, prepareDelay: 220, nextLabel: tryIt }}),
             step('Select cells for Region', ['#umap-lasso-btn', '#grid'], [
                 'Region needs a selected cell set before a new region annotation can be created.'
@@ -9413,7 +9429,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'The annotation button saves the active selected cells as a Region annotation.'
             ], {{ condition: () => modalAnnotations.length === 0 && selectedCells.size > 0, action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('annotate'); updateSelectionCreateAnnotationButtonState?.(); }}, task: 'Click the polygon annotation button to annotate the selected region.', requiresAnnotationCreated: true, nextLabel: tryIt }}),
             step('Insights Region', ['#modal-annotation-list', '.modal-annotation-row'], [
-                'Each region represents a saved spatial region or annotation group.',
+                'Each region represents a saved spatial region or cells group.',
                 'Click a region row to select its cells. Click a group row to select the union of cells from its nested regions.',
                 'Rows can also be recolored, grouped, exported, or deleted.'
             ], {{ action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('annotate'); }}, nextLabel: tryIt }}),
@@ -9428,13 +9444,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ], {{ action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('annotate'); }}, nextLabel: tryIt }}),
             step('Module gene picker', ['#gene-module-gene-picker', '#gene-module-draft-genes', '#insights-module-panel'], [
                 'The draft area shows which genes will be saved into the next module.'
-            ], {{ action: () => {{ if (typeof closeModal === 'function') closeModal(); if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); if (typeof setInsightsMode === 'function') setInsightsMode('module'); }}, task: 'Use the gene picker to add genes into the draft module list.', requiresModuleDraftGene: true, nextLabel: tryIt }}),
+            ], {{ action: () => {{ if (typeof closeModal === 'function') closeModal(); if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); if (typeof setInsightsMode === 'function') setInsightsMode('module'); }}, task: 'Use the gene picker to add genes into the module list.', requiresModuleDraftGene: true, nextLabel: tryIt }}),
             step('Create module', ['#gene-module-create', '#insights-module-panel'], [
                 'Each gene in the module will get a scaled expression and the average expression will be calculated.'
             ], {{ action: () => {{ tutorialModuleCreateClicked = false; if (typeof setInsightsMode === 'function') setInsightsMode('module'); }}, task: 'Click on the sum button', requiresModuleCreateClicked: true, nextLabel: tryIt }}),
             step('Load module score', ['[data-gene-module-load]', '#insights-module-panel'], [
                 'The load button activates a module score in the spatial viewer.',
-                'One can now display a module score like a gene expression.',
                 'Module scores are computed from the selected module genes and displayed like an expression layer.'
             ], {{ action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('module'); }}, nextLabel: tryIt }}),
             step('Module import export', ['#gene-module-upload', '#gene-module-download'], [
@@ -9448,207 +9463,157 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'The Visualization menu is the navigation tree.'
             ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); }}, onNext: () => {{ const tree = document.querySelector('[data-insights-tree]'); if (!tree?.classList.contains('is-open')) safeTutorialClick('[data-insights-tree-root]'); }}, nextLabel: tryIt }}),
             step('Visualization menu options', ['.insights-tree-panel-content', '[data-insights-tree]'], [
-                'The menu options open Overview, Genes, Compare, and Neighbors panels.'
+                'The menu options open Overview, Genes, Compare, and Neighbors panels.',
+                'Overview summarizes section composition and metadata trends; Genes focuses marker, spatial, distribution, and mean-expression gene views; Compare contains selection, region, annotation, pseudobulk, and relationship comparisons; Neighbors contains spatial adjacency, interaction, and dispersion analyses.'
             ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); const tree = document.querySelector('[data-insights-tree]'); if (!tree?.classList.contains('is-open')) safeTutorialClick('[data-insights-tree-root]'); }}, nextLabel: tryIt }}),
-            step('Open Overview summary', ['[data-insights-tree-branch="overview"]', '[data-insights-tree-leaf="summary"]'], [
-                'Overview contains summary views for section metadata and annotation composition.'
-            ], {{ action: () => {{ tutorialOverviewSummaryClicked = false; if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); const tree = document.querySelector('[data-insights-tree]'); if (!tree?.classList.contains('is-open')) safeTutorialClick('[data-insights-tree-root]'); const overview = document.querySelector('[data-insights-tree-branch="overview"]'); if (overview?.getAttribute('aria-expanded') !== 'true') overview.click(); }}, task: 'Click Summary in the Overview options.', requiresOverviewSummaryClicked: true, combineTargets: true, nextLabel: tryIt }}),
-            step('Overview summary', ['#color-tab-overview-content', '#color-aggregation'], [
+            step('Open Overview > Summary', '[data-insights-tree-leaf="summary"][data-insights-tree-parent="overview"]', [
+                'Open Visualization, then Overview, then Summary to inspect annotation composition across section metadata.',
+                'All calculation in this section is done on cells embedded in the HTML file.'
+            ], {{ action: () => openTutorialVisualizationLeafMenu('overview', 'summary'), task: 'Click Summary in the Overview options.', nextLabel: tryIt }}),
+            step('Overview Summary aggregation', ['#color-tab-overview-content', '#color-aggregation'], [
                 'Overview Summary aggregates cells across section metadata.',
                 'Use it to check whether categories differ by sample, condition, region, or other section-level metadata.'
-            ], {{ action: () => openTutorialInsightsPanel('overview', 'summary'), task: 'Change Aggregate By if options are available, then inspect the summary.', nextLabel: tryIt }}),
-            step('Per-annotation trend', ['#celltype-select-row', '#celltype-trend'], [
+            ], {{ action: () => openTutorialInsightsPanel('overview', 'summary'), nextLabel: tryIt }}),
+            step('Overview Summary per-annotation trend', ['#celltype-select-row', '#celltype-trend'], [
                 'The per-annotation selector focuses one cell type or category across section metadata.',
                 'This is useful for quick abundance trend checks.'
             ], {{ action: () => openTutorialInsightsPanel('overview', 'summary'), task: 'Pick one category in Per Annotation and inspect its trend.', nextLabel: tryIt }}),
-            step('Overview sections', ['#samples-panel', '#overview-tab-sections-content'], [
-                'The Sections overview compares per-section composition as bars or heatmaps.',
-                'Use it for sample-level quality control before focusing on gene or DE results.'
-            ], {{ action: () => openTutorialInsightsPanel('overview', 'sections'), task: 'Switch the section view if a mode toggle is present.', nextLabel: tryIt }}),
-            step('Genes: marker panel', ['#marker-genes', '#genes-tab-de-genes-content'], [
+            step('Open Overview > Sections', '[data-insights-tree-leaf="sections"][data-insights-tree-parent="overview"]', [
+                'Open Visualization, then Overview, then Sections to compare section-level composition.',
+                'All calculation in this section is done on cells embedded in the HTML file.'
+            ], {{ action: () => openTutorialVisualizationLeafMenu('overview', 'sections'), task: 'Click Sections in the Overview options.', nextLabel: tryIt }}),
+            step('Overview Sections panel', ['#samples-panel', '#overview-tab-sections-content'], [
+                'The Sections overview compares per-section composition as bars or heatmaps.'
+            ], {{ action: () => openTutorialInsightsPanel('overview', 'sections'), nextLabel: tryIt }}),
+            step('Overview Sections view switch', '.samples-view-icon-toggle', [
+                'The section composition switch changes the same data between stacked bars and a heatmap.'
+            ], {{ action: () => openTutorialInsightsPanel('overview', 'sections'), nextLabel: tryIt }}),
+            step('Open Genes > Markers', '[data-insights-tree-leaf="de-genes"][data-insights-tree-parent="genes"]', [
+                'Open Visualization, then Genes, then Markers to inspect exported marker genes.'
+            ], {{ action: () => openTutorialVisualizationLeafMenu('genes', 'de-genes'), task: 'Click Markers in the Genes options.', nextLabel: tryIt }}),
+            step('Genes Markers panel', ['#marker-genes', '#genes-tab-de-genes-content'], [
                 'The marker panel lists pseudobulk-derived marker genes by category when available.',
                 'Genes that were not embedded may be shown but disabled for direct expression viewing.'
-            ], {{ action: () => openTutorialInsightsPanel('genes', 'de-genes'), task: 'Search or click one available marker gene to load it in the viewer.', nextLabel: tryIt }}),
-            step('Marker gene search', ['#marker-gene-search', '#marker-gene-search-clear'], [
-                'The marker gene search filters marker results to a specific gene.',
-                'Use it when you already know a gene and want to see where it appears as a marker.'
-            ], {{ action: () => openTutorialInsightsPanel('genes', 'de-genes'), task: 'Open the marker search dropdown and clear it afterward.', nextLabel: tryIt }}),
-            step('Spatially variable genes', ['#spatially-variable-genes', '#genes-tab-spatial-content'], [
-                'The Spatial genes panel shows Moran I rankings computed at export.',
+            ], {{ action: () => openTutorialInsightsPanel('genes', 'de-genes'), nextLabel: tryIt }}),
+            step('Genes Markers view switch', '[data-gene-subtab-toggle="de-genes"]', [
+                'The marker view switch changes between a compact gene list and a heatmap.'
+            ], {{ action: () => openTutorialInsightsPanel('genes', 'de-genes'), nextLabel: tryIt }}),
+            step('Open Genes > Spatial', '[data-insights-tree-leaf="spatial"][data-insights-tree-parent="genes"]', [
+                'Open Visualization, then Genes, then Spatial to inspect spatially variable genes.'
+            ], {{ action: () => openTutorialVisualizationLeafMenu('genes', 'spatial'), task: 'Click Spatial in the Genes options.', nextLabel: tryIt }}),
+            step('Genes Spatial panel', ['#spatially-variable-genes', '#genes-tab-spatial-content'], [
+                'The Spatial genes panel shows Moran Index rankings computed at export.',
                 'High values suggest genes with stronger spatial autocorrelation.'
-            ], {{ action: () => openTutorialInsightsPanel('genes', 'spatial'), task: 'Click one spatial gene if it is enabled for expression viewing.', nextLabel: tryIt }}),
-            step('Gene distribution plot', ['#gene-distribution-panel', '#genes-tab-distribution-content'], [
-                'The distribution panel summarizes expression distributions across categories.',
-                'It helps determine whether an expression signal is broad, rare, or category-specific.'
-            ], {{ action: () => openTutorialInsightsPanel('genes', 'distribution'), task: 'Change the restriction controls if available and observe the plot.', nextLabel: tryIt }}),
-            step('Gene means plot', ['#pseudobulk-gene-means', '#genes-tab-means-content'], [
-                'The means panel uses pseudobulk/category mean summaries to compare expression across categories.',
-                'It is a compact way to inspect category-level gene expression.'
-            ], {{ action: () => openTutorialInsightsPanel('genes', 'means'), task: 'Load a gene, then inspect its category means.', nextLabel: tryIt }}),
-            step('Compare: annotation groups', ['#group-de-panel', '#compare-tab-groups-content'], [
-                'Annotation comparison is an exploratory per-cell comparison between groups or annotations.',
-                'It can scan loaded genes quickly and can use sidecar genes for fuller runs when configured.'
-            ], {{ action: () => openTutorialInsightsPanel('compare', 'groups'), task: 'Configure two groups if possible, but do not start a long sidecar scan unless you need it.', nextLabel: tryIt }}),
-            step('Compare: regions', ['#annotation-comparison', '#compare-tab-regions-content'], [
-                'Region comparison uses user-created region annotations.',
-                'It can compare composition and region-level differential expression when regions exist.'
-            ], {{ action: () => openTutorialInsightsPanel('compare', 'regions'), task: 'If you created two regions, select them here and inspect the comparison.', nextLabel: tryIt }}),
-            step('Compare: selections', ['#compare-selection-panel', '#compare-tab-selection-content'], [
+            ], {{ action: () => openTutorialInsightsPanel('genes', 'spatial'), nextLabel: tryIt }}),
+            step('Genes Spatial view switch', '[data-gene-subtab-toggle="spatial"]', [
+                'The Spatial panel can be shown as a ranked list or as a graph.'
+            ], {{ action: () => openTutorialInsightsPanel('genes', 'spatial'), nextLabel: tryIt }}),
+            step('Open Genes > Distribution > Per cell', '[data-insights-tree-leaf="distribution"][data-insights-tree-parent="genes"]', [
+                'Open Visualization, then Genes, then Distribution, then Per cell to inspect expression distributions.',
+                'All calculation in this section is done on cells embedded in the HTML file.'
+            ], {{ action: () => openTutorialVisualizationLeafMenu('genes', 'distribution', 'distribution'), task: 'Click Per cell in the Genes > Distribution options.', nextLabel: tryIt }}),
+            step('Genes Distribution per cell gene search', '.marker-gene-search-wrap', [
+                'Enter or select a gene in the Search control before inspecting the per-cell distribution panel.'
+            ], {{ action: () => openTutorialInsightsPanel('genes', 'distribution'), task: 'Enter or select a gene in Search.', requiresInsightsGeneSelected: true, nextLabel: tryIt }}),
+            step('Genes Distribution per cell panel', ['#gene-distribution-panel', '#genes-tab-distribution-content'], [
+                'The distribution panel summarizes expression distributions across categories.'
+            ], {{ action: () => {{ openTutorialInsightsPanel('genes', 'distribution'); ensureTutorialInsightsGeneSelected(); }}, nextLabel: tryIt }}),
+            step('Genes Distribution per cell view switch', '.samples-view-toggle[data-gene-subtab-toggle="distribution"]', [
+                'The distribution view switch changes between a table and a violin/boxplot.'
+            ], {{ action: () => openTutorialInsightsPanel('genes', 'distribution'), prepareDelay: 420, scrollDelay: 520, spotlightPadding: 2, nextLabel: tryIt }}),
+            step('Open Genes > Distribution > Per sample', '[data-insights-tree-leaf="means"][data-insights-tree-parent="genes"]', [
+                'Open Visualization, then Genes, then Distribution, then Per sample to inspect pseudobulk/category means.'
+            ], {{ action: () => openTutorialVisualizationLeafMenu('genes', 'means', 'distribution'), task: 'Click Per sample in the Genes > Distribution options.', nextLabel: tryIt }}),
+            step('Genes Distribution per sample gene search', '.marker-gene-search-wrap', [
+                'Enter or select a gene in the Search control before inspecting the per-sample means panel.'
+            ], {{ action: () => openTutorialInsightsPanel('genes', 'means'), task: 'Enter or select a gene in Search.', requiresInsightsGeneSelected: true, nextLabel: tryIt }}),
+            step('Genes Distribution per sample panel', ['#pseudobulk-gene-means', '#genes-tab-means-content'], [
+                'The means panel uses pseudobulk/category mean summaries to compare expression across categories.'
+            ], {{ action: () => {{ openTutorialInsightsPanel('genes', 'means'); ensureTutorialInsightsGeneSelected(); }}, nextLabel: tryIt }}),
+            step('Genes Distribution per sample view switch', '.samples-view-toggle[data-gene-subtab-toggle="means"]', [
+                'The per-sample means view can switch between category means and a barplot.'
+            ], {{ action: () => openTutorialInsightsPanel('genes', 'means'), prepareDelay: 420, scrollDelay: 520, spotlightPadding: 2, nextLabel: tryIt }}),
+            step('Open Compare > Per cell > Selections', '[data-insights-tree-leaf="selection"][data-insights-tree-parent="compare"]', [
+                'Open Visualization, then Compare, then Per cell, then Selections to analyze selected cells.'
+            ], {{ action: () => openTutorialVisualizationLeafMenu('compare', 'selection', 'quick'), task: 'Click Selections in Compare > Per cell.', nextLabel: tryIt }}),
+            step('Compare Selections panel', ['#compare-selection-panel', '#compare-tab-selection-content'], [
                 'Selection comparison summarizes current lasso/query selections.',
-                'It is useful for quick checks before turning selections into saved annotations.'
-            ], {{ action: () => openTutorialInsightsPanel('compare', 'selection'), task: 'Make or reuse a selection and inspect this panel.', nextLabel: tryIt }}),
-            step('Compare: Simple design', ['#cluster-de-results', '#compare-tab-cell-de-content'], [
-                'Simple design contains category-versus-category pseudobulk DE results.',
-                'This is the main panel for the exported per-sample DE workflow.'
-            ], {{ condition: tutorialHasPseudobulk, action: () => openTutorialInsightsPanel('compare', 'cell-de'), task: 'Open Simple design and choose Annotation A and B if selectors are available.', nextLabel: tryIt }}),
-            step('Pseudobulk category selectors', ['#cluster-de-source', '#cluster-de-reference', '#cluster-de-results'], [
+                'Previously described in this tutorial in the Selection section.'
+            ], {{ action: () => openTutorialInsightsPanel('compare', 'selection'), nextLabel: tryIt }}),
+            step('Open Compare > Per cell > Regions', '[data-insights-tree-leaf="regions"][data-insights-tree-parent="compare"]', [
+                'Open Visualization, then Compare, then Per cell, then Regions to compare saved Region annotations.'
+            ], {{ action: () => openTutorialVisualizationLeafMenu('compare', 'regions', 'quick'), task: 'Click Regions in Compare > Per cell.', nextLabel: tryIt }}),
+            step('Compare Regions panel', ['#annotation-comparison', '#compare-tab-regions-content'], [
+                'Region comparison uses user-created region annotations.',
+                'Previously described in this tutorial in the Region section.',
+                'Clicking on the search icon display a region comparison similar to the selection comparison.'
+            ], {{ action: () => openTutorialInsightsPanel('compare', 'regions'), nextLabel: tryIt }}),
+            step('Open Compare > Per cell > Annotations', '[data-insights-tree-leaf="groups"][data-insights-tree-parent="compare"]', [
+                'Open Visualization, then Compare, then Per cell, then Annotations to compare annotation values.'
+            ], {{ action: () => openTutorialVisualizationLeafMenu('compare', 'groups', 'quick'), task: 'Click Annotations in Compare > Per cell.', nextLabel: tryIt }}),
+            step('Compare Annotations panel', '#compare-tab-groups-content .color-panel-section', [
+                'Annotation comparison is a per-cell comparison between categories in the selected annotation.',
+                'Clicking on the search icon display an annotation comparison similar to the selection comparison.'
+            ], {{ action: () => {{ invalidateGroupDEState?.(false); openTutorialInsightsPanel('compare', 'groups'); }}, nextLabel: tryIt }}),
+            step('Open Compare > Per sample > Simple design', '[data-insights-tree-leaf="cell-de"][data-insights-tree-parent="compare"]', [
+                'Open Visualization, then Compare, then Per sample, then Simple design to inspect pseudobulk category contrasts.'
+            ], {{ action: () => openTutorialVisualizationLeafMenu('compare', 'cell-de', 'precise'), task: 'Click Simple design in Compare > Per sample.', nextLabel: tryIt }}),
+            step('Compare Simple design panel', ['#cluster-de-results .comparison-info', '#cluster-de-results .agg-group', '#cluster-de-results .agg-group-meta'], [
+                'Simple design contains category-versus-category pseudobulk DE results when they were exported.',
+                'The panel can contain warnings, marker tables, MA/volcano plots, sample diagnostics, and pathway enrichment.'
+            ], {{ action: () => openTutorialInsightsPanel('compare', 'cell-de'), combineTargets: true, prepareDelay: 520, nextLabel: tryIt }}),
+            step('Compare Simple design controls', ['#cluster-de-source', '#cluster-de-reference'], [
                 'Annotation A and Annotation B define the active category-versus-category contrast.',
                 'Changing them updates the DE table, plots, diagnostics, and pathway section.'
-            ], {{ condition: tutorialHasPseudobulk, action: () => openTutorialInsightsPanel('compare', 'cell-de'), task: 'Pick two biologically meaningful categories.', nextLabel: tryIt }}),
-            step('Swap DE contrast direction', ['#cluster-de-swap', '#cluster-de-results'], [
-                'The swap button reverses Annotation A and B.',
-                'This changes the interpretation of positive and negative log2 fold change.'
-            ], {{ condition: tutorialHasPseudobulk, action: () => openTutorialInsightsPanel('compare', 'cell-de'), task: 'Use Swap once and confirm the category labels reverse.', nextLabel: tryIt }}),
-            step('Raw DE table', ['.cluster-de-panel-mode-switch', '#cluster-de-results'], [
-                'Raw table mode shows the differential expression rows directly.',
-                'The table is the most precise view for gene names, log2FC, adjusted p-values, baseMean, and expression percentages.'
-            ], {{ condition: tutorialHasPseudobulk, action: () => openTutorialInsightsPanel('compare', 'cell-de'), task: 'Switch to Raw table and use Show more if the link is visible.', nextLabel: tryIt }}),
-            step('DE gene plots', ['#cluster-de-results', '.cluster-de-qc-svg'], [
-                'Gene plot mode contains MA and volcano-style views.',
-                'Use these plots to see the relationship between effect size, expression level, and adjusted p-value.'
-            ], {{ condition: tutorialHasPseudobulk, action: () => openTutorialInsightsPanel('compare', 'cell-de'), task: 'Switch to Genes and hover points if tooltips are available.', nextLabel: tryIt }}),
-            step('MA plot interpretation', ['#cluster-de-results', '.cluster-de-qc-svg'], [
-                'The MA plot uses baseMean on one axis and log2FC on the other.',
-                'Coloring highlights genes passing the adjusted p-value threshold while filtered genes are shown separately.'
-            ], {{ condition: tutorialHasPseudobulk, action: () => openTutorialInsightsPanel('compare', 'cell-de'), task: 'Find one red point or one grey/black point and read its tooltip.', nextLabel: tryIt }}),
-            step('Volcano plot interpretation', ['#cluster-de-results', '.cluster-de-qc-svg'], [
-                'The volcano plot emphasizes statistical strength and effect size.',
-                'It helps quickly identify strong positive and negative DE genes.'
-            ], {{ condition: tutorialHasPseudobulk, action: () => openTutorialInsightsPanel('compare', 'cell-de'), task: 'Compare the most extreme positive and negative sides.', nextLabel: tryIt }}),
-            step('Sample diagnostics', ['#cluster-de-results', '.samples-controls'], [
-                'Samples mode shows pseudobulk sample diagnostics such as PCA and distance matrices.',
-                'Use these before interpreting DE if you want to see replicate-level structure.'
-            ], {{ condition: tutorialHasPseudobulk, action: () => openTutorialInsightsPanel('compare', 'cell-de'), task: 'Switch to Samples and inspect PCA or distance matrix if present.', nextLabel: tryIt }}),
-            step('Pseudobulk plot info buttons', ['#cluster-de-results', '.calc-info-btn'], [
-                'Calculation info buttons explain how each DE section or plot was generated.',
-                'They are useful for checking thresholds and assumptions without leaving the HTML.'
-            ], {{ condition: tutorialHasPseudobulk, action: () => openTutorialInsightsPanel('compare', 'cell-de'), task: 'Click one calculation info button and read the explanation.', nextLabel: tryIt }}),
-            step('Pathway Enrichment section', ['.cluster-PA-result', '.cluster-pa-result', '#cluster-de-results'], [
-                'Pathway Enrichment is built from the active pseudobulk contrast.',
-                'ORA uses significant DE genes favoring the selected annotation; GSEA uses the full retained ranked list.'
-            ], {{ condition: () => tutorialHasPseudobulk() && hasPathwayPanel(), action: () => openTutorialInsightsPanel('compare', 'cell-de'), task: 'Scroll to Pathway Enrichment in Simple design.', nextLabel: tryIt }}),
-            step('Pathway annotation selector', ['[data-pathway-annotation-select]', '.cluster-PA-result'], [
-                'The pathway annotation selector chooses whether you inspect pathways for Annotation A or B.',
-                'ORA and GSEA dropdowns update to the selected side.'
-            ], {{ condition: () => tutorialHasPseudobulk() && hasPathwayPanel(), action: () => openTutorialInsightsPanel('compare', 'cell-de'), task: 'Switch between Annotation A and B and watch the pathway content change.', nextLabel: tryIt }}),
-            step('ORA pathway dot plot', ['[data-pathway-ora-panel]', '.cluster-PA-result'], [
-                'The ORA dot plot places GeneRatio on the x-axis and pathways on the y-axis.',
-                'Dot size represents gene count, fill color represents -log10 adjusted p-value, and border color indicates significance.'
-            ], {{ condition: () => tutorialHasPseudobulk() && hasPathwayPanel(), action: () => openTutorialInsightsPanel('compare', 'cell-de'), task: 'Hover or inspect the top ORA dots and read the pathway labels.', nextLabel: tryIt }}),
-            step('ORA raw table', ['[data-pathway-ora-panel]', '.cluster-PA-result'], [
-                'The ORA table exposes the numeric pathway results behind the plot.',
-                'Use it when labels are long or when exact adjusted p-values matter.'
-            ], {{ condition: () => tutorialHasPseudobulk() && hasPathwayPanel(), action: () => openTutorialInsightsPanel('compare', 'cell-de'), task: 'Switch ORA from plot to raw table if the toggle is visible.', nextLabel: tryIt }}),
-            step('GSEA pathway dropdown', ['[data-pathway-gsea-select]', '.cluster-PA-result'], [
-                'GSEA shows one enrichment profile at a time.',
-                'The dropdown lets you choose which pathway profile to inspect.'
-            ], {{ condition: () => tutorialHasPseudobulk() && hasPathwayPanel(), action: () => openTutorialInsightsPanel('compare', 'cell-de'), task: 'Open the GSEA pathway dropdown and choose a different pathway if available.', nextLabel: tryIt }}),
-            step('GSEA enrichment profile', ['[data-gsea-pathway-panel]', '.cluster-PA-result'], [
-                'The green profile shows the running enrichment score along the ranked gene list.',
-                'Black ticks mark pathway genes, and the bottom distribution shows the ranking metric from one end of the contrast to the other.'
-            ], {{ condition: () => tutorialHasPseudobulk() && hasPathwayPanel(), action: () => openTutorialInsightsPanel('compare', 'cell-de'), task: 'Inspect where the black ticks cluster and where the enrichment score peaks.', nextLabel: tryIt }}),
-            step('Pathway downloads', ['.cluster-PA-result', '[data-pathway-download]'], [
-                'Pathway panels include downloads for plots or full raw tables depending on the active subview.',
-                'Use these for reports instead of screenshotting the whole viewer.'
-            ], {{ condition: () => tutorialHasPseudobulk() && hasPathwayPanel(), action: () => openTutorialInsightsPanel('compare', 'cell-de'), task: 'Find the download button in ORA or GSEA.', nextLabel: tryIt }}),
-            step('Complex pseudobulk design', ['#complex-pseudobulk-design', '#compare-tab-complex-contrast-content'], [
-                'Complex design is reserved for more advanced pseudobulk contrasts when exported or configured.',
-                'Use Simple design first unless your question requires a custom design.'
-            ], {{ action: () => openTutorialInsightsPanel('compare', 'complex-contrast'), task: 'Open Complex design and read what inputs are available.', nextLabel: tryIt }}),
-            step('Relationships river plot', ['#river-plot', '#compare-tab-river-content'], [
-                'The Relationships view shows how categories from two annotations correspond.',
-                'It helps translate between annotation levels, clustering resolutions, or curated labels.'
-            ], {{ action: () => openTutorialInsightsPanel('compare', 'river'), task: 'Choose the target annotation and inspect the largest flows.', nextLabel: tryIt }}),
-            step('River direction and export', ['#river-swap', '#river-export', '#river-plot'], [
-                'The river swap button reverses the relationship direction.',
-                'The export button downloads the correspondence table for downstream use.'
-            ], {{ action: () => openTutorialInsightsPanel('compare', 'river'), task: 'Swap direction once and observe how the labels move.', nextLabel: tryIt }}),
-            step('Neighbors overview', ['#color-tab-neighbors-content', '#neighbor-stats'], [
-                'Neighbors panels use spatial adjacency to summarize which categories are near each other.',
-                'They depend on neighbor stats calculated at export for the selected annotation.'
-            ], {{ condition: tutorialHasNeighborhoods, action: () => openTutorialInsightsPanel('neighbors', 'enrichment'), task: 'Open Neighbors > Enrichment.', nextLabel: tryIt }}),
-            step('Neighbor enrichment table', ['#neighbor-stats', '#neighbors-tab-enrichment-content'], [
-                'The table view reports observed neighbor relationships and enrichment metrics.',
-                'Start here when you need exact category-pair values.'
-            ], {{ condition: tutorialHasNeighborhoods, action: () => openTutorialInsightsPanel('neighbors', 'enrichment'), task: 'Read one row and identify source, target, and metric columns.', nextLabel: tryIt }}),
-            step('Neighbor network view', ['[data-neighbor-view="bubble"]', '#neighbor-stats'], [
-                'Network view turns neighbor relationships into nodes and edges.',
-                'It is better for seeing global interaction structure than reading a long table.'
-            ], {{ condition: tutorialHasNeighborhoods, action: () => openTutorialInsightsPanel('neighbors', 'enrichment'), task: 'Switch to Network view and hover a node or edge.', nextLabel: tryIt }}),
-            step('Neighbor chord view', ['[data-neighbor-view="chord"]', '#neighbor-stats'], [
-                'Chord view emphasizes pairwise connections as ribbons around a circle.',
-                'It is useful when many categories interact and you need a compact relationship view.'
-            ], {{ condition: tutorialHasNeighborhoods, action: () => openTutorialInsightsPanel('neighbors', 'enrichment'), task: 'Switch to Chord view and change the ordering if controls are present.', nextLabel: tryIt }}),
-            step('Neighbor visualization controls', ['#neighbor-metric-mode', '#neighbor-threshold-range', '#neighbor-max-categories'], [
-                'Neighbor visualization controls change metric, threshold, labels, focus behavior, and maximum categories.',
-                'They help reduce clutter without changing the underlying neighbor statistics.'
-            ], {{ condition: tutorialHasNeighborhoods, action: () => openTutorialInsightsPanel('neighbors', 'enrichment'), task: 'Adjust the minimum strength or max category control and observe the plot.', nextLabel: tryIt }}),
-            step('Neighbor interaction markers', ['#interaction-source', '#interaction-browser'], [
-                'Interactions shows contact-conditioned marker results by source and target category.',
-                'It asks which genes differ when source cells are near a target category.'
-            ], {{ condition: tutorialHasNeighborhoods, action: () => openTutorialInsightsPanel('neighbors', 'interactions'), task: 'Choose an interaction source and filter target names if the list is long.', nextLabel: tryIt }}),
-            step('Neighbor dispersion', ['#dispersion-panel', '#neighbors-tab-dispersion-content'], [
-                'Dispersion summarizes whether categories are spatially clustered, dispersed, or near-random compared with the all-cell layout.',
-                'Use it to separate local neighborhood enrichment from whole-section spatial patterning.'
-            ], {{ condition: tutorialHasNeighborhoods, action: () => openTutorialInsightsPanel('neighbors', 'dispersion'), task: 'Open Dispersion and compare at least two categories.', nextLabel: tryIt }}),
-            step('No neighbor stats warning', ['#neighbors-stats-warning', '#color-tab-neighbors-content'], [
-                'If a selected annotation has no exported neighbor stats, the panel shows a yellow warning instead of stale results.',
-                'Switch to an annotation chip listed in the warning to view available stats.'
-            ], {{ condition: tutorialHasNeighborhoods, action: () => openTutorialInsightsPanel('neighbors', 'enrichment'), task: 'Change the Exploration annotation and check whether the neighbor panel updates.', nextLabel: tryIt }}),
-            step('Panel-specific download buttons', ['#marker-genes-export-btn', '#gene-distribution-export-svg', '#gene-means-export-svg'], [
-                'Many Insights panels have their own download button next to the active plot or table.',
-                'These are more precise than the global export menu because they download the current analysis view.'
-            ], {{ action: () => openTutorialInsightsPanel('genes', 'de-genes'), task: 'Find one panel-specific download button and read its tooltip.', nextLabel: tryIt }}),
-            step('Calculation info buttons', ['.calc-info-btn', '#color-panel'], [
-                'Calculation info buttons explain formulas, filters, and thresholds for the active metric.',
-                'Use them whenever you need to know how a plot or table was generated.'
-            ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); }}, task: 'Click any calculation info button visible in the current panel.', nextLabel: tryIt }}),
-            step('Keyboard shortcuts overlay', ['#shortcuts-overlay', '#info-trigger'], [
-                'The keyboard shortcut overlay opens with the question-mark key.',
-                'Shortcuts are disabled while typing in inputs, selects, or textareas.'
-            ], {{ task: 'Press ? to open shortcuts, then close the overlay.', nextLabel: tryIt }}),
-            step('Use I for Insights', ['#color-toggle', '#color-panel'], [
-                'The I key toggles the Insights panel.',
-                'This is the fastest way to move between full-grid browsing and analysis summaries.'
-            ], {{ task: 'Press I twice and watch the Insights panel open and close.', nextLabel: tryIt }}),
-            step('Use L for Legend', ['#legend-toggle', '#legend'], [
-                'The L key toggles the legend.',
-                'This is helpful on small screens where the legend takes space.'
-            ], {{ task: 'Press L twice and watch the legend open and close.', nextLabel: tryIt }}),
-            step('Use slash for gene search', ['#gene-input', '#visual-gene-controls'], [
-                'The slash key focuses gene search when you are not typing elsewhere.',
-                'This makes expression lookup faster during review sessions.'
-            ], {{ action: () => safeTutorialClick('#default-source-gene'), task: 'Press / and type part of a gene name.', nextLabel: tryIt }}),
-            step('Recommended first-pass workflow', ['#grid-stage', '#color-panel'], [
-                'A practical first pass is: choose annotation, check legend, apply section filters, scan the grid, inspect one modal, then open Insights.',
-                'Do this before interpreting DE or pathway results.'
-            ], {{ task: 'Mentally map where you are in that workflow for this dataset.', nextLabel: tryIt }}),
-            step('Recommended expression workflow', ['#gene-input-shell', '#gene-discovery-panel'], [
-                'For a gene-focused pass: search gene, tune scale, inspect spatial panels, open modal, then check gene distribution and means in Insights.',
-                'If sidecar mode is active, remember that first load can fetch external shards.'
-            ], {{ action: () => safeTutorialClick('#default-source-gene'), task: 'Pick one gene you care about and follow the first two steps of this workflow.', nextLabel: tryIt }}),
-            step('Recommended DE workflow', ['#cluster-de-results', '#compare-tab-cell-de-content'], [
-                'For pseudobulk DE: choose categories, read warnings, inspect raw table, check MA and volcano plots, review sample diagnostics, then inspect pathways.',
-                'The order matters because diagnostics and warnings affect how much you should trust the table.'
-            ], {{ condition: tutorialHasPseudobulk, action: () => openTutorialInsightsPanel('compare', 'cell-de'), task: 'Follow the order shown here for one contrast.', nextLabel: tryIt }}),
-            step('Recommended neighborhood workflow', ['#neighbor-stats', '#color-tab-neighbors-content'], [
-                'For spatial neighborhoods: choose annotation, start with enrichment table, switch to network or chord, then inspect interactions and dispersion.',
-                'This separates pairwise adjacency, contact-conditioned genes, and whole-section spatial patterning.'
-            ], {{ condition: tutorialHasNeighborhoods, action: () => openTutorialInsightsPanel('neighbors', 'enrichment'), task: 'Follow this order for one annotation.', nextLabel: tryIt }}),
+            ], {{ action: () => openTutorialInsightsPanel('compare', 'cell-de'), task: 'Choose Annotation A and B if selectors are available.', combineTargets: true, prepareDelay: 420, nextLabel: tryIt }}),
+            step('Compare Simple design view switch', ['#cluster-de-section-title', '#cluster-de-results .cluster-de-panel-mode-switch'], [
+                'The Simple design switch separates the contrast into Raw table, Genes, and Samples views.',
+                'Raw table shows exact DE rows, Genes shows MA and volcano plots, and Samples shows pseudobulk diagnostics such as PCA or distance matrix.'
+            ], {{ action: () => openTutorialInsightsPanel('compare', 'cell-de'), combineTargets: true, prepareDelay: 420, scrollDelay: 620, spotlightPadding: 2, nextLabel: tryIt }}),
+            step('Compare Simple design pathway switch', ['#pathway-enrichment-title', '#compare-tab-cell-de-content [data-pathway-annotation-select]', '#compare-tab-cell-de-content .pathway-panel-mode-switch'], [
+                'When pathway enrichment is available, the pathway switch changes between ORA pathways and GSEA enrichment.',
+                'ORA summarizes significant DE genes, while GSEA follows a ranked gene list across the full contrast.'
+            ], {{ condition: hasPathwayPanel, action: () => openTutorialInsightsPanel('compare', 'cell-de'), combineTargets: true, prepareDelay: 520, scrollDelay: 720, spotlightPadding: 2, nextLabel: tryIt }}),
+            step('Open Compare > Relationships', '[data-insights-tree-leaf="river"][data-insights-tree-parent="compare"]', [
+                'Open Visualization, then Compare, then Relationships to inspect how two annotations correspond.'
+            ], {{ action: () => openTutorialVisualizationLeafMenu('compare', 'river'), task: 'Click Relationships in Compare.', nextLabel: tryIt }}),
+            step('Compare Relationships panel', ['#river-plot', '#compare-tab-river-content'], [
+                'Relationships shows how categories from two annotations map to each other.',
+                'Use it to translate between annotation levels, clustering resolutions, or curated labels.'
+            ], {{ action: () => openTutorialInsightsPanel('compare', 'river'), nextLabel: tryIt }}),
+            step('Compare Relationships controls', ['#river-right', '#river-swap', '#river-export'], [
+                'The Relationships controls choose the second annotation, reverse the direction, and export the correspondence table.'
+            ], {{ action: () => openTutorialInsightsPanel('compare', 'river'), combineTargets: true, prepareDelay: 420, scrollDelay: 520, nextLabel: tryIt }}),
+            step('Open Neighbors > Enrichment', '[data-insights-tree-leaf="enrichment"][data-insights-tree-parent="neighbors"]', [
+                'Open Visualization, then Neighbors, then Enrichment to inspect spatial adjacency enrichment.'
+            ], {{ action: () => openTutorialVisualizationLeafMenu('neighbors', 'enrichment'), task: 'Click Enrichment in Neighbors.', nextLabel: tryIt }}),
+            step('Neighbors Enrichment panel', ['#neighbor-stats', '#neighbors-tab-enrichment-content'], [
+                'Enrichment summarizes which annotation categories are observed near each other more or less often than expected.'
+            ], {{ action: () => openTutorialInsightsPanel('neighbors', 'enrichment'), nextLabel: tryIt }}),
+            step('Neighbors Enrichment view switch', '.neighbor-view-buttons', [
+                'The Enrichment switch changes between table, network, and chord views.'
+            ], {{ action: () => openTutorialInsightsPanel('neighbors', 'enrichment'), nextLabel: tryIt }}),
+            step('Open Neighbors > Interactions', '[data-insights-tree-leaf="interactions"][data-insights-tree-parent="neighbors"]', [
+                'Open Visualization, then Neighbors, then Interactions to inspect contact-conditioned marker genes.'
+            ], {{ action: () => openTutorialVisualizationLeafMenu('neighbors', 'interactions'), task: 'Click Interactions in Neighbors.', nextLabel: tryIt }}),
+            step('Neighbors Interactions panel', ['#interaction-browser', '#neighbors-tab-interactions-content'], [
+                'Interactions compares source cells based on which target categories they touch.',
+                'Use it to inspect marker genes associated with local neighborhood context when interaction markers were exported.'
+            ], {{ action: () => openTutorialInsightsPanel('neighbors', 'interactions'), nextLabel: tryIt }}),
+            step('Neighbors Interactions controls', ['#interaction-source', '#interaction-search'], [
+                'The Interactions controls choose the source category and filter target names.'
+            ], {{ action: () => openTutorialInsightsPanel('neighbors', 'interactions'), combineTargets: true, prepareDelay: 420, scrollDelay: 520, nextLabel: tryIt }}),
+            step('Open Neighbors > Dispersion', '[data-insights-tree-leaf="dispersion"][data-insights-tree-parent="neighbors"]', [
+                'Open Visualization, then Neighbors, then Dispersion to inspect whole-section spatial patterning.'
+            ], {{ action: () => openTutorialVisualizationLeafMenu('neighbors', 'dispersion'), task: 'Click Dispersion in Neighbors.', nextLabel: tryIt }}),
+            step('Neighbors Dispersion panel', ['#dispersion-panel', '#neighbors-tab-dispersion-content'], [
+                'Dispersion summarizes whether categories look clustered, dispersed, or close to random across all cells.',
+                'It complements neighbor enrichment by describing global spatial arrangement rather than only immediate adjacency.'
+            ], {{ action: () => openTutorialInsightsPanel('neighbors', 'dispersion'), nextLabel: tryIt }}),
             step('Finish the tutorial', ['#tutorial-trigger', '.header-title-row'], [
-                'You have now touched the major viewer workflows: browsing, filters, genes, modal inspection, selections, annotations, Insights, DE, pathways, neighbors, and exports.',
+                'You have now touched the major viewer workflows: browsing, filters, genes, modal inspection, selections, annotations, and Insights.',
                 'Restart the tutorial from the graduation-cap button if you want to revisit any workflow.'
-            ], {{ task: 'Decide which steps felt unnecessary; those can be removed from future versions.', nextLabel: 'Finish' }})
+            ], {{ nextLabel: 'Finish' }})
         ];
         const geneStartIndex = rawSteps.findIndex(item => item.title === 'Switch to Gene source');
         const geneEndIndex = rawSteps.findIndex(item => item.title === 'Open a section modal');
@@ -9716,12 +9681,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ['Select cells for Region', 'Region'],
             ['Module gene picker', 'Module'],
             ['Exploration annotation selector', 'Exploration'],
-            ['Compare: Simple design', 'Pseudobulk DE'],
-            ['Pathway Enrichment section', 'Pathway Enrichment'],
-            ['Complex pseudobulk design', 'Compare Workflows'],
-            ['Neighbors overview', 'Neighbors'],
-            ['Panel-specific download buttons', 'Exports and Shortcuts'],
-            ['Recommended first-pass workflow', 'Recommended Workflows'],
+            ['Open Overview > Summary', 'Exploration > Overview'],
+            ['Open Genes > Markers', 'Exploration > Genes'],
+            ['Open Compare > Per cell > Selections', 'Exploration > Compare'],
+            ['Open Neighbors > Enrichment', 'Exploration > Neighbors'],
             ['Finish the tutorial', 'Finish']
         ]);
         let currentChapter = 'Introduction';
@@ -9892,6 +9855,25 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
     }}
 
+    function ensureTutorialInsightsGeneSelected() {{
+        const select = document.getElementById('marker-gene-search');
+        if (!select) return;
+        if (getInsightsSelectedGene()) return;
+        const firstOption = Array.from(select.options || []).find(option => String(option.value || '').trim());
+        if (!firstOption) return;
+        select.value = firstOption.value;
+        if (typeof activateViewerGene === 'function') {{
+            activateViewerGene(firstOption.value, {{ showErrors: false }})
+                .then(() => {{
+                    renderActiveInsightsPanel?.();
+                    updateTutorialStepGate?.();
+                }})
+                .catch(error => console.warn('Tutorial insights gene selection failed', error));
+        }} else {{
+            updateTutorialStepGate?.();
+        }}
+    }}
+
     function clearTutorialGeneInput() {{
         const geneInput = document.getElementById('gene-input');
         if (geneInput) geneInput.value = '';
@@ -9974,7 +9956,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const isSplitGeneScaleStep = title === 'Gene expression scale';
         const isSplitStep = title.startsWith('Open split') || title.startsWith('Split boundary') || title.startsWith('Choose split') || title.startsWith('Split expression') || isSplitGeneScaleStep;
 
-        if (chapter === 'Visual Setup' || isSplitStep || title === 'Recommended first-pass workflow') {{
+        if (chapter === 'Visual Setup' || isSplitStep) {{
             if (isSplitStep) {{
                 ensureTutorialSplitMode(title.startsWith('Split expression') || isSplitGeneScaleStep);
                 if (isSplitGeneScaleStep) prepareTutorialGeneExpressionScaleStep();
@@ -10005,7 +9987,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ensureTutorialDefaultMode('color');
         }}
 
-        if ((chapter === 'Gene Expression' || title === 'Use slash for gene search' || title === 'Recommended expression workflow') && !isSplitStep) {{
+        if (chapter === 'Gene Expression' && !isSplitStep) {{
             ensureTutorialDefaultMode('gene');
             if (title === 'Switch to Gene source') clearTutorialGeneInput();
             if (title === 'Gene input field') ensureTutorialFirstGeneSelected();
@@ -10223,8 +10205,28 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }};
     }}
 
+    function getTutorialInsightsLeafTarget(step) {{
+        if (!step || !String(step.title || '').startsWith('Open ')) return null;
+        const target = Array.isArray(step.target) ? step.target.find(item => String(item || '').includes('data-insights-tree-leaf')) : step.target;
+        const text = String(target || '');
+        const leafMatch = text.match(/data-insights-tree-leaf="([^"]+)"/);
+        const parentMatch = text.match(/data-insights-tree-parent="([^"]+)"/);
+        if (!leafMatch || !parentMatch) return null;
+        return {{ topLevel: parentMatch[1], subtab: leafMatch[1] }};
+    }}
+
+    function tutorialInsightsLeafTargetMatches(step, topLevel, subtab) {{
+        const target = getTutorialInsightsLeafTarget(step);
+        return !!target && target.topLevel === topLevel && target.subtab === subtab;
+    }}
+
     function tutorialStepGateSatisfied(step) {{
         if (!step) return true;
+        const insightsLeafTarget = getTutorialInsightsLeafTarget(step);
+        if (insightsLeafTarget) {{
+            return insightsTreeSelectedLeaf?.topLevel === insightsLeafTarget.topLevel
+                && insightsTreeSelectedLeaf?.subtab === insightsLeafTarget.subtab;
+        }}
         if (step.requiresSelection) return selectedCells.size > 0;
         if (step.requiresRegionB) return selectedCellsB.size > 0;
         if (step.requiresRegionBCleared) return !tutorialRegionBClearStepStarted || selectedCellsB.size === 0;
@@ -10236,7 +10238,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (step.requiresSelectionMarkersClicked) return tutorialSelectionMarkersClicked === true;
         if (step.requiresModuleDraftGene) return geneModuleDraftGenes.length > 0;
         if (step.requiresModuleCreateClicked) return tutorialModuleCreateClicked === true;
-        if (step.requiresOverviewSummaryClicked) return tutorialOverviewSummaryClicked === true;
+        if (step.requiresInsightsGeneSelected) return !!getInsightsSelectedGene();
         return true;
     }}
 
@@ -10262,7 +10264,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         else if (blocked && step?.requiresSelectionMarkersClicked) next.title = 'Click the marker search icon to continue';
         else if (blocked && step?.requiresModuleDraftGene) next.title = 'Select at least one gene to continue';
         else if (blocked && step?.requiresModuleCreateClicked) next.title = 'Click the module sum button to continue';
-        else if (blocked && step?.requiresOverviewSummaryClicked) next.title = 'Click Summary to continue';
+        else if (blocked && step?.requiresInsightsGeneSelected) next.title = 'Enter or select a gene to continue';
+        else if (blocked && getTutorialInsightsLeafTarget(step)) next.title = 'Click the highlighted menu option to continue';
         else next.removeAttribute('title');
         if (!blocked && step?.autoNextWhenGateSatisfied) {{
             const stepAtSchedule = step;
@@ -10275,6 +10278,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 stepTutorial(1);
             }}, Number.isFinite(step.autoNextDelay) ? step.autoNextDelay : 180);
         }}
+    }}
+
+    function clickTutorialNextWhenCurrentStep(predicate, delay = 120) {{
+        if (!tutorialActive || typeof predicate !== 'function') return;
+        const stepAtSchedule = tutorialSteps[tutorialStepIndex];
+        const indexAtSchedule = tutorialStepIndex;
+        if (!predicate(stepAtSchedule) || !tutorialStepGateSatisfied(stepAtSchedule)) return;
+        window.setTimeout(() => {{
+            if (!tutorialActive) return;
+            if (tutorialStepIndex !== indexAtSchedule || tutorialSteps[tutorialStepIndex] !== stepAtSchedule) return;
+            if (!predicate(stepAtSchedule) || !tutorialStepGateSatisfied(stepAtSchedule)) return;
+            document.getElementById('tutorial-next')?.click();
+        }}, Number.isFinite(delay) ? delay : 120);
     }}
 
     function autoAdvanceTutorialAfterModalOpen() {{
@@ -10403,11 +10419,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             if (shouldScroll) {{
                 target.scrollIntoView?.({{ block: 'center', inline: 'center', behavior: 'smooth' }});
             }}
+            const scrollDelay = shouldScroll
+                ? (Number.isFinite(step.scrollDelay) ? Math.max(0, step.scrollDelay) : 180)
+                : 0;
             window.setTimeout(() => {{
                 if (!tutorialActive || activeRenderToken !== tutorialRenderToken) return;
                 tutorialStepIndex = index;
                 renderTutorialStep(target, step, getTutorialDisplayIndex(index));
-            }}, shouldScroll ? 180 : 0);
+            }}, scrollDelay);
         }}, Number.isFinite(step.prepareDelay) ? step.prepareDelay : 80);
     }}
 
@@ -17137,6 +17156,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         renderUMAP();
         renderAllSections();
         if (modalSection) renderModalSection();
+        updateSelectionInfo();
+        clickTutorialNextWhenCurrentStep(step => step?.requiresSelection || step?.requiresRegionB);
     }}
 
     function getGridLassoCanvas() {{
@@ -17233,6 +17254,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         renderUMAP();
         renderAllSections();
         if (modalSection) renderModalSection();
+        updateSelectionInfo();
+        clickTutorialNextWhenCurrentStep(step => step?.requiresSelection || step?.requiresRegionB);
     }}
 
     function escapeHtml(text) {{
@@ -19329,10 +19352,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 restored++;
                 return;
             }}
-            if (poly.type === 'cell-list' || poly.source_type === 'query' || poly.source_type === 'umap' || Array.isArray(poly.cell_keys)) {{
-                const cellKeys = Array.isArray(poly.cell_keys)
-                    ? poly.cell_keys.map(key => String(key || '')).filter(key => key.includes(':'))
-                    : [];
+            const importedCellKeys = Array.isArray(poly.cell_keys)
+                ? poly.cell_keys.map(key => String(key || '')).filter(key => key.includes(':'))
+                : [];
+            const isExplicitCellList = poly.type === 'cell-list' || poly.source_type === 'query' || poly.source_type === 'umap';
+            const hasCellListPayload = importedCellKeys.length > 0 && (!Array.isArray(poly.vertices) || poly.vertices.length < 3);
+            if (isExplicitCellList || hasCellListPayload) {{
+                const cellKeys = importedCellKeys;
                 const grouped = getSelectionLocalIndicesBySection(new Set(cellKeys));
                 const sectionIds = Array.from(grouped.keys());
                 const sectionId = sectionIds.length === 1 ? sectionIds[0] : (poly.section_id || null);
@@ -20507,6 +20533,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         renderAllSections();
         if (umapVisible) renderUMAP();
         if (modalSection) renderModalSection();
+        updateSelectionInfo();
+        clickTutorialNextWhenCurrentStep(step => step?.requiresSelection || step?.requiresRegionB);
     }}
 
     function updateUMAPLassoButtonState() {{
@@ -20569,6 +20597,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             renderUMAP();
             renderAllSections();
             if (modalSection) renderModalSection();
+            clickTutorialNextWhenCurrentStep(step => step?.requiresRegionBCleared);
             return;
         }}
         lassoModeB = true;
@@ -23233,6 +23262,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!INSIGHTS_SUBTABS[topLevel]?.includes(subtab)) return;
         insightsTopLevelTab = topLevel;
         setActiveInsightsSubtab(topLevel, subtab);
+        insightsTreeSelectedLeaf = {{ topLevel, subtab }};
+        insightsTreeOpen = false;
+        insightsTreeOpenBranch = null;
+        insightsTreeOpenCompareBranch = null;
+        insightsTreeOpenGenesBranch = null;
         renderActiveInsightsPanel();
     }}
 
@@ -24303,12 +24337,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 insightsTreeOpenCompareBranch = null;
                 insightsTreeOpenGenesBranch = null;
                 activateInsightsSubtab(topLevel, subtab);
-                if (tutorialActive && tutorialSteps[tutorialStepIndex]?.requiresOverviewSummaryClicked && topLevel === 'overview' && subtab === 'summary') {{
-                    tutorialOverviewSummaryClicked = true;
+                if (tutorialActive && tutorialInsightsLeafTargetMatches(tutorialSteps[tutorialStepIndex], topLevel, subtab)) {{
                     updateTutorialStepGate?.();
                     window.setTimeout(() => {{
                         if (!tutorialActive) return;
-                        if (!tutorialSteps[tutorialStepIndex]?.requiresOverviewSummaryClicked) return;
+                        if (!tutorialInsightsLeafTargetMatches(tutorialSteps[tutorialStepIndex], topLevel, subtab)) return;
                         document.getElementById('tutorial-next')?.click();
                     }}, 80);
                 }}
@@ -24316,19 +24349,34 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }});
         const markerSearch = document.getElementById('marker-gene-search');
         markerSearch?.addEventListener('change', async () => {{
+            const advanceTutorialFromInsightsGene = tutorialActive && tutorialSteps[tutorialStepIndex]?.requiresInsightsGeneSelected;
+            const advanceTutorialIfReady = () => {{
+                updateTutorialStepGate?.();
+                if (!advanceTutorialFromInsightsGene) return;
+                window.setTimeout(() => {{
+                    if (!tutorialActive) return;
+                    const activeStep = tutorialSteps[tutorialStepIndex];
+                    if (!activeStep?.requiresInsightsGeneSelected) return;
+                    if (!tutorialStepGateSatisfied(activeStep)) return;
+                    document.getElementById('tutorial-next')?.click();
+                }}, 80);
+            }};
             const gene = getInsightsSelectedGene();
             if (!gene) {{
                 await activateViewerGene('', {{ showErrors: false }});
+                advanceTutorialIfReady();
                 return;
             }}
             if (isEmbeddedViewerGene(gene)) {{
                 await activateViewerGene(gene, {{ showErrors: true }});
+                advanceTutorialIfReady();
                 return;
             }}
             // Balanced-rest results remain searchable even when their
             // expression vectors were intentionally omitted from the HTML.
             // Keep the selected term as a panel filter, without trying to load it.
             renderActiveInsightsPanel();
+            advanceTutorialIfReady();
         }});
         document.getElementById('marker-gene-search-clear')?.addEventListener('click', async () => {{
             const markerSearch = document.getElementById('marker-gene-search');
@@ -25457,8 +25505,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const label = entry.gene.slice(0, 18);
             const chipW = Math.max(34, Math.min(86, label.length * 6.1 + 14));
             const chipX = Math.max(ml, Math.min(W - mr - chipW, x - chipW / 2));
-            parts.push(`<rect x="${{chipX.toFixed(1)}}" y="${{(y - 8).toFixed(1)}}" width="${{chipW.toFixed(1)}}" height="16" rx="8" fill="#e7f0fa" stroke="#5d8fcb" data-volcano-gene="${{escapeHtml(entry.gene)}}" data-tooltip-title="${{escapeHtml(entry.gene)}}" data-tooltip-line1="Moran Index: ${{escapeHtml(entry.score.toFixed(4))}}" data-tooltip-line2="Rank: #${{entry.rank}}"/>`);
-            parts.push(`<text x="${{(chipX + chipW / 2).toFixed(1)}}" y="${{(y + 3.5).toFixed(1)}}" text-anchor="middle" font-size="9" fill="var(--text-color)" pointer-events="none">${{escapeHtml(label)}}</text>`);
+            parts.push(`<rect x="${{chipX.toFixed(1)}}" y="${{(y - 8).toFixed(1)}}" width="${{chipW.toFixed(1)}}" height="16" rx="8" fill="var(--spatial-gene-chip-bg)" stroke="var(--spatial-gene-chip-border)" stroke-width="1.2" data-volcano-gene="${{escapeHtml(entry.gene)}}" data-tooltip-title="${{escapeHtml(entry.gene)}}" data-tooltip-line1="Moran Index: ${{escapeHtml(entry.score.toFixed(4))}}" data-tooltip-line2="Rank: #${{entry.rank}}"/>`);
+            parts.push(`<text x="${{(chipX + chipW / 2).toFixed(1)}}" y="${{(y + 3.5).toFixed(1)}}" text-anchor="middle" font-size="9" font-weight="600" fill="var(--spatial-gene-chip-text)" pointer-events="none">${{escapeHtml(label)}}</text>`);
         }});
         parts.push(`<text class="volcano-axis-label" x="${{(ml + iw / 2).toFixed(1)}}" y="${{H - 2}}" text-anchor="middle">Moran Index</text>`);
         parts.push('</svg>');
@@ -28192,9 +28240,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ${{controlsHtml}}
             ${{contrastInfo}}
             ${{markerSection}}
-            <div class="selection-summary-title">Pseudobulk gene expression differential analysis${{renderCalcInfoButton('de_genes')}}</div>
+            <div class="selection-summary-title" id="cluster-de-section-title">Pseudobulk gene expression differential analysis${{renderCalcInfoButton('de_genes')}}</div>
             ${{renderClusterDEResultSection(clusterDeGroupby, clusterDeSourceCategory, clusterDeReferenceCategory)}}
-            ${{pathwaySection ? '<div class="selection-summary-title">Pathway Enrichment' + renderCalcInfoButton('pathway_enrichment_section') + '</div>' + pathwaySection : ''}}
+            ${{pathwaySection ? '<div class="selection-summary-title" id="pathway-enrichment-title">Pathway Enrichment' + renderCalcInfoButton('pathway_enrichment_section') + '</div>' + pathwaySection : ''}}
         `;
 
         const sourceSelect = container.querySelector('#cluster-de-source');
@@ -29244,7 +29292,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             : (!hasCompletedCalculation ? '<button class="selection-query-icon-btn" id="group-de-run" type="button" title="Find annotation markers" aria-label="Find annotation markers"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg></button>' : '');
         const controlsHtml = `
             <div class="selection-summary-title">Gene expression — annotation A vs annotation B${{renderCalcInfoButton('group_de')}}</div>
-            <div class="cluster-de-controls">
+            <div class="cluster-de-controls color-panel-section">
                 <div class="cluster-de-select-row comparison-pair-select-row">
                     <div><label>Annotation A</label><select id="group-de-source-value" style="border-color:${{colorA}}">${{renderValues(groupValues, groupDeSourceValue)}}</select></div>
                     <div><label>Annotation B</label><select id="group-de-reference-value" style="border-color:${{colorB}}">${{renderValues(groupValues, groupDeReferenceValue)}}</select></div>
@@ -33800,8 +33848,72 @@ def export_to_html(
         log_step("Computing pathway enrichment")
         log_detail(
             "Running ORA on significant DE genes and preranked GSEA on retained ranked genes; "
-            "output feeds Pathway Enrichment."
+            "output feeds Visualization > Compare > Per sample > Simple design > Pathway Enrichment."
         )
+        log_detail("Parameters:")
+        if pathway_gmt:
+            pathway_gmt_paths = [pathway_gmt] if isinstance(pathway_gmt, str) else list(pathway_gmt)
+            log_detail(
+                f"Gene sets: {len(pathway_gmt_paths)} GMT file(s) from --pathway-gmt.",
+                level=2,
+            )
+        else:
+            log_detail(
+                f"Gene sets: default Reactome library for organism={str(pathway_organism or 'Human')}.",
+                level=2,
+            )
+        log_detail(
+            f"ORA query genes: significant DE genes split by direction.",
+            level=2,
+        )
+        log_detail(
+            f"ORA DE threshold: padj < {float(pseudobulk_padj_cutoff):g} and "
+            f"|log2FC| >= {float(pseudobulk_log2fc_cutoff):g}.",
+            level=2,
+        )
+        log_detail(
+            "GSEA ranked genes: all retained genes per contrast after model and % expression filtering.",
+            level=2,
+        )
+        log_detail(
+            f"GSEA permutations: {int(pathway_gsea_permutations)}.",
+            level=2,
+        )
+        log_detail(
+            f"Minimum pathway overlap: {int(pathway_min_overlap)} gene(s).",
+            level=2,
+        )
+        log_detail(
+            f"Top pathways stored per direction: {int(pathway_top_n)}.",
+            level=2,
+        )
+
+        def _log_pathway_progress(event: Mapping[str, Any]) -> None:
+            if event.get("event") != "comparison_done":
+                return
+            source = str(event.get("source") or "Annotation A")
+            reference = str(event.get("reference") or "Annotation B")
+            color_col = str(event.get("color_col") or annotation)
+            log_detail(
+                f"[{int(event.get('index') or 0)}/{int(event.get('total') or 0)}] "
+                f"{color_col}: {source} vs {reference}: pathway comparison done."
+            )
+            log_detail(
+                f"ORA done: {int(event.get('ora_up') or 0)} pathways favor {source}, "
+                f"{int(event.get('ora_down') or 0)} pathways favor {reference}.",
+                level=2,
+            )
+            log_detail(
+                f"GSEA done: {int(event.get('gsea_positive') or 0)} profiles favor {source}, "
+                f"{int(event.get('gsea_negative') or 0)} profiles favor {reference}.",
+                level=2,
+            )
+            if not event.get("stored"):
+                log_detail(
+                    "No ORA or GSEA pathways passed retention filters for this comparison.",
+                    level=2,
+                )
+
         data["pathway_settings"] = add_pathway_enrichment_to_pseudobulk_de(
             data.get("pseudobulk_de"),
             pathway_gmt=pathway_gmt,
@@ -33809,16 +33921,33 @@ def export_to_html(
             min_overlap=int(pathway_min_overlap),
             gsea_permutations=int(pathway_gsea_permutations),
             organism=str(pathway_organism or "Human"),
+            progress_callback=_log_pathway_progress,
         )
         if not data["pathway_settings"].get("available"):
             reason = data["pathway_settings"].get("reason") or "unavailable"
             error = data["pathway_settings"].get("error")
             log_warning(f"pathway enrichment unavailable ({reason}{': ' + error if error else ''}).")
         else:
+            source = data["pathway_settings"].get("source") or "pathway source"
+            gene_set_count = int(data["pathway_settings"].get("gene_set_count") or 0)
+            if source == "reactome":
+                library = data["pathway_settings"].get("library") or "Reactome"
+                organism = data["pathway_settings"].get("organism") or str(pathway_organism or "Human")
+                log_detail(
+                    f"Loaded {gene_set_count:,} pathway gene sets from {library} ({organism}).",
+                    level=2,
+                )
+            elif source == "gmt":
+                files = data["pathway_settings"].get("files") or []
+                log_detail(
+                    f"Loaded {gene_set_count:,} pathway gene sets from {len(files)} GMT file(s).",
+                    level=2,
+                )
             log_detail(
-                f"Pathway enrichment stored with top_n={int(pathway_top_n)}, "
-                f"min_overlap={int(pathway_min_overlap)}, "
-                f"GSEA permutations={int(pathway_gsea_permutations)}."
+                f"Stored pathway enrichment for "
+                f"{int(data['pathway_settings'].get('enriched_comparisons') or 0):,}/"
+                f"{int(data['pathway_settings'].get('comparisons') or 0):,} pseudobulk comparisons.",
+                level=2,
             )
     except Exception as exc:
         data["pathway_settings"] = {

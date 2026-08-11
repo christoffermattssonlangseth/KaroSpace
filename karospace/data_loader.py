@@ -2347,25 +2347,25 @@ class SpatialDataset:
                     if groupby_pairwise_categories
                     else "all categories"
                 )
+                log_detail("Parameters:", level=2)
                 log_detail(
-                    "Parameters: "
-                    f"model=shared_all_category(~ {pseudobulk_replicate_name} + {groupby_name}); "
-                    "rest=balanced_equal_category_weight; "
-                    f"counts_layer={pseudobulk_counts_layer or 'X'}; "
-                    f"min_cell_counts={pseudobulk_min_cell_counts_n}; "
-                    f"min_gene_counts={pseudobulk_min_gene_counts_n}; "
-                    f"min_cells_per_pseudobulk={pseudobulk_min_cells_n}; "
-                    f"min_replicates={max(2, pseudobulk_min_rep_n)}; "
-                    f"min_pct_expressed={pseudobulk_min_pct_n:g}; "
-                    f"p_adjust={pseudobulk_p_adjust_method}; "
-                    f"padj_cutoff={pseudobulk_padj_cutoff_n:g}; "
-                    f"log2fc_cutoff={pseudobulk_log2fc_cutoff_n:g}; "
-                    f"fit_type={pseudobulk_deseq2_fit_type}; "
-                    f"n_cpus={pseudobulk_n_cpus_n}; "
-                    "diagnostics=pairwise; "
-                    f"reported_pairwise_categories={pairwise_categories_label}",
-                    level=2,
+                    f"model=shared_all_category(~ {pseudobulk_replicate_name} + {groupby_name})",
+                    level=3,
                 )
+                log_detail("rest=balanced_equal_category_weight", level=3)
+                log_detail(f"counts_layer={pseudobulk_counts_layer or 'X'}", level=3)
+                log_detail(f"min_cell_counts={pseudobulk_min_cell_counts_n}", level=3)
+                log_detail(f"min_gene_counts={pseudobulk_min_gene_counts_n}", level=3)
+                log_detail(f"min_cells_per_pseudobulk={pseudobulk_min_cells_n}", level=3)
+                log_detail(f"min_replicates={max(2, pseudobulk_min_rep_n)}", level=3)
+                log_detail(f"min_pct_expressed={pseudobulk_min_pct_n:g}", level=3)
+                log_detail(f"p_adjust={pseudobulk_p_adjust_method}", level=3)
+                log_detail(f"padj_cutoff={pseudobulk_padj_cutoff_n:g}", level=3)
+                log_detail(f"log2fc_cutoff={pseudobulk_log2fc_cutoff_n:g}", level=3)
+                log_detail(f"fit_type={pseudobulk_deseq2_fit_type}", level=3)
+                log_detail(f"n_cpus={pseudobulk_n_cpus_n}", level=3)
+                log_detail("diagnostics=pairwise", level=3)
+                log_detail(f"reported_pairwise_categories={pairwise_categories_label}", level=3)
                 groupby_results = compute_pseudobulk_group_de(
                     self.adata,
                     groupby_name,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
 from scipy.stats import hypergeom
@@ -543,6 +543,7 @@ def add_pathway_enrichment_to_pseudobulk_de(
     gsea_permutations: int = 100,
     seed: int = 0,
     organism: str = "Human",
+    progress_callback: Optional[Callable[[Mapping[str, Any]], None]] = None,
 ) -> Dict[str, Any]:
     """Attach pathway enrichment summaries to every available pseudobulk DE result."""
     settings: Dict[str, Any] = {
@@ -559,8 +560,8 @@ def add_pathway_enrichment_to_pseudobulk_de(
         settings["reason"] = "no_pseudobulk_de"
         return settings
 
-    has_comparison = False
-    for _color_col, by_source in pseudobulk_de.items():
+    comparison_items: List[Tuple[str, str, str, Dict[str, Any]]] = []
+    for color_col, by_source in pseudobulk_de.items():
         if not isinstance(by_source, dict):
             continue
         for source, by_reference in by_source.items():
@@ -569,13 +570,8 @@ def add_pathway_enrichment_to_pseudobulk_de(
             for reference, result in by_reference.items():
                 if str(reference).startswith("_") or not isinstance(result, dict):
                     continue
-                has_comparison = True
-                break
-            if has_comparison:
-                break
-        if has_comparison:
-            break
-    if not has_comparison:
+                comparison_items.append((str(color_col), str(source), str(reference), result))
+    if not comparison_items:
         settings["reason"] = "no_pseudobulk_comparisons"
         return settings
 
@@ -590,28 +586,37 @@ def add_pathway_enrichment_to_pseudobulk_de(
 
     comparison_count = 0
     enriched_count = 0
-    for _color_col, by_source in pseudobulk_de.items():
-        if not isinstance(by_source, dict):
-            continue
-        for source, by_reference in by_source.items():
-            if str(source).startswith("_") or not isinstance(by_reference, dict):
-                continue
-            for reference, result in by_reference.items():
-                if str(reference).startswith("_") or not isinstance(result, dict):
-                    continue
-                comparison_count += 1
-                enrichment = enrich_pseudobulk_result(
-                    result,
-                    gene_sets,
-                    top_n=int(top_n),
-                    min_overlap=int(min_overlap),
-                    max_pathway_size=int(max_pathway_size),
-                    gsea_permutations=int(gsea_permutations),
-                    seed=int(seed) + comparison_count,
-                )
-                if enrichment:
-                    result["pathway_enrichment"] = enrichment
-                    enriched_count += 1
+    total_comparisons = len(comparison_items)
+    for color_col, source, reference, result in comparison_items:
+        comparison_count += 1
+        enrichment = enrich_pseudobulk_result(
+            result,
+            gene_sets,
+            top_n=int(top_n),
+            min_overlap=int(min_overlap),
+            max_pathway_size=int(max_pathway_size),
+            gsea_permutations=int(gsea_permutations),
+            seed=int(seed) + comparison_count,
+        )
+        if enrichment:
+            result["pathway_enrichment"] = enrichment
+            enriched_count += 1
+        ora = (enrichment or {}).get("ora") if isinstance(enrichment, dict) else {}
+        gsea = (enrichment or {}).get("gsea") if isinstance(enrichment, dict) else {}
+        if progress_callback is not None:
+            progress_callback({
+                "event": "comparison_done",
+                "index": int(comparison_count),
+                "total": int(total_comparisons),
+                "color_col": color_col,
+                "source": source,
+                "reference": reference,
+                "ora_up": len((ora or {}).get("up") or []),
+                "ora_down": len((ora or {}).get("down") or []),
+                "gsea_positive": len((gsea or {}).get("positive") or []),
+                "gsea_negative": len((gsea or {}).get("negative") or []),
+                "stored": bool(enrichment),
+            })
     settings["comparisons"] = int(comparison_count)
     settings["enriched_comparisons"] = int(enriched_count)
     return settings
