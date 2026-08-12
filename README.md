@@ -111,7 +111,8 @@ python -m pip install -e ".[spatialdata]"
 
 ## Usage
 
-See [FEATURES_SUMMARY.md](FEATURES_SUMMARY.md) for a guided overview of the main HTML viewer features.
+> [!NOTE]
+> See [FEATURES_SUMMARY.md](FEATURES_SUMMARY.md) for a guided overview of the main HTML viewer features.
 
 ### Python API
 
