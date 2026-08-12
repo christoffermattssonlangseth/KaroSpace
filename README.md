@@ -32,60 +32,12 @@ Visit [KaroSpace Website](https://karospace.se/).
 - [x] **Compact sidecar** — Keep large gene matrices outside the HTML with lazy-loaded sidecar manifests and binary shards for lighter initial viewer files
 - [x] **Shareable packages** — Export as `.karospace` bundles (ZIP + viewer HTML)
 
-
-## Browser Considerations
-
-KaroSpace is canvas-heavy. Chrome/Chromium is generally fastest; Safari can be noticeably slower on large datasets. The viewer caps canvas DPR at `1.0` in Safari by default to reduce pixel work on Retina displays.
-
-For large datasets:
-- Use `downsample` to limit cells per section
-- Lower `min_panel_size` to reduce pixels drawn per thumbnail
-- Keep the neighbor graph toggle off unless needed
-
-## Installation
-
-### From source
-
-```bash
-git clone https://github.com/christoffermattssonlangseth/karospace.git
-cd karospace
-pip install -e .
-```
-
-### Dependencies
-
-- Python >= 3.9
-- scanpy >= 1.9.0
-- anndata >= 0.8.0
-- numpy >= 1.20.0
-- pandas >= 1.3.0
-- pydeseq2 >= 0.5.0
-- scipy >= 1.7.0
-- gseapy >= 1.1.0
-- tqdm >= 4.66.0
-
-SpatialData input is optional. Install the extra only when you want to load SpatialData `.zarr` stores directly:
-
-```bash
-pip install -e ".[spatialdata]"
-```
-
-If KaroSpace is already installed and you want to reinstall the local checkout after editing the source:
-
-```bash
-python -m pip uninstall karospace -y
-python -m pip install -e .
-```
-
-Install the SpatialData extra in the same environment if `import spatialdata` fails:
-
-```bash
-python -m pip install -e ".[spatialdata]"
-```
-
 ## Quick Start
 
-### Desktop GUI (KaroSpaceBuilder)
+> [!NOTE]
+> No code.
+
+A GUI version of KaroSpace (`KaroSpaceBuilder`) has been developed to allow researchers with moderate computational skills to create HTML file.
 
 Prebuilt executables are available from the
 [`KaroSpaceBuilder` Releases](https://github.com/christoffermattssonlangseth/KaroSpaceBuilder/releases) page:
@@ -118,6 +70,47 @@ karospacebuilder   # or: karospace-gui
 4. Open `Advanced` only if needed, then export
 
 Output is written to `<output_dir>/index.html`.
+
+## Installation
+
+```bash
+git clone https://github.com/christoffermattssonlangseth/karospace.git
+cd karospace
+pip install -e .
+```
+
+> [!WARNING]
+```bash
+- Python >= 3.9
+- scanpy >= 1.9.0
+- anndata >= 0.8.0
+- numpy >= 1.20.0
+- pandas >= 1.3.0
+- pydeseq2 >= 0.5.0
+- scipy >= 1.7.0
+- gseapy >= 1.1.0
+- tqdm >= 4.66.0
+```
+
+SpatialData input is optional. Install the extra only when you want to load SpatialData `.zarr` stores directly:
+
+```bash
+pip install -e ".[spatialdata]"
+```
+
+If KaroSpace is already installed and you want to reinstall the local checkout after editing the source:
+
+```bash
+python -m pip uninstall karospace -y
+python -m pip install -e .
+```
+
+Install the SpatialData extra in the same environment if `import spatialdata` fails:
+
+```bash
+python -m pip install -e ".[spatialdata]"
+```
+
 
 ### Python API
 
@@ -578,6 +571,15 @@ integrate_polygon_annotations(
 )
 adata.write_h5ad("your_data_with_polygons.h5ad")
 ```
+
+## Browser Considerations
+
+KaroSpace is canvas-heavy. Chrome/Chromium is generally fastest; Safari can be noticeably slower on large datasets. The viewer caps canvas DPR at `1.0` in Safari by default to reduce pixel work on Retina displays.
+
+For large datasets:
+- Use `downsample` to limit cells per section
+- Lower `min_panel_size` to reduce pixels drawn per thumbnail
+- Keep the neighbor graph toggle off unless needed
 
 ## License
 
