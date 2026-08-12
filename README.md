@@ -76,7 +76,7 @@ cd karospace
 pip install -e .
 ```
 
-> [!WARNING : Dependencies]
+> [!WARNING] Dependencies
 > ```bash
 > - Python >= 3.9
 > - scanpy >= 1.9.0
