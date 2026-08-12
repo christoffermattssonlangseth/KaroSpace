@@ -34,9 +34,6 @@ Visit [KaroSpace Website](https://karospace.se/).
 
 ## Quick Start
 
-> [!NOTE]
-> No code.
-
 A GUI version of KaroSpace (`KaroSpaceBuilder`) has been developed to allow researchers with moderate computational skills to create HTML file.
 
 Prebuilt executables are available from the
@@ -79,7 +76,7 @@ cd karospace
 pip install -e .
 ```
 
-> [!WARNING]
+> [!WARNING : Dependencies]
 > ```bash
 > - Python >= 3.9
 > - scanpy >= 1.9.0
