@@ -37,7 +37,7 @@ Visit [KaroSpace Website](https://karospace.se/).
 A GUI version of KaroSpace (`KaroSpaceBuilder`) has been developed to allow researchers with moderate computational skills to create HTML file.
 
 Prebuilt executables are available from the
-[`KaroSpaceBuilder` Releases](https://github.com/christoffermattssonlangseth/KaroSpaceBuilder/releases) page:
+[KaroSpaceBuilder Releases](https://github.com/christoffermattssonlangseth/KaroSpaceBuilder/releases) page:
 - Apple Silicon: `KaroSpaceBuilder-macos-arm64.zip`
 - Windows: `KaroSpaceBuilder-windows.zip`
 - Linux: `KaroSpaceBuilder-linux.zip`
