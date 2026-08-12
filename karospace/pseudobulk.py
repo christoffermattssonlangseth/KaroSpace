@@ -314,7 +314,7 @@ def _estimate_shared_deseq2_fit_seconds(
     workers = max(1, int(n_cpus))
     parallel_speedup = 1.0 + 0.75 * (workers - 1)
     central_seconds = max(60.0, 6.0 * sample_gene_millions * design_factor / parallel_speedup)
-    return 0.7 * central_seconds
+    return central_seconds
 
 
 def _compute_pseudobulk_sample_diagnostics(
