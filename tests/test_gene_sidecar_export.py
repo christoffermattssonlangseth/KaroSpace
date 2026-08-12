@@ -244,14 +244,18 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
 
     assert embedded["available_genes"] == ["G1", "G2", "G3"]
     assert embedded["gene_aux_url"] == "viewer.genes.json"
-    assert set(embedded["genes_meta"]) == {"G1"}
-    assert set(manifest["genes_meta"]) == {"G2", "G3"}
+    assert embedded["embedded_genes"] == []
+    assert embedded["genes_meta"] == {}
+    assert all(not (section.get("genes") or section.get("genes_sparse")) for section in embedded["sections"])
+    assert set(manifest["genes_meta"]) == {"G1", "G2", "G3"}
     assert manifest["format"] == "karospace-gene-sidecar-manifest-v3"
     assert manifest["gene_sidecar_format"] == "binary"
+    assert manifest["gene_to_shard"]["G1"].startswith("viewer.genes/")
     assert manifest["gene_to_shard"]["G2"].startswith("viewer.genes/")
     assert manifest["gene_to_shard"]["G2"].endswith(".bin")
+    assert manifest["gene_value_encodings"]["G1"] == "uint16"
     assert manifest["gene_value_encodings"]["G2"] == "uint16"
-    assert "G1" not in entries
+    assert "G1" in entries
     assert "G2" in entries
     assert "async function ensureGeneAvailable" in html_text
     assert "function requestModalBlendGene(gene, modality = null)" in html_text
@@ -684,6 +688,7 @@ def test_sidecar_export_with_no_embedded_genes_keeps_gene_catalog_and_warns(tmp_
 
     assert embedded["available_genes"] == ["G1", "G2", "G3"]
     assert embedded["genes_meta"] == {}
+    assert all(not (section.get("genes") or section.get("genes_sparse")) for section in embedded["sections"])
     assert set(manifest["genes_meta"]) == {"G1", "G2", "G3"}
     assert "function getAvailableFeaturesForModality" in html_text
     assert "const availableGenes = DATA.available_genes || [];" in html_text
@@ -958,7 +963,10 @@ def test_package_sidecar_viewer_wraps_existing_sidecar_bundle(tmp_path, capsys):
 
     assert embedded["gene_aux_url"] == "viewer.genes.json"
     assert embedded["available_genes"] == ["G1", "G2", "G3"]
-    assert set(embedded["genes_meta"]) == {"G1"}
+    assert embedded["embedded_genes"] == []
+    assert embedded["genes_meta"] == {}
+    assert all(not (section.get("genes") or section.get("genes_sparse")) for section in embedded["sections"])
+    assert set(manifest["genes_meta"]) == {"G1", "G2", "G3"}
     assert manifest["format"] == "karospace-gene-sidecar-manifest-v3"
     assert manifest["gene_sidecar_format"] == "binary"
     assert manifest["gene_to_shard"]["G2"].startswith("viewer.genes/")

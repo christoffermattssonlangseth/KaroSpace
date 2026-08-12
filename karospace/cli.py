@@ -88,7 +88,7 @@ def _run_export_cli(argv=None):
         "--genes",
         type=str,
         default="",
-        help="Comma-separated genes to preload for expression visualization. Significant DE genes are embedded automatically."
+        help="Comma-separated genes to preload for expression visualization. In embedded mode, significant DE genes are embedded automatically up to the configured cap."
     )
     dataset_args.add_argument(
         "-g", "--groupby",
@@ -253,7 +253,7 @@ def _run_export_cli(argv=None):
         "--gene-storage",
         choices=["embedded", "sidecar"],
         default="embedded",
-        help="Store genes in the HTML (`embedded`) or write non-embedded genes to an auxiliary JSON sidecar (`sidecar`). (default: embedded)"
+        help="Store requested/top DE gene expression vectors in the HTML (`embedded`) or write all gene expression vectors to an auxiliary sidecar (`sidecar`). (default: embedded)"
     )
     gene_args.add_argument(
         "--gene-aux-path",
@@ -383,8 +383,8 @@ def _run_export_cli(argv=None):
         type=int,
         default=20,
         help=(
-            "Maximum significant DE genes to auto-embed per category/contact comparison. "
-            "Explicit --genes are still embedded. Use 0 to disable automatic DE-gene embedding. (default: 20)"
+            "Maximum significant DE genes to auto-embed per category/contact comparison in embedded mode. "
+            "Ignored by --gene-storage sidecar, where all gene expression vectors are written to the sidecar. (default: 20)"
         ),
     )
     pseudobulk_args.add_argument(

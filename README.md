@@ -32,6 +32,9 @@ Visit [KaroSpace Website](https://karospace.se/).
 - [x] **Compact sidecar** — Keep large gene matrices outside the HTML with lazy-loaded sidecar manifests and binary shards for lighter initial viewer files
 - [x] **Shareable packages** — Export as `.karospace` bundles (ZIP + viewer HTML)
 
+> [!TIP]
+> Add the guided *Tutorial* to the exported HTML to walk users through the main controls and analysis panels. Enable it with `tutorial=True` in Python API or `--tutorial` on the command line.
+
 ## Quick Start
 
 A GUI version of KaroSpace (`KaroSpaceBuilder`) has been developed to allow researchers with moderate computational skills to create HTML file.
@@ -289,7 +292,7 @@ karospace your_data.h5ad \
 | `--tutorial` | Embed the detailed guided HTML tutorial; users start it from the graduation-cap control and are asked to click, tweak, search, and inspect controls | off |
 | `--gene-encoding` | Gene vector encoding (`auto`, `dense`, `sparse`) | `auto` |
 | `--gene-value-encoding` | Sidecar/package gene value encoding for binary shards (`uint16`, `uint8`) | `uint16` |
-| `--gene-storage` | Gene storage mode (`embedded`, `sidecar`) | `embedded` |
+| `--gene-storage` | Gene storage mode: `embedded` stores requested/top DE expression vectors in the HTML; `sidecar` stores all gene expression vectors outside the HTML | `embedded` |
 | `--gene-aux-path` | Path for the gene sidecar manifest JSON | auto |
 | `--gene-sidecar-shard-size` | Genes/features per sidecar shard | `256` |
 | `--gene-sparse-zero-threshold` | Zero fraction threshold for `auto` sparse encoding | `0.8` |
@@ -316,7 +319,7 @@ karospace your_data.h5ad \
 | `--pseudobulk-log2fc-cutoff` | Absolute log2FC cutoff for volcano highlighting and DE table inclusion | `0.5` |
 | `--pseudobulk-deseq2-fit-type` | PyDESeq2 dispersion trend fit type; use `mean` to avoid parametric trend fallback warnings | `parametric` |
 | `--pseudobulk-n-cpus` | CPU workers used for pseudobulk DESeq2 fitting and contrasts | `1` |
-| `--pseudobulk-embed-top-n-per-comparison` | Significant DE genes to auto-embed per category/contact comparison; full DE tables still display non-embedded genes as disabled expression links | `20` |
+| `--pseudobulk-embed-top-n-per-comparison` | Significant DE genes to auto-embed per category/contact comparison in embedded mode; ignored by sidecar mode because all gene expression vectors are sidecar-loaded | `20` |
 | `--pathway-gmt` | GMT pathway file(s) for ORA/GSEA after Simple design DE; omitted uses Reactome via GSEApy | Reactome |
 | `--pathway-organism` | Organism passed to GSEApy for default Reactome loading, e.g. `Human` or `Mouse` | `Human` |
 | `--pathway-top-n` | Maximum ORA/GSEA pathways stored per direction and comparison | `20` |
@@ -421,7 +424,7 @@ KaroSpace has three practical export modes:
 | Sidecar viewer | `viewer.html` + `viewer.genes.json` + `viewer.genes/` | Large gene payloads with lazy gene loading | Serve the directory over HTTP(S), then open the HTML URL |
 | `.karospace` package | `viewer.karospace` + optional `viewer.loader.html` | One-file sharing of a sidecar viewer | Drop the package into the hosted loader or the generated local loader |
 
-Sidecar mode keeps the initial HTML smaller by moving non-embedded gene vectors into a manifest and binary shard files. The viewer fetches those shards only when a gene is needed. This is useful when many genes, modalities, or sidecar-only DE genes would make a single HTML file too large.
+Sidecar mode keeps the initial HTML smaller by moving all gene expression vectors into a manifest and binary shard files. The viewer fetches those shards only when a gene is needed. This is useful when many genes or modalities would make a single HTML file too large.
 
 ### Create a sidecar viewer
 
@@ -465,7 +468,7 @@ viewer.genes/
 ```
 
 > [!IMPORTANT]
-> Keep all three together. The HTML contains the viewer and embedded summary data; `viewer.genes.json` is the sidecar manifest; `viewer.genes/` contains the binary gene shards.
+> Keep all three together. The HTML contains the viewer and embedded summary data, but no gene expression vectors in sidecar mode; `viewer.genes.json` is the sidecar manifest; `viewer.genes/` contains the binary gene shards.
 
 ### Open a sidecar viewer
 

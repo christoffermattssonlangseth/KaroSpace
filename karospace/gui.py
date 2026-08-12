@@ -103,11 +103,11 @@ Dataset Loading Options
 Annotation & Gene Content
 - Cells annotations: Comma/newline-separated obs columns to include in the annotation dropdown.
 - Genes: Hand-picked gene symbols (comma/newline-separated) to pre-load for expression view.
-- Significant shared-fit pseudobulk DE genes are embedded automatically up to the per-comparison cap.
+- In embedded mode, significant shared-fit pseudobulk DE genes are embedded automatically up to the per-comparison cap.
 
 Advanced Options
 - Gene encoding: auto | dense | sparse.
-- Gene storage: embedded keeps genes in the HTML; sidecar writes extra genes to a separate JSON file.
+- Gene storage: embedded keeps requested/top DE genes in the HTML; sidecar writes all gene expression vectors to separate sidecar files.
 - Gene aux path: Optional override for the sidecar JSON path. Leave blank to place it next to the HTML.
 - Gene sparse threshold: Number between 0 and 1 (used when encoding=auto).
 - Neighbor permutations: "auto" or integer >= 0.

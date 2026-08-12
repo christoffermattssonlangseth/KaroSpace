@@ -7634,6 +7634,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const embedded = getEmbeddedGeneSet();
         return embedded.has(raw) || (!!canonical && embedded.has(canonical));
     }}
+    function isSidecarViewerGene(gene) {{
+        if (!DATA.gene_aux_url) return false;
+        const raw = String(gene || '').trim();
+        if (!raw) return false;
+        const canonical = resolveCanonicalGeneName(raw);
+        const available = new Set((DATA.available_genes || []).map(g => String(g)));
+        return available.has(raw) || (!!canonical && available.has(canonical));
+    }}
+    function isViewerGeneLoadable(gene) {{
+        return isEmbeddedViewerGene(gene) || isSidecarViewerGene(gene);
+    }}
     function getCategoryVsRestGenes(colorCol = explorationColorCol || currentColor || '') {{
         const byCategory = (DATA.pseudobulk_de || {{}})[colorCol] || {{}};
         const summaryGenes = byCategory?._summary?.category_gene_means?.genes;
@@ -8157,7 +8168,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }},
         pseudobulk_simple_de_table: {{
             title: 'Differential expression table',
-            body: 'The table lists genes from the selected Annotation A versus Annotation B contrast that pass the current DE thresholds. Rows are sorted by adjusted p-value, then p-value and log2FC. Gene buttons are disabled when that gene expression vector was not embedded in the HTML viewer.',
+            body: 'The table lists genes from the selected Annotation A versus Annotation B contrast that pass the current DE thresholds. Rows are sorted by adjusted p-value, then p-value and log2FC. Gene buttons are disabled only when that gene expression vector is not available in the HTML or sidecar.',
             formula: 'displayed rows: padj < padj_cutoff and |log2FC| >= log2fc_cutoff; row direction/color follows sign(log2FC)'
         }},
         pseudobulk_ma_plot: {{
@@ -9077,7 +9088,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             condition: () => !!DATA.gene_aux_url,
             action: () => safeTutorialClick('#default-source-gene'),
             body: [
-                'This viewer uses sidecar gene loading. The HTML starts smaller because non-embedded gene vectors live in the sidecar manifest and shard files.',
+                'This viewer uses sidecar gene loading. The HTML starts smaller because gene expression vectors live in the sidecar manifest and shard files.',
                 'Open sidecar viewers through HTTP or a .karospace loader so the browser is allowed to fetch additional genes.'
             ]
         }},
@@ -9392,7 +9403,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'Modify the default scaling of a gene to highlight its expression. Scaling can be propagated to the other gene in the Split setup to compare gene expression.'
             ], {{ action: () => prepareTutorialGeneExpressionScaleStep(), positionTarget: '#gene-params-panel', placement: 'right', prepareDelay: 360, nextLabel: tryIt }}),
             step('Sidecar gene loading note', ['#gene-input-shell', '#gene-discovery-panel'], [
-                'In sidecar mode, the HTML contains only selected embedded genes and fetches the rest from nearby sidecar files.',
+                'In sidecar mode, the HTML contains no gene expression vectors and fetches genes from nearby sidecar files.',
                 'If the viewer is opened with file://, browsers can block those fetches. Serve the folder or use a .karospace package.'
             ], {{ condition: () => !!DATA.gene_aux_url, action: () => safeTutorialClick('#default-source-gene'), task: 'Try searching for a gene that was not initially embedded and watch the loading status.', nextLabel: tryIt }}),
             step('Modality selector', ['#modality-control-group', '#modality-select'], [
@@ -24093,7 +24104,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 advanceTutorialIfReady();
                 return;
             }}
-            if (isEmbeddedViewerGene(gene)) {{
+            if (isViewerGeneLoadable(gene)) {{
                 await activateViewerGene(gene, {{ showErrors: true }});
                 advanceTutorialIfReady();
                 return;
@@ -25468,16 +25479,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
             const geneButtons = genes.length
                 ? genes.map((entry) => {{
-                    const embedded = isEmbeddedViewerGene(entry.raw);
+                    const loadable = isViewerGeneLoadable(entry.raw);
                     return renderGeneTokenButton(entry.raw, {{
                         allowUnknown: true,
-                        disableActivation: !embedded,
-                        isActive: embedded && !!entry.canonical && entry.canonical === currentGene,
+                        disableActivation: !loadable,
+                        isActive: loadable && !!entry.canonical && entry.canonical === currentGene,
                         isSearchActive: !!selectedGene && (entry.raw === selectedGene || entry.canonical === selectedGene),
                         showMeta: false,
-                        title: embedded
+                        title: loadable
                             ? 'Load pseudobulk DE gene into the viewer'
-                            : 'This category-vs-balanced-rest gene is not embedded in the HTML viewer',
+                            : 'This category-vs-balanced-rest gene is not available for expression viewing',
                     }});
                 }}).join('')
                 : '<div class="marker-empty">No pseudobulk DE genes found.</div>';
@@ -26136,15 +26147,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return `
             <div class="gene-token-grid">
                 ${{entries.map((entry) => {{
-                    const embedded = isEmbeddedViewerGene(entry.raw);
+                    const loadable = isViewerGeneLoadable(entry.raw);
                     return renderGeneTokenButton(entry.raw, {{
                         allowUnknown: true,
-                        disableActivation: !embedded,
-                        isActive: embedded && !!entry.canonical && entry.canonical === currentGene,
+                        disableActivation: !loadable,
+                        isActive: loadable && !!entry.canonical && entry.canonical === currentGene,
                         showMeta: false,
-                        title: embedded
+                        title: loadable
                             ? activateTitle
-                            : 'This DE gene is shown in the table but its expression vector was not embedded',
+                            : 'This DE gene is shown in the table but is not available for expression viewing',
                     }});
                 }}).join('')}}
             </div>
@@ -26471,10 +26482,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const padjDisplay = formatAdjustedPValue(padj);
             const baseDisplay = formatScaleNumber(xValues[i]);
             const color = dotClass === 'red' ? '#d94f4f' : 'var(--border-color)';
-            const embedded = isEmbeddedViewerGene(gene);
+            const loadable = isViewerGeneLoadable(gene);
             const pctLine = 'pct expr: ' + escapeHtml(formatClusterDEPct(Number.isFinite(sourcePct) ? sourcePct : NaN)) + ' / ' + escapeHtml(formatClusterDEPct(Number.isFinite(referencePct) ? referencePct : NaN));
-            const extraLine = embedded ? '' : '" data-tooltip-line6="Expression vector not embedded"';
-            dots.push({{ dotClass, html: '<circle class="volcano-dot" cx="' + xs(xValues[i]).toFixed(1) + '" cy="' + ys(fc).toFixed(1) + '" r="2.8" fill="' + color + '" fill-opacity="0.78" data-volcano-gene="' + escapeHtml(gene) + '" data-gene-embedded="' + (embedded ? 'true' : 'false') + '" data-volcano-fc="' + fc.toFixed(3) + '" data-volcano-p="' + rawPDisplay + '" data-volcano-padj="' + padjDisplay + '" data-tooltip-title="' + escapeHtml(gene) + '" data-tooltip-line1="baseMean: ' + escapeHtml(baseDisplay) + '" data-tooltip-line2="logFC: ' + escapeHtml(fc.toFixed(3)) + '" data-tooltip-line3="pvalue: ' + escapeHtml(rawPDisplay) + '" data-tooltip-line4="adj. p: ' + escapeHtml(padjDisplay) + '" data-tooltip-line5="' + pctLine + extraLine + '"/>' }});
+            const extraLine = loadable ? '' : '" data-tooltip-line6="Expression vector unavailable"';
+            dots.push({{ dotClass, html: '<circle class="volcano-dot" cx="' + xs(xValues[i]).toFixed(1) + '" cy="' + ys(fc).toFixed(1) + '" r="2.8" fill="' + color + '" fill-opacity="0.78" data-volcano-gene="' + escapeHtml(gene) + '" data-gene-loadable="' + (loadable ? 'true' : 'false') + '" data-volcano-fc="' + fc.toFixed(3) + '" data-volcano-p="' + rawPDisplay + '" data-volcano-padj="' + padjDisplay + '" data-tooltip-title="' + escapeHtml(gene) + '" data-tooltip-line1="baseMean: ' + escapeHtml(baseDisplay) + '" data-tooltip-line2="logFC: ' + escapeHtml(fc.toFixed(3)) + '" data-tooltip-line3="pvalue: ' + escapeHtml(rawPDisplay) + '" data-tooltip-line4="adj. p: ' + escapeHtml(padjDisplay) + '" data-tooltip-line5="' + pctLine + extraLine + '"/>' }});
         }});
         ['grey', 'red'].forEach((layer) => {{
             dots.filter(dot => dot.dotClass === layer).forEach(dot => parts.push(dot.html));
@@ -26658,10 +26669,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const col = dotClass === 'source' ? sourceColor : (dotClass === 'reference' ? referenceColor : 'var(--border-color)');
             const safePAdj = Number.isFinite(pvalAdj) ? pvalAdj : 1;
             const padjDisplay = formatAdjustedPValue(safePAdj);
-            const embedded = isEmbeddedViewerGene(gene);
+            const loadable = isViewerGeneLoadable(gene);
             const pctLine = 'pct expr: ' + escapeHtml(formatClusterDEPct(Number.isFinite(sourcePct) ? sourcePct : NaN)) + ' / ' + escapeHtml(formatClusterDEPct(Number.isFinite(referencePct) ? referencePct : NaN));
-            const extraLine = embedded ? '' : '" data-tooltip-line4="Expression vector not embedded"';
-            dots.push({{ dotClass, html: '<circle class="volcano-dot" cx="' + xs(fc).toFixed(1) + '" cy="' + ys(nlpi).toFixed(1) + '" r="3" fill="' + col + '" fill-opacity="0.82" data-volcano-class="' + dotClass + '" data-volcano-gene="' + escapeHtml(gene) + '" data-gene-embedded="' + (embedded ? 'true' : 'false') + '" data-volcano-fc="' + fc.toFixed(3) + '" data-volcano-padj="' + padjDisplay + '" data-tooltip-title="' + escapeHtml(gene) + '" data-tooltip-line1="log\u2082FC: ' + escapeHtml(fc.toFixed(3)) + '" data-tooltip-line2="adj. p: ' + escapeHtml(padjDisplay) + '" data-tooltip-line3="' + pctLine + extraLine + '"/>' }});
+            const extraLine = loadable ? '' : '" data-tooltip-line4="Expression vector unavailable"';
+            dots.push({{ dotClass, html: '<circle class="volcano-dot" cx="' + xs(fc).toFixed(1) + '" cy="' + ys(nlpi).toFixed(1) + '" r="3" fill="' + col + '" fill-opacity="0.82" data-volcano-class="' + dotClass + '" data-volcano-gene="' + escapeHtml(gene) + '" data-gene-loadable="' + (loadable ? 'true' : 'false') + '" data-volcano-fc="' + fc.toFixed(3) + '" data-volcano-padj="' + padjDisplay + '" data-tooltip-title="' + escapeHtml(gene) + '" data-tooltip-line1="log\u2082FC: ' + escapeHtml(fc.toFixed(3)) + '" data-tooltip-line2="adj. p: ' + escapeHtml(padjDisplay) + '" data-tooltip-line3="' + pctLine + extraLine + '"/>' }});
         }});
         ['grey', 'reference', 'source'].forEach((layer) => {{
             dots.filter(dot => dot.dotClass === layer).forEach(dot => parts.push(dot.html));
@@ -26891,7 +26902,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             plotSvg.addEventListener('click', async (e) => {{
                 const dot = e.target.closest('[data-volcano-gene]');
                 if (!dot) return;
-                if (dot.getAttribute('data-gene-embedded') === 'false') return;
+                if (dot.getAttribute('data-gene-loadable') === 'false') return;
                 const gene = dot.getAttribute('data-volcano-gene') || '';
                 if (!gene) return;
                 const ok = await activateViewerGene(gene, {{ showErrors: true }});
@@ -27668,7 +27679,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const scoreValue = scores[idx];
             const pctSourceValue = pctSource[idx];
             const pctReferenceValue = pctReference[idx];
-            const embedded = isEmbeddedViewerGene(gene);
+            const loadable = isViewerGeneLoadable(gene);
             const rowColor = Number.isFinite(log2fcValue)
                 ? (log2fcValue >= 0 ? sourceColor : referenceColor)
                 : '';
@@ -27681,7 +27692,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 : '';
             return `
                 <tr${{extraAttrs}} style="background:${{rowBackground}};" data-most-expressed="${{escapeHtml(mostExpressed || '')}}">
-                    <td><button type="button" class="cluster-de-gene-btn" ${{embedded ? `data-cluster-de-gene="${{escapeHtml(gene)}}"` : 'disabled'}} title="${{embedded ? 'Load DE gene into the viewer' : 'Expression vector not embedded'}}">${{escapeHtml(gene)}}</button></td>
+                    <td><button type="button" class="cluster-de-gene-btn" ${{loadable ? `data-cluster-de-gene="${{escapeHtml(gene)}}"` : 'disabled'}} title="${{loadable ? 'Load DE gene into the viewer' : 'Expression vector unavailable'}}">${{escapeHtml(gene)}}</button></td>
                     <td>${{formatScaleNumber(Number.isFinite(log2fcValue) ? log2fcValue : NaN)}}</td>
                     <td>${{formatAdjustedPValue(pvalAdjValue)}}</td>
                     <td>${{formatScaleNumber(Number.isFinite(scoreValue) ? scoreValue : NaN)}}</td>
@@ -31146,12 +31157,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         const topEntries = sortedEntries.slice(0, 12);
         const renderInlineGeneLinks = (genes) => genes.map(g => {{
-            const embedded = isEmbeddedViewerGene(g);
-            const cls = embedded ? 'interaction-gene-link' : 'interaction-gene-link disabled';
-            const activateAttr = embedded ? ` data-gene-activate="${{escapeHtml(g)}}"` : '';
-            const title = embedded
+            const loadable = isViewerGeneLoadable(g);
+            const cls = loadable ? 'interaction-gene-link' : 'interaction-gene-link disabled';
+            const activateAttr = loadable ? ` data-gene-activate="${{escapeHtml(g)}}"` : '';
+            const title = loadable
                 ? `Load ${{g}} into the viewer`
-                : `${{g}} is shown in DE results but its expression vector was not embedded`;
+                : `${{g}} is shown in DE results but its expression vector is unavailable`;
             return `<span class="${{cls}}"${{activateAttr}} title="${{escapeHtml(title)}}">${{escapeHtml(g)}}</span>`;
         }}).join(', ');
         const sourceMarkerLabel = sourceMarkers.length ? renderInlineGeneLinks(sourceMarkers) : 'No pseudobulk DE genes available.';
@@ -33202,10 +33213,10 @@ def export_to_html(
         Only used for sidecar/package genes. "uint16" (default) and "uint8"
         store linearly quantized values using each gene's exported vmin/vmax range.
     gene_storage : str
-        "embedded" (default) keeps gene data in the HTML. "sidecar" embeds only
-        the selected/preloaded genes and writes remaining genes to an auxiliary
-        JSON file for downstream lazy loading. `.karospace` package export
-        requires `"sidecar"`.
+        "embedded" (default) keeps requested/top DE gene expression vectors in
+        the HTML. "sidecar" embeds no gene expression vectors in the HTML and
+        writes all default-modality genes to sidecar shards for lazy loading.
+        `.karospace` package export requires `"sidecar"`.
     gene_aux_path : str, optional
         Output path for the sidecar gene JSON when gene_storage="sidecar".
     gene_sidecar_shard_size : int
@@ -33272,8 +33283,8 @@ def export_to_html(
         evaluation. Must be at least one.
     pseudobulk_embed_top_n_per_comparison : int
         Maximum significant DE genes to auto-embed per category or contact
-        comparison. Explicitly requested genes are still embedded. Use 0 to
-        disable automatic DE-gene embedding.
+        comparison in embedded mode. Ignored in sidecar mode, where all gene
+        expression vectors are written to the sidecar.
     pathway_gmt : str or list, optional
         GMT pathway file(s) used for ORA and preranked GSEA. When omitted,
         KaroSpace attempts to load the default Reactome library through
@@ -33368,7 +33379,11 @@ def export_to_html(
         raise ValueError("gene_value_encoding must be one of: 'uint16', 'uint8'")
     resolved_section_rotations = _resolve_section_rotations(dataset, section_rotations)
 
-    embedded_genes = list(dict.fromkeys([g for g in (genes or []) if g in dataset.adata.var_names]))
+    requested_genes = list(dict.fromkeys([g for g in (genes or []) if g in dataset.adata.var_names]))
+    embedded_genes = [] if gene_storage == "sidecar" else list(requested_genes)
+    effective_pseudobulk_embed_top_n_per_comparison = (
+        0 if gene_storage == "sidecar" else int(pseudobulk_embed_top_n_per_comparison)
+    )
     sidecar_genes: List[str] = []
     resolved_gene_aux_path: Optional[Path] = None
     resolved_gene_aux_dir: Optional[Path] = None
@@ -33516,6 +33531,8 @@ def export_to_html(
     )
     if bool(tutorial):
         log_detail("Embedding guided tutorial; output adds the graduation-cap tutorial launcher.")
+    if gene_storage == "sidecar":
+        log_detail("Gene storage=sidecar; no gene expression vectors will be embedded in the HTML.")
 
     data = dataset.to_json_data(
         annotation,
@@ -33538,7 +33555,7 @@ def export_to_html(
         pseudobulk_log2fc_cutoff=pseudobulk_log2fc_cutoff,
         pseudobulk_deseq2_fit_type=fit_type,
         pseudobulk_n_cpus=int(pseudobulk_n_cpus),
-        pseudobulk_embed_top_n_per_comparison=int(pseudobulk_embed_top_n_per_comparison),
+        pseudobulk_embed_top_n_per_comparison=effective_pseudobulk_embed_top_n_per_comparison,
         interaction_markers_groupby=interaction_markers_groupby,
         neighbor_stats_groupby=neighbor_stats_groupby,
         neighbor_stats_permutations=neighbor_stats_permutations,
@@ -33551,10 +33568,10 @@ def export_to_html(
         deconvolutions=deconvolutions,
     )
     data["scalebar_unit"] = str(scalebar_unit or "μm")
-    embedded_genes = list(data.get("available_genes") or embedded_genes)
+    embedded_genes = [] if gene_storage == "sidecar" else list(data.get("available_genes") or embedded_genes)
     data["embedded_genes"] = list(embedded_genes)
     if gene_storage == "sidecar":
-        sidecar_genes = [g for g in dataset.var_names if g not in set(embedded_genes)]
+        sidecar_genes = list(dataset.var_names)
     original_total_cells = int(dataset.adata.n_obs)
     exported_total_cells = int(data.get("total_cells") or 0)
     downsample_configured = downsample is not None
@@ -33767,7 +33784,7 @@ def export_to_html(
         data["spatial_variable_genes"] = []
 
     cluster_gene_means_for_correlations = None
-    if int(cluster_means_n_genes) > 0:
+    if int(cluster_means_n_genes) > 0 and embedded_genes:
         log_step("Computing category gene means from pseudobulk DE genes")
         log_detail(
             f"Using up to {int(cluster_means_n_genes)} embedded DE genes from the current "

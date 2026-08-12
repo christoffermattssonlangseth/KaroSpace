@@ -86,9 +86,9 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 - The gene discovery panel supports fuzzy search, keyboard navigation, recent genes, marker suggestions, spatial genes, correlated-gene suggestions, and module-related suggestions when those payloads exist.
 - The gene input accepts embedded genes and sidecar-loadable genes.
 - Gene expression scale controls adjust the visible color range and can be propagated across split gene comparison.
-- Sidecar mode keeps non-embedded gene vectors outside the HTML and fetches them from nearby sidecar files.
+- Sidecar mode keeps all gene expression vectors outside the HTML and fetches them from nearby sidecar files.
 - Multiple modalities can be selected when exported, for example RNA genes and protein features.
-- Genes not embedded in the HTML can still appear in DE tables or marker lists, but their expression links are disabled unless sidecar loading can retrieve them.
+- Genes not embedded in the HTML can still appear in DE tables or marker lists; sidecar-loadable genes can be fetched on demand.
 
 ## 9. Spatial Selection
 
@@ -241,7 +241,7 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 ## 23. Sharing and Storage
 
 - Embedded HTML stores viewer data directly in the HTML file.
-- Sidecar mode writes non-embedded genes to a manifest and binary shard directory for lazy loading over HTTP(S).
+- Sidecar mode writes all gene expression vectors to a manifest and binary shard directory for lazy loading over HTTP(S).
 - `.karospace` packages wrap sidecar exports into one shareable ZIP-based package with a local or hosted loader.
 - Generated HTML is static; re-export is required to pick up new viewer code or new analytics.
 - Old exported HTML files do not gain new behavior automatically.
