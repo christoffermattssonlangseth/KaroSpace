@@ -16,15 +16,16 @@ Visit [KaroSpace Website](https://karospace.se/).
 - [x] **Modal interaction** — Browse many sections in a responsive grid, then zoom and pan any section in detail
 - [x] **Section filters** — Filter visible sections by exported metadata such as stage, condition, region, sex, model, sample, or batch
 - [x] **UMAP to sections connection** — Magic Wand lasso works in UMAP and modal view with synced highlights
-- [x] **Cells selection composition** — Selected-cell totals and per-type counts with expandable scrollable lists; minimize the panel to a compact header to keep the view clear
+- [x] **Cells selection composition** — Selected-cell totals and per-type counts with expandable scrollable lists
 - [x] **Region polygon annotation** — Save lasso selections as persistent annotations, reorder labels, and export JSON for downstream integration
 - [x] **Region-to-region comparison** — Compare drawn regions or annotations directly in the viewer, export JSON/CSV reports, and search top hits
 - [x] **Cell search** — Select cells with query syntax based on annotations, genes, or section metadata, then reuse the selection in summaries and comparisons
-- [x] **Split screen** — Compare two variables side-by-side in the modal (`Cell type` or `Gene`, including `All categories`), draggable directly on the canvas
+- [x] **Split screen** — Compare two variables side-by-side in the modal (`Annotation`, `Modality` or `Module`)
 - [x] **Gene modules** — Build custom gene sets, compute averaged module scores, display them like expression layers, and import/export module definitions
 - [x] **Legend controls** — Toggle/hide categories and spotlight one class across grid and UMAP
 - [x] **Gene exploration** — Search genes, inspect expression distributions, review marker genes, spatial genes, category means, and related-gene suggestions
-- [x] **Per cell/Per sample comparison** — Compare selections, regions, annotations, and pseudobulk sample-level category contrasts with tables, plots, diagnostics, and pathway enrichment
+- [x] **Per cell comparison** — Live comparison of cell selections or regions with table and graphs visualization (Welch test scores, log2FC, mean, expression percentage)
+- [x] **Per sample comparison** — Precomputed pseudobulk differential gene expression using DESeq2 (PCA, distance matrices, volcano plots) and pathway enrichments.
 - [x] **Neighbor graph tools** — Graph overlay, hover rings (1–3 hops), enrichment, interactions, and dispersion summaries when `adata.obsp` contains a spatial graph
 - [x] **Quality-of-life controls** — Hideable toolbar, screenshots, light/dark theme toggle, buttons explanation, keyboard shortcuts, and adjustable spot size
 - [x] **Standalone export** — One self-contained HTML file, no backend required

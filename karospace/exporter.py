@@ -13633,7 +13633,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function getBlendKindOptions() {{
-        const kindOptions = [{{ value: 'cell', label: 'Cell type' }}];
+        const kindOptions = [{{ value: 'cell', label: 'Annotation' }}];
         if (MODALITY_DESCRIPTORS.length > 0) {{
             for (const mod of MODALITY_DESCRIPTORS) {{
                 kindOptions.push({{ value: mod.name, label: mod.label || mod.name }});
@@ -13779,7 +13779,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         const colorCol = spec.color;
         const categories = getCategoriesForColorColumn(colorCol);
-        const colLabel = colorCol ? formatMetadataLabel(colorCol) : 'Cell type';
+        const colLabel = colorCol ? formatMetadataLabel(colorCol) : 'Annotation';
         const categoryEntries = categories.map((cat, idx) => ({{
             label: formatCategoryLabel(colorCol, cat),
             color: getCategoryColor(idx, colorCol),
