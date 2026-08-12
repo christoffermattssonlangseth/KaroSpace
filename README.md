@@ -111,6 +111,8 @@ python -m pip install -e ".[spatialdata]"
 
 ## Usage
 
+See [FEATURES_SUMMARY.md](FEATURES_SUMMARY.md) for a guided overview of the main HTML viewer features.
+
 ### Python API
 
 ```python
@@ -362,6 +364,9 @@ karospace your_data.h5ad -o viewer.html --spatial-x x_centroid --spatial-y y_cen
 This creates `adata.obsm["spatial"]` during loading. Use `--spatial-key` to pick
 a different target key.
 
+> [!TIP]
+> See [`examples/`](examples/) for complete dataset-specific export scripts.
+
 ### Optional metadata
 
 Use `metadata_section=[...]` / `--metadata-section ...` for section-level obs columns that should appear in the visual params bar and filter chips. Use `metadata_section_extra=[...]` / `--metadata-section-extra ...` for section-level metadata that should be stored in the viewer payload but not shown as filter chips.
@@ -427,9 +432,7 @@ karospace your_data.h5ad \
   --main-cells-annotation cell_type \
   --genes Cd4,Cd8a,Gfap \
   --gene-storage sidecar \
-  --gene-aux-path viewer.genes.json \
-  --gene-sidecar-shard-size 256 \
-  --gene-value-encoding uint16
+  --gene-aux-path viewer.genes.json
 ```
 
 Python API:
@@ -445,9 +448,7 @@ export_to_html(
     main_cells_annotation="cell_type",
     genes=["Cd4", "Cd8a", "Gfap"],
     gene_storage="sidecar",
-    gene_aux_path="viewer.genes.json",
-    gene_sidecar_shard_size=256,
-    gene_value_encoding="uint16",
+    gene_aux_path="viewer.genes.json"
 )
 ```
 
@@ -531,17 +532,15 @@ karospace package-sidecar viewer.html \
   --loader-output viewer.loader.html
 ```
 
-This wraps the existing sidecar assets into a `.karospace` archive without recomputing analytics or rewriting the viewer data.
-
 ### Sidecar troubleshooting
 
-- **The viewer opens but genes do not load**: check that the HTML is served over HTTP(S), not opened with `file://`.
-- **404 for `viewer.genes.json` or `.bin` shards**: keep `viewer.html`, `viewer.genes.json`, and `viewer.genes/` in the same relative layout used at export time.
-- **Custom `--gene-aux-path`**: for normal sidecar HTML it may be a path; for direct `.karospace` export it must be a filename inside the package.
-- **Large packages**: increase `--gene-sidecar-shard-size` for fewer shard files, decrease it for smaller individual requests. `uint16` is the default value encoding; `uint8` is smaller but less precise.
-- **Need one file for sharing**: export `viewer.karospace` directly or run `karospace package-sidecar` on an existing sidecar viewer.
+> [!TIP]
+> - **The viewer opens but genes do not load**: check that the HTML is served over HTTP(S), not opened with `file://`.
+> - **404 for `viewer.genes.json` or `.bin` shards**: keep `viewer.html`, `viewer.genes.json`, and `viewer.genes/` in the same relative layout used at export time.
+> - **Custom `--gene-aux-path`**: for normal sidecar HTML it may be a path; for direct `.karospace` export it must be a filename inside the package.
+> - **Large packages**: increase `--gene-sidecar-shard-size` for fewer shard files, decrease it for smaller individual requests.
 
-### Integrate polygon annotations back into AnnData
+## Integrate region polygon annotations back into AnnData
 
 ```python
 import scanpy as sc
@@ -558,18 +557,15 @@ integrate_polygon_annotations(
 adata.write_h5ad("your_data_with_polygons.h5ad")
 ```
 
-## Examples
-
-See [`examples/`](examples/) for complete dataset-specific export scripts.
-
 ## Browser Considerations
 
-KaroSpace is canvas-heavy. Chrome/Chromium is generally fastest; Safari can be noticeably slower on large datasets. The viewer caps canvas DPR at `1.0` in Safari by default to reduce pixel work on Retina displays.
+> [!WARNING]
+> KaroSpace is canvas-heavy. Chrome/Chromium is generally fastest; Safari can be noticeably slower on large datasets. The viewer caps canvas DPR at `1.0` in Safari by default to reduce pixel work on Retina displays.
 
-For large datasets:
-- Use `downsample` to limit cells per section
-- Lower `min_panel_size` to reduce pixels drawn per thumbnail
-- Keep the neighbor graph toggle off unless needed
+> For large datasets:
+> - Use `downsample` to limit cells per section
+> - Lower `min_panel_size` to reduce pixels drawn per thumbnail
+> - Keep the neighbor graph toggle off unless needed
 
 ## License
 
