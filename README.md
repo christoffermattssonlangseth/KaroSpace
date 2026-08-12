@@ -393,64 +393,17 @@ If `adata.obsp` contains a neighbor graph (`spatial_connectivities`, `connectivi
 
 `Insights → Neighbors → Enrichment` and `Interactions` use neighbor composition statistics for the selected Exploration annotation. If no graph or no stats exist for that annotation, the viewer shows a yellow warning and lists the annotations that do have neighbor stats. `Insights → Neighbors → Dispersion` is computed from all cells before HTML downsampling for the main cells annotation and any requested `cells_annotations`, then summarizes whether each category is clustered, random, or dispersed relative to the observed all-cell layout.
 
-Contact-conditioned interaction markers are computed automatically for the initial `color` column and for `pseudobulk_additional_annotations` unless `interaction_markers=None` / `--interaction-markers None` is used. KaroSpace classifies source cells as contact+ or contact- within each `groupby` replicate, aggregates raw counts by replicate/contact status, and fits pseudobulk DESeq2 with a paired replicate design.
+### Optional pseudobulk category selection
 
-Pseudobulk category DE is precomputed automatically for the initial `color` column unless `pseudobulk=None` / `--pseudobulk None` is used, and shown in `Insights → Compare → Per sample → Simple design`. KaroSpace aggregates raw counts by replicate and annotation, keeps replicate × annotation pseudobulk samples with at least `pseudobulk_min_cells_per_sample` / `--pseudobulk-min-cells-per-sample` cells, fits one shared `~ replicate + annotation` DESeq2 model per annotation column, then extracts category-versus-category contrasts. It also extracts a balanced-rest contrast for every category: the category minus the equally weighted mean of all other retained annotation categories. Genes that do not reach `pseudobulk_min_pct_expressed` / `--pseudobulk-min-pct-expressed` in at least one compared group are removed before `DeseqStats`, so they do not enter the contrast-level multiple-testing correction. Pairwise PCA/distance diagnostics are generated automatically for selected category pairs.
+Pseudobulk category DE is precomputed automatically for the initial `main cells annotation` column unless `pseudobulk=None` / `--pseudobulk None` is used, and shown in `Insights → Compare → Per sample → Simple design`. KaroSpace aggregates raw counts by replicate and annotation, keeps replicate × annotation pseudobulk samples with at least `pseudobulk_min_cells_per_sample` / `--pseudobulk-min-cells-per-sample` cells, fits one shared `~ replicate + annotation` DESeq2 model per annotation column, then extracts category-versus-category contrasts. It also extracts a balanced-rest contrast for every category: the category minus the equally weighted mean of all other retained annotation categories. Genes that do not reach `pseudobulk_min_pct_expressed` / `--pseudobulk-min-pct-expressed` in at least one compared group are removed before `DeseqStats`, so they do not enter the contrast-level multiple-testing correction. Pairwise PCA/distance diagnostics are generated automatically for selected category pairs.
 
-When selecting specific pairwise categories from the command line, wrap JSON values in single quotes in zsh/bash/macOS/Linux shells. The single quotes protect the JSON double quotes from the shell:
-
-```bash
---pseudobulk-simple-constrast-categories '{"Anno_L1_curated":["Astrocyte","Schwann cell","B cell","OPC"]}'
-```
-
-With multiple pseudobulk annotation columns, use one JSON key per annotation:
+When selecting specific pairwise categories from the command line, wrap listed values in single quotes:
 
 ```bash
 --main-cells-annotation Anno_L1_curated \
 --pseudobulk-additional-annotations region \
 --pseudobulk-simple-constrast-categories '{"Anno_L1_curated":["Astrocyte","B cell"],"region":["Cortex"]}'
 ```
-
-Do not use unescaped double quotes around JSON, because the shell will split the value before KaroSpace receives it:
-
-```bash
-# Wrong in zsh/bash:
---pseudobulk-simple-constrast-categories "{"Anno_L1_curated":["Astrocyte"]}"
-```
-
-The Simple design DE panel includes raw tables, marker lists, MA/volcano plots, PCA, distance matrix diagnostics, and pathway enrichment. ORA uses significant DE genes favoring the selected annotation. GSEA uses the full retained ranked gene list after model-level and expression-percent filtering. Pathways come from `--pathway-gmt` when supplied, otherwise KaroSpace uses Reactome through GSEApy for `--pathway-organism`. Significant genes passing `padj < pseudobulk_padj_cutoff` and `abs(log2FC) >= pseudobulk_log2fc_cutoff` are embedded automatically up to `pseudobulk_embed_top_n_per_comparison` / `--pseudobulk-embed-top-n-per-comparison` per comparison, exposed in `Insights → Genes → DE Genes`, and reused for category means/correlations. Full DE tables still list non-embedded genes, but their expression links are disabled. Use `pseudobulk_additional_annotations=[...]` or `--pseudobulk-additional-annotations ...` to compute category DE and interaction pseudobulk DE for extra annotation columns.
-
-## Examples
-
-See [`examples/`](examples/) for complete dataset-specific export scripts.
-
-## Viewer Controls
-
-### Grid View
-- **Click a section** — Open detailed modal view
-- **Annotation dropdown** — Switch between annotation columns
-- **Gene input** — Fuzzy search with keyboard navigation, recent genes, saved panels, and pseudobulk DE gene suggestions
-- **Size slider** — Adjust spot size
-- **Filter chips** — Filter sections by metadata
-- **Legend items** — Toggle categories; spotlight one across grid and UMAP
-- **Insights button** — Toggle the insights panel (`Summary`, `Compare`, `Genes`, `Neighbors`, `Regions`)
-- **Screenshot / Theme** — Download the current grid snapshot or toggle dark/light mode
-
-### Modal View
-- **Scroll** — Zoom in/out
-- **Drag** — Pan; `Space` + drag to pan while Select is active
-- **Split button** — Open the A/B comparison panel; drag the divider line directly on the canvas
-- **Magic Wand** — Draw lasso selection; opens `Genes in selection` ranked gene panel
-- **Annotate** — Save lasso selections as persistent annotations; export as JSON with cell indices
-- **Pick type** — Click a cell to spotlight its category
-- **Focused view** — Open the current selection as a filtered subview
-- **Hide tools** — Collapse the toolbar for an unobstructed canvas
-- **Escape or click outside** — Close modal
-
-### UMAP View
-- **UMAP button** — Toggle panel; dock to any corner and keep it pinned while scrolling the grid
-- **Magic Wand** — Lasso selection synced to spatial views
-- **Scroll / drag** — Zoom and pan the embedding
 
 ## Deployment and Sharing
 
@@ -604,6 +557,10 @@ integrate_polygon_annotations(
 )
 adata.write_h5ad("your_data_with_polygons.h5ad")
 ```
+
+## Examples
+
+See [`examples/`](examples/) for complete dataset-specific export scripts.
 
 ## Browser Considerations
 
