@@ -6,6 +6,7 @@ This document summarizes the current capabilities in this repository, focused on
 
 - Python API for loading `.h5ad`, `AnnData`, or SpatialData input and exporting a standalone HTML viewer.
 - Command-line interface (`karospace`) for scriptable exports.
+- Inspect-only API/CLI path for listing input `adata.obs` metadata before export.
 - Desktop GUI (`karospace.gui`) for non-code export configuration.
 - Self-contained HTML output for sharing and interactive exploration in a browser.
 
@@ -13,6 +14,8 @@ This document summarizes the current capabilities in this repository, focused on
 
 - Input: AnnData (`.h5ad` path or in-memory object) with spatial coordinates in `adata.obsm`.
 - Optional SpatialData input: load a SpatialData `.zarr` store or in-memory SpatialData object, select one AnnData table with `spatialdata_table` / `--spatialdata-table`, then export through the same AnnData-based pipeline.
+- SpatialData `.zarr` table fallback: if full SpatialData construction fails because unrelated images/labels are invalid, KaroSpace can read the selected AnnData table directly from `tables/<table>`.
+- `inspect_input_file(...)` / `--inspect-input` reads the selected AnnData table and reports available obs metadata, value types, example values, and missing-value counts without building sections, downsampling, exporting HTML, or running analytics.
 - Section grouping by any obs column (`groupby`).
 - For SpatialData tables, the table's `region_key` is used automatically as the section grouping column when `sample_id` is absent and the region key is available.
 - Section metadata is split into `metadata_section` (shown in the visual params bar/filter chips) and `metadata_section_extra` (stored as section metadata without filter chips).
@@ -43,7 +46,7 @@ This document summarizes the current capabilities in this repository, focused on
   - Filtered-to-one-section view gets capped-width layout (prevents full-page stretch).
 - Category legend with hide/show toggles and spotlight behavior.
 - Light and dark viewer styling is built in.
-- Screenshot export for current grid view.
+- Screenshot export for the current grid view.
 - Category/ gene annotation switching from the top controls.
 - Gene discovery panel with fuzzy search, keyboard navigation, recent genes, saved panels, and pseudobulk-DE-driven suggestions.
 - Performance-aware incremental rendering and offscreen skipping.
@@ -142,11 +145,13 @@ This document summarizes the current capabilities in this repository, focused on
 ## 10. Interfaces and Configuration
 
 - API entry points:
+  - `inspect_input_file(...)`
   - `load_spatial_data(...)`
   - `export_to_html(...)`
   - `integrate_polygon_annotations(...)`
 - CLI supports core export settings:
   - H5AD and SpatialData `.zarr` inputs
+  - `--inspect-input` to inspect metadata and exit before export
   - SpatialData table selection with `--spatialdata-table`
   - `--cells-annotations`, `--metadata-section`, and `--metadata-section-extra`
   - color, groupby, panel size, spot size, downsample

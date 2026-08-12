@@ -67,6 +67,19 @@ SpatialData input is optional. Install the extra only when you want to load Spat
 pip install -e ".[spatialdata]"
 ```
 
+If KaroSpace is already installed and you want to reinstall the local checkout after editing the source:
+
+```bash
+python -m pip uninstall karospace -y
+python -m pip install -e .
+```
+
+Install the SpatialData extra in the same environment if `import spatialdata` fails:
+
+```bash
+python -m pip install -e ".[spatialdata]"
+```
+
 ## Quick Start
 
 ### Desktop GUI (KaroSpaceBuilder)
@@ -106,7 +119,12 @@ Output is written to `<output_dir>/index.html`.
 ### Python API
 
 ```python
-from karospace import load_spatial_data, export_to_html
+from karospace import inspect_input_file, load_spatial_data, export_to_html
+
+# Optional: inspect obs metadata first without exporting HTML or running analytics.
+report = inspect_input_file("your_data.h5ad")
+for column in report["metadata"]:
+    print(column["name"], column["type"], column["examples"][:3])
 
 dataset = load_spatial_data(
     "your_data.h5ad",
@@ -145,6 +163,7 @@ export_to_html(
     pseudobulk="auto",           # Use None to disable category pseudobulk DE
     pseudobulk_additional_annotations=["cell_type"],
     pseudobulk_counts_layer="counts",
+    pseudobulk_min_cells_per_sample=20,
     pseudobulk_min_pct_expressed=0.0,
     pseudobulk_p_adjust_method="fdr_bh",
     pseudobulk_padj_cutoff=0.05,
@@ -178,9 +197,11 @@ For SpatialData, pass either the object or a `.zarr` store. If the SpatialData o
 
 ```python
 import spatialdata as sd
-from karospace import load_spatial_data, export_to_html
+from karospace import inspect_input_file, load_spatial_data, export_to_html
 
 sdata = sd.read_zarr("your_spatialdata.zarr")
+
+report = inspect_input_file(sdata, spatialdata_table="table")
 
 dataset = load_spatial_data(
     sdata,
@@ -197,6 +218,12 @@ export_to_html(dataset, "viewer.html", main_cells_annotation="cell_type")
 karospace your_data.h5ad -o viewer.html --main-cells-annotation leiden
 ```
 
+Inspect an `.h5ad` or SpatialData input without generating HTML or running analytics:
+
+```bash
+karospace your_data.h5ad --inspect-input
+```
+
 SpatialData `.zarr` stores are also supported:
 
 ```bash
@@ -208,6 +235,7 @@ karospace your_spatialdata.zarr -o viewer.html --main-cells-annotation cell_type
 | Option | Description | Default |
 |--------|-------------|---------|
 | `-o, --output` | Output HTML file path | `karospace.html` |
+| `--inspect-input` | Read input metadata and exit without building sections, downsampling, exporting HTML, or running analytics | off |
 | `--main-cells-annotation` | Main cell-annotation column shown first in the viewer | `leiden` |
 | `--cells-annotations` | Comma-separated extra cell obs annotation columns to embed as selectable cell annotations | empty |
 | `--genes` | Comma-separated genes to preload; significant pseudobulk DE genes are embedded automatically up to the per-comparison cap | empty |
@@ -247,8 +275,11 @@ karospace your_spatialdata.zarr -o viewer.html --main-cells-annotation cell_type
 | `--interaction-markers-min-neighbors` | Minimum target neighbors to classify contact+ source cells | `1` |
 | `--pseudobulk` | Category pseudobulk DE mode (`auto`, `None`) | `auto` |
 | `--pseudobulk-additional-annotations` | Additional annotation columns to analyze when pseudobulk or interaction markers are enabled. `--main-cells-annotation` is included automatically | empty |
+| `--pseudobulk-replicate-annotation` | Obs annotation to use as the biological replicate for pseudobulk analyses; defaults to `--groupby` | `--groupby` |
 | `--pseudobulk-counts-layer` | Raw-count AnnData layer for pseudobulk aggregation; use `None` for `adata.X` | `counts` |
 | `--pseudobulk-simple-constrast-categories` | Categories to report in category-versus-category contrasts. Use `A,B` only with one pseudobulk annotation. With `--pseudobulk-additional-annotations`, use annotation-specific JSON wrapped in single quotes, such as `'{"Anno_L1":["Astrocyte","B cell"],"region":["Cortex"]}'`, or a nested list matching `[main-cells-annotation, additional...]` | empty |
+| `--pseudobulk-min-cells-per-sample` | Minimum cells required in each replicate × annotation pseudobulk sample before it can enter the shared DESeq2 fit | `20` |
+| `--pseudobulk-min-cells-per-pseudobulk` | Alias for `--pseudobulk-min-cells-per-sample` | `20` |
 | `--pseudobulk-min-replicates` | Minimum paired replicates required for each reported contrast | `2` |
 | `--pseudobulk-min-pct-expressed` | Minimum fraction of cells expressing a gene required in at least one compared group before `DeseqStats`; values >1 are interpreted as percentages | `0` |
 | `--pseudobulk-p-adjust-method` | Multiple-testing correction method (`fdr_bh`, `bonferroni`, `holm`, `none`) | `fdr_bh` |
@@ -280,6 +311,8 @@ KaroSpace accepts:
 - A SpatialData `.zarr` store path
 - A SpatialData object passed through the Python API
 
+Use `inspect_input_file(...)` in Python or `--inspect-input` on the CLI to list available `adata.obs` metadata, value types, example values, and missing-value counts before choosing annotation, section metadata, and pseudobulk arguments. This inspect path only reads the AnnData table and does not validate coordinates or run the export pipeline.
+
 Internally, SpatialData input is normalized to one AnnData table before export. The selected table must satisfy the same requirements as a regular AnnData input:
 
 - **`adata.obsm['spatial']`** — 2D coordinates for each cell (x, y)
@@ -287,6 +320,8 @@ Internally, SpatialData input is normalized to one AnnData table before export. 
 - **Categorical or numeric columns in `adata.obs`** — For assigning cell annotations and visualizing cells
 
 For SpatialData tables, use `spatialdata_table="..."` / `--spatialdata-table ...` when the object contains more than one table. If the default `groupby="sample_id"` is missing, KaroSpace uses the table's SpatialData `region_key` automatically when available. If no per-cell region key exists, the table is exported as one section.
+
+If a SpatialData `.zarr` store contains invalid non-table elements, such as images with missing transformations, KaroSpace falls back to reading the selected AnnData table directly from `tables/<table>` instead of failing the whole export. The image/label elements are ignored by this fallback; pass separate section images with `--section-images` if you want image overlays in the viewer.
 
 If coordinates are stored as separate obs columns instead of an `obsm` matrix,
 pass them on the CLI:
@@ -331,7 +366,7 @@ If `adata.obsp` contains a neighbor graph (`spatial_connectivities`, `connectivi
 
 Contact-conditioned interaction markers are computed automatically for the initial `color` column and for `pseudobulk_additional_annotations` unless `interaction_markers=None` / `--interaction-markers None` is used. KaroSpace classifies source cells as contact+ or contact- within each `groupby` replicate, aggregates raw counts by replicate/contact status, and fits pseudobulk DESeq2 with a paired replicate design.
 
-Pseudobulk category DE is precomputed automatically for the initial `color` column unless `pseudobulk=None` / `--pseudobulk None` is used, and shown in `Insights → Compare → Per sample → Simple design`. KaroSpace aggregates raw counts by replicate and annotation, fits one shared `~ replicate + annotation` DESeq2 model per annotation column, then extracts category-versus-category contrasts. It also extracts a balanced-rest contrast for every category: the category minus the equally weighted mean of all other retained annotation categories. Genes that do not reach `pseudobulk_min_pct_expressed` / `--pseudobulk-min-pct-expressed` in at least one compared group are removed before `DeseqStats`, so they do not enter the contrast-level multiple-testing correction. Pairwise PCA/distance diagnostics are generated automatically for selected category pairs.
+Pseudobulk category DE is precomputed automatically for the initial `color` column unless `pseudobulk=None` / `--pseudobulk None` is used, and shown in `Insights → Compare → Per sample → Simple design`. KaroSpace aggregates raw counts by replicate and annotation, keeps replicate × annotation pseudobulk samples with at least `pseudobulk_min_cells_per_sample` / `--pseudobulk-min-cells-per-sample` cells, fits one shared `~ replicate + annotation` DESeq2 model per annotation column, then extracts category-versus-category contrasts. It also extracts a balanced-rest contrast for every category: the category minus the equally weighted mean of all other retained annotation categories. Genes that do not reach `pseudobulk_min_pct_expressed` / `--pseudobulk-min-pct-expressed` in at least one compared group are removed before `DeseqStats`, so they do not enter the contrast-level multiple-testing correction. Pairwise PCA/distance diagnostics are generated automatically for selected category pairs.
 
 When selecting specific pairwise categories from the command line, wrap JSON values in single quotes in zsh/bash/macOS/Linux shells. The single quotes protect the JSON double quotes from the shell:
 
@@ -370,7 +405,7 @@ See [`examples/`](examples/) for complete dataset-specific export scripts.
 - **Filter chips** — Filter sections by metadata
 - **Legend items** — Toggle categories; spotlight one across grid and UMAP
 - **Insights button** — Toggle the insights panel (`Summary`, `Compare`, `Genes`, `Neighbors`, `Regions`)
-- **Screenshot / Theme** — Download snapshot or toggle dark/light mode
+- **Screenshot / Theme** — Download the current grid snapshot or toggle dark/light mode
 
 ### Modal View
 - **Scroll** — Zoom in/out

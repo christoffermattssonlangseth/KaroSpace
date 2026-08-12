@@ -1813,32 +1813,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .screenshot-options .toolbar-action-row {{
             grid-column: 1 / -1;
         }}
-        .screenshot-target-switch {{
-            grid-column: 1 / -1;
-            display: inline-flex;
-            align-items: center;
-            padding: 2px;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            background: var(--input-bg);
-        }}
-        .screenshot-target-btn {{
-            flex: 1;
-            min-width: 70px;
-            padding: 5px 9px;
-            border: 0;
-            border-radius: 6px;
-            background: transparent;
-            color: var(--muted-color);
-            cursor: pointer;
-            font-size: 11px;
-            font-weight: 600;
-        }}
-        .screenshot-target-btn.active {{
-            background: var(--accent-fill);
-            color: var(--accent-on-fill);
-            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.14);
-        }}
 
         .visual-params-bar {{
             padding: 6px 16px;
@@ -3387,7 +3361,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             font-weight: 600;
         }}
         .tutorial-nav-btn:disabled,
-        .tutorial-nav-btn:disabled:hover {{
+        .tutorial-nav-btn:disabled:hover,
+        .tutorial-nav-btn[aria-disabled="true"],
+        .tutorial-nav-btn[aria-disabled="true"]:hover {{
             opacity: 0.45;
             cursor: not-allowed;
             background: var(--input-bg);
@@ -5118,6 +5094,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .modal-body {{ flex: 1; display: flex; overflow: hidden; }}
         .modal-canvas-container {{ flex: 1; position: relative; overflow: hidden; background: var(--panel-bg); }}
         .modal-canvas {{ position: absolute; top: 0; left: 0; width: 100%; height: 100%; transform-origin: 0 0; will-change: transform; }}
+        .modal-canvas.render-pending {{
+            opacity: 0;
+        }}
         .modal-size-block {{
             display: flex;
             align-items: center;
@@ -6941,7 +6920,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         <div class="button-help-list">
                             <div class="button-help-item"><div class="button-help-icons" aria-label="Button guide"><span class="button-help-icon"><svg class="lucide lucide-message-circle-question-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"></path><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><path d="M12 17h.01"></path></svg></span></div><div class="button-help-text">Opens this guide for the application controls.</div></div>
                             <div class="button-help-item"><div class="button-help-icons" aria-label="Theme"><span class="button-help-icon button-help-emoji">🌙</span></div><div class="button-help-text">Switches between light and dark display modes.</div></div>
-                            <div class="button-help-item"><div class="button-help-icons" aria-label="Screenshot"><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"></path><circle cx="12" cy="13" r="3.5"></circle></svg></span></div><div class="button-help-text">Opens screenshot options and downloads the selected viewer area as a PNG.</div></div>
+                            <div class="button-help-item"><div class="button-help-icons" aria-label="Screenshot"><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"></path><circle cx="12" cy="13" r="3.5"></circle></svg></span></div><div class="button-help-text">Opens screenshot options and downloads the current grid view as a PNG.</div></div>
                             <div class="button-help-item"><div class="button-help-icons" aria-label="Save and load"><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"></path><path d="m17 8-5-5-5 5"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path></svg></span></div><div class="button-help-text">Saves the current viewer state to JSON or restores a previously saved state.</div></div>
                             <div class="button-help-item"><div class="button-help-icons" aria-label="Export and download"><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"></path><path d="M14 2v4a2 2 0 0 0 2 2h4"></path><path d="M12 18v-6"></path><path d="m9 15 3 3 3-3"></path></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path></svg></span></div><div class="button-help-text">Downloads the available table, plot, palette, annotations, session, or data bundle for that panel.</div></div>
                             <div class="button-help-item"><div class="button-help-icons" aria-label="Visual and gene settings"><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.2 14.8a2 2 0 0 1 2 2"></path><circle cx="18.5" cy="8.5" r="3.5"></circle><circle cx="7.5" cy="16.5" r="5.5"></circle><circle cx="7.5" cy="4.5" r="2.5"></circle></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><line x1="21" x2="14" y1="4" y2="4"></line><line x1="10" x2="3" y1="4" y2="4"></line><line x1="21" x2="12" y1="12" y2="12"></line><line x1="8" x2="3" y1="12" y2="12"></line><line x1="21" x2="16" y1="20" y2="20"></line><line x1="12" x2="3" y1="20" y2="20"></line><line x1="14" x2="14" y1="2" y2="6"></line><line x1="8" x2="8" y1="10" y2="14"></line><line x1="16" x2="16" y1="18" y2="22"></line></svg></span></div><div class="button-help-text">Opens visual parameters, UMAP appearance, or gene-expression display controls.</div></div>
@@ -6970,16 +6949,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             </button>
             <div class="toolbar-actions">
                 <div class="toolbar-menu-wrap" id="screenshot-menu-wrap">
-                    <button class="icon-btn" id="screenshot-btn" type="button" title="Screenshot options" aria-expanded="false" aria-controls="screenshot-menu" data-help="Open screenshot parameters before downloading a PNG of the current main viewer layout.">
+                    <button class="icon-btn" id="screenshot-btn" type="button" title="Screenshot options" aria-expanded="false" aria-controls="screenshot-menu" data-help="Open screenshot parameters before downloading a PNG of the current grid view.">
                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"></path><circle cx="12" cy="13" r="3.5"></circle></svg>
                     </button>
                     <div class="toolbar-popover" id="screenshot-menu" aria-hidden="true">
                         <div class="toolbar-popover-title">Screenshot</div>
                         <div class="screenshot-options">
-                            <div class="screenshot-target-switch" role="group" aria-label="Screenshot target">
-                                <button class="screenshot-target-btn active" id="screenshot-target-grid" type="button" data-screenshot-target="grid">Grid</button>
-                                <button class="screenshot-target-btn" id="screenshot-target-screen" type="button" data-screenshot-target="screen">Screen</button>
-                            </div>
                             <label for="screenshot-res">Size</label>
                             <select id="screenshot-res" title="Screenshot resolution multiplier" style="font-size:11px; padding:3px 2px; border:1px solid var(--border-color); border-radius:4px; background:var(--input-bg); color:var(--text-color);">
                                 <option value="1">1x</option>
@@ -7811,7 +7786,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     let screenshotDprOverride = null;
     let screenshotTransparentBg = false;
-    let screenshotTarget = 'grid';
     function getRenderDpr() {{
         if (screenshotDprOverride) return screenshotDprOverride;
         const dpr = window.devicePixelRatio || 1;
@@ -9242,7 +9216,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'It updates when filters, hidden sections, or some display choices change.'
             ], {{ nextLabel: tryIt }}),
             step('Screenshot menu', ['#screenshot-menu-wrap', '#screenshot-btn'], [
-                'The screenshot menu exports either the grid or the current screen view.'
+                'The screenshot menu exports the current grid view.'
             ], {{ nextLabel: tryIt }}),
             step('Save the viewer session', ['#save-session-btn'], [
                 'Session export saves interactive state JSON file containing annotations, hidden categories, and current views.'
@@ -9365,14 +9339,33 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ], {{ nextLabel: tryIt }}),
             step('Lasso selection mode', ['#umap-lasso-btn', '#grid .section-panel:not(.filtered-out):nth-of-type(2)'], [
                 'Lasso mode lets you draw around cells directly on the spatial panels to select cells.'
-            ], {{ task: 'Select the lasso tool and draw a small selection on one visible section to continue.', requiresSelection: true, combineTargets: true, autoNextWhenGateSatisfied: true, nextLabel: tryIt }}),
-            step('Compare two selections', ['#umap-compare-btn', '#visual-spatial-tools'], [
+            ], {{ action: () => {{
+                if (typeof closeModal === 'function') closeModal();
+                if (typeof clearSelection === 'function') clearSelection();
+                if (typeof openInsightsMode === 'function') openInsightsMode('selection');
+                magicWandActive = false;
+                umapPanActive = true;
+                lassoModeB = false;
+                updateUMAPCursor?.();
+                updateUMAPLassoButtonState?.();
+                updateSelectionInfo?.();
+            }}, task: 'Select the lasso tool and draw a small selection on one visible section to continue.', requiresSelection: true, combineTargets: true, nextLabel: tryIt }}),
+            step('Compare two selections', ['#umap-compare-btn', '#grid .section-panel:not(.filtered-out):nth-of-type(2)'], [
                 'The compare button starts a Region A / Region B selection workflow.',
                 'Use it to compare two manually selected spatial cell sets before committing to annotations.'
-            ], {{ task: 'Click the compare button, then draw Region B to continue.', requiresRegionB: true, autoNextWhenGateSatisfied: true, nextLabel: tryIt }}),
+            ], {{ action: () => {{
+                clearRegionBSelection?.();
+                lassoModeB = false;
+                magicWandActive = false;
+                umapPanActive = true;
+                updateUMAPCursor?.();
+                updateUMAPLassoButtonState?.();
+                updateUMAPCompareButtonState?.();
+                updateSelectionInfo?.();
+            }}, task: 'Click the compare button, then draw Region B to continue.', requiresRegionB: true, combineTargets: true, nextLabel: tryIt }}),
             step('Clear Region B selection', ['#umap-compare-btn', '#visual-spatial-tools'], [
                 'When Regions are selected, the compare buttons change to a cross to deselect the cells.'
-            ], {{ action: () => {{ tutorialRegionBClearStepStarted = selectedCellsB.size > 0; updateUMAPCompareButtonState?.(); }}, task: 'Click the cross to deselect Region B and return to a single active selection.', requiresRegionBCleared: true, autoNextWhenGateSatisfied: true, nextLabel: tryIt }}),
+            ], {{ action: () => {{ tutorialRegionBClearStepStarted = selectedCellsB.size > 0; updateUMAPCompareButtonState?.(); }}, task: 'Click the cross to deselect Region B and return to a single active selection.', requiresRegionBCleared: true, nextLabel: tryIt }}),
             step('Create annotation from selection', ['#selection-create-annotation-btn', '#visual-spatial-tools'], [
                 'When cells are selected, you can create a region annotation from them.',
                 'Region annotations are user-defined spatial cell sets stored in the viewer session.'
@@ -10048,6 +10041,28 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             .filter(isTutorialElementVisible);
     }}
 
+    function ensureFormFieldNames(root = document) {{
+        const scope = root && typeof root.querySelectorAll === 'function' ? root : document;
+        scope.querySelectorAll('input, select, textarea').forEach((field, idx) => {{
+            if (field.id || field.name) return;
+            const tag = String(field.tagName || 'field').toLowerCase();
+            const key = field.getAttribute('data-selection-query-input')
+                || field.getAttribute('data-welch-top-n')
+                || field.getAttribute('data-welch-min-pct')
+                || field.getAttribute('data-annotation-label')
+                || field.getAttribute('data-annotation-color')
+                || field.getAttribute('data-category-label-idx')
+                || field.getAttribute('data-category-color')
+                || field.getAttribute('data-module-name-input')
+                || field.getAttribute('data-pathway-gsea-select')
+                || field.getAttribute('data-pathway-annotation-select')
+                || field.className
+                || idx;
+            const safe = String(key).replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '') || String(idx);
+            field.name = `karospace_${{tag}}_${{safe}}`;
+        }});
+    }}
+
     function clearTutorialExtraSpotlights() {{
         document.getElementById('tutorial-multi-shade')?.remove();
         document.querySelectorAll('.tutorial-spotlight-extra').forEach(el => el.remove());
@@ -10252,7 +10267,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             window.clearTimeout(tutorialAutoAdvanceTimer);
             tutorialAutoAdvanceTimer = null;
         }}
-        next.disabled = blocked;
+        next.disabled = false;
+        next.setAttribute('aria-disabled', blocked ? 'true' : 'false');
         if (blocked && step?.requiresSelection) next.title = 'Draw a cell selection to continue';
         else if (blocked && step?.requiresRegionB) next.title = 'Select Region B to continue';
         else if (blocked && step?.requiresRegionBCleared) next.title = 'Click the blue cross to clear Region B';
@@ -10289,7 +10305,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             if (!tutorialActive) return;
             if (tutorialStepIndex !== indexAtSchedule || tutorialSteps[tutorialStepIndex] !== stepAtSchedule) return;
             if (!predicate(stepAtSchedule) || !tutorialStepGateSatisfied(stepAtSchedule)) return;
-            document.getElementById('tutorial-next')?.click();
+            stepTutorial(1);
         }}, Number.isFinite(delay) ? delay : 120);
     }}
 
@@ -10353,8 +10369,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         body.innerHTML = (step.body || []).map(text => '<p>' + escapeHtml(text) + '</p>').join('')
             + (step.task ? '<div class="tutorial-task">' + escapeHtml(step.task) + '</div>' : '');
+        ensureFormFieldNames(overlay);
         prev.disabled = displayIndex <= 0;
         next.textContent = displayIndex >= total - 1 ? 'Finish' : 'Next';
+        next.setAttribute('aria-disabled', 'false');
         updateTutorialStepGate();
         positionTutorialCard(target, step);
     }}
@@ -10867,21 +10885,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return new Date().toISOString().replace(/[:.]/g, '-');
     }}
 
-    let html2canvasPromise = null;
-    function ensureHtml2CanvasLoaded() {{
-        if (typeof html2canvas === 'function') return Promise.resolve();
-        if (html2canvasPromise) return html2canvasPromise;
-        html2canvasPromise = new Promise((resolve, reject) => {{
-            const script = document.createElement('script');
-            script.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
-            script.async = true;
-            script.onload = () => resolve();
-            script.onerror = () => reject(new Error('Failed to load html2canvas'));
-            document.head.appendChild(script);
-        }});
-        return html2canvasPromise;
-    }}
-
     function downloadCanvasImage(canvas, filename) {{
         if (!canvas) return;
         const link = document.createElement('a');
@@ -10916,134 +10919,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         URL.revokeObjectURL(url);
     }}
 
-    function replaceCanvasesWithImages(root) {{
-        const originals = document.querySelectorAll('canvas');
-        const clones = root.querySelectorAll('canvas');
-        originals.forEach((canvas, idx) => {{
-            const cloneCanvas = clones[idx];
-            if (!cloneCanvas || !cloneCanvas.parentNode) return;
-            const img = document.createElement('img');
-            const rect = canvas.getBoundingClientRect();
-            if (!canvas.width || !canvas.height || rect.width <= 0 || rect.height <= 0) {{
-                cloneCanvas.remove();
-                return;
-            }}
-            try {{
-                img.src = canvas.toDataURL('image/png');
-            }} catch (error) {{
-                const placeholder = document.createElement('div');
-                placeholder.style.width = `${{rect.width}}px`;
-                placeholder.style.height = `${{rect.height}}px`;
-                placeholder.style.background = getPanelBg();
-                cloneCanvas.parentNode.replaceChild(placeholder, cloneCanvas);
-                return;
-            }}
-            img.style.width = `${{rect.width}}px`;
-            img.style.height = `${{rect.height}}px`;
-            img.style.display = 'block';
-            img.setAttribute('width', `${{canvas.width}}`);
-            img.setAttribute('height', `${{canvas.height}}`);
-            cloneCanvas.parentNode.replaceChild(img, cloneCanvas);
-        }});
-    }}
-
     function getScreenshotResolution() {{
         const el = document.getElementById('screenshot-res');
         return Math.max(1, parseInt(el?.value || '2', 10));
-    }}
-
-    const SCREENSHOT_COLOR_PROPS = [
-        'color',
-        'backgroundColor',
-        'borderTopColor',
-        'borderRightColor',
-        'borderBottomColor',
-        'borderLeftColor',
-        'outlineColor',
-        'textDecorationColor',
-        'fill',
-        'stroke',
-    ];
-
-    function normalizeScreenshotColor(value, fallback = 'transparent') {{
-        const text = String(value || '').trim();
-        if (!text || text === 'currentColor') return fallback;
-        if (!/color\\(|color-mix\\(/i.test(text)) return text;
-        const canvas = normalizeScreenshotColor.canvas || (normalizeScreenshotColor.canvas = document.createElement('canvas'));
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return fallback;
-        const marker = 'rgba(1, 2, 3, 0.5)';
-        try {{
-            ctx.fillStyle = marker;
-            ctx.fillStyle = text;
-            return ctx.fillStyle === marker ? fallback : ctx.fillStyle;
-        }} catch (error) {{
-            return fallback;
-        }}
-    }}
-
-    function fallbackScreenshotStyleValue(prop, style) {{
-        const name = String(prop || '').toLowerCase();
-        if (name.includes('background-image') || name.includes('image') || name.includes('shadow')) return 'none';
-        if (name.includes('background')) return 'transparent';
-        if (name.includes('border') || name.includes('outline') || name.includes('text-decoration') || name.includes('caret')) {{
-            return normalizeScreenshotColor(style.color || '#222', '#222');
-        }}
-        if (name === 'fill' || name === 'stroke' || name.includes('color')) {{
-            return normalizeScreenshotColor(style.color || '#222', '#222');
-        }}
-        return '';
-    }}
-
-    function hasUnsupportedScreenshotCssFunction(value) {{
-        return /(?:color-mix|color|oklab|oklch|lab|lch)\\(/i.test(String(value || ''));
-    }}
-
-    function sanitizeScreenshotStyleSheets(clonedDoc) {{
-        const unsafeFn = /(?:color-mix|color|oklab|oklch|lab|lch)\\(/i;
-        clonedDoc.querySelectorAll('style').forEach((styleEl) => {{
-            const text = styleEl.textContent || '';
-            if (!unsafeFn.test(text)) return;
-            styleEl.textContent = text.replace(
-                /([a-zA-Z-]+)\\s*:\\s*[^;{{}}]*(?:color-mix|color|oklab|oklch|lab|lch)\\([^;{{}}]+\\)[^;{{}}]*;/gi,
-                (match, prop) => {{
-                    const name = String(prop || '').toLowerCase();
-                    if (name.includes('background')) return `${{prop}}: transparent;`;
-                    if (name.includes('border') || name.includes('outline')) return `${{prop}}: transparent;`;
-                    if (name.includes('shadow')) return `${{prop}}: none;`;
-                    if (name === 'fill' || name === 'stroke' || name.includes('color')) return `${{prop}}: #222222;`;
-                    return `${{prop}}: initial;`;
-                }}
-            );
-        }});
-    }}
-
-    function sanitizeScreenScreenshotClone(clonedDoc) {{
-        sanitizeScreenshotStyleSheets(clonedDoc);
-        replaceCanvasesWithImages(clonedDoc);
-        const originalNodes = [document.documentElement, document.body, ...document.body.querySelectorAll('*')];
-        const clonedNodes = [clonedDoc.documentElement, clonedDoc.body, ...clonedDoc.body.querySelectorAll('*')];
-        clonedNodes.forEach((clone, idx) => {{
-            const original = originalNodes[idx];
-            if (!clone || !original || !(clone instanceof clonedDoc.defaultView.Element)) return;
-            if (hasUnsupportedScreenshotCssFunction(clone.getAttribute('style') || '')) clone.removeAttribute('style');
-            const style = getComputedStyle(original);
-            for (const prop of style) {{
-                const value = style.getPropertyValue(prop);
-                if (hasUnsupportedScreenshotCssFunction(value)) {{
-                    const fallback = fallbackScreenshotStyleValue(prop, style);
-                    if (fallback) clone.style.setProperty(prop, fallback, 'important');
-                    else clone.style.removeProperty(prop);
-                }}
-            }}
-            SCREENSHOT_COLOR_PROPS.forEach((prop) => {{
-                const fallback = prop === 'backgroundColor' ? 'transparent' : normalizeScreenshotColor(style.color || '#222', '#222');
-                clone.style[prop] = normalizeScreenshotColor(style[prop], fallback);
-            }});
-            if (hasUnsupportedScreenshotCssFunction(style.backgroundImage || '')) clone.style.backgroundImage = 'none';
-            clone.style.boxShadow = 'none';
-            clone.style.textShadow = 'none';
-        }});
     }}
 
     // Re-render just one section's grid panel (cheap) so H&E tweaks made in the
@@ -11139,182 +11017,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         downloadCanvasImage(composite, name);
     }}
 
-    function copyFormStateForScreenshot(sourceRoot, cloneRoot) {{
-        const sourceFields = sourceRoot.querySelectorAll('input, textarea, select');
-        const cloneFields = cloneRoot.querySelectorAll('input, textarea, select');
-        sourceFields.forEach((source, idx) => {{
-            const clone = cloneFields[idx];
-            if (!clone) return;
-            if (source instanceof HTMLInputElement) {{
-                clone.value = source.value;
-                if (source.type === 'checkbox' || source.type === 'radio') clone.checked = source.checked;
-            }} else if (source instanceof HTMLTextAreaElement || source instanceof HTMLSelectElement) {{
-                clone.value = source.value;
-            }}
-        }});
-    }}
-
-    function inlineSafeComputedStylesForScreenshot(sourceRoot, cloneRoot, clonedDoc) {{
-        const sourceNodes = [sourceRoot, ...sourceRoot.querySelectorAll('*')];
-        const cloneNodes = [cloneRoot, ...cloneRoot.querySelectorAll('*')];
-        sourceNodes.forEach((source, idx) => {{
-            const clone = cloneNodes[idx];
-            if (!source || !clone || !(clone instanceof clonedDoc.defaultView.Element)) return;
-            const style = getComputedStyle(source);
-            clone.removeAttribute('style');
-            for (const prop of style) {{
-                if (String(prop).startsWith('--')) continue;
-                let value = style.getPropertyValue(prop);
-                if (!value) continue;
-                if (hasUnsupportedScreenshotCssFunction(value)) {{
-                    value = fallbackScreenshotStyleValue(prop, style);
-                    if (!value) continue;
-                }}
-                try {{
-                    clone.style.setProperty(prop, value, style.getPropertyPriority(prop));
-                }} catch (error) {{
-                    // Ignore properties that cannot be serialized cross-document.
-                }}
-            }}
-            SCREENSHOT_COLOR_PROPS.forEach((prop) => {{
-                const fallback = prop === 'backgroundColor' ? 'transparent' : normalizeScreenshotColor(style.color || '#222', '#222');
-                clone.style[prop] = normalizeScreenshotColor(style[prop], fallback);
-            }});
-            if (hasUnsupportedScreenshotCssFunction(style.backgroundImage || '')) clone.style.backgroundImage = 'none';
-            clone.style.boxShadow = normalizeScreenshotColor(style.boxShadow || '', 'none');
-            clone.style.textShadow = normalizeScreenshotColor(style.textShadow || '', 'none');
-        }});
-    }}
-
-    async function renderSanitizedPageWithHtml2Canvas(clonedDoc, captureW, captureH, pageBg, multiplier) {{
-        await ensureHtml2CanvasLoaded();
-        sanitizeScreenshotStyleSheets(clonedDoc);
-        clonedDoc.querySelectorAll('[style]').forEach((el) => {{
-            if (!hasUnsupportedScreenshotCssFunction(el.getAttribute('style') || '')) return;
-            el.removeAttribute('style');
-        }});
-        return html2canvas(clonedDoc.body, {{
-            backgroundColor: screenshotTransparentBg ? null : pageBg,
-            scale: multiplier,
-            useCORS: true,
-            logging: false,
-            width: captureW,
-            height: captureH,
-            windowWidth: captureW,
-            windowHeight: captureH,
-            scrollX: 0,
-            scrollY: 0,
-            x: 0,
-            y: 0,
-        }});
-    }}
-
-    async function screenshotScreenView() {{
-        const multiplier = getScreenshotResolution();
-        const name = `spatial-viewer-page-${{getScreenshotTimestamp()}}${{multiplier > 1 ? `-${{multiplier}}x` : ''}}.png`;
-        let frame = null;
-        let svgUrl = null;
-        try {{
-            const docEl = document.documentElement;
-            const captureW = Math.ceil(Math.max(docEl.scrollWidth, document.body.scrollWidth, window.innerWidth));
-            const captureH = Math.ceil(Math.max(docEl.scrollHeight, document.body.scrollHeight, window.innerHeight));
-            const pageBg = screenshotTransparentBg
-                ? 'transparent'
-                : normalizeScreenshotColor(getComputedStyle(document.body).backgroundColor, currentTheme === 'dark' ? '#1a1a1a' : '#ffffff');
-
-            frame = document.createElement('iframe');
-            frame.setAttribute('aria-hidden', 'true');
-            Object.assign(frame.style, {{
-                position: 'fixed',
-                left: '-100000px',
-                top: '0',
-                width: `${{captureW}}px`,
-                height: `${{captureH}}px`,
-                border: '0',
-                pointerEvents: 'none',
-                opacity: '0',
-            }});
-            document.body.appendChild(frame);
-
-            const clonedDoc = frame.contentDocument;
-            clonedDoc.open();
-            clonedDoc.write('<!DOCTYPE html><html><head><meta charset="utf-8"></head><body></body></html>');
-            clonedDoc.close();
-            clonedDoc.documentElement.className = document.documentElement.className;
-            clonedDoc.documentElement.style.width = `${{captureW}}px`;
-            clonedDoc.documentElement.style.minHeight = `${{captureH}}px`;
-            clonedDoc.documentElement.style.background = pageBg;
-            clonedDoc.body.style.width = `${{captureW}}px`;
-            clonedDoc.body.style.minHeight = `${{captureH}}px`;
-            clonedDoc.body.style.margin = '0';
-            clonedDoc.body.style.background = pageBg;
-
-            const bodyClone = document.body.cloneNode(true);
-            bodyClone.querySelectorAll('script, iframe').forEach((node) => node.remove());
-            clonedDoc.body.replaceWith(bodyClone);
-            clonedDoc.body.style.width = `${{captureW}}px`;
-            clonedDoc.body.style.minHeight = `${{captureH}}px`;
-            clonedDoc.body.style.margin = '0';
-            clonedDoc.body.style.background = pageBg;
-
-            copyFormStateForScreenshot(document.body, clonedDoc.body);
-            replaceCanvasesWithImages(clonedDoc);
-            inlineSafeComputedStylesForScreenshot(document.body, clonedDoc.body, clonedDoc);
-
-            clonedDoc.body.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml');
-            const serializedBody = new XMLSerializer().serializeToString(clonedDoc.body);
-            const svg = [
-                `<svg xmlns="http://www.w3.org/2000/svg" width="${{captureW}}" height="${{captureH}}" viewBox="0 0 ${{captureW}} ${{captureH}}">`,
-                screenshotTransparentBg ? '' : `<rect width="100%" height="100%" fill="${{pageBg}}"/>`,
-                `<foreignObject x="0" y="0" width="${{captureW}}" height="${{captureH}}">${{serializedBody}}</foreignObject>`,
-                '</svg>',
-            ].join('');
-            svgUrl = URL.createObjectURL(new Blob([svg], {{ type: 'image/svg+xml;charset=utf-8' }}));
-
-            const image = new Image();
-            image.decoding = 'sync';
-            const loaded = new Promise((resolve, reject) => {{
-                image.onload = resolve;
-                image.onerror = () => reject(new Error('Could not render the page screenshot image.'));
-            }});
-            image.src = svgUrl;
-            await loaded;
-
-            const canvas = document.createElement('canvas');
-            canvas.width = Math.max(1, Math.round(captureW * multiplier));
-            canvas.height = Math.max(1, Math.round(captureH * multiplier));
-            const ctx = canvas.getContext('2d');
-            if (!ctx) throw new Error('Could not create the page screenshot canvas.');
-            if (!screenshotTransparentBg) {{
-                ctx.fillStyle = pageBg;
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-            }}
-            ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-            try {{
-                downloadCanvasImage(canvas, name);
-            }} catch (taintError) {{
-                const fallbackCanvas = await renderSanitizedPageWithHtml2Canvas(
-                    clonedDoc,
-                    captureW,
-                    captureH,
-                    pageBg,
-                    multiplier
-                );
-                downloadCanvasImage(fallbackCanvas, name);
-            }}
-        }} catch (error) {{
-            alert(`Screenshot failed: ${{error.message || error}}`);
-        }} finally {{
-            if (svgUrl) URL.revokeObjectURL(svgUrl);
-            if (frame) frame.remove();
-        }}
-    }}
-
-    function screenshotSelectedTarget() {{
-        if (screenshotTarget === 'screen') {{
-            screenshotScreenView();
-            return;
-        }}
+    function screenshotCurrentGridView() {{
         if (modalSection && (modalInlineActive || document.getElementById('modal')?.classList.contains('active'))) {{
             screenshotModalView();
             return;
@@ -14716,7 +14419,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function renderWelchTopNControl() {{
-        return `<div class="selection-summary-welch-controls"><div class="selection-summary-welch-control-row"><label>Top N per direction</label><input type="number" min="1" max="20" step="1" value="${{selectionWelchTopN}}" data-welch-top-n aria-label="Number of top positive and negative genes selected by Welch test"></div><div class="selection-summary-welch-control-row"><label>Min expressed %</label><input type="range" min="0" max="100" step="1" value="${{selectionWelchMinPct}}" data-welch-min-pct aria-label="Minimum percentage of expressing cells in at least one group"><output data-welch-min-pct-value>${{selectionWelchMinPct}}%</output></div></div>`;
+        return `<div class="selection-summary-welch-controls"><div class="selection-summary-welch-control-row"><label>Top N per direction</label><input type="number" name="selection_welch_top_n" min="1" max="20" step="1" value="${{selectionWelchTopN}}" data-welch-top-n aria-label="Number of top positive and negative genes selected by Welch test"></div><div class="selection-summary-welch-control-row"><label>Min expressed %</label><input type="range" name="selection_welch_min_pct" min="0" max="100" step="1" value="${{selectionWelchMinPct}}" data-welch-min-pct aria-label="Minimum percentage of expressing cells in at least one group"><output data-welch-min-pct-value>${{selectionWelchMinPct}}%</output></div></div>`;
     }}
 
     function renderFindMarkersButton() {{
@@ -16263,6 +15966,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         <div class="selection-query-input-wrap">
                             <textarea
                                 class="selection-query-input"
+                                name="selection_query"
                                 data-selection-query-input
                                 rows="2"
                                 placeholder="${{escapeHtml(getSelectionQueryPlaceholder())}}"
@@ -18509,6 +18213,27 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         canvas.style.transformOrigin = '0 0';
     }}
 
+    function clearModalCanvasFrame() {{
+        const canvas = document.getElementById('modal-canvas');
+        const container = document.getElementById('modal-canvas-container');
+        if (!canvas || !container) return;
+        clearModalInteractionPreview();
+        const rect = container.getBoundingClientRect();
+        const dpr = getRenderDpr();
+        const width = Math.max(1, rect.width || canvas.clientWidth || 1);
+        const height = Math.max(1, rect.height || canvas.clientHeight || 1);
+        canvas.width = Math.max(1, Math.round(width * dpr));
+        canvas.height = Math.max(1, Math.round(height * dpr));
+        const ctx = canvas.getContext('2d');
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.scale(dpr, dpr);
+        ctx.fillStyle = getPanelBg();
+        ctx.fillRect(0, 0, width, height);
+        modalRenderedView = null;
+        updateModalViewportInfo();
+    }}
+
     function cacheModalRenderedView(rect, transform) {{
         if (!modalSection || !rect || !transform) {{
             modalRenderedView = null;
@@ -20191,9 +19916,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 <div class="${{rowClasses}}" data-annotation-id="${{annotation.id}}" data-annotation-depth="${{depth}}" draggable="true">
                     <div class="modal-annotation-row-main" data-annotation-select="${{annotation.id}}" role="button" tabindex="0" title="${{selectTitle}}" aria-label="${{selectTitle}}">
                         <span class="modal-annotation-drag-handle" data-annotation-drag-handle title="Drag to reorder or nest" aria-label="Drag to reorder or nest"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5h.01"></path><path d="M15 5h.01"></path><path d="M9 12h.01"></path><path d="M15 12h.01"></path><path d="M9 19h.01"></path><path d="M15 19h.01"></path></svg></span>
-                        <input class="modal-annotation-label" type="text" value="${{label}}" data-annotation-label="${{annotation.id}}"${{labelStyle}}>
+                        <input class="modal-annotation-label" type="text" name="modal_annotation_label_${{escapeHtml(annotation.id)}}" value="${{label}}" data-annotation-label="${{annotation.id}}"${{labelStyle}}>
                         <div class="modal-annotation-row-actions">
-                            <input class="modal-annotation-color" type="color" value="${{getAnnotationDisplayColor(annotation) || '#777777'}}" data-annotation-color="${{annotation.id}}" title="Change ${{annotation.isGroup ? 'group' : 'region'}} color" aria-label="Change ${{annotation.isGroup ? 'group' : 'region'}} color">
+                            <input class="modal-annotation-color" type="color" name="modal_annotation_color_${{escapeHtml(annotation.id)}}" value="${{getAnnotationDisplayColor(annotation) || '#777777'}}" data-annotation-color="${{annotation.id}}" title="Change ${{annotation.isGroup ? 'group' : 'region'}} color" aria-label="Change ${{annotation.isGroup ? 'group' : 'region'}} color">
                             ${{groupToggle}}
                             <button type="button" data-annotation-delete="${{annotation.id}}" title="Delete annotation" aria-label="Delete annotation">
                                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>
@@ -20689,6 +20414,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         updateModalToolbarState();
         updateUMAPLassoButtonState();
         updateSelectionCreateAnnotationButtonState();
+        ensureFormFieldNames(document);
     }}
 
     // Clear selection
@@ -20795,14 +20521,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const visualBar = document.getElementById('visual-params-bar');
         const filterBar = document.getElementById('filter-bar');
         const headerRect = header ? header.getBoundingClientRect() : null;
-        const headerH = headerRect ? Math.max(0, Math.ceil(headerRect.bottom)) : 0;
-        const visualH = visualBar ? Math.ceil(visualBar.getBoundingClientRect().height) : 0;
+        const headerH = headerRect ? Math.max(0, headerRect.bottom) : 0;
+        const visualH = visualBar ? Math.max(0, visualBar.getBoundingClientRect().height) : 0;
         const filterVisible = filterBar && getComputedStyle(filterBar).display !== 'none';
-        const filterH = filterVisible ? Math.ceil(filterBar.getBoundingClientRect().height) : 0;
-        document.body.style.setProperty('--sticky-header-height', `${{headerH}}px`);
-        document.body.style.setProperty('--sticky-visual-height', `${{visualH}}px`);
-        document.body.style.setProperty('--sticky-filter-height', `${{filterH}}px`);
-        document.body.style.setProperty('--sticky-stack-height', `${{headerH + visualH + filterH}}px`);
+        const filterH = filterVisible ? Math.max(0, filterBar.getBoundingClientRect().height) : 0;
+        document.body.style.setProperty('--sticky-header-height', `${{headerH.toFixed(3)}}px`);
+        document.body.style.setProperty('--sticky-visual-height', `${{visualH.toFixed(3)}}px`);
+        document.body.style.setProperty('--sticky-filter-height', `${{filterH.toFixed(3)}}px`);
+        document.body.style.setProperty('--sticky-stack-height', `${{(headerH + visualH + filterH).toFixed(3)}}px`);
         updateUMAPPanelPosition();
     }}
 
@@ -22828,10 +22554,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 html += `<div class="legend-item ${{hiddenClass}} ${{selectedClass}} ${{spotlightClass}} ${{dimmedClass}}" data-category="${{cat}}">
                     <div class="legend-color" style="background: ${{getCategoryColor(idx, config.colorCol)}}"></div>
                     ${{targetId === 'legend'
-                        ? `<input type="text" class="legend-label-editor" data-category-label-idx="${{idx}}" value="${{escapeHtml(String(cat))}}" title="Rename this category label">`
+                        ? `<input type="text" class="legend-label-editor" name="legend_label_${{idx}}" data-category-label-idx="${{idx}}" value="${{escapeHtml(String(cat))}}" title="Rename this category label">`
                         : `<span>${{escapeHtml(String(cat))}}</span>`}}
                     ${{targetId === 'legend'
-                        ? `<input type="color" class="legend-color-editor" data-category-color="${{escapeHtml(String(cat))}}" value="${{currentHex}}" title="Change color for this category">`
+                        ? `<input type="color" class="legend-color-editor" name="legend_color_${{idx}}" data-category-color="${{escapeHtml(String(cat))}}" value="${{currentHex}}" title="Change color for this category">`
                         : ''}}
                 </div>`;
             }});
@@ -23804,7 +23530,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     : '<div class="gene-discovery-empty">No valid genes in this module.</div>';
                 return `
                     <div class="gene-module-card" data-gene-module-id="${{escapeHtml(module.id)}}">
-                        <input type="text" data-module-name-input="${{escapeHtml(module.id)}}" value="${{escapeHtml(module.name)}}" aria-label="Module name">
+                        <input type="text" name="gene_module_name_${{escapeHtml(module.id)}}" data-module-name-input="${{escapeHtml(module.id)}}" value="${{escapeHtml(module.name)}}" aria-label="Module name">
                         <div class="gene-module-genes">${{geneChips}}</div>
                         <div class="gene-module-actions">
                             <button class="legend-btn icon-only${{isActive ? ' active' : ''}}" type="button" data-gene-module-load="${{escapeHtml(module.id)}}" title="${{isActive ? 'Module loaded' : 'Load module assay'}}" aria-label="${{isActive ? 'Module loaded' : 'Load module assay'}}"${{module.genes.length ? '' : ' disabled'}}>${{MODULE_LOAD_ICON}}</button>
@@ -27790,7 +27516,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const control = `
             <div class="pathway-gsea-control">
                 <label>Pathway</label>
-                <select data-pathway-gsea-select>${{options.join('')}}</select>
+                <select name="pathway_gsea_select" data-pathway-gsea-select>${{options.join('')}}</select>
                 ${{exportButton}}
             </div>
         `;
@@ -27864,7 +27590,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const activeMode = pathwayEnrichmentMode === 'gsea' ? 'gsea' : 'ora';
         const methodButton = (mode, label) => `<button type="button" class="legend-btn${{activeMode === mode ? ' active' : ''}}" data-pathway-mode="${{mode}}">${{escapeHtml(label)}}</button>`;
         return `
-            <select class="pathway-analysis-select" data-pathway-annotation-select>
+            <select class="pathway-analysis-select" name="pathway_annotation_side" data-pathway-annotation-select>
                 <option value="source"${{pathwayAnnotationSide === 'source' ? ' selected' : ''}}>Annotation A (${{escapeHtml(String(sourceCategory || 'A'))}})</option>
                 <option value="reference"${{pathwayAnnotationSide === 'reference' ? ' selected' : ''}}>Annotation B (${{escapeHtml(String(referenceCategory || 'B'))}})</option>
             </select>
@@ -31769,7 +31495,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     }},
                 ],
                 {{
-                    duration: 280,
+                    duration: 160,
                     easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
                     fill: 'forwards',
                 }}
@@ -31785,7 +31511,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }});
     }}
 
-    function waitForOpenHandoff(sourcePanel, delayMs = 130) {{
+    function waitForOpenHandoff(sourcePanel, delayMs = 55) {{
         if (!sourcePanel || window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) {{
             return Promise.resolve(false);
         }}
@@ -31843,7 +31569,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 }},
             ],
             {{
-                duration: 520,
+                duration: 240,
                 easing: 'cubic-bezier(0.16, 1, 0.3, 1)',
                 fill: 'forwards',
             }}
@@ -31864,10 +31590,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function animateModalIntoGrid(content, sourceRect, returnRect = null) {{
-        if (!content || !content.animate) return;
-        if (window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) return;
+        if (!content || !content.animate) return Promise.resolve(false);
+        if (window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) return Promise.resolve(false);
         const targetRect = content.getBoundingClientRect();
-        if (!targetRect.width || !targetRect.height) return;
+        if (!targetRect.width || !targetRect.height) return Promise.resolve(false);
         content.getAnimations?.().forEach((animation) => animation.cancel());
         content.classList.add('is-expanding');
         content.style.transformOrigin = 'top left';
@@ -31896,24 +31622,29 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 }},
             ],
             {{
-                duration: sourceRect ? 920 : 320,
+                duration: sourceRect ? 260 : 180,
                 easing: 'cubic-bezier(0.16, 1, 0.3, 1)',
             }}
         );
-        const cleanup = () => {{
-            content.style.transformOrigin = '';
-            content.classList.remove('is-expanding');
-            requestAnimationFrame(() => {{
-                renderModalSection();
-                refreshFocusedModalToolPanels();
-                layoutModalAnnotationPanel();
-            }});
-        }};
-        animation.addEventListener('finish', cleanup, {{ once: true }});
-        animation.addEventListener('cancel', cleanup, {{ once: true }});
+        return new Promise((resolve) => {{
+            let settled = false;
+            const cleanup = (played) => {{
+                if (settled) return;
+                settled = true;
+                content.style.transformOrigin = '';
+                content.classList.remove('is-expanding');
+                requestAnimationFrame(() => {{
+                    refreshFocusedModalToolPanels();
+                    layoutModalAnnotationPanel();
+                }});
+                resolve(played);
+            }};
+            animation.addEventListener('finish', () => cleanup(true), {{ once: true }});
+            animation.addEventListener('cancel', () => cleanup(false), {{ once: true }});
+        }});
     }}
 
-    function mountModalInGrid(sourceRect = null, returnRect = null) {{
+    function mountModalInGrid() {{
         const grid = document.getElementById('grid');
         const modal = document.getElementById('modal');
         const content = document.querySelector('#modal .modal-content, #grid > .modal-content');
@@ -31922,13 +31653,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         grid.classList.add('focused-section-layout');
         grid.classList.remove('single-section-layout', 'single-visible-filter-layout');
         if (content.parentElement !== grid) grid.appendChild(content);
+        content.getAnimations?.().forEach((animation) => animation.cancel());
+        content.classList.remove('is-expanding');
+        content.style.transform = '';
+        content.style.transformOrigin = '';
         modalInlineActive = true;
         const gridToolbar = document.getElementById('grid-side-toolbar');
         gridToolbar?.classList.add('focused-mode');
         gridToolbar?.classList.remove('visual-open');
         document.getElementById('visual-params-toggle')?.setAttribute('aria-expanded', 'false');
-        animateModalIntoGrid(content, sourceRect, returnRect);
-        return true;
+        return content;
     }}
 
     function unmountModalFromGrid() {{
@@ -31957,24 +31691,42 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         updateModalHeader();
         const liftPromise = sourcePanel ? animateSourcePanelBounce(sourcePanel) : Promise.resolve(false);
-        if (sourcePanel) await waitForOpenHandoff(sourcePanel);
         const handoffRect = sourcePanel?.__karospaceOpeningGhost?.getBoundingClientRect?.() || sourcePanel?.getBoundingClientRect?.() || sourceRect;
         animateSourcePanelDiffuse(sourcePanel);
-        mountModalInGrid(handoffRect, sourceRect);
+        const mountedContent = mountModalInGrid();
         clearSourcePanelBounce(sourcePanel);
         liftPromise.catch(() => {{}});
+        const canvas = document.getElementById('modal-canvas');
+        if (canvas) {{
+            canvas.classList.add('render-pending');
+            canvas.style.cursor = 'grab';
+        }}
+        updateModalToolbarState();
+        refreshFocusedModalToolPanels();
+        layoutModalAnnotationPanel();
+        renderModalAnnotationPanel();
+        clearModalCanvasFrame();
+        const modalFrameOpened = animateModalIntoGrid(mountedContent, handoffRect, sourceRect);
         updateSelectionInfo();
         updateSectionRotationIndicators(sectionId);
         renderLegend('modal-legend');
         requestAnimationFrame(() => {{
-            const canvas = document.getElementById('modal-canvas');
-            if (canvas) canvas.style.cursor = 'grab';
             updateModalToolbarState();
             refreshFocusedModalToolPanels();
             layoutModalAnnotationPanel();
             renderModalAnnotationPanel();
-            renderModalSection();
             setHeAlignPanelOpen(false);
+            refreshModalHeControls();
+            updateTutorialStepGate?.();
+            autoAdvanceTutorialAfterModalOpen?.();
+        }});
+        modalFrameOpened.then(() => {{
+            if (!modalSection || modalSection.id !== sectionId) return;
+            renderModalSection();
+            document.getElementById('modal-canvas')?.classList.remove('render-pending');
+            refreshFocusedModalToolPanels();
+            layoutModalAnnotationPanel();
+            renderModalAnnotationPanel();
             refreshModalHeControls();
             updateTutorialStepGate?.();
             autoAdvanceTutorialAfterModalOpen?.();
@@ -31985,6 +31737,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         invalidateModalRenderedView();
         hideModalGeneDiscoveryPanel();
         modalSpacePanActive = false;
+        document.getElementById('modal-canvas')?.classList.remove('render-pending');
         document.getElementById('modal').classList.remove('active');
         unmountModalFromGrid();
         magicWandActive = false;
@@ -32811,21 +32564,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
         }});
 
-        const syncScreenshotTargetButtons = () => {{
-            document.querySelectorAll('[data-screenshot-target]').forEach((btn) => {{
-                const active = btn.dataset.screenshotTarget === screenshotTarget;
-                btn.classList.toggle('active', active);
-                btn.setAttribute('aria-pressed', active ? 'true' : 'false');
-            }});
-        }};
-        document.querySelectorAll('[data-screenshot-target]').forEach((btn) => {{
-            btn.addEventListener('click', () => {{
-                screenshotTarget = btn.dataset.screenshotTarget === 'screen' ? 'screen' : 'grid';
-                syncScreenshotTargetButtons();
-            }});
-        }});
-        syncScreenshotTargetButtons();
-        document.getElementById('screenshot-download-btn')?.addEventListener('click', screenshotSelectedTarget);
+        document.getElementById('screenshot-download-btn')?.addEventListener('click', screenshotCurrentGridView);
 
         document.getElementById('save-session-btn')?.addEventListener('click', () => {{
             try {{ downloadSessionState(); }}
@@ -33389,6 +33128,7 @@ def export_to_html(
     pseudobulk_counts_layer: Optional[str] = "counts",
     pseudobulk_min_cell_counts: int = 0,
     pseudobulk_min_gene_counts: int = 0,
+    pseudobulk_min_cells_per_sample: int = 20,
     pseudobulk_min_replicates: int = 2,
     pseudobulk_min_pct_expressed: float = 0.0,
     pseudobulk_p_adjust_method: str = "fdr_bh",
@@ -33508,6 +33248,9 @@ def export_to_html(
     pseudobulk_min_gene_counts : int
         Exclude genes below this total raw pseudobulk-count threshold in the
         shared DESeq2 fit. Zero disables filtering.
+    pseudobulk_min_cells_per_sample : int
+        Minimum cells required in each replicate x annotation pseudobulk sample
+        before it can enter the shared DESeq2 fit. Default: 20.
     pseudobulk_min_replicates : int
         Minimum paired replicates required for each reported group-vs-group
         contrast.
@@ -33683,6 +33426,8 @@ def export_to_html(
         raise ValueError("pseudobulk_min_cell_counts must be >= 0")
     if int(pseudobulk_min_gene_counts) < 0:
         raise ValueError("pseudobulk_min_gene_counts must be >= 0")
+    if int(pseudobulk_min_cells_per_sample) < 1:
+        raise ValueError("pseudobulk_min_cells_per_sample must be >= 1")
     if int(pseudobulk_n_cpus) < 1:
         raise ValueError("pseudobulk_n_cpus must be >= 1")
     if int(pseudobulk_embed_top_n_per_comparison) < 0:
@@ -33785,6 +33530,7 @@ def export_to_html(
         pseudobulk_counts_layer=pseudobulk_counts_layer,
         pseudobulk_min_cell_counts=pseudobulk_min_cell_counts,
         pseudobulk_min_gene_counts=pseudobulk_min_gene_counts,
+        pseudobulk_min_cells_per_sample=pseudobulk_min_cells_per_sample,
         pseudobulk_min_replicates=pseudobulk_min_replicates,
         pseudobulk_min_pct_expressed=pseudobulk_min_pct_expressed,
         pseudobulk_p_adjust_method=correction_method,

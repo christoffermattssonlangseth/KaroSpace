@@ -638,15 +638,10 @@ def _read_spatialdata_zarr(path: str) -> Any:
         return read_zarr(path)
 
 
-def _coerce_spatialdata_table(
-    sdata: Any,
+def _select_spatialdata_table_key(
+    table_keys: Sequence[Any],
     spatialdata_table: Optional[str] = None,
-) -> Tuple[sc.AnnData, str]:
-    tables = getattr(sdata, "tables", None)
-    if tables is None or not hasattr(tables, "keys"):
-        raise ValueError("SpatialData input does not expose a tables mapping.")
-
-    table_keys = list(tables.keys())
+) -> Any:
     if not table_keys:
         raise ValueError("SpatialData input contains no AnnData tables.")
 
@@ -669,6 +664,19 @@ def _coerce_spatialdata_table(
             "SpatialData input contains multiple AnnData tables. "
             f"Pass spatialdata_table=... or --spatialdata-table. Available tables: {available}"
         )
+    return chosen_key
+
+
+def _coerce_spatialdata_table(
+    sdata: Any,
+    spatialdata_table: Optional[str] = None,
+) -> Tuple[sc.AnnData, str]:
+    tables = getattr(sdata, "tables", None)
+    if tables is None or not hasattr(tables, "keys"):
+        raise ValueError("SpatialData input does not expose a tables mapping.")
+
+    table_keys = list(tables.keys())
+    chosen_key = _select_spatialdata_table_key(table_keys, spatialdata_table)
 
     table = tables[chosen_key]
     if not isinstance(table, sc.AnnData):
@@ -679,6 +687,38 @@ def _coerce_spatialdata_table(
                 f"SpatialData table '{chosen_key}' is not an AnnData object and cannot be converted."
             )
     return table, str(chosen_key)
+
+
+def _read_spatialdata_zarr_table_direct(
+    path: str,
+    spatialdata_table: Optional[str] = None,
+) -> Tuple[sc.AnnData, Optional[str]]:
+    """Read an AnnData table from a SpatialData Zarr store without loading images."""
+    path_obj = os.fspath(path)
+    tables_dir = os.path.join(path_obj, "tables")
+    if os.path.isdir(tables_dir):
+        table_keys = [
+            name
+            for name in sorted(os.listdir(tables_dir))
+            if os.path.isdir(os.path.join(tables_dir, name))
+        ]
+        chosen_key = _select_spatialdata_table_key(table_keys, spatialdata_table)
+        table_path = os.path.join(tables_dir, str(chosen_key))
+        return sc.read_zarr(table_path), str(chosen_key)
+
+    if spatialdata_table:
+        raise ValueError(
+            f"SpatialData table '{spatialdata_table}' was requested, but {path} "
+            "does not contain a SpatialData 'tables' directory."
+        )
+    return sc.read_zarr(path_obj), None
+
+
+def _compact_exception_message(exc: Exception, limit: int = 260) -> str:
+    text = str(exc).strip().replace("\n", " ")
+    if len(text) > limit:
+        return text[: limit - 1].rstrip() + "..."
+    return text or exc.__class__.__name__
 
 
 def _coerce_input_to_anndata(
@@ -697,9 +737,28 @@ def _coerce_input_to_anndata(
         path_obj = os.fspath(data)
         lower = path.lower()
         if lower.endswith(".zarr") or os.path.isdir(path_obj):
-            sdata = _read_spatialdata_zarr(path)
-            adata, table_key = _coerce_spatialdata_table(sdata, spatialdata_table)
-            return adata, f"SpatialData store {path} table '{table_key}'", table_key
+            try:
+                sdata = _read_spatialdata_zarr(path)
+                adata, table_key = _coerce_spatialdata_table(sdata, spatialdata_table)
+                return adata, f"SpatialData store {path} table '{table_key}'", table_key
+            except Exception as exc:
+                try:
+                    adata, table_key = _read_spatialdata_zarr_table_direct(path, spatialdata_table)
+                except Exception as fallback_exc:
+                    raise ValueError(
+                        f"Unable to read SpatialData/AnnData Zarr input: {path}. "
+                        f"SpatialData read failed with {_compact_exception_message(exc)}; "
+                        f"direct AnnData table fallback failed with "
+                        f"{_compact_exception_message(fallback_exc)}."
+                    ) from exc
+                table_label = f" table '{table_key}'" if table_key is not None else ""
+                log_warning(
+                    "SpatialData store could not be fully constructed; reading the "
+                    f"AnnData{table_label} directly from the Zarr store instead "
+                    f"({_compact_exception_message(exc)}).",
+                    level=1,
+                )
+                return adata, f"SpatialData store {path}{table_label}", table_key
         return _read_h5ad_with_fallback(path), path, None
 
     raise TypeError(
@@ -1602,6 +1661,7 @@ class SpatialDataset:
         pseudobulk_counts_layer: Optional[str] = "counts",
         pseudobulk_min_cell_counts: int = 0,
         pseudobulk_min_gene_counts: int = 0,
+        pseudobulk_min_cells_per_sample: int = 20,
         pseudobulk_min_replicates: int = 2,
         pseudobulk_min_pct_expressed: float = 0.0,
         pseudobulk_p_adjust_method: str = "fdr_bh",
@@ -1670,6 +1730,9 @@ class SpatialDataset:
         pseudobulk_min_gene_counts : int
             Exclude genes below this total raw pseudobulk-count threshold in the
             shared DESeq2 fit. Zero disables filtering.
+        pseudobulk_min_cells_per_sample : int
+            Minimum cells required in each replicate x annotation pseudobulk
+            sample before it can enter the shared DESeq2 fit. Default: 20.
         pseudobulk_min_replicates : int
             Minimum paired replicates required for a reported group-vs-group
             contrast.
@@ -1859,6 +1922,8 @@ class SpatialDataset:
 
         gene_encoding = str(gene_encoding or "auto").lower()
         self._validate_gene_export_options(gene_encoding, gene_sparse_zero_threshold, gene_sparse_pack_min_nnz)
+        if int(pseudobulk_min_cells_per_sample) < 1:
+            raise ValueError("pseudobulk_min_cells_per_sample must be >= 1")
         if int(pseudobulk_embed_top_n_per_comparison) < 0:
             raise ValueError("pseudobulk_embed_top_n_per_comparison must be >= 0")
         if int(interaction_markers_top_targets) < 1:
@@ -2321,7 +2386,7 @@ class SpatialDataset:
                 f"{'s' if len(pending_pseudobulk_de_groupby) != 1 else ''}; "
                 "output feeds Insights > Compare > Per sample."
             )
-            pseudobulk_min_cells_n = 20
+            pseudobulk_min_cells_n = int(pseudobulk_min_cells_per_sample)
             pseudobulk_min_cell_counts_n = int(pseudobulk_min_cell_counts)
             pseudobulk_min_gene_counts_n = int(pseudobulk_min_gene_counts)
             pseudobulk_min_rep_n = int(pseudobulk_min_replicates)
@@ -2882,6 +2947,7 @@ class SpatialDataset:
                 "min_replicates": max(2, int(pseudobulk_min_replicates)),
                 "min_cell_counts": int(pseudobulk_min_cell_counts),
                 "min_gene_counts": int(pseudobulk_min_gene_counts),
+                "min_cells_per_sample": int(pseudobulk_min_cells_per_sample),
                 "n_cpus": max(1, int(pseudobulk_n_cpus)),
                 "diagnostics": "pairwise",
                 "p_adjust_method": str(pseudobulk_p_adjust_method or "fdr_bh"),
