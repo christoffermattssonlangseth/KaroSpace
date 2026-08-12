@@ -111,9 +111,6 @@ python -m pip install -e ".[spatialdata]"
 
 ## Usage
 
-> [!NOTE]
-> See [FEATURES_SUMMARY.md](FEATURES_SUMMARY.md) for a guided overview of the main HTML viewer features.
-
 ### Python API
 
 ```python
@@ -334,6 +331,9 @@ karospace your_data.h5ad \
 | `--section-images-max-px` | Maximum image dimension when embedding section images | `4096` |
 | `--scalebar-unit` | Unit label for the scalebar | `μm` |
 
+> [!NOTE]
+> See [FEATURES_SUMMARY.md](FEATURES_SUMMARY.md) for a guided overview of the main HTML viewer features.
+
 ## Data Requirements
 
 KaroSpace accepts:
@@ -464,11 +464,15 @@ viewer.genes/
   ...
 ```
 
-Keep all three together. The HTML contains the viewer and embedded summary data; `viewer.genes.json` is the sidecar manifest; `viewer.genes/` contains the binary gene shards.
+> [!IMPORTANT]
+> Keep all three together. The HTML contains the viewer and embedded summary data; `viewer.genes.json` is the sidecar manifest; `viewer.genes/` contains the binary gene shards.
 
 ### Open a sidecar viewer
 
-Do not open sidecar HTML directly with `file://`; browsers block local shard loading. Serve the output directory instead:
+> [!CAUTION]
+> Do not open sidecar HTML directly with `file://`; browsers block local shard loading.
+
+Serve the output directory instead:
 
 ```bash
 python -m http.server --directory /path/to/output-dir 8000
@@ -480,11 +484,14 @@ Then open:
 http://localhost:8000/viewer.html
 ```
 
-For deployment, upload the HTML, manifest, and shard directory with the same relative paths to GitHub Pages, S3, an institutional web server, or a lab intranet. If `viewer.html` references `viewer.genes.json`, then `viewer.genes.json` must be next to the HTML and its `viewer.genes/` shard directory must also be next to the HTML unless you intentionally used matching custom paths.
+> [!TIP]
+> For deployment, upload the HTML, manifest, and shard directory with the same relative paths to GitHub Pages, S3, an institutional web server, or a lab intranet. If `viewer.html` references `viewer.genes.json`, then `viewer.genes.json` must be next to the HTML and its `viewer.genes/` shard directory must also be next to the HTML unless you intentionally used matching custom paths.
 
 ### Create a `.karospace` package directly
 
 Use `.karospace` output when you want sidecar loading but prefer one shareable file:
+
+CLI :
 
 ```bash
 karospace your_data.h5ad \
@@ -515,7 +522,8 @@ viewer.loader.html
 
 The `.karospace` file is a ZIP-based package containing `index.html`, `karospace-package.json`, the sidecar manifest, and the binary shard directory. The sibling `viewer.loader.html` is a local opener; it is not part of the package itself.
 
-Open the package by visiting the hosted loader at [karospace.se/open](https://karospace.se/open) or by opening `viewer.loader.html` and dropping/selecting `viewer.karospace`. Package loading happens in the browser; the package is read locally by the browser and is not uploaded by the local loader.
+> [!INFO]
+> Open the package by visiting the hosted loader at [karospace.se/open](https://karospace.se/open) or by opening `viewer.loader.html` and dropping/selecting `viewer.karospace`. Package loading happens in the browser; the package is read locally by the browser and is not uploaded by the local loader.
 
 ### Package an existing sidecar into `.karospace`
 
