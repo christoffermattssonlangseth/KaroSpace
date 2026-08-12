@@ -4,11 +4,13 @@
 
 Originally developed at Karolinska Institutet for visualizing Xenium spatial transcriptomics data across multiple tissue sections.
 
+> [!IMPORTANT]
+> Visit [KaroSpace Website](https://karospace.se/).
+
 ![KaroSpace viewer showing a multi-section spatial transcriptomics grid](assets/karospace-readme-visual.png)
 
-## Live Demo
-- [KaroSpace website](https://karospace.se/)
-- **Pancreas viewer**: [Open hosted demo](https://christoffermattssonlangseth.github.io/KaroSpace/pancreas.html)
+> [!NOTE]
+> Live Demo ! **Pancreas viewer**: [Open hosted demo](https://christoffermattssonlangseth.github.io/KaroSpace/pancreas.html).
 
 ## Features
 
