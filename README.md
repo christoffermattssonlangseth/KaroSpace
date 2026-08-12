@@ -80,17 +80,17 @@ pip install -e .
 ```
 
 > [!WARNING]
-```bash
-- Python >= 3.9
-- scanpy >= 1.9.0
-- anndata >= 0.8.0
-- numpy >= 1.20.0
-- pandas >= 1.3.0
-- pydeseq2 >= 0.5.0
-- scipy >= 1.7.0
-- gseapy >= 1.1.0
-- tqdm >= 4.66.0
-```
+> ```bash
+> - Python >= 3.9
+> - scanpy >= 1.9.0
+> - anndata >= 0.8.0
+> - numpy >= 1.20.0
+> - pandas >= 1.3.0
+> - pydeseq2 >= 0.5.0
+> - scipy >= 1.7.0
+> - gseapy >= 1.1.0
+> - tqdm >= 4.66.0
+> ```
 
 SpatialData input is optional. Install the extra only when you want to load SpatialData `.zarr` stores directly:
 
