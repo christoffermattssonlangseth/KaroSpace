@@ -302,8 +302,8 @@ def _estimate_shared_deseq2_fit_seconds(
     n_genes: int,
     design_columns: int,
     n_cpus: int = 1,
-) -> Tuple[float, float]:
-    """Return a deliberately broad pre-fit runtime estimate.
+) -> float:
+    """Return a pre-fit runtime estimate.
 
     This is a workload heuristic, not a benchmark: DESeq2 convergence, BLAS,
     available memory, and CPU speed can substantially change the duration.
@@ -313,7 +313,7 @@ def _estimate_shared_deseq2_fit_seconds(
     workers = max(1, int(n_cpus))
     parallel_speedup = 1.0 + 0.75 * (workers - 1)
     central_seconds = max(60.0, 6.0 * sample_gene_millions * design_factor / parallel_speedup)
-    return 0.7 * central_seconds, 3.5 * central_seconds
+    return 0.7 * central_seconds
 
 
 def _compute_pseudobulk_sample_diagnostics(
@@ -1787,7 +1787,7 @@ def _compute_pseudobulk_group_de_shared(
         f"retained {fit_counts.shape[1]} of {model_counts.shape[1]} genes before DESeq2 fitting",
         level=2,
     )
-    estimate_low, estimate_high = _estimate_shared_deseq2_fit_seconds(
+    estimate = _estimate_shared_deseq2_fit_seconds(
         fit_counts.shape[0],
         fit_counts.shape[1],
         design_columns,
@@ -1795,8 +1795,7 @@ def _compute_pseudobulk_group_de_shared(
     )
     log_detail(
         "Fitting shared all-category DESeq2 model (normalization and dispersion estimation); "
-        f"rough {max(1, int(n_cpus))}-CPU estimate: {_format_duration(estimate_low)} to "
-        f"{_format_duration(estimate_high)}.",
+        f"rough {max(1, int(n_cpus))}-CPU estimate: {_format_duration(estimate)}.",
         level=2,
     )
     fit_started = time.perf_counter()
