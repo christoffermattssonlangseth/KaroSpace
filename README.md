@@ -570,7 +570,6 @@ adata.write_h5ad("your_data_with_polygons.h5ad")
 
 > [!WARNING]
 > KaroSpace is canvas-heavy. Chrome/Chromium is generally fastest; Safari can be noticeably slower on large datasets. The viewer caps canvas DPR at `1.0` in Safari by default to reduce pixel work on Retina displays.
-
 > For large datasets:
 > - Use `downsample` to limit cells per section
 > - Lower `min_panel_size` to reduce pixels drawn per thumbnail
