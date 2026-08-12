@@ -90,7 +90,7 @@ pip install -e .
 > - tqdm >= 4.66.0
 > ```
 
-SpatialData input is optional. Install the extra only when you want to load SpatialData `.zarr` stores directly:
+SpatialData input is optional. Install only when you want to load SpatialData `.zarr` :
 
 ```bash
 pip install -e ".[spatialdata]"
@@ -109,6 +109,7 @@ Install the SpatialData extra in the same environment if `import spatialdata` fa
 python -m pip install -e ".[spatialdata]"
 ```
 
+## Usage
 
 ### Python API
 
@@ -208,11 +209,7 @@ export_to_html(dataset, "viewer.html", main_cells_annotation="cell_type")
 
 ### Command Line
 
-```bash
-karospace your_data.h5ad -o viewer.html --main-cells-annotation leiden
-```
-
-Inspect an `.h5ad` or SpatialData input without generating HTML or running analytics:
+Inspect an `.h5ad` without generating HTML or running analytics:
 
 ```bash
 karospace your_data.h5ad --inspect-input
@@ -222,6 +219,44 @@ SpatialData `.zarr` stores are also supported:
 
 ```bash
 karospace your_spatialdata.zarr -o viewer.html --main-cells-annotation cell_type --spatialdata-table table
+```
+
+```bash
+karospace your_data.h5ad \
+  -o viewer.html \
+  --groupby sample_id \
+  --metadata-section course,region,condition \
+  --metadata-section-extra patient_id,slide_id \
+  --metadata-value-order '{"course":["naive","peak_I","peak_II","peak_III"]}' \
+  --main-cells-annotation cell_type \
+  --title "KaroSpace" \
+  --min-panel-size 150 \
+  --spot-size auto \
+  --downsample 30000 \
+  --cells-annotations leiden,condition \
+  --genes Cd4,Cd8a,Gfap \
+  --gene-encoding auto \
+  --gene-storage embedded \
+  --gene-sparse-zero-threshold 0.8 \
+  --neighbor-stats-groupby cell_type \
+  --neighbor-permutations 20 \
+  --pseudobulk auto \
+  --pseudobulk-additional-annotations cell_type \
+  --pseudobulk-counts-layer counts \
+  --pseudobulk-min-cells-per-sample 20 \
+  --pseudobulk-min-pct-expressed 0.0 \
+  --pseudobulk-p-adjust-method fdr_bh \
+  --pseudobulk-padj-cutoff 0.05 \
+  --pseudobulk-log2fc-cutoff 0.5 \
+  --pseudobulk-deseq2-fit-type parametric \
+  --pseudobulk-n-cpus 1 \
+  --pseudobulk-embed-top-n-per-comparison 20 \
+  --pathway-organism Human \
+  --pathway-top-n 20 \
+  --pathway-min-overlap 3 \
+  --pathway-gsea-permutations 100 \
+  --interaction-markers auto \
+  --section-rotations sample_a:37.5,sample_b:-90
 ```
 
 #### CLI Options
