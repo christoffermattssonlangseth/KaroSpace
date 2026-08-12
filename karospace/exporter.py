@@ -33279,8 +33279,8 @@ def export_to_html(
     pseudobulk_deseq2_fit_type : str
         PyDESeq2 dispersion trend fit type: "parametric" or "mean".
     pseudobulk_n_cpus : int
-        Number of CPU workers used for PyDESeq2 pseudobulk fitting and contrast
-        evaluation. Must be at least one.
+        Number of CPU workers used for the shared PyDESeq2 fit and the maximum
+        number of parallel shared-fit contrasts. Must be at least one.
     pseudobulk_embed_top_n_per_comparison : int
         Maximum significant DE genes to auto-embed per category or contact
         comparison in embedded mode. Ignored in sidecar mode, where all gene

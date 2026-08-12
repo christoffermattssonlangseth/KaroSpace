@@ -1750,11 +1750,13 @@ class SpatialDataset:
         pseudobulk_deseq2_fit_type : str
             PyDESeq2 dispersion trend fit type, "parametric" or "mean".
         pseudobulk_n_cpus : int
-            Number of CPU workers used by PyDESeq2 pseudobulk fitting and
-            contrast evaluation. Must be at least one.
+            Number of CPU workers used for the shared PyDESeq2 fit and the
+            maximum number of parallel shared-fit contrasts. Must be at least
+            one.
         pseudobulk_embed_top_n_per_comparison : int
             Maximum significant DE genes to auto-embed per category or contact
-            comparison. Explicitly requested ``genes`` are always embedded.
+            comparison in embedded mode. Ignored in sidecar mode, where all gene
+            expression vectors are written to the sidecar.
         interaction_markers_groupby : list, optional
             Internal list of obs columns to compute contact-conditioned
             pseudobulk interaction markers for. Empty/None disables them.

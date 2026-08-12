@@ -376,7 +376,10 @@ def _run_export_cli(argv=None):
         "--pseudobulk-n-cpus",
         type=int,
         default=1,
-        help="CPU workers used for PyDESeq2 pseudobulk fitting and contrasts. Use 1 to avoid parallel workers. (default: 1)",
+        help=(
+            "CPU workers used for the shared PyDESeq2 fit and as the maximum number of "
+            "parallel shared-fit contrasts. (default: 1)"
+        ),
     )
     pseudobulk_args.add_argument(
         "--pseudobulk-embed-top-n-per-comparison",

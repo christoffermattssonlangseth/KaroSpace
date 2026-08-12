@@ -6,6 +6,7 @@ import os
 import re
 import time
 import warnings
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -674,6 +675,15 @@ def _deseq2_shared_contrast(
             stats = DeseqStats(stats_dds, contrast=vector, n_cpus=max(1, int(n_cpus)))
         stats.summary()
     return stats.results_df.copy()
+
+
+def _reverse_deseq2_result(result: pd.DataFrame) -> pd.DataFrame:
+    """Return the opposite direction of a DESeq2 contrast result."""
+    reversed_result = result.copy()
+    for column in ("log2FoldChange", "stat"):
+        if column in reversed_result.columns:
+            reversed_result[column] = -pd.to_numeric(reversed_result[column], errors="coerce")
+    return reversed_result
 
 
 def _shared_group_contrast(dds: Any, source: str, reference: str) -> np.ndarray:
@@ -1833,7 +1843,41 @@ def _compute_pseudobulk_group_de_shared(
     def category_cell_mask(category: str) -> np.ndarray:
         return model_cell_mask & (group_values.to_numpy() == str(category))
 
-    def store_result(
+    def format_shared_result(
+        raw_result: pd.DataFrame,
+        *,
+        contrast_type: str,
+        n_replicates: int,
+        source_mask: np.ndarray,
+        reference_mask: np.ndarray,
+        fit_gene_count: int,
+        test_gene_count: int,
+    ) -> Dict[str, Any]:
+        formatted = _format_result(
+            raw_result,
+            source_mask=source_mask,
+            reference_mask=reference_mask,
+            expression_matrix=expression_matrix,
+            var_names=adata.var_names,
+            top_n=0,
+            n_source=int(np.count_nonzero(source_mask)),
+            n_reference=int(np.count_nonzero(reference_mask)),
+            n_replicates=n_replicates,
+            counts_layer_used=counts_layer_used,
+            warning=warning,
+            p_adjust_method=p_adjust_method,
+            min_pct_expressed=min_pct_expressed,
+            padj_cutoff=padj_cutoff,
+            log2fc_cutoff=log2fc_cutoff,
+        )
+        formatted.update(model_info)
+        formatted["contrast_type"] = contrast_type
+        formatted["min_pct_prefilter_gene_count"] = int(fit_gene_count)
+        formatted["min_pct_retained_gene_count"] = int(test_gene_count)
+        formatted["min_pct_removed_gene_count"] = int(max(0, fit_gene_count - test_gene_count))
+        return formatted
+
+    def evaluate_contrast(
         source: str,
         reference: str,
         contrast: np.ndarray,
@@ -1841,16 +1885,13 @@ def _compute_pseudobulk_group_de_shared(
         contrast_type: str,
         n_replicates: int,
         reference_mask: np.ndarray,
-        progress: str,
-    ) -> None:
+    ) -> Tuple[str, str, Dict[str, Any], str, Optional[str], str]:
         source_mask = category_cell_mask(source)
         n_source = int(np.count_nonzero(source_mask))
         n_reference = int(np.count_nonzero(reference_mask))
         label = f"{source} vs {reference}" if reference != "__rest__" else f"{source} vs balanced rest"
         try:
-            log_step(f"[{progress}] {label}: testing shared DESeq2 contrast", level=3)
             fit_gene_names = [str(gene) for gene in fit_meta.attrs.get("gene_names", [])]
-            min_pct_threshold = _normalize_pct_threshold(min_pct_expressed)
             test_gene_names = _expression_prefilter_gene_names(
                 expression_matrix,
                 source_mask,
@@ -1859,51 +1900,23 @@ def _compute_pseudobulk_group_de_shared(
                 fit_gene_names,
                 min_pct_expressed,
             )
-            if min_pct_threshold > 0:
-                log_detail(
-                    f"Minimum % cells retained {len(test_gene_names)} "
-                    f"of {len(fit_gene_names)} fitted genes for DeseqStats",
-                    level=4,
-                )
             raw_result = _deseq2_shared_contrast(
                 dds,
                 contrast,
-                n_cpus=n_cpus,
+                n_cpus=1,
                 gene_names=test_gene_names,
             )
-            formatted = _format_result(
+            formatted = format_shared_result(
                 raw_result,
+                contrast_type=contrast_type,
+                n_replicates=n_replicates,
                 source_mask=source_mask,
                 reference_mask=reference_mask,
-                expression_matrix=expression_matrix,
-                var_names=adata.var_names,
-                top_n=0,
-                n_source=n_source,
-                n_reference=n_reference,
-                n_replicates=n_replicates,
-                counts_layer_used=counts_layer_used,
-                warning=warning,
-                p_adjust_method=p_adjust_method,
-                min_pct_expressed=min_pct_expressed,
-                padj_cutoff=padj_cutoff,
-                log2fc_cutoff=log2fc_cutoff,
+                fit_gene_count=len(fit_gene_names),
+                test_gene_count=len(test_gene_names),
             )
-            formatted.update(model_info)
-            formatted["contrast_type"] = contrast_type
-            formatted["min_pct_prefilter_gene_count"] = int(len(fit_gene_names))
-            formatted["min_pct_retained_gene_count"] = int(len(test_gene_names))
-            formatted["min_pct_removed_gene_count"] = int(
-                max(0, len(fit_gene_names) - len(test_gene_names))
-            )
-            results.setdefault(source, {})[reference] = formatted
-            log_detail(
-                f"{_count_threshold_passing_genes(formatted)} "
-                f"genes pass the DE thresholds (padj < {float(padj_cutoff):g} "
-                f"and |log2FC| >= {float(log2fc_cutoff):g})",
-                level=4,
-            )
+            return source, reference, formatted, label, None, "shared DESeq2 contrast returned"
         except Exception as exc:
-            log_step(f"[{progress}] {label}: failed ({exc})", level=3)
             failed = _empty_result(
                 "de_failed",
                 n_source=n_source,
@@ -1914,81 +1927,174 @@ def _compute_pseudobulk_group_de_shared(
             )
             failed.update(model_info)
             failed["contrast_type"] = contrast_type
-            results.setdefault(source, {})[reference] = failed
+            return source, reference, failed, label, str(exc), "failed"
+
+    def evaluate_pairwise_contrast(
+        source: str,
+        reference: str,
+        contrast: np.ndarray,
+        *,
+        n_replicates: int,
+        reference_mask: np.ndarray,
+    ) -> List[Tuple[str, str, Dict[str, Any], str, Optional[str], str]]:
+        source_mask = category_cell_mask(source)
+        n_source = int(np.count_nonzero(source_mask))
+        n_reference = int(np.count_nonzero(reference_mask))
+        forward_label = f"{source} vs {reference}"
+        reverse_label = f"{reference} vs {source}"
+        try:
+            fit_gene_names = [str(gene) for gene in fit_meta.attrs.get("gene_names", [])]
+            test_gene_names = _expression_prefilter_gene_names(
+                expression_matrix,
+                source_mask,
+                reference_mask,
+                adata.var_names,
+                fit_gene_names,
+                min_pct_expressed,
+            )
+            raw_result = _deseq2_shared_contrast(
+                dds,
+                contrast,
+                n_cpus=1,
+                gene_names=test_gene_names,
+            )
+            forward = format_shared_result(
+                raw_result,
+                contrast_type="category_vs_category",
+                n_replicates=n_replicates,
+                source_mask=source_mask,
+                reference_mask=reference_mask,
+                fit_gene_count=len(fit_gene_names),
+                test_gene_count=len(test_gene_names),
+            )
+            reverse = format_shared_result(
+                _reverse_deseq2_result(raw_result),
+                contrast_type="category_vs_category",
+                n_replicates=n_replicates,
+                source_mask=reference_mask,
+                reference_mask=source_mask,
+                fit_gene_count=len(fit_gene_names),
+                test_gene_count=len(test_gene_names),
+            )
+            return [
+                (source, reference, forward, forward_label, None, "shared DESeq2 contrast returned"),
+                (reference, source, reverse, reverse_label, None, "derived reverse contrast returned"),
+            ]
+        except Exception as exc:
+            forward_failed = _empty_result(
+                "de_failed",
+                n_source=n_source,
+                n_reference=n_reference,
+                min_cells=int(min_cells),
+                min_replicates=required_min_replicates,
+                details=str(exc),
+            )
+            forward_failed.update(model_info)
+            forward_failed["contrast_type"] = "category_vs_category"
+            reverse_failed = _empty_result(
+                "de_failed",
+                n_source=n_reference,
+                n_reference=n_source,
+                min_cells=int(min_cells),
+                min_replicates=required_min_replicates,
+                details=str(exc),
+            )
+            reverse_failed.update(model_info)
+            reverse_failed["contrast_type"] = "category_vs_category"
+            return [
+                (source, reference, forward_failed, forward_label, str(exc), "failed"),
+                (reference, source, reverse_failed, reverse_label, str(exc), "failed"),
+            ]
+
+    def log_returned_contrast(
+        progress: str,
+        label: str,
+        formatted: Dict[str, Any],
+        error: Optional[str],
+        status: str,
+    ) -> None:
+        if error:
+            log_step(f"[{progress}] {label}: failed ({error})", level=3)
+            return
+        log_step(f"[{progress}] {label}: {status}", level=3)
+        if _normalize_pct_threshold(min_pct_expressed) > 0:
+            retained_count = int(formatted.get("min_pct_retained_gene_count") or 0)
+            prefilter_count = int(formatted.get("min_pct_prefilter_gene_count") or 0)
+            log_detail(
+                f"Minimum % cells retained {retained_count} "
+                f"of {prefilter_count} fitted genes for DeseqStats",
+                level=4,
+            )
+        log_detail(
+            f"{_count_threshold_passing_genes(formatted)} "
+            f"genes pass the DE thresholds (padj < {float(padj_cutoff):g} "
+            f"and |log2FC| >= {float(log2fc_cutoff):g})",
+            level=4,
+        )
+
+    def run_contrast_tasks(tasks: List[Dict[str, Any]]) -> None:
+        if not tasks:
+            return
+        workers = min(max(1, int(n_cpus)), len(tasks))
+        log_detail(
+            f"Running {len(tasks)} shared DESeq2 contrast"
+            f"{'s' if len(tasks) != 1 else ''} with up to {workers} parallel worker"
+            f"{'s' if workers != 1 else ''}.",
+            level=2,
+        )
+        if workers == 1:
+            for task in tasks:
+                source, reference, formatted, label, error, status = evaluate_contrast(**task)
+                results.setdefault(source, {})[reference] = formatted
+                progress = next_progress()
+                log_returned_contrast(progress, label, formatted, error, status)
+        else:
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = [executor.submit(evaluate_contrast, **task) for task in tasks]
+                for future in as_completed(futures):
+                    source, reference, formatted, label, error, status = future.result()
+                    results.setdefault(source, {})[reference] = formatted
+                    progress = next_progress()
+                    log_returned_contrast(progress, label, formatted, error, status)
+
+    def run_pairwise_contrast_tasks(tasks: List[Dict[str, Any]]) -> None:
+        if not tasks:
+            return
+        workers = min(max(1, int(n_cpus)), len(tasks))
+        log_detail(
+            f"Running {len(tasks)} shared DESeq2 pairwise contrast task"
+            f"{'s' if len(tasks) != 1 else ''} with up to {workers} parallel worker"
+            f"{'s' if workers != 1 else ''}; each task returns both directions.",
+            level=2,
+        )
+        if workers == 1:
+            for task in tasks:
+                for source, reference, formatted, label, error, status in evaluate_pairwise_contrast(**task):
+                    results.setdefault(source, {})[reference] = formatted
+                    progress = next_progress()
+                    log_returned_contrast(progress, label, formatted, error, status)
+        else:
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = [executor.submit(evaluate_pairwise_contrast, **task) for task in tasks]
+                for future in as_completed(futures):
+                    for source, reference, formatted, label, error, status in future.result():
+                        results.setdefault(source, {})[reference] = formatted
+                        progress = next_progress()
+                        log_returned_contrast(progress, label, formatted, error, status)
 
     selected_retained = [category for category in selected_pairwise_categories if category in retained_categories]
     directed_pairs = len(selected_retained) * max(0, len(selected_retained) - 1)
     total_contrasts = directed_pairs + len(retained_categories)
-    contrast_index = 0
+    completed_contrasts = 0
+    balanced_rest_tasks: List[Dict[str, Any]] = []
+    pairwise_contrast_tasks: List[Dict[str, Any]] = []
+
+    def next_progress() -> str:
+        nonlocal completed_contrasts
+        completed_contrasts += 1
+        return f"{completed_contrasts}/{total_contrasts}"
+
     pair_diagnostics: Dict[str, Dict[str, Dict[str, Any]]] = {}
-    if len(selected_retained) > 1:
-        unique_pairs = [
-            (source, reference)
-            for source_index, source in enumerate(selected_retained)
-            for reference in selected_retained[source_index + 1:]
-        ]
-        log_detail(
-            f"Preparing {len(unique_pairs)} pairwise PCA/distance diagnostic payload"
-            f"{'s' if len(unique_pairs) != 1 else ''} for the selected annotations; "
-            "output feeds the Samples tab.",
-            level=2,
-        )
-        for diagnostic_index, (source, reference) in enumerate(unique_pairs, start=1):
-            keep_positions = np.flatnonzero(
-                fit_meta["_pb_group"].isin([source, reference]).to_numpy()
-            )
-            log_step(
-                f"Diagnostic [{diagnostic_index}/{len(unique_pairs)}] {source} vs {reference}",
-                level=3,
-            )
-            pair_diagnostics.setdefault(source, {})[reference] = _compute_pseudobulk_sample_diagnostics(
-                fit_counts[keep_positions],
-                fit_meta.iloc[keep_positions].copy(),
-            )
-    log_detail(
-        f"{len(selected_retained)} selected categories -> {directed_pairs} category-versus-category "
-        "contrasts from the shared fit; output feeds Raw table, Genes, and Pathway Enrichment.",
-        level=2,
-    )
-    for source in selected_retained:
-        for reference in selected_retained:
-            if source == reference:
-                continue
-            contrast_index += 1
-            paired_reps = sorted(
-                set(fit_meta.loc[fit_meta["_pb_group"] == source, "_pb_replicate"].astype(str))
-                & set(fit_meta.loc[fit_meta["_pb_group"] == reference, "_pb_replicate"].astype(str))
-            )
-            source_mask = category_cell_mask(source)
-            reference_mask = category_cell_mask(reference)
-            if len(paired_reps) < required_min_replicates:
-                log_step(
-                    f"[{contrast_index}/{total_contrasts}] {source} vs {reference}: "
-                    f"skipped, insufficient paired replicates "
-                    f"({len(paired_reps)}; need >= {required_min_replicates})",
-                    level=3,
-                )
-                empty = _empty_result(
-                    "insufficient_replicates",
-                    n_source=int(np.count_nonzero(source_mask)),
-                    n_reference=int(np.count_nonzero(reference_mask)),
-                    min_cells=int(min_cells),
-                    min_replicates=required_min_replicates,
-                    details=f"{len(paired_reps)} paired replicate(s) available",
-                )
-                empty.update(model_info)
-                empty["contrast_type"] = "category_vs_category"
-                results.setdefault(source, {})[reference] = empty
-                continue
-            store_result(
-                source,
-                reference,
-                _shared_group_contrast(dds, source, reference),
-                contrast_type="category_vs_category",
-                n_replicates=len(paired_reps),
-                reference_mask=reference_mask,
-                progress=f"{contrast_index}/{total_contrasts}",
-            )
 
     rest_reference = "__rest__"
     log_detail(
@@ -1997,7 +2103,6 @@ def _compute_pseudobulk_group_de_shared(
         level=2,
     )
     for source in retained_categories:
-        contrast_index += 1
         references = [category for category in retained_categories if category != source]
         source_reps = set(fit_meta.loc[fit_meta["_pb_group"] == source, "_pb_replicate"].astype(str))
         paired_reps = sorted(
@@ -2010,8 +2115,9 @@ def _compute_pseudobulk_group_de_shared(
         source_mask = category_cell_mask(source)
         reference_mask = model_cell_mask & (group_values.to_numpy() != source)
         if len(paired_reps) < required_min_replicates:
+            progress = next_progress()
             log_step(
-                f"[{contrast_index}/{total_contrasts}] {source} vs balanced rest: "
+                f"[{progress}] {source} vs balanced rest: "
                 f"skipped, insufficient paired replicates "
                 f"({len(paired_reps)}; need >= {required_min_replicates})",
                 level=3,
@@ -2032,15 +2138,91 @@ def _compute_pseudobulk_group_de_shared(
             [_shared_group_contrast(dds, source, reference) for reference in references],
             axis=0,
         )
-        store_result(
-            source,
-            rest_reference,
-            balanced_contrast,
-            contrast_type="balanced_rest",
-            n_replicates=len(paired_reps),
-            reference_mask=reference_mask,
-            progress=f"{contrast_index}/{total_contrasts}",
+        balanced_rest_tasks.append(
+            {
+                "source": source,
+                "reference": rest_reference,
+                "contrast": balanced_contrast,
+                "contrast_type": "balanced_rest",
+                "n_replicates": len(paired_reps),
+                "reference_mask": reference_mask,
+            }
         )
+
+    run_contrast_tasks(balanced_rest_tasks)
+
+    unique_pairs = [
+        (source, reference)
+        for source_index, source in enumerate(selected_retained)
+        for reference in selected_retained[source_index + 1:]
+    ]
+    if unique_pairs:
+        log_detail(
+            f"Preparing {len(unique_pairs)} pairwise PCA/distance diagnostic payload"
+            f"{'s' if len(unique_pairs) != 1 else ''} for the selected annotations; "
+            "output feeds the Samples tab.",
+            level=2,
+        )
+        for diagnostic_index, (source, reference) in enumerate(unique_pairs, start=1):
+            keep_positions = np.flatnonzero(
+                fit_meta["_pb_group"].isin([source, reference]).to_numpy()
+            )
+            log_step(
+                f"Diagnostic [{diagnostic_index}/{len(unique_pairs)}] {source} vs {reference}",
+                level=3,
+            )
+            pair_diagnostics.setdefault(source, {})[reference] = _compute_pseudobulk_sample_diagnostics(
+                fit_counts[keep_positions],
+                fit_meta.iloc[keep_positions].copy(),
+            )
+    log_detail(
+        f"{len(selected_retained)} selected categories -> {directed_pairs} category-versus-category "
+        f"contrasts from {len(unique_pairs)} fitted pairwise comparison"
+        f"{'s' if len(unique_pairs) != 1 else ''}; output feeds Raw table, Genes, and Pathway Enrichment.",
+        level=2,
+    )
+    for source, reference in unique_pairs:
+        paired_reps = sorted(
+            set(fit_meta.loc[fit_meta["_pb_group"] == source, "_pb_replicate"].astype(str))
+            & set(fit_meta.loc[fit_meta["_pb_group"] == reference, "_pb_replicate"].astype(str))
+        )
+        source_mask = category_cell_mask(source)
+        reference_mask = category_cell_mask(reference)
+        if len(paired_reps) < required_min_replicates:
+            for skipped_source, skipped_reference, skipped_source_mask, skipped_reference_mask in (
+                (source, reference, source_mask, reference_mask),
+                (reference, source, reference_mask, source_mask),
+            ):
+                progress = next_progress()
+                log_step(
+                    f"[{progress}] {skipped_source} vs {skipped_reference}: "
+                    f"skipped, insufficient paired replicates "
+                    f"({len(paired_reps)}; need >= {required_min_replicates})",
+                    level=3,
+                )
+                empty = _empty_result(
+                    "insufficient_replicates",
+                    n_source=int(np.count_nonzero(skipped_source_mask)),
+                    n_reference=int(np.count_nonzero(skipped_reference_mask)),
+                    min_cells=int(min_cells),
+                    min_replicates=required_min_replicates,
+                    details=f"{len(paired_reps)} paired replicate(s) available",
+                )
+                empty.update(model_info)
+                empty["contrast_type"] = "category_vs_category"
+                results.setdefault(skipped_source, {})[skipped_reference] = empty
+            continue
+        pairwise_contrast_tasks.append(
+            {
+                "source": source,
+                "reference": reference,
+                "contrast": _shared_group_contrast(dds, source, reference),
+                "n_replicates": len(paired_reps),
+                "reference_mask": reference_mask,
+            }
+        )
+
+    run_pairwise_contrast_tasks(pairwise_contrast_tasks)
 
     if not results:
         return None
