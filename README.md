@@ -4,8 +4,7 @@
 
 Originally developed at Karolinska Institutet for visualizing Xenium spatial transcriptomics data across multiple tissue sections.
 
-> [!IMPORTANT]
-> Visit [KaroSpace Website](https://karospace.se/).
+Visit [KaroSpace Website](https://karospace.se/).
 
 ![KaroSpace viewer showing a multi-section spatial transcriptomics grid](assets/karospace-readme-visual.png)
 
@@ -14,25 +13,24 @@ Originally developed at Karolinska Institutet for visualizing Xenium spatial tra
 
 ## Features
 
-- **Grid + modal exploration** — Browse many sections in a responsive grid, then zoom and pan any section in detail
-- **Per-section rotation** — Set exact initial section angles at export time and adjust them interactively
-- **Linked UMAP + section selection** — Magic Wand lasso works in UMAP and modal view with synced highlights
-- **Selection summaries** — Selected-cell totals and per-type counts with expandable scrollable lists; minimize the panel to a compact header to keep the view clear
-- **Polygon annotation workflow** — Save lasso selections as persistent annotations, reorder labels, and export JSON for downstream `adata` integration
-- **Region-to-region DE** — Compare drawn annotations directly in the viewer, export JSON/CSV reports, and search top hits
-- **Split compare slider** — Compare two variables side-by-side in the modal (`Cell type` or `Gene`, including `All categories`), draggable directly on the canvas
-- **Legend controls + spotlight** — Toggle/hide categories and spotlight one class across grid and UMAP
-- **Flexible coloring + gene discovery** — Switch between annotation columns, fuzzy-search genes, and reuse recent or saved gene panels
-- **Insights panel** — `Summary`, `Compare`, `Genes`, `Neighbors`, and `Regions` tabs with pseudobulk category DE, pathway enrichment, neighbor composition, full-cell spatial dispersion, interaction markers, and region comparison
-- **Annotation river plot** — `Insights → Compare → River` draws a Sankey of how two annotations correspond (e.g. `leiden_1` ↔ `leiden_2`); click a node to recolor and spotlight it, or export the crosstab as CSV
-- **Numeric category ordering** — Numeric cluster labels sort naturally (`2` before `10`) in legends, dropdowns, and plots, with `adata.uns` palettes kept aligned
-- **Modal selection workflow** — Lasso in the sample view, save selections as annotations, open a focused subview, browse `Genes in selection`, and use `Space` + drag to pan while Select is active
-- **Shareable packages** — Export as `.karospace` bundles (ZIP + viewer HTML) for offline sharing; open via the hosted loader at [karospace.se/open](https://karospace.se/open) or a local `loader.html`. See [KAROSPACE_PACKAGE_FORMAT_SPEC.md](KAROSPACE_PACKAGE_FORMAT_SPEC.md)
-- **Compact sidecar options** — JSON and binary shard formats, sparse-first encoding, and optional `uint16`/`uint8` quantization for large datasets
-- **Metadata-aware browsing** — Filter sections by metadata and outline by course or another column
-- **Neighbor graph tools** — Graph overlay, hover rings (1–3 hops), enrichment, interactions, and dispersion summaries when `adata.obsp` contains a spatial graph
-- **Quality-of-life controls** — Hideable toolbar, screenshots, light/dark theme toggle, keyboard shortcuts, and adjustable spot size
-- **Standalone export** — One self-contained HTML file, no backend required
+- [x] **Modal interaction** — Browse many sections in a responsive grid, then zoom and pan any section in detail
+- [x] **Section filters** — Filter visible sections by exported metadata such as stage, condition, region, sex, model, sample, or batch
+- [x] **UMAP to sections connection** — Magic Wand lasso works in UMAP and modal view with synced highlights
+- [x] **Cells selection composition** — Selected-cell totals and per-type counts with expandable scrollable lists; minimize the panel to a compact header to keep the view clear
+- [x] **Region polygon annotation** — Save lasso selections as persistent annotations, reorder labels, and export JSON for downstream integration
+- [x] **Region-to-region comparison** — Compare drawn regions or annotations directly in the viewer, export JSON/CSV reports, and search top hits
+- [x] **Cell search** — Select cells with query syntax based on annotations, genes, or section metadata, then reuse the selection in summaries and comparisons
+- [x] **Split screen** — Compare two variables side-by-side in the modal (`Cell type` or `Gene`, including `All categories`), draggable directly on the canvas
+- [x] **Gene modules** — Build custom gene sets, compute averaged module scores, display them like expression layers, and import/export module definitions
+- [x] **Legend controls** — Toggle/hide categories and spotlight one class across grid and UMAP
+- [x] **Gene exploration** — Search genes, inspect expression distributions, review marker genes, spatial genes, category means, and related-gene suggestions
+- [x] **Per cell/Per sample comparison** — Compare selections, regions, annotations, and pseudobulk sample-level category contrasts with tables, plots, diagnostics, and pathway enrichment
+- [x] **Neighbor graph tools** — Graph overlay, hover rings (1–3 hops), enrichment, interactions, and dispersion summaries when `adata.obsp` contains a spatial graph
+- [x] **Quality-of-life controls** — Hideable toolbar, screenshots, light/dark theme toggle, buttons explanation, keyboard shortcuts, and adjustable spot size
+- [x] **Standalone export** — One self-contained HTML file, no backend required
+- [x] **Compact sidecar** — Keep large gene matrices outside the HTML with lazy-loaded sidecar manifests and binary shards for lighter initial viewer files
+- [x] **Shareable packages** — Export as `.karospace` bundles (ZIP + viewer HTML)
+
 
 ## Browser Considerations
 
