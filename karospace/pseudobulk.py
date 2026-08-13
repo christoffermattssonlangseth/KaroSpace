@@ -2032,7 +2032,7 @@ def _compute_pseudobulk_group_de_shared(
             level=4,
         )
 
-    def run_contrast_tasks(tasks: List[Dict[str, Any]]) -> None:
+    def run_contrast_tasks(tasks: List[Dict[str, Any]], next_progress_fn) -> None:
         if not tasks:
             return
         workers = min(max(1, int(n_cpus)), len(tasks))
@@ -2046,7 +2046,7 @@ def _compute_pseudobulk_group_de_shared(
             for task in tasks:
                 source, reference, formatted, label, error, status = evaluate_contrast(**task)
                 results.setdefault(source, {})[reference] = formatted
-                progress = next_progress()
+                progress = next_progress_fn()
                 log_returned_contrast(progress, label, formatted, error, status)
         else:
             with ThreadPoolExecutor(max_workers=workers) as executor:
@@ -2054,10 +2054,10 @@ def _compute_pseudobulk_group_de_shared(
                 for future in as_completed(futures):
                     source, reference, formatted, label, error, status = future.result()
                     results.setdefault(source, {})[reference] = formatted
-                    progress = next_progress()
+                    progress = next_progress_fn()
                     log_returned_contrast(progress, label, formatted, error, status)
 
-    def run_pairwise_contrast_tasks(tasks: List[Dict[str, Any]]) -> None:
+    def run_pairwise_contrast_tasks(tasks: List[Dict[str, Any]], next_progress_fn) -> None:
         if not tasks:
             return
         workers = min(max(1, int(n_cpus)), len(tasks))
@@ -2071,7 +2071,7 @@ def _compute_pseudobulk_group_de_shared(
             for task in tasks:
                 for source, reference, formatted, label, error, status in evaluate_pairwise_contrast(**task):
                     results.setdefault(source, {})[reference] = formatted
-                    progress = next_progress()
+                    progress = next_progress_fn()
                     log_returned_contrast(progress, label, formatted, error, status)
         else:
             with ThreadPoolExecutor(max_workers=workers) as executor:
@@ -2079,20 +2079,40 @@ def _compute_pseudobulk_group_de_shared(
                 for future in as_completed(futures):
                     for source, reference, formatted, label, error, status in future.result():
                         results.setdefault(source, {})[reference] = formatted
-                        progress = next_progress()
+                        progress = next_progress_fn()
                         log_returned_contrast(progress, label, formatted, error, status)
 
     selected_retained = [category for category in selected_pairwise_categories if category in retained_categories]
     directed_pairs = len(selected_retained) * max(0, len(selected_retained) - 1)
-    total_contrasts = directed_pairs + len(retained_categories)
-    completed_contrasts = 0
+    unique_pairs = [
+        (source, reference)
+        for source_index, source in enumerate(selected_retained)
+        for reference in selected_retained[source_index + 1:]
+    ]
+    balanced_rest_total = len(retained_categories)
+    pairwise_total = directed_pairs
+    balanced_rest_completed = 0
+    pairwise_completed = 0
     balanced_rest_tasks: List[Dict[str, Any]] = []
     pairwise_contrast_tasks: List[Dict[str, Any]] = []
 
-    def next_progress() -> str:
-        nonlocal completed_contrasts
-        completed_contrasts += 1
-        return f"{completed_contrasts}/{total_contrasts}"
+    def next_balanced_rest_progress() -> str:
+        nonlocal balanced_rest_completed
+        balanced_rest_completed += 1
+        return f"{balanced_rest_completed}/{balanced_rest_total}"
+
+    def next_pairwise_progress() -> str:
+        nonlocal pairwise_completed
+        pairwise_completed += 1
+        return f"{pairwise_completed}/{pairwise_total}"
+
+    def next_pairwise_progress_range(width: int) -> str:
+        nonlocal pairwise_completed
+        start = pairwise_completed + 1
+        pairwise_completed += max(1, int(width))
+        if pairwise_completed == start:
+            return f"{start}/{pairwise_total}"
+        return f"{start}-{pairwise_completed}/{pairwise_total}"
 
     pair_diagnostics: Dict[str, Dict[str, Dict[str, Any]]] = {}
 
@@ -2115,7 +2135,7 @@ def _compute_pseudobulk_group_de_shared(
         source_mask = category_cell_mask(source)
         reference_mask = model_cell_mask & (group_values.to_numpy() != source)
         if len(paired_reps) < required_min_replicates:
-            progress = next_progress()
+            progress = next_balanced_rest_progress()
             log_step(
                 f"[{progress}] {source} vs balanced rest: "
                 f"skipped, insufficient paired replicates "
@@ -2149,13 +2169,8 @@ def _compute_pseudobulk_group_de_shared(
             }
         )
 
-    run_contrast_tasks(balanced_rest_tasks)
+    run_contrast_tasks(balanced_rest_tasks, next_balanced_rest_progress)
 
-    unique_pairs = [
-        (source, reference)
-        for source_index, source in enumerate(selected_retained)
-        for reference in selected_retained[source_index + 1:]
-    ]
     if unique_pairs:
         log_detail(
             f"Preparing {len(unique_pairs)} pairwise PCA/distance diagnostic payload"
@@ -2189,17 +2204,18 @@ def _compute_pseudobulk_group_de_shared(
         source_mask = category_cell_mask(source)
         reference_mask = category_cell_mask(reference)
         if len(paired_reps) < required_min_replicates:
+            progress = next_pairwise_progress_range(2)
+            log_step(
+                f"[{progress}] {source} vs {reference} pair: "
+                f"skipped, insufficient paired replicates "
+                f"({len(paired_reps)}; need >= {required_min_replicates}); "
+                "reverse direction skipped as same pair",
+                level=3,
+            )
             for skipped_source, skipped_reference, skipped_source_mask, skipped_reference_mask in (
                 (source, reference, source_mask, reference_mask),
                 (reference, source, reference_mask, source_mask),
             ):
-                progress = next_progress()
-                log_step(
-                    f"[{progress}] {skipped_source} vs {skipped_reference}: "
-                    f"skipped, insufficient paired replicates "
-                    f"({len(paired_reps)}; need >= {required_min_replicates})",
-                    level=3,
-                )
                 empty = _empty_result(
                     "insufficient_replicates",
                     n_source=int(np.count_nonzero(skipped_source_mask)),
@@ -2222,7 +2238,7 @@ def _compute_pseudobulk_group_de_shared(
             }
         )
 
-    run_pairwise_contrast_tasks(pairwise_contrast_tasks)
+    run_pairwise_contrast_tasks(pairwise_contrast_tasks, next_pairwise_progress)
 
     if not results:
         return None
