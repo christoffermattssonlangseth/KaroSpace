@@ -2106,14 +2106,6 @@ def _compute_pseudobulk_group_de_shared(
         pairwise_completed += 1
         return f"{pairwise_completed}/{pairwise_total}"
 
-    def next_pairwise_progress_range(width: int) -> str:
-        nonlocal pairwise_completed
-        start = pairwise_completed + 1
-        pairwise_completed += max(1, int(width))
-        if pairwise_completed == start:
-            return f"{start}/{pairwise_total}"
-        return f"{start}-{pairwise_completed}/{pairwise_total}"
-
     pair_diagnostics: Dict[str, Dict[str, Dict[str, Any]]] = {}
 
     rest_reference = "__rest__"
@@ -2204,18 +2196,17 @@ def _compute_pseudobulk_group_de_shared(
         source_mask = category_cell_mask(source)
         reference_mask = category_cell_mask(reference)
         if len(paired_reps) < required_min_replicates:
-            progress = next_pairwise_progress_range(2)
-            log_step(
-                f"[{progress}] {source} vs {reference} pair: "
-                f"skipped, insufficient paired replicates "
-                f"({len(paired_reps)}; need >= {required_min_replicates}); "
-                "reverse direction skipped as same pair",
-                level=3,
-            )
             for skipped_source, skipped_reference, skipped_source_mask, skipped_reference_mask in (
                 (source, reference, source_mask, reference_mask),
                 (reference, source, reference_mask, source_mask),
             ):
+                progress = next_pairwise_progress()
+                log_step(
+                    f"[{progress}] {skipped_source} vs {skipped_reference} pair: "
+                    f"skipped, insufficient paired replicates "
+                    f"({len(paired_reps)}; need >= {required_min_replicates})",
+                    level=3,
+                )
                 empty = _empty_result(
                     "insufficient_replicates",
                     n_source=int(np.count_nonzero(skipped_source_mask)),

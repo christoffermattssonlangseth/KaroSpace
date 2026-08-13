@@ -33298,6 +33298,8 @@ def export_to_html(
         Minimum overlap between a pathway and a comparison gene universe.
     pathway_gsea_permutations : int
         Label permutations used for compact preranked GSEA p-values.
+        Pathway comparisons are processed in parallel using up to
+        pseudobulk_n_cpus workers.
     neighbor_stats_groupby : list, optional
         Obs columns to compute neighbor composition stats for (categorical only).
         If None/empty, neighbor stats are not computed.
@@ -33650,6 +33652,10 @@ def export_to_html(
             f"Top pathways stored per direction: {int(pathway_top_n)}.",
             level=2,
         )
+        log_detail(
+            f"Parallel pathway workers: {int(pseudobulk_n_cpus)}.",
+            level=2,
+        )
 
         def _log_pathway_progress(event: Mapping[str, Any]) -> None:
             if event.get("event") != "comparison_done":
@@ -33684,6 +33690,7 @@ def export_to_html(
             min_overlap=int(pathway_min_overlap),
             gsea_permutations=int(pathway_gsea_permutations),
             organism=str(pathway_organism or "Human"),
+            n_cpus=int(pseudobulk_n_cpus),
             progress_callback=_log_pathway_progress,
         )
         if not data["pathway_settings"].get("available"):

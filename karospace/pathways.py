@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
 
@@ -543,6 +544,7 @@ def add_pathway_enrichment_to_pseudobulk_de(
     gsea_permutations: int = 100,
     seed: int = 0,
     organism: str = "Human",
+    n_cpus: int = 1,
     progress_callback: Optional[Callable[[Mapping[str, Any]], None]] = None,
 ) -> Dict[str, Any]:
     """Attach pathway enrichment summaries to every available pseudobulk DE result."""
@@ -553,6 +555,7 @@ def add_pathway_enrichment_to_pseudobulk_de(
         "max_pathway_size": int(max_pathway_size),
         "gsea_permutations": int(gsea_permutations),
         "organism": organism,
+        "n_cpus": max(1, int(n_cpus)),
         "comparisons": 0,
         "enriched_comparisons": 0,
     }
@@ -584,11 +587,8 @@ def add_pathway_enrichment_to_pseudobulk_de(
     settings.update(source_info)
     settings["available"] = True
 
-    comparison_count = 0
-    enriched_count = 0
-    total_comparisons = len(comparison_items)
-    for color_col, source, reference, result in comparison_items:
-        comparison_count += 1
+    def _compute_comparison(item: Tuple[int, str, str, str, Dict[str, Any]]) -> Dict[str, Any]:
+        submit_index, color_col, source, reference, result = item
         enrichment = enrich_pseudobulk_result(
             result,
             gene_sets,
@@ -596,27 +596,66 @@ def add_pathway_enrichment_to_pseudobulk_de(
             min_overlap=int(min_overlap),
             max_pathway_size=int(max_pathway_size),
             gsea_permutations=int(gsea_permutations),
-            seed=int(seed) + comparison_count,
+            seed=int(seed) + submit_index,
         )
-        if enrichment:
-            result["pathway_enrichment"] = enrichment
-            enriched_count += 1
         ora = (enrichment or {}).get("ora") if isinstance(enrichment, dict) else {}
         gsea = (enrichment or {}).get("gsea") if isinstance(enrichment, dict) else {}
+        return {
+            "submit_index": int(submit_index),
+            "color_col": color_col,
+            "source": source,
+            "reference": reference,
+            "result": result,
+            "enrichment": enrichment,
+            "ora_up": len((ora or {}).get("up") or []),
+            "ora_down": len((ora or {}).get("down") or []),
+            "gsea_positive": len((gsea or {}).get("positive") or []),
+            "gsea_negative": len((gsea or {}).get("negative") or []),
+            "stored": bool(enrichment),
+        }
+
+    def _store_completed(completed: Mapping[str, Any], completion_index: int) -> bool:
+        result = completed["result"]
+        enrichment = completed["enrichment"]
+        if enrichment:
+            result["pathway_enrichment"] = enrichment
         if progress_callback is not None:
             progress_callback({
                 "event": "comparison_done",
-                "index": int(comparison_count),
+                "index": int(completion_index),
                 "total": int(total_comparisons),
-                "color_col": color_col,
-                "source": source,
-                "reference": reference,
-                "ora_up": len((ora or {}).get("up") or []),
-                "ora_down": len((ora or {}).get("down") or []),
-                "gsea_positive": len((gsea or {}).get("positive") or []),
-                "gsea_negative": len((gsea or {}).get("negative") or []),
-                "stored": bool(enrichment),
+                "submit_index": int(completed["submit_index"]),
+                "color_col": completed["color_col"],
+                "source": completed["source"],
+                "reference": completed["reference"],
+                "ora_up": int(completed["ora_up"]),
+                "ora_down": int(completed["ora_down"]),
+                "gsea_positive": int(completed["gsea_positive"]),
+                "gsea_negative": int(completed["gsea_negative"]),
+                "stored": bool(completed["stored"]),
             })
+        return bool(enrichment)
+
+    comparison_count = 0
+    enriched_count = 0
+    total_comparisons = len(comparison_items)
+    indexed_items = [
+        (idx, color_col, source, reference, result)
+        for idx, (color_col, source, reference, result) in enumerate(comparison_items, start=1)
+    ]
+    max_workers = min(max(1, int(n_cpus)), max(1, total_comparisons))
+    if max_workers <= 1 or total_comparisons <= 1:
+        for item in indexed_items:
+            comparison_count += 1
+            if _store_completed(_compute_comparison(item), comparison_count):
+                enriched_count += 1
+    else:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(_compute_comparison, item) for item in indexed_items]
+            for future in as_completed(futures):
+                comparison_count += 1
+                if _store_completed(future.result(), comparison_count):
+                    enriched_count += 1
     settings["comparisons"] = int(comparison_count)
     settings["enriched_comparisons"] = int(enriched_count)
     return settings
