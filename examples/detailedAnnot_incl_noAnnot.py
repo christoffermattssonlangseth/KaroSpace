@@ -4,8 +4,8 @@ Export a KaroSpace viewer for the detailed-annotation Xenium dataset
 (212k cells), split into one section per sample.
 
 No embedded morphology images (no uns/spatial); it's a straight spatial cell map
-coloured by the detailed cell annotations:
-  - cell_annotation_detailed (39 fine cell types) — default colouring
+shown by the detailed cell annotations:
+  - cell_annotation_detailed (39 fine cell types) — default annotation
   - cell_class (5) / cell_subclass (16) — coarser hierarchies
   - cytetype_annotation_leiden0.2, cluster_cellcharter_10 (spatial niches)
 Clinical variables (condition, status, diabetes, patient, slide) are exposed as

@@ -7088,7 +7088,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             <button class="umap-toggle" id="umap-toggle" title="Toggle UMAP view" data-help="Show or hide the UMAP panel for a global embedding view with shared selection tools." style="display: none;">
                 UMAP
             </button>
-            <button class="legend-toggle active" id="legend-toggle" title="Toggle legend panel" data-help="Show or hide the legend panel with color keys, category toggles, and spotlight controls.">
+            <button class="legend-toggle active" id="legend-toggle" title="Toggle legend panel" data-help="Show or hide the legend panel with annotation keys, category toggles, and spotlight controls.">
                 Legend
             </button>
             <button class="color-toggle" id="color-toggle" title="Toggle insights panel" data-help="Insights opens Overview, Genes, Compare, and Neighbors views for the current dataset and selection state.">
@@ -7133,7 +7133,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         <button class="umap-btn icon-only umap-compare-btn" id="umap-compare-btn" type="button" title="Compare with another cell selection" aria-label="Compare with another cell selection">
                             <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"></path><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"></path><path d="M7 21h10"></path><path d="M12 3v18"></path><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"></path></svg>
                         </button>
-                        <button class="umap-btn icon-only" id="selection-create-annotation-btn" type="button" title="Create annotation from this lasso selection" aria-label="Create annotation from this lasso selection" hidden>
+                        <button class="umap-btn icon-only" id="selection-create-annotation-btn" type="button" title="Create region from this lasso selection" aria-label="Create region from this lasso selection" hidden>
                             <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>
                         </button>
                         <div class="umap-tool-wrap" id="umap-query-wrap">
@@ -8422,7 +8422,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let modalPointerMoved = false;
     let modalTypeSelectEnabled = false;
     let modalSelectedCategory = null;
-    let modalMagicWandActive = false;
+    let modalLassoSelectionActive = false;
     let isDrawingModalLasso = false;
     let modalLassoPath = [];  // Array of {{x, y}} points in modal canvas space
     let modalAnnotations = [];
@@ -8498,7 +8498,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let umapLastPanX = 0, umapLastPanY = 0;
 
     // Selection state
-    let magicWandActive = false;
+    let lassoSelectionActive = false;
     let isDrawingLasso = false;
     let lassoPath = [];  // Array of {{x, y}} points
     let isDrawingGridLasso = false;
@@ -9079,7 +9079,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ]
         }},
         {{
-            title: 'Color selector and categories',
+            title: 'Annotation selector and categories',
             target: ['#visual-color-controls', '#color-select', '#legend'],
             body: [
                 'The annotation selector controls how cells are colored in every section.',
@@ -9179,7 +9179,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ]
         }},
         {{
-            title: 'Region annotation and region DE',
+            title: 'Region and region DE',
             target: ['#modal-annotation-section', '#insights-annotate-toggle', '#compare-tab-regions-content'],
             action: () => {{
                 if (!modalSection && Array.isArray(DATA.sections) && DATA.sections.length && typeof openModal === 'function') {{
@@ -9272,7 +9272,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ], {{ nextLabel: tryIt }}),
             step('Annotation selector', ['#visual-color-controls', '#color-select'], [
                 'The annotation selector chooses which cell-level annotation colors every section.',
-                'This is the main starting point for browsing cell types, clusters, or other categorical cell labels.'
+                'This is the main starting point for browsing annotations, clusters, or other categorical cell labels.'
             ], {{ task: 'Open the dropdown and pick another annotation if one is available.', nextLabel: tryIt }}),
             step('Open split mode', ['#overview-mode-split', '#visual-params-bar'], [
                 'Split mode compares two visual layers in the same spatial panels.',
@@ -9319,12 +9319,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             step('UMAP selection', ['#umap-lasso-btn', '#umap-canvas'], [
                 'Cells selection via the lasso tool is also enabled directly in the UMAP.'
             ], {{ condition: () => !!DATA.has_umap, action: () => {{ if (DATA.has_umap && !umapVisible && typeof toggleUMAP === 'function') toggleUMAP(); }}, task: 'Create a selection on the UMAP with the lasso tool', requiresSelection: true, combineTargets: true, autoNextWhenGateSatisfied: true, nextLabel: tryIt }}),
-            step('Create annotation from UMAP selection', ['#selection-create-annotation-btn', '#visual-spatial-tools'], [
-                'Selected UMAP cells can be saved as a cell-set annotation.',
-                'Unlike a spatial lasso annotation, this stores the selected cells directly rather than a polygon tied to one section.'
-            ], {{ condition: () => !!DATA.has_umap, task: 'Create a cell-set annotation from the selected UMAP cells by clicking the annotation button.', requiresAnnotationCreated: true, nextLabel: tryIt }}),
+            step('Create region from UMAP selection', ['#selection-create-annotation-btn', '#visual-spatial-tools'], [
+                'Selected UMAP cells can be saved as a cell-set region.',
+                'Unlike a polygon region, this stores the selected cells directly rather than a polygon tied to one section.'
+            ], {{ condition: () => !!DATA.has_umap, task: 'Create a cell-set region from the selected UMAP cells by clicking the region button.', requiresAnnotationCreated: true, nextLabel: tryIt }}),
             step('Insights panel overview', ['#color-toggle', '#color-panel'], [
-                'Insights is the right-side workspace for selected cells, region annotations, gene modules, and built-in analysis panels.'
+                'Insights is the right-side workspace for selected cells, regions, gene modules, and built-in analysis panels.'
             ], {{ action: () => {{ if (typeof closeModal === 'function') closeModal(); if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); }}, nextLabel: tryIt }}),
             step('Insights Selection mode', ['#insights-mode-selection', '#insights-selection-panel'], [
                 'Selection contains the compact summary for cells selected by lasso, UMAP lasso, or query.',
@@ -9375,7 +9375,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 if (typeof closeModal === 'function') closeModal();
                 if (typeof clearSelection === 'function') clearSelection();
                 if (typeof openInsightsMode === 'function') openInsightsMode('selection');
-                magicWandActive = false;
+                lassoSelectionActive = false;
                 umapPanActive = true;
                 lassoModeB = false;
                 updateUMAPCursor?.();
@@ -9388,7 +9388,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ], {{ action: () => {{
                 clearRegionBSelection?.();
                 lassoModeB = false;
-                magicWandActive = false;
+                lassoSelectionActive = false;
                 umapPanActive = true;
                 updateUMAPCursor?.();
                 updateUMAPLassoButtonState?.();
@@ -9398,9 +9398,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             step('Clear Region B selection', ['#umap-compare-btn', '#visual-spatial-tools'], [
                 'When Regions are selected, the compare buttons change to a cross to deselect the cells.'
             ], {{ action: () => {{ tutorialRegionBClearStepStarted = selectedCellsB.size > 0; updateUMAPCompareButtonState?.(); }}, task: 'Click the cross to deselect Region B and return to a single active selection.', requiresRegionBCleared: true, nextLabel: tryIt }}),
-            step('Create annotation from selection', ['#selection-create-annotation-btn', '#visual-spatial-tools'], [
+            step('Create region from selection', ['#selection-create-annotation-btn', '#visual-spatial-tools'], [
                 'When cells are selected, you can create a region annotation from them.',
-                'Region annotations are user-defined spatial cell sets stored in the viewer session.'
+                'Regions are user-defined spatial cell sets stored in the viewer session.'
             ], {{ action: () => {{ tutorialAnnotationRowSelected = false; if (typeof setInsightsMode === 'function') setInsightsMode('annotate'); updateSelectionCreateAnnotationButtonState?.(); }}, task: 'If you have a selection, create a small test annotation, by clicking the button, then select it from the Region list.', requiresSelectedAnnotationRow: true, nextLabel: tryIt }}),
             step('Deselect selected cells', ['#umap-lasso-btn', '#umap-selection-info'], [
                 'Selected cells can be cleared from either the lasso button when it is shown as a cross or from the selection chip.',
@@ -9446,22 +9446,22 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             step('Select cells for Region', ['#umap-lasso-btn', '#grid'], [
                 'Region needs a selected cell set before a new region annotation can be created.'
             ], {{ condition: () => modalAnnotations.length === 0 && selectedCells.size === 0, action: () => {{ if (!modalSection && Array.isArray(DATA.sections) && DATA.sections.length && typeof openModal === 'function') openModal(DATA.sections[0].id); if (typeof setInsightsMode === 'function') setInsightsMode('annotate'); updateSelectionInfo?.(); updateUMAPLassoButtonState?.(); }}, task: 'Select cells with the lasso tool on the modal section to continue.', requiresSelection: true, combineTargets: true, autoNextWhenGateSatisfied: true, nextLabel: tryIt }}),
-            step('Create first Region annotation', ['#selection-create-annotation-btn', '#visual-spatial-tools'], [
-                'The annotation button saves the active selected cells as a Region annotation.'
-            ], {{ condition: () => modalAnnotations.length === 0 && selectedCells.size > 0, action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('annotate'); updateSelectionCreateAnnotationButtonState?.(); }}, task: 'Click the polygon annotation button to annotate the selected region.', requiresAnnotationCreated: true, nextLabel: tryIt }}),
+            step('Create first Region', ['#selection-create-annotation-btn', '#visual-spatial-tools'], [
+                'The region button saves the active selected cells as a Region.'
+            ], {{ condition: () => modalAnnotations.length === 0 && selectedCells.size > 0, action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('annotate'); updateSelectionCreateAnnotationButtonState?.(); }}, task: 'Click the polygon region button to save the selected region.', requiresAnnotationCreated: true, nextLabel: tryIt }}),
             step('Insights Region', ['#modal-annotation-list', '.modal-annotation-row'], [
                 'Each region represents a saved spatial region or cells group.',
                 'Click a region row to select its cells. Click a group row to select the union of cells from its nested regions.',
                 'Rows can also be recolored, grouped, exported, or deleted.'
             ], {{ action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('annotate'); }}, nextLabel: tryIt }}),
-            step('Create annotation groups', ['#modal-annotations-create-group', '#modal-annotation-section'], [
-                'Annotation groups help organize multiple regions into a hierarchy.'
+            step('Create region groups', ['#modal-annotations-create-group', '#modal-annotation-section'], [
+                'Region groups help organize multiple regions into a hierarchy.'
             ], {{ action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('annotate'); }}, nextLabel: tryIt }}),
-            step('Export annotations', ['#modal-annotations-export', '#modal-annotation-section'], [
-                'Annotation export downloads your user-created regions as JSON.'
+            step('Export regions', ['#modal-annotations-export', '#modal-annotation-section'], [
+                'Region export downloads your user-created regions as JSON.'
             ], {{ action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('annotate'); }}, nextLabel: tryIt }}),
-            step('Import annotations', ['#modal-annotations-import', '#modal-annotation-section'], [
-                'Annotation import uploads a Region annotation JSON and restores saved regions in the viewer.'
+            step('Import regions', ['#modal-annotations-import', '#modal-annotation-section'], [
+                'Region import uploads a regions JSON file and restores saved regions in the viewer.'
             ], {{ action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('annotate'); }}, nextLabel: tryIt }}),
             step('Module gene picker', ['#gene-module-gene-picker', '#gene-module-draft-genes', '#insights-module-panel'], [
                 'The gene picker dropdown shows which genes will be saved into the next module.'
@@ -9496,7 +9496,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'Use it to check whether categories differ by sample, condition, region, or other section-level metadata.'
             ], {{ action: () => openTutorialInsightsPanel('overview', 'summary'), nextLabel: tryIt }}),
             step('Overview Summary per-annotation trend', ['#celltype-select-row', '#celltype-trend'], [
-                'The per-annotation selector focuses one cell type or category across section metadata.',
+                'The per-annotation selector focuses one category across section metadata.',
                 'This is useful for quick abundance trend checks.'
             ], {{ action: () => openTutorialInsightsPanel('overview', 'summary'), task: 'Pick one category in Per Annotation and inspect its trend.', nextLabel: tryIt }}),
             step('Open Overview > Sections', '[data-insights-tree-leaf="sections"][data-insights-tree-parent="overview"]', [
@@ -9562,10 +9562,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'Previously described in this tutorial in the Selection section.'
             ], {{ action: () => openTutorialInsightsPanel('compare', 'selection'), nextLabel: tryIt }}),
             step('Open Compare > Per cell > Regions', '[data-insights-tree-leaf="regions"][data-insights-tree-parent="compare"]', [
-                'Open Visualization, then Compare, then Per cell, then Regions to compare saved Region annotations.'
+                'Open Visualization, then Compare, then Per cell, then Regions to compare saved Regions.'
             ], {{ action: () => openTutorialVisualizationLeafMenu('compare', 'regions', 'quick'), task: 'Click Regions in Compare > Per cell.', nextLabel: tryIt }}),
             step('Compare Regions panel', ['#annotation-comparison', '#compare-tab-regions-content'], [
-                'Region comparison uses user-created region annotations.',
+                'Region comparison uses user-created Regions.',
                 'Previously described in this tutorial in the Region section.',
                 'Clicking on the search icon display a region comparison similar to the selection comparison.'
             ], {{ action: () => openTutorialInsightsPanel('compare', 'regions'), nextLabel: tryIt }}),
@@ -11987,7 +11987,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return {{ vmin, vmax }};
     }}
 
-    // Get current color config
+    // Get current annotation display config
     function getColorConfig() {{
         if (currentGene && (DATA.genes_meta[currentGene] || getGeneModuleByToken(currentGene))) {{
             const scale = getGeneScaleRange(currentGene);
@@ -16364,7 +16364,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function renderSelectionSummaryHtml(summary, options = {{}}) {{
         const queryHtml = options.hideSelectionQuery ? '' : renderSelectionQueryPanelHtml();
         if (!summary || summary.total === 0) {{
-            return '<div class="selection-summary-meta selection-summary-empty">Draw a region with Magic Wand to inspect selected cells.</div>' + queryHtml;
+            return '<div class="selection-summary-meta selection-summary-empty">Draw a lasso selection to inspect selected cells.</div>' + queryHtml;
         }}
 
         const header = options.hideHeader ? '' : renderSelectionSummaryHeaderHtml(summary);
@@ -16991,7 +16991,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             selectedModalLassoPathB = [];
             selectedAnnotationBId = null;
             lassoModeB = true;
-            magicWandActive = true;
+            lassoSelectionActive = true;
             umapPanActive = false;
             isDrawingLasso = false;
             lassoPath = [];
@@ -17034,7 +17034,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function updateGridPanelLassoCursor() {{
         document.querySelectorAll('.section-panel').forEach((panel) => {{
-            panel.classList.toggle('grid-lasso-active', magicWandActive && !modalInlineActive);
+            panel.classList.toggle('grid-lasso-active', lassoSelectionActive && !modalInlineActive);
         }});
     }}
 
@@ -17092,7 +17092,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             selectedModalLassoPathB = [];
             selectedAnnotationBId = null;
             lassoModeB = true;
-            magicWandActive = true;
+            lassoSelectionActive = true;
             umapPanActive = false;
             setUMAPCompareHintVisible(false);
         }} else {{
@@ -18082,7 +18082,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             if (downsampleWarning) warnings.push(downsampleWarning);
         }}
         if (insightsGenesTab === 'de-genes') {{
-            warnings.push('<div class="genes-warning"><strong>Double dipping warning.</strong> When unsupervised cell clustering is used as category, the genes contributing to that clustering are inherently likely to be identified as differentially expressed. False positive differentially expressed genes are expected, which could lead to false determination of cell types.</div>');
+            warnings.push('<div class="genes-warning"><strong>Double dipping warning.</strong> When unsupervised cell clustering is used as category, the genes contributing to that clustering are inherently likely to be identified as differentially expressed. False positive differentially expressed genes are expected, which could lead to false biological cell-type interpretation.</div>');
         }}
         container.innerHTML = warnings.join('');
     }}
@@ -18811,10 +18811,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         btn.hidden = !visible;
         btn.disabled = alreadyCreated || !canCreate;
         const title = alreadyCreated
-            ? 'Annotation already created for this selection'
+            ? 'Region already created for this selection'
             : canCreate
-                ? 'Create annotation from this selection'
-                : 'Search cells to create an annotation';
+                ? 'Create region from this selection'
+                : 'Search cells to create a region';
         btn.title = title;
         btn.setAttribute('aria-label', title);
     }}
@@ -18823,7 +18823,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (annotationAlreadyCreatedForCurrentSelection()) return false;
         const candidate = getSelectionAnnotationCandidate();
         if (!candidate) {{
-            alert('Create an annotation from a single-section selection first.');
+            alert('Create a region from a single-section selection first.');
             return false;
         }}
         const {{ section, polygonData }} = candidate;
@@ -19066,7 +19066,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         selectedModalLassoPathB = [];
         selectedAnnotationBId = annotation.id;
         lassoModeB = false;
-        magicWandActive = false;
+        lassoSelectionActive = false;
         umapPanActive = true;
         setUMAPCompareHintVisible(false);
         syncModalLassoFromGlobal();
@@ -19896,7 +19896,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function exportModalAnnotations() {{
         if (!modalAnnotations.length) {{
-            alert('No annotations to export yet.');
+            alert('No regions to export yet.');
             return;
         }}
         const payload = buildModalAnnotationExport();
@@ -19914,7 +19914,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     : parsed;
                 const result = applyAnnotationsFromExport(payload);
                 if (!result.restored) {{
-                    alert('No valid Region annotations found in this JSON file.');
+                    alert('No valid regions found in this JSON file.');
                     return;
                 }}
                 if (selectedCellsFromAnnotation) {{
@@ -19934,12 +19934,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const skippedText = result.skipped
                     ? `; skipped ${{result.skipped.toLocaleString()}} invalid ${{result.skipped === 1 ? 'entry' : 'entries'}}`
                     : '';
-                alert(`Imported ${{result.restored.toLocaleString()}} Region annotation${{result.restored === 1 ? '' : 's'}}${{skippedText}}.`);
+                alert(`Imported ${{result.restored.toLocaleString()}} region${{result.restored === 1 ? '' : 's'}}${{skippedText}}.`);
             }} catch (error) {{
-                alert(`Could not import Region annotations: ${{error.message || error}}`);
+                alert(`Could not import regions: ${{error.message || error}}`);
             }}
         }};
-        reader.onerror = () => alert('Could not read the selected Region annotation JSON file.');
+        reader.onerror = () => alert('Could not read the selected regions JSON file.');
         reader.readAsText(file);
     }}
 
@@ -20397,7 +20397,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             selectedModalLassoPathB = polygonData;
             selectedAnnotationBId = null;
             lassoModeB = true;
-            magicWandActive = true;
+            lassoSelectionActive = true;
             umapPanActive = false;
             setUMAPCompareHintVisible(false);
         }} else {{
@@ -20433,7 +20433,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         updateGridPanelLassoCursor();
         if (!btn) return;
         const hasSelection = selectedCells.size > 0 || selectedCellsB.size > 0;
-        panBtn?.classList.toggle('active', umapPanActive && !magicWandActive);
+        panBtn?.classList.toggle('active', umapPanActive && !lassoSelectionActive);
         if (hasSelection) {{
             btn.innerHTML = UMAP_CLEAR_ICON;
             btn.title = 'Clear selected cells';
@@ -20441,20 +20441,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             btn.classList.add('active');
         }} else {{
             btn.innerHTML = UMAP_LASSO_ICON;
-            btn.title = magicWandActive ? 'Selection tool active on UMAP and sections' : 'Draw to select cells on UMAP or sections';
+            btn.title = lassoSelectionActive ? 'Selection tool active on UMAP and sections' : 'Draw to select cells on UMAP or sections';
             btn.setAttribute('aria-label', btn.title);
-            btn.classList.toggle('active', magicWandActive);
+            btn.classList.toggle('active', lassoSelectionActive);
         }}
         updateUMAPCompareButtonState();
     }}
 
     function syncModalLassoFromGlobal() {{
         if (!modalSection) return;
-        if (magicWandActive) {{
+        if (lassoSelectionActive) {{
             resetFocusedModalTools('lasso');
-            modalMagicWandActive = true;
+            modalLassoSelectionActive = true;
         }} else {{
-            modalMagicWandActive = false;
+            modalLassoSelectionActive = false;
             isDrawingModalLasso = false;
             modalLassoPath = [];
         }}
@@ -20491,7 +20491,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             return;
         }}
         lassoModeB = true;
-        magicWandActive = true;
+        lassoSelectionActive = true;
         umapPanActive = false;
         syncModalLassoFromGlobal();
         updateUMAPCursor();
@@ -20508,7 +20508,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function updateUMAPCursor() {{
         const canvas = document.getElementById('umap-canvas');
-        if (canvas) canvas.style.cursor = magicWandActive ? 'crosshair' : (umapPanActive ? 'grab' : 'default');
+        if (canvas) canvas.style.cursor = lassoSelectionActive ? 'crosshair' : (umapPanActive ? 'grab' : 'default');
         updateGridPanelLassoCursor();
     }}
 
@@ -20590,9 +20590,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         selectedCells.clear();
         clearRegionBSelection();
         lassoModeB = false;
-        magicWandActive = false;
+        lassoSelectionActive = false;
         umapPanActive = true;
-        modalMagicWandActive = false;
+        modalLassoSelectionActive = false;
         isDrawingModalLasso = false;
         modalLassoPath = [];
         isDrawingLasso = false;
@@ -20819,12 +20819,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             adjustUMAPPanelSize(UMAP_PANEL_SIZE_STEP);
         }});
         document.getElementById('umap-pan-btn')?.addEventListener('click', () => {{
-            if (umapPanActive && !magicWandActive) {{
+            if (umapPanActive && !lassoSelectionActive) {{
                 umapPanActive = false;
-                magicWandActive = true;
+                lassoSelectionActive = true;
             }} else {{
                 umapPanActive = true;
-                magicWandActive = false;
+                lassoSelectionActive = false;
             }}
             syncModalLassoFromGlobal();
             updateUMAPCursor();
@@ -20837,8 +20837,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 clearSelection();
                 return;
             }}
-            magicWandActive = !magicWandActive;
-            if (magicWandActive) umapPanActive = false;
+            lassoSelectionActive = !lassoSelectionActive;
+            if (lassoSelectionActive) umapPanActive = false;
             else umapPanActive = true;
             syncModalLassoFromGlobal();
             updateUMAPCursor();
@@ -20917,7 +20917,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const x = e.clientX - rect.left;
             const y = e.clientY - rect.top;
 
-            if (magicWandActive) {{
+            if (lassoSelectionActive) {{
                 // Start lasso drawing
                 isDrawingLasso = true;
                 lassoPath = [{{ x, y }}];
@@ -21404,7 +21404,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         drawGridPanelLassoPath();
 
-        // Draw polygon annotations in overview
+        // Draw polygon regions in overview
         const sectionAnnotations = getSectionAnnotations(section.id);
         sectionAnnotations.forEach((annotation) => {{
             const vertices = annotation.vertices || [];
@@ -23856,16 +23856,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <div class="modal-annotation-empty">Create regions from lasso selection in the Tools panel.</div>
                 </div>
                 <div class="modal-annotation-actions selection-query-actions">
-                    <button class="selection-summary-compare-btn icon-only" id="modal-annotations-create-group" type="button" title="Create annotation group" aria-label="Create annotation group">
+                    <button class="selection-summary-compare-btn icon-only" id="modal-annotations-create-group" type="button" title="Create region group" aria-label="Create region group">
                         <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="7"></circle><circle cx="15" cy="15" r="7"></circle></svg>
                     </button>
-                    <button class="selection-summary-compare-btn icon-only" id="modal-annotations-import" type="button" title="Import Region annotations JSON" aria-label="Import Region annotations JSON">
+                    <button class="selection-summary-compare-btn icon-only" id="modal-annotations-import" type="button" title="Import regions JSON" aria-label="Import regions JSON">
                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 8 5-5 5 5"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path></svg>
                     </button>
-                    <button class="selection-summary-compare-btn icon-only" id="modal-annotations-export" type="button" title="Export Region annotations JSON" aria-label="Export Region annotations JSON" data-requires-annotations>
+                    <button class="selection-summary-compare-btn icon-only" id="modal-annotations-export" type="button" title="Export regions JSON" aria-label="Export regions JSON" data-requires-annotations>
                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path></svg>
                     </button>
-                    <button class="selection-summary-compare-btn icon-only" id="modal-annotations-clear-all" type="button" title="Delete all annotations" aria-label="Delete all annotations" data-requires-annotations>
+                    <button class="selection-summary-compare-btn icon-only" id="modal-annotations-clear-all" type="button" title="Delete all regions" aria-label="Delete all regions" data-requires-annotations>
                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>
                     </button>
                     <input type="file" id="modal-annotations-import-input" accept="application/json,.json" style="display:none">
@@ -24015,7 +24015,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <div class="color-tab-content active" id="compare-tab-groups-content">
                         <div class="agg-group-meta" id="group-de-summary">Compare samples, metadata groups, or annotations.</div>
                         <div class="color-aggregation" id="group-de-panel">
-                            <div class="agg-group-meta">Configure two samples, metadata groups, or annotation groups for exploratory group DE.</div>
+                            <div class="agg-group-meta">Configure two samples, metadata groups, or annotation categories for exploratory group DE.</div>
                         </div>
                     </div>
                     <div class="color-tab-content" id="compare-tab-regions-content">
@@ -24078,10 +24078,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         </div>
                         <div>
                             <label>Target Filter</label>
-                            <input class="color-search" id="interaction-search" type="text" placeholder="Filter Target Cell Types...">
+                            <input class="color-search" id="interaction-search" type="text" placeholder="Filter target categories...">
                         </div>
                         <div class="color-aggregation" id="interaction-browser">
-                            <div class="agg-group-meta">Select a source cell type to browse interactions.</div>
+                            <div class="agg-group-meta">Select a source category to browse interactions.</div>
                         </div>
                     </div>
                     <div class="color-tab-content" id="neighbors-tab-dispersion-content">
@@ -28649,7 +28649,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             .join('');
 
         let html = `
-            <div class="agg-group-meta">Exploratory DE between two arbitrary cell groups. Compare samples, section metadata groups, or cell annotations, and optionally restrict within a second annotation such as a cell type.</div>
+            <div class="agg-group-meta">Exploratory DE between two arbitrary cell groups. Compare samples, section metadata groups, or annotation categories, and optionally restrict within a second annotation.</div>
             <div class="cluster-de-controls">
                 <div>
                     <label>Compare By</label>
@@ -29330,7 +29330,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 select.innerHTML = '<option value="">No categories available</option>';
                 select.disabled = true;
             }}
-            container.innerHTML = '<div class="agg-group-meta">No categories available for this color.</div>';
+            container.innerHTML = '<div class="agg-group-meta">No categories available for this annotation.</div>';
             return;
         }}
 
@@ -29666,7 +29666,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const zscores = stats.zscore || null;
         const permN = Number(stats.perm_n || 0);
         if (categories.length === 0 || counts.length === 0) {{
-            return {{ error: 'Neighbor stats are empty for this color.' }};
+            return {{ error: 'Neighbor stats are empty for this annotation.' }};
         }}
 
         const query = '';
@@ -29675,7 +29675,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             .filter((idx) => idx !== null);
 
         if (!matches.length) {{
-            return {{ error: 'No matching cell types.' }};
+            return {{ error: 'No matching categories.' }};
         }}
 
         return {{
@@ -30614,7 +30614,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         const {{ indices, trimmedCount, focus, seedIndices }} = focusState;
         if (!indices.length) {{
-            return controlPanel + '<div class="neighbor-view-note">No matching cell types.</div>';
+            return controlPanel + '<div class="neighbor-view-note">No matching categories.</div>';
         }}
 
         const pairCandidates = [];
@@ -30799,7 +30799,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         const orderedIndices = sortNeighborIndicesForChord(focusState.indices, viewState, controls.chordOrder);
         if (orderedIndices.length < 2) {{
-            return controlPanel + '<div class="neighbor-view-note">Chord view needs at least two visible cell types after the current focus and category settings.</div>';
+            return controlPanel + '<div class="neighbor-view-note">Chord view needs at least two visible categories after the current focus and category settings.</div>';
         }}
 
         const pairCandidates = [];
@@ -30834,7 +30834,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         const visibleIndices = Array.from(new Set(linkEntries.flatMap((entry) => [entry.sourceIdx, entry.targetIdx])));
         if (visibleIndices.length < 2) {{
-            return controlPanel + '<div class="neighbor-view-note">Chord view needs at least two connected cell types after the current focus and threshold settings.</div>';
+            return controlPanel + '<div class="neighbor-view-note">Chord view needs at least two connected categories after the current focus and threshold settings.</div>';
         }}
 
         const indices = sortNeighborIndicesForChord(visibleIndices, viewState, controls.chordOrder);
@@ -31008,7 +31008,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         `;
     }}
 
-    // ---- Spatial dispersion (restricted vs dispersed) per cell type ----
+    // ---- Spatial dispersion (restricted vs dispersed) per category ----
     // These values are computed by the Python exporter from all cells before
     // downsampling. The browser only renders the precomputed table.
     function getPrecomputedDispersionRows(colorCol) {{
@@ -31028,7 +31028,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             return;
         }}
         if (!(config.categories && config.categories.length)) {{
-            container.innerHTML = '<div class="agg-group-meta">No categories available for the current color.</div>';
+            container.innerHTML = '<div class="agg-group-meta">No categories available for the current annotation.</div>';
             return;
         }}
 
@@ -31074,20 +31074,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}).join('');
 
         const saiHeader = hasSai
-            ? `<th data-dispersion-sort="sai" title="Mean fraction of each cell's spatial neighbours that share its type">Self-Agg%${{arrow('sai')}}</th>`
-            : '<th title="No spatial neighbour graph was available during export, so self-aggregation is unavailable">Self-Agg%</th>';
+            ? `<th data-dispersion-sort="sai" title="Mean fraction of each cell's spatial neighbors that share its category">Self-Agg%${{arrow('sai')}}</th>`
+            : '<th title="No spatial neighbor graph was available during export, so self-aggregation is unavailable">Self-Agg%</th>';
 
         container.innerHTML = `
             <div class="dispersion-summary">
-                Spatial pattern per cell type &mdash; ${{sorted.length}} types. Computed from all cells before HTML downsampling. NNI is normalized to the observed all-cell layout: &lt;0.9 clustered/restricted, ~1 random, &gt;1.1 dispersed.${{renderCalcInfoButton('dispersion')}}
-                ${{hasSai ? '' : '<span style="margin-left:6px;">(no neighbour graph: Self-Agg% unavailable)</span>'}}
+                Spatial pattern per category &mdash; ${{sorted.length}} categories. Computed from all cells before HTML downsampling. NNI is normalized to the observed all-cell layout: &lt;0.9 clustered/restricted, ~1 random, &gt;1.1 dispersed.${{renderCalcInfoButton('dispersion')}}
+                ${{hasSai ? '' : '<span style="margin-left:6px;">(no neighbor graph: Self-Agg% unavailable)</span>'}}
             </div>
             <table class="gene-distribution-table">
                 <thead><tr>
-                    <th data-dispersion-sort="cat">Cell Type${{arrow('cat')}}</th>
+                    <th data-dispersion-sort="cat">Category${{arrow('cat')}}</th>
                     <th data-dispersion-sort="n">n${{arrow('n')}}</th>
                     ${{saiHeader}}
-                    <th data-dispersion-sort="nni" title="Nearest-neighbour index normalized to the observed all-cell layout">NNI${{arrow('nni')}}</th>
+                    <th data-dispersion-sort="nni" title="Nearest-neighbor index normalized to the observed all-cell layout">NNI${{arrow('nni')}}</th>
                     <th>Pattern</th>
                 </tr></thead>
                 <tbody>${{tbody}}</tbody>
@@ -31163,7 +31163,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         // Enrichment table: keep the agg-group blocks as direct children (so
         // their layout is unchanged) and just make the container scroll
-        // internally for long cell-type lists, like the legend's .color-list.
+        // internally for long category lists, like the legend's .color-list.
         container.classList.add('neighbor-stats-scrollable');
         container.innerHTML = renderNeighborStatsTableView(viewState);
         container.querySelectorAll('[data-neighbor-toggle]').forEach((btn) => {{
@@ -31239,7 +31239,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const interactionMarkersByColor = (DATA.interaction_markers || {{}})[colorCol] || {{}};
         const hasInteractionMarkers = Object.keys(interactionMarkersByColor).length > 0;
         if (categories.length === 0 || counts.length === 0) {{
-            container.innerHTML = '<div class="agg-group-meta">Interaction data is empty for this color.</div>';
+            container.innerHTML = '<div class="agg-group-meta">Interaction data is empty for this annotation.</div>';
             sourceSelect.innerHTML = '';
             return;
         }}
@@ -31271,7 +31271,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const source = interactionSourceCategory;
         const sourceIdx = categories.indexOf(source);
         if (sourceIdx < 0) {{
-            container.innerHTML = '<div class="agg-group-meta">Choose a source cell type.</div>';
+            container.innerHTML = '<div class="agg-group-meta">Choose a source category.</div>';
             return;
         }}
         const rawSource = resolveRawCategoryValue(colorCol, source);
@@ -31305,7 +31305,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }});
 
         if (sortedEntries.length === 0) {{
-            container.innerHTML = '<div class="agg-group-meta">No target cell types match the current filter.</div>';
+            container.innerHTML = '<div class="agg-group-meta">No target categories match the current filter.</div>';
             return;
         }}
 
@@ -31525,7 +31525,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function resetFocusedModalTools(except = null) {{
         let graphChanged = false;
         if (except !== 'lasso') {{
-            modalMagicWandActive = false;
+            modalLassoSelectionActive = false;
             isDrawingModalLasso = false;
             modalLassoPath = [];
         }}
@@ -31862,7 +31862,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         invalidateModalRenderedView();
         modalZoom = 1; modalPanX = 0; modalPanY = 0;
         modalPointerMoved = false;
-        modalMagicWandActive = false;
+        modalLassoSelectionActive = false;
         isDrawingModalLasso = false;
         modalLassoPath = [];
         setModalAnnotationPanelOpen(false);
@@ -31918,7 +31918,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         document.getElementById('modal-canvas')?.classList.remove('render-pending');
         document.getElementById('modal').classList.remove('active');
         unmountModalFromGrid();
-        magicWandActive = false;
+        lassoSelectionActive = false;
         umapPanActive = true;
         isDrawingLasso = false;
         lassoPath = [];
@@ -31927,7 +31927,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         gridLassoSectionId = null;
         if (lassoModeB && selectedCellsB.size === 0) lassoModeB = false;
         setUMAPCompareHintVisible(false);
-        modalMagicWandActive = false;
+        modalLassoSelectionActive = false;
         isDrawingModalLasso = false;
         modalLassoPath = [];
         setModalAnnotationPanelOpen(false);
@@ -32034,13 +32034,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     suppressPanelClick = false;
                     return;
                 }}
-                if (magicWandActive || isDrawingGridLasso) return;
+                if (lassoSelectionActive || isDrawingGridLasso) return;
                 openModal(section.id, panel);
             }});
             const sectionCanvas = panel.querySelector('.section-canvas');
             if (sectionCanvas) {{
                 sectionCanvas.addEventListener('mousedown', (event) => {{
-                    if (!magicWandActive || modalInlineActive || event.button !== 0) return;
+                    if (!lassoSelectionActive || modalInlineActive || event.button !== 0) return;
                     event.preventDefault();
                     event.stopPropagation();
                     suppressPanelClick = true;
@@ -32124,7 +32124,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             grid.querySelectorAll('.section-panel').forEach(panel => {{
                 panel.setAttribute('draggable', 'true');
                 panel.addEventListener('dragstart', (e) => {{
-                    if (magicWandActive || isDrawingGridLasso) {{ e.preventDefault(); return; }}
+                    if (lassoSelectionActive || isDrawingGridLasso) {{ e.preventDefault(); return; }}
                     if (e.target.closest('button, input, select, textarea, a')) {{ e.preventDefault(); return; }}
                     suppressPanelClick = true;
                     dragSrcId = panel.dataset.sectionId;
@@ -33052,7 +33052,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 canvas.style.cursor = 'move';
             }} else if (modalSpacePanActive) {{
                 canvas.style.cursor = 'grab';
-            }} else if (modalMagicWandActive) {{
+            }} else if (modalLassoSelectionActive) {{
                 canvas.style.cursor = 'crosshair';
             }} else {{
                 canvas.style.cursor = 'grab';
@@ -33110,7 +33110,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 e.preventDefault();
                 return;
             }}
-            if (modalMagicWandActive) {{
+            if (modalLassoSelectionActive) {{
                 if (!modalSection) return;
                 const rect = container.getBoundingClientRect();
                 const x = e.clientX - rect.left;
@@ -33183,7 +33183,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         // Tooltip on hover in modal
         canvas.addEventListener('mousemove', (e) => {{
-            if (isDragging || isDrawingModalLasso || modalMagicWandActive || !modalSection) return;
+            if (isDragging || isDrawingModalLasso || modalLassoSelectionActive || !modalSection) return;
 
             const rect = container.getBoundingClientRect();
             const mouseX = e.clientX - rect.left;
@@ -33370,7 +33370,7 @@ def export_to_html(
         Optional mapping of column keys to display labels used across the viewer
         UI without renaming the underlying obs/metadata columns.
     viewer_info_html : str, optional
-        HTML string shown in the Info tab of the color panel.
+        HTML string shown in the Info tab of the Insights panel.
     tutorial : bool
         Embed the guided HTML tutorial and show an in-page control to start it.
     cells_annotations : list, optional
@@ -33478,7 +33478,7 @@ def export_to_html(
     neighbor_stats_seed : int
         Random seed used for neighbor permutations
     interaction_markers_top_targets : int
-        Number of target cell types to evaluate per source.
+        Number of target categories to evaluate per source.
     interaction_markers_top_genes : int
         Number of top DE genes to keep per source-target interaction.
     interaction_markers_min_cells : int
@@ -33643,7 +33643,7 @@ def export_to_html(
             '<div class="info-block">'
             '<div class="info-title">Viewer</div>'
             '<div class="info-text">KaroSpace interactive spatial viewer for exploring '
-            'sections, cell types, and gene expression.</div>'
+            'sections, annotations, and gene expression.</div>'
             '</div>'
             '<div class="info-block">'
             '<div class="info-title">Contact</div>'
@@ -33783,7 +33783,7 @@ def export_to_html(
         log_step("Computing pathway enrichment")
         log_detail(
             "Running ORA on significant DE genes and preranked GSEA on retained ranked genes; "
-            "output feeds Visualization > Compare > Per sample > Simple design > Pathway Enrichment."
+            "output feeds Insights > Exploration > Compare > Per sample > Simple design > Pathway Enrichment."
         )
         log_detail("Parameters:")
         if pathway_gmt:
@@ -33980,7 +33980,7 @@ def export_to_html(
         log_detail(
             f"Running Moran's I for up to {int(spatial_variable_genes_n)} variable genes "
             f"on the full input cell set ({int(dataset.adata.n_obs):,} cells); "
-            "output feeds Insights > Exploration > Visualization > Genes > Spatial."
+            "output feeds Insights > Exploration > Genes > Spatial."
         )
         data["spatial_variable_genes"] = _compute_morans_i(
             dataset.adata, list(dataset.var_names), n_genes=int(spatial_variable_genes_n)
@@ -33994,7 +33994,7 @@ def export_to_html(
         log_step("Computing category gene means from pseudobulk DE genes")
         log_detail(
             f"Using up to {int(cluster_means_n_genes)} embedded DE genes from the current "
-            "pseudobulk analysis; output feeds Insights > Exploration > Visualization > "
+            "pseudobulk analysis; output feeds Insights > Exploration > "
             "Genes > Distribution > Per sample."
         )
         data["cluster_gene_means"] = _cluster_gene_means_from_pseudobulk_de(
@@ -34364,7 +34364,7 @@ def export_to_html(
         log_detail(f"Spot size auto-resolved to {resolved_spot_size:.2f}.")
     else:
         log_detail(f"Spot size: {resolved_spot_size:.2f}.")
-    log_detail(f"Color options: {len(data['available_colors'])}")
+    log_detail(f"Annotation options: {len(data['available_colors'])}")
     if embedded_genes:
         log_detail(f"Genes embedded in HTML: {len(data['genes_meta'])}")
         enc = data.get("gene_encodings") or {}

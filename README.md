@@ -17,8 +17,8 @@ Visit [KaroSpace Website](https://karospace.se/).
 - [x] **Section filters** — Filter visible sections by exported metadata such as stage, condition, region, sex, model, sample, or batch
 - [x] **UMAP to sections connection** — Lasso selection works in UMAP and modal view with synced highlights
 - [x] **Cells selection composition** — Selected-cell totals and per-type counts with expandable scrollable lists
-- [x] **Region polygon annotation** — Save lasso selections as persistent annotations, reorder labels, and export JSON for downstream integration
-- [x] **Region-to-region comparison** — Compare drawn regions or annotations directly in the viewer, export JSON/CSV reports, and search top hits
+- [x] **Polygon regions** — Save lasso selections as persistent regions, reorder labels, and export JSON for downstream integration
+- [x] **Region-to-region comparison** — Compare saved regions directly in the viewer, export JSON/CSV reports, and search top hits
 - [x] **Cell search** — Select cells with query syntax based on annotations, genes, or section metadata, then reuse the selection in summaries and comparisons
 - [x] **Split screen** — Compare two variables side-by-side in the modal (`Annotation`, `Modality` or `Module`)
 - [x] **Gene modules** — Build custom gene sets, compute averaged module scores, display them like expression layers, and import/export module definitions
@@ -301,7 +301,7 @@ karospace your_data.h5ad \
 | `--neighbor-stats-groupby` | Obs columns for neighbor composition stats (`auto` or comma-separated) | `auto` |
 | `--neighbor-stats-seed` | Random seed for neighbor enrichment permutations | `0` |
 | `--interaction-markers` | Contact-conditioned pseudobulk marker mode (`auto`, `None`) | `auto` |
-| `--interaction-markers-top-targets` | Target cell types evaluated per source for contact-conditioned markers | `8` |
+| `--interaction-markers-top-targets` | Target categories evaluated per source for contact-conditioned markers | `8` |
 | `--interaction-markers-top-genes` | Top DE genes kept per source-target interaction | `20` |
 | `--interaction-markers-min-cells` | Minimum cells per replicate contact+ and contact- pseudobulk sample | `30` |
 | `--interaction-markers-min-neighbors` | Minimum target neighbors to classify contact+ source cells | `1` |
@@ -552,7 +552,7 @@ karospace package-sidecar viewer.html \
 > - **Custom `--gene-aux-path`**: for normal sidecar HTML it may be a path; for direct `.karospace` export it must be a filename inside the package.
 > - **Large packages**: increase `--gene-sidecar-shard-size` for fewer shard files, decrease it for smaller individual requests.
 
-## Integrate region polygon annotations back into AnnData
+## Integrate polygon regions back into AnnData
 
 ```python
 import scanpy as sc

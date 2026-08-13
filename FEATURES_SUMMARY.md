@@ -26,7 +26,7 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 - When exported with `tutorial=True` / `--tutorial`, the HTML displays a graduation-cap launcher and a blue information note next to it.
 - The tutorial does not open automatically.
 - Tutorial cards have chapter names, chapter progress bars, and a chapter dropdown.
-- The tutorial asks the user to interact with real controls: open menus, select annotations, lasso cells, create annotations, run selection marker searches, load genes, and inspect panels.
+- The tutorial asks the user to interact with real controls: open menus, select annotations, make lasso selections, create regions, run selection marker searches, load genes, and inspect panels.
 - The final tutorial chapter order is:
   - Introduction
   - Helpers
@@ -126,11 +126,11 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 - The UMAP panel can be docked to corners, resized, and kept pinned while scrolling the grid.
 - UMAP supports pan, zoom, point-size control, and lasso selection.
 - UMAP lasso selections synchronize with the spatial grid.
-- Selected UMAP cells can be saved as a cell-set annotation, not as a polygon tied to one section.
+- Selected UMAP cells can be saved as a cell-set region, not as a polygon region tied to one section.
 
 ## 13. Insights Modes
 
-- Insights is the right-side workspace for selected cells, region annotations, gene modules, and built-in analysis panels.
+- Insights is the right-side workspace for selected cells, regions, gene modules, and built-in analysis panels.
 - Selection mode shows compact summaries for active lasso, UMAP, or query selections.
 - Region mode stores, selects, groups, imports, exports, recolors, and deletes user-created spatial regions or cell sets.
 - Module mode creates gene modules and displays module scores like expression layers.
@@ -149,13 +149,13 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 ## 15. Region Workflow
 
 - Region creation starts from selected cells.
-- Region annotations can be created from modal or grid selections.
+- Regions can be created from modal or grid lasso selections.
 - Each region row represents a saved spatial region or cell group.
 - Clicking a region row selects its cells.
 - Clicking a group row selects the union of cells from nested regions.
 - Regions can be recolored, grouped, exported, imported, or deleted.
 - Imported region JSON restores saved regions and associated selected cells in the viewer.
-- Region comparison in Exploration uses saved region annotations.
+- Region comparison in Exploration uses saved regions.
 
 ## 16. Module Workflow
 

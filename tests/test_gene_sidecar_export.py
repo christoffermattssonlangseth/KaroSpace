@@ -124,6 +124,70 @@ def _build_pseudobulk_dataset(cells_per_category_per_sample: int = 20) -> Spatia
     )
 
 
+def _build_sample_metadata_pseudobulk_dataset(cells_per_category_per_sample: int = 4) -> SpatialDataset:
+    obs_rows = []
+    x_rows = []
+    coords = []
+    sample_conditions = [
+        ("S1", "ctrl"),
+        ("S2", "ctrl"),
+        ("S3", "treated"),
+        ("S4", "treated"),
+    ]
+    for sample_idx, (sample_id, condition) in enumerate(sample_conditions):
+        for category_idx, category in enumerate(["A", "B"]):
+            for cell_idx in range(int(cells_per_category_per_sample)):
+                obs_rows.append(
+                    {
+                        "sample_id": sample_id,
+                        "leiden": category,
+                        "condition": condition,
+                    }
+                )
+                x_rows.append(
+                    [
+                        float(2 + (condition == "treated")),
+                        float(1 + category_idx),
+                        float(cell_idx % 2),
+                    ]
+                )
+                coords.append(
+                    [
+                        float(sample_idx * 100 + cell_idx),
+                        float(category_idx * 100 + cell_idx),
+                    ]
+                )
+
+    obs = pd.DataFrame(obs_rows, index=[f"cell_{i}" for i in range(len(obs_rows))])
+    obs["sample_id"] = pd.Categorical(obs["sample_id"])
+    obs["leiden"] = pd.Categorical(obs["leiden"])
+    obs["condition"] = pd.Categorical(obs["condition"])
+    var = pd.DataFrame(index=["G1", "G2", "G3"])
+    x = np.asarray(x_rows, dtype=float)
+    adata = AnnData(X=x, obs=obs, var=var)
+    adata.layers["counts"] = x.copy()
+    adata.layers["normalized"] = x.copy()
+    adata.obsm["spatial"] = np.asarray(coords, dtype=float)
+    sections = [
+        SectionData(
+            section_id=sample_id,
+            coordinates=adata.obsm["spatial"][
+                obs["sample_id"].astype(str).to_numpy() == sample_id
+            ],
+            metadata={"condition": condition},
+        )
+        for sample_id, condition in sample_conditions
+    ]
+    return SpatialDataset(
+        adata=adata,
+        sections=sections,
+        groupby="sample_id",
+        obs_columns=["sample_id", "leiden", "condition"],
+        var_names=["G1", "G2", "G3"],
+        metadata_section=["condition"],
+    )
+
+
 def _extract_data_json(html_text: str) -> dict:
     match = re.search(
         r'<script id="karospace-data" type="application/json">(.*?)</script>',
@@ -284,7 +348,7 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert "function scoreLoadedGenesForModalSelection(section, selectedCellIndices)" in html_text
     assert "function createModalAnnotationFromSelection()" in html_text
     assert 'id="selection-create-annotation-btn"' in html_text
-    assert 'id="selection-create-annotation-btn" type="button" title="Create annotation from this lasso selection" aria-label="Create annotation from this lasso selection" hidden' in html_text
+    assert 'id="selection-create-annotation-btn" type="button" title="Create region from this lasso selection" aria-label="Create region from this lasso selection" hidden' in html_text
     assert "function markPrimarySelectionChanged()" in html_text
     assert "function annotationAlreadyCreatedForCurrentSelection()" in html_text
     assert "function updateSelectionCreateAnnotationButtonState()" in html_text
@@ -536,7 +600,13 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert "function buildPseudobulkDistanceHeatmap(sampleInfo, colorCol)" in html_text
     assert "function renderClusterPAResultSection(colorCol, sourceCategory, referenceCategory)" in html_text
     assert 'class="cluster-PA-result cluster-pa-result"' in html_text
-    assert "Gene Enrichment" in html_text
+    assert "Pathway Enrichment" in html_text
+    assert "Gene Enrichment" not in html_text
+    assert "Magic Wand" not in html_text
+    assert "cell-set annotation" not in html_text
+    assert "No matching cell types" not in html_text
+    assert "neighbour" not in html_text
+    assert "Color options:" not in html_text
     assert "data-pathway-annotation-select" in html_text
     assert 'data-pathway-annotation-panel="source"' in html_text
     assert 'data-pathway-annotation-panel="reference"' in html_text
@@ -1173,6 +1243,70 @@ def test_export_embeds_pairwise_pseudobulk_de(monkeypatch, tmp_path):
     assert embedded["pathway_settings"]["source"] == "gmt"
     assert embedded["pathway_settings"]["enriched_comparisons"] >= 1
     assert embedded["marker_genes"]["leiden"]["A"] == ["G1"]
+
+
+def test_export_routes_fixed_section_metadata_to_sample_level_pseudobulk(monkeypatch, tmp_path):
+    dataset = _build_sample_metadata_pseudobulk_dataset()
+    output_path = tmp_path / "viewer.html"
+    sample_level_calls = []
+
+    def fake_group_de(adata, groupby, **kwargs):
+        if groupby == "condition":
+            pytest.fail("fixed section metadata must not use the replicate-adjusted category model")
+        return None
+
+    def fake_sample_metadata_de(adata, groupby, *, replicate, **kwargs):
+        sample_level_calls.append((groupby, replicate))
+        return {
+            "ctrl": {
+                "treated": {
+                    "available": True,
+                    "method": "pseudobulk-deseq2-sample-metadata",
+                    "model_formula": "~ condition",
+                    "genes": [],
+                    "log2foldchanges": [],
+                    "logfoldchanges": [],
+                    "pvals": [],
+                    "pvals_adj": [],
+                    "scores": [],
+                    "pct_source": [],
+                    "pct_reference": [],
+                }
+            },
+            "_summary": {
+                "replicate": "sample_id",
+                "groupby": "condition",
+                "model_formula": "~ condition",
+                "model_categories": ["ctrl", "treated"],
+                "diagnostics": "pairwise",
+            },
+        }
+
+    monkeypatch.setattr("karospace.pseudobulk.compute_pseudobulk_group_de", fake_group_de)
+    monkeypatch.setattr(
+        "karospace.pseudobulk.compute_pseudobulk_sample_metadata_de",
+        fake_sample_metadata_de,
+    )
+
+    export_to_html(
+        dataset,
+        output_path=str(output_path),
+        main_cells_annotation="leiden",
+        pseudobulk_additional_annotations=["condition"],
+        pseudobulk_min_cells_per_sample=2,
+        pseudobulk_embed_top_n_per_comparison=0,
+        spatial_variable_genes_n=0,
+        cluster_means_n_genes=0,
+        gene_correlation_top_n=0,
+    )
+
+    embedded = _extract_data_json(output_path.read_text(encoding="utf-8"))
+
+    assert sample_level_calls == [("condition", "sample_id")]
+    assert embedded["pseudobulk_de"]["condition"]["ctrl"]["treated"]["method"] == (
+        "pseudobulk-deseq2-sample-metadata"
+    )
+    assert embedded["pseudobulk_de"]["condition"]["_summary"]["model_formula"] == "~ condition"
 
 
 def test_pseudobulk_min_pct_expressed_does_not_truncate_de_table(monkeypatch, tmp_path):

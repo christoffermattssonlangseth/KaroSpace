@@ -3,9 +3,9 @@ Export a KaroSpace viewer for the annotated P1 skin Xenium dataset, Lesional (L)
 and Non-lesional (NL) combined into one object (two sections, by sample_id).
 
 This dataset has NO embedded morphology images (no uns/spatial), so there is no
-DAPI/H&E overlay — it's a straight spatial cell map coloured by the Seurat
+DAPI/H&E overlay — it's a straight spatial cell map shown by the Seurat
 annotations:
-  - predicted.celltype (19 skin cell types) — default colouring
+  - predicted.celltype (19 skin cell types) — default annotation
   - niches (5 spatial niches)
   - seurat_clusters / Xenium_snn_res.0.2
   - an IFN-alpha REACTOME signature score (continuous)

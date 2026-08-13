@@ -1767,7 +1767,7 @@ class SpatialDataset:
         neighbor_stats_seed : int
             Random seed used for neighbor permutations
         interaction_markers_top_targets : int
-            Number of target cell types to evaluate per source (ranked by z-score or edge count).
+            Number of target categories to evaluate per source (ranked by z-score or edge count).
         interaction_markers_top_genes : int
             Number of top genes to keep per source-target interaction.
         interaction_markers_min_cells : int
@@ -1883,7 +1883,7 @@ class SpatialDataset:
             except Exception as e:
                     log_warning(f"Could not load annotation '{col}': {e}", level=1)
 
-        # Pre-compute deconvolution proportion matrices (per-cell × K cell types)
+        # Pre-compute deconvolution proportion matrices (per-cell x K cell types)
         # deconvolutions: {display_name: obsm_key} where adata.obsm[obsm_key] is (N, K)
         decon_data: Dict[str, Dict[str, Any]] = {}
         if deconvolutions:
@@ -2397,7 +2397,32 @@ class SpatialDataset:
             pseudobulk_log2fc_cutoff_n = float(pseudobulk_log2fc_cutoff)
             pseudobulk_n_cpus_n = max(1, int(pseudobulk_n_cpus))
 
-            from .pseudobulk import compute_pseudobulk_group_de
+            from .pseudobulk import compute_pseudobulk_group_de, compute_pseudobulk_sample_metadata_de
+
+            section_metadata_columns = set(self.metadata_section or [])
+            section_metadata_columns.update(self.metadata_section_extra or [])
+
+            def _use_sample_metadata_pseudobulk(groupby_name: str) -> bool:
+                if groupby_name not in section_metadata_columns:
+                    return False
+                if groupby_name not in self.adata.obs.columns:
+                    return False
+                frame = self.adata.obs[[pseudobulk_replicate_name, groupby_name]].dropna()
+                if frame.empty:
+                    return False
+                replicate_values = frame[pseudobulk_replicate_name].astype(str)
+                group_values = frame[groupby_name].astype(str)
+                unique_per_replicate = group_values.groupby(replicate_values).nunique()
+                if bool((unique_per_replicate > 1).any()):
+                    mixed = sorted(unique_per_replicate[unique_per_replicate > 1].index.astype(str))[:5]
+                    log_warning(
+                        f"section metadata '{groupby_name}' is not fixed within "
+                        f"pseudobulk replicate '{pseudobulk_replicate_name}' "
+                        f"({', '.join(mixed)}); using replicate-adjusted category pseudobulk.",
+                        level=2,
+                    )
+                    return False
+                return True
 
             for groupby_name in pending_pseudobulk_de_groupby:
                 groupby_pairwise_categories = (
@@ -2405,6 +2430,7 @@ class SpatialDataset:
                     if pseudobulk_simple_categories_by_groupby
                     else None
                 )
+                sample_metadata_model = _use_sample_metadata_pseudobulk(groupby_name)
                 log_step(
                     f"Pseudobulk DE: annotation column {groupby_name}; replicate={pseudobulk_replicate_name}",
                     level=1,
@@ -2416,7 +2442,11 @@ class SpatialDataset:
                 )
                 log_detail("Parameters:", level=2)
                 log_detail(
-                    f"model=shared_all_category(~ {pseudobulk_replicate_name} + {groupby_name})",
+                    (
+                        f"model=sample_metadata(~ {groupby_name})"
+                        if sample_metadata_model
+                        else f"model=shared_all_category(~ {pseudobulk_replicate_name} + {groupby_name})"
+                    ),
                     level=3,
                 )
                 log_detail("rest=balanced_equal_category_weight", level=3)
@@ -2433,7 +2463,12 @@ class SpatialDataset:
                 log_detail(f"n_cpus={pseudobulk_n_cpus_n}", level=3)
                 log_detail("diagnostics=pairwise", level=3)
                 log_detail(f"reported_pairwise_categories={pairwise_categories_label}", level=3)
-                groupby_results = compute_pseudobulk_group_de(
+                compute_de = (
+                    compute_pseudobulk_sample_metadata_de
+                    if sample_metadata_model
+                    else compute_pseudobulk_group_de
+                )
+                groupby_results = compute_de(
                     self.adata,
                     groupby_name,
                     replicate=pseudobulk_replicate_name,

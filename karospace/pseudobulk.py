@@ -650,6 +650,59 @@ def _fit_deseq2_shared_categories(
     return dds, fit_counts, fit_meta
 
 
+def _fit_deseq2_sample_metadata(
+    counts: np.ndarray,
+    metadata: pd.DataFrame,
+    categories: Sequence[str],
+    *,
+    fit_type: str = "parametric",
+    min_gene_counts: int = 0,
+    n_cpus: int = 1,
+) -> Tuple[Any, np.ndarray, pd.DataFrame]:
+    """Fit one sample-level DESeq2 model for metadata fixed per replicate."""
+    try:
+        from pydeseq2.dds import DeseqDataSet
+    except Exception as exc:  # pragma: no cover - depends on optional runtime import
+        raise RuntimeError(
+            "PyDESeq2 is required for pseudobulk sample-metadata DE. Install KaroSpace with "
+            "pydeseq2 support or run `pip install pydeseq2`."
+        ) from exc
+
+    fit_counts, fit_meta = _filter_pseudobulk_genes(counts, metadata, min_gene_counts)
+    gene_names = [str(gene) for gene in fit_meta.attrs.get("gene_names", [])]
+    if not gene_names:
+        raise ValueError("no genes meet the raw pseudobulk count threshold")
+
+    counts_df = pd.DataFrame(fit_counts, index=fit_meta.index, columns=gene_names)
+    design_meta = fit_meta[["_pb_group"]].copy()
+    design_meta["_pb_group"] = pd.Categorical(
+        design_meta["_pb_group"].astype(str),
+        categories=[str(category) for category in categories],
+    )
+    try:
+        dds = DeseqDataSet(
+            counts=counts_df,
+            metadata=design_meta,
+            design="~ _pb_group",
+            fit_type=fit_type,
+            n_cpus=max(1, int(n_cpus)),
+            quiet=True,
+        )
+    except TypeError:
+        dds = DeseqDataSet(
+            counts=counts_df,
+            clinical=design_meta,
+            design_factors=["_pb_group"],
+            fit_type=fit_type,
+            refit_cooks=True,
+            n_cpus=max(1, int(n_cpus)),
+        )
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=RuntimeWarning)
+        dds.deseq2()
+    return dds, fit_counts, fit_meta
+
+
 def _deseq2_shared_contrast(
     dds: Any,
     contrast: np.ndarray,
@@ -703,6 +756,13 @@ def _shared_category_design_rank(metadata: pd.DataFrame) -> Tuple[int, int]:
     replicate = pd.get_dummies(metadata["_pb_replicate"].astype(str), drop_first=True, dtype=float)
     group = pd.get_dummies(metadata["_pb_group"].astype(str), drop_first=True, dtype=float)
     design = np.column_stack((np.ones(len(metadata), dtype=float), replicate.to_numpy(), group.to_numpy()))
+    return int(np.linalg.matrix_rank(design)), int(design.shape[1])
+
+
+def _sample_metadata_design_rank(metadata: pd.DataFrame) -> Tuple[int, int]:
+    """Return rank and column count for ``~ annotation``."""
+    group = pd.get_dummies(metadata["_pb_group"].astype(str), drop_first=True, dtype=float)
+    design = np.column_stack((np.ones(len(metadata), dtype=float), group.to_numpy()))
     return int(np.linalg.matrix_rank(design)), int(design.shape[1])
 
 
@@ -1595,6 +1655,439 @@ def compute_pseudobulk_interaction_markers(
             level=2,
         )
     return results or None
+
+
+def compute_pseudobulk_sample_metadata_de(
+    adata,
+    groupby: str,
+    *,
+    replicate: str,
+    pairwise_categories: Optional[Sequence[str]] = None,
+    counts_layer: Optional[str] = "counts",
+    min_cell_counts: int = 0,
+    min_gene_counts: int = 0,
+    min_cells: int = 20,
+    min_replicates: int = 2,
+    min_pct_expressed: float = 0.0,
+    p_adjust_method: str = "fdr_bh",
+    padj_cutoff: float = 0.05,
+    log2fc_cutoff: float = 0.5,
+    fit_type: str = "parametric",
+    n_cpus: int = 1,
+) -> Optional[Dict[str, Dict[str, Dict[str, Any]]]]:
+    """Compute pseudobulk DE for metadata fixed per biological replicate."""
+    if groupby not in adata.obs.columns:
+        log_warning(f"sample-metadata pseudobulk DE annotation '{groupby}' not found in obs.", level=2)
+        return None
+    if replicate not in adata.obs.columns:
+        log_warning(f"sample-metadata pseudobulk DE replicate '{replicate}' not found in obs.", level=2)
+        return None
+
+    col = adata.obs[groupby]
+    if pd.api.types.is_numeric_dtype(col):
+        log_warning(f"sample-metadata pseudobulk DE annotation '{groupby}' is numeric; skipping.", level=2)
+        return None
+    if not isinstance(col.dtype, CategoricalDtype):
+        col = col.astype("category")
+    categories = [str(category) for category in col.cat.categories]
+    if len(categories) < 2:
+        return None
+    if pairwise_categories is None:
+        selected_pairwise_categories = list(categories)
+    else:
+        requested = [str(category) for category in pairwise_categories]
+        selected_pairwise_categories = [category for category in categories if category in requested]
+        missing = sorted(set(requested) - set(selected_pairwise_categories))
+        if missing:
+            log_warning(
+                "requested Simple design pairwise categories not found in "
+                f"'{groupby}': {', '.join(missing)}.",
+                level=2,
+            )
+
+    expression_matrix, counts_layer_used, warning = _as_count_matrix(adata, counts_layer)
+    rep_values = adata.obs[replicate].astype(str)
+    group_values = col.astype(str)
+    valid = rep_values.notna().to_numpy() & group_values.notna().to_numpy()
+    valid &= np.asarray(col.cat.codes.to_numpy() >= 0, dtype=bool)
+    valid &= _cell_count_mask(expression_matrix, min_cell_counts)
+    if not valid.any():
+        return None
+
+    required_min_replicates = max(2, int(min_replicates))
+    valid_indices = np.flatnonzero(valid)
+    rep_valid = rep_values.iloc[valid_indices].to_numpy(dtype=str)
+    group_valid = group_values.iloc[valid_indices].to_numpy(dtype=str)
+    per_replicate_groups: Dict[str, str] = {}
+    mixed_replicates = set()
+    for rep_value, group_value in zip(rep_valid, group_valid):
+        previous = per_replicate_groups.get(rep_value)
+        if previous is None:
+            per_replicate_groups[rep_value] = group_value
+        elif previous != group_value:
+            mixed_replicates.add(rep_value)
+    if mixed_replicates:
+        preview = ", ".join(sorted(mixed_replicates)[:5])
+        log_warning(
+            f"sample-metadata pseudobulk DE for '{groupby}' was skipped: annotation is not "
+            f"fixed within replicate '{replicate}' ({preview}).",
+            level=2,
+        )
+        return None
+    if len(per_replicate_groups) < required_min_replicates:
+        available = len(per_replicate_groups)
+        reason = (
+            "only one biological replicate is available; pseudobulk DE requires at least two"
+            if available == 1
+            else f"{available} biological replicate(s) are available; need >= {required_min_replicates}"
+        )
+        log_warning(
+            f"sample-metadata pseudobulk DE for '{groupby}' was skipped: {reason} "
+            f"(replicate annotation: '{replicate}').",
+            level=2,
+        )
+        return None
+
+    sample_keys: List[str] = []
+    sample_index: Dict[str, int] = {}
+    rows = np.empty(valid_indices.size, dtype=np.int64)
+    for index, rep_value in enumerate(rep_valid):
+        row = sample_index.get(rep_value)
+        if row is None:
+            row = len(sample_keys)
+            sample_index[rep_value] = row
+            sample_keys.append(rep_value)
+        rows[index] = row
+
+    incidence = sp.csr_matrix(
+        (np.ones(valid_indices.size, dtype=np.float64), (rows, valid_indices)),
+        shape=(len(sample_keys), adata.n_obs),
+    )
+    aggregate = _to_dense_counts(incidence @ expression_matrix)
+    cell_counts = np.bincount(rows, minlength=len(sample_keys)).astype(int)
+    pb_meta = pd.DataFrame(
+        {
+            "_pb_replicate": sample_keys,
+            "_pb_group": [per_replicate_groups[key] for key in sample_keys],
+            "n_cells": cell_counts,
+        },
+        index=[f"pb_{index}" for index in range(len(sample_keys))],
+    )
+    pb_meta.attrs["gene_names"] = [str(gene) for gene in adata.var_names]
+    aggregate_summary = _compute_category_gene_means_from_aggregate(
+        aggregate, pb_meta, categories, adata.var_names,
+    )
+    log_detail(
+        f"Aggregated {len(pb_meta)} replicate pseudobulk samples from "
+        f"{len(valid_indices)} retained cells; output is the count matrix used for sample-level DESeq2.",
+        level=2,
+    )
+
+    sufficient_pb = pb_meta[pb_meta["n_cells"] >= int(min_cells)]
+    retained_categories = [
+        category
+        for category in categories
+        if sufficient_pb.loc[sufficient_pb["_pb_group"] == category, "_pb_replicate"].nunique()
+        >= required_min_replicates
+    ]
+    omitted_categories = [category for category in categories if category not in retained_categories]
+    if omitted_categories:
+        log_detail(
+            "Excluded sample-metadata categories with insufficient pseudobulk replicates: "
+            + ", ".join(omitted_categories),
+            level=2,
+        )
+    if len(retained_categories) < 2:
+        log_warning(
+            f"sample-metadata pseudobulk DE for '{groupby}' was skipped: fewer than two categories have "
+            f">= {required_min_replicates} replicate pseudobulks with >= {int(min_cells)} cells.",
+            level=2,
+        )
+        return None
+
+    model_mask = (
+        pb_meta["_pb_group"].isin(retained_categories)
+        & (pb_meta["n_cells"] >= int(min_cells))
+    )
+    model_positions = np.flatnonzero(model_mask.to_numpy())
+    model_counts = aggregate[model_positions]
+    model_meta = pb_meta.iloc[model_positions].copy()
+    model_meta.attrs["gene_names"] = [str(gene) for gene in adata.var_names]
+    design_rank, design_columns = _sample_metadata_design_rank(model_meta)
+    residual_df = int(len(model_meta) - design_rank)
+    if design_rank < design_columns or residual_df <= 0:
+        log_warning(
+            f"sample-metadata pseudobulk DE for '{groupby}' was skipped: the "
+            f"~ {groupby} design is rank-deficient or has no residual degrees of freedom "
+            f"(rank {design_rank}/{design_columns}; residual df {residual_df}).",
+            level=2,
+        )
+        return None
+    log_detail(
+        f"Validated sample-level DESeq2 design ~ {groupby}: "
+        f"rank {design_rank}/{design_columns}; residual df {residual_df}",
+        level=2,
+    )
+
+    model_replicates = set(model_meta["_pb_replicate"].astype(str))
+    model_cell_mask = valid & rep_values.astype(str).isin(model_replicates).to_numpy()
+    fit_counts, fit_meta = _filter_pseudobulk_genes(
+        model_counts,
+        model_meta,
+        min_gene_counts,
+    )
+    if not fit_meta.attrs.get("gene_names"):
+        log_warning(
+            f"sample-metadata pseudobulk DE for '{groupby}' was skipped: no genes meet "
+            f"min_gene_counts={max(0, int(min_gene_counts))}.",
+            level=2,
+        )
+        return None
+
+    log_detail(
+        "Fitting sample-level DESeq2 model "
+        f"(~ {groupby}; {fit_counts.shape[0]} pseudobulk samples, {fit_counts.shape[1]} genes).",
+        level=2,
+    )
+    fit_started = time.perf_counter()
+    try:
+        dds, fit_counts, fit_meta = _fit_deseq2_sample_metadata(
+            fit_counts,
+            fit_meta,
+            retained_categories,
+            fit_type=str(fit_type or "parametric"),
+            min_gene_counts=0,
+            n_cpus=n_cpus,
+        )
+    except Exception as exc:
+        log_warning(f"sample-metadata pseudobulk DE fit for '{groupby}' failed ({exc}).", level=2)
+        return None
+    log_detail(
+        f"Sample-level DESeq2 model fit completed in {_format_duration(time.perf_counter() - fit_started)}.",
+        level=2,
+    )
+
+    model_info = {
+        "model_formula": f"~ {groupby}",
+        "model_categories": retained_categories,
+        "contrast_reference": "balanced_rest",
+    }
+    results: Dict[str, Dict[str, Dict[str, Any]]] = {}
+
+    def category_cell_mask(category: str) -> np.ndarray:
+        return model_cell_mask & (group_values.to_numpy() == str(category))
+
+    def format_sample_result(
+        raw_result: pd.DataFrame,
+        *,
+        contrast_type: str,
+        n_replicates: int,
+        source_mask: np.ndarray,
+        reference_mask: np.ndarray,
+        fit_gene_count: int,
+        test_gene_count: int,
+    ) -> Dict[str, Any]:
+        formatted = _format_result(
+            raw_result,
+            source_mask=source_mask,
+            reference_mask=reference_mask,
+            expression_matrix=expression_matrix,
+            var_names=adata.var_names,
+            top_n=0,
+            n_source=int(np.count_nonzero(source_mask)),
+            n_reference=int(np.count_nonzero(reference_mask)),
+            n_replicates=n_replicates,
+            counts_layer_used=counts_layer_used,
+            warning=warning,
+            p_adjust_method=p_adjust_method,
+            min_pct_expressed=min_pct_expressed,
+            padj_cutoff=padj_cutoff,
+            log2fc_cutoff=log2fc_cutoff,
+            method="pseudobulk-deseq2-sample-metadata",
+        )
+        formatted.update(model_info)
+        formatted["contrast_type"] = contrast_type
+        formatted["min_pct_prefilter_gene_count"] = int(fit_gene_count)
+        formatted["min_pct_retained_gene_count"] = int(test_gene_count)
+        formatted["min_pct_removed_gene_count"] = int(max(0, fit_gene_count - test_gene_count))
+        return formatted
+
+    def run_sample_contrast(
+        source: str,
+        contrast: np.ndarray,
+        *,
+        contrast_type: str,
+        n_replicates: int,
+        reference_mask: np.ndarray,
+    ) -> Dict[str, Any]:
+        source_mask = category_cell_mask(source)
+        fit_gene_names = [str(gene) for gene in fit_meta.attrs.get("gene_names", [])]
+        test_gene_names = _expression_prefilter_gene_names(
+            expression_matrix,
+            source_mask,
+            reference_mask,
+            adata.var_names,
+            fit_gene_names,
+            min_pct_expressed,
+        )
+        raw_result = _deseq2_shared_contrast(
+            dds,
+            contrast,
+            n_cpus=1,
+            gene_names=test_gene_names,
+        )
+        return format_sample_result(
+            raw_result,
+            contrast_type=contrast_type,
+            n_replicates=n_replicates,
+            source_mask=source_mask,
+            reference_mask=reference_mask,
+            fit_gene_count=len(fit_gene_names),
+            test_gene_count=len(test_gene_names),
+        )
+
+    selected_retained = [category for category in selected_pairwise_categories if category in retained_categories]
+    rest_reference = "__rest__"
+    for source in retained_categories:
+        references = [category for category in retained_categories if category != source]
+        replicate_counts = [
+            int(fit_meta.loc[fit_meta["_pb_group"] == category, "_pb_replicate"].nunique())
+            for category in [source, *references]
+        ]
+        n_replicates = min(replicate_counts) if replicate_counts else 0
+        source_mask = category_cell_mask(source)
+        reference_mask = model_cell_mask & (group_values.to_numpy() != source)
+        if n_replicates < required_min_replicates:
+            empty = _empty_result(
+                "insufficient_replicates",
+                n_source=int(np.count_nonzero(source_mask)),
+                n_reference=int(np.count_nonzero(reference_mask)),
+                min_cells=int(min_cells),
+                min_replicates=required_min_replicates,
+                details=f"{n_replicates} replicate(s) available per category",
+            )
+            empty.update(model_info)
+            empty["method"] = "pseudobulk-deseq2-sample-metadata"
+            empty["contrast_type"] = "balanced_rest"
+            results.setdefault(source, {})[rest_reference] = empty
+            continue
+        try:
+            contrast = np.mean(
+                [_shared_group_contrast(dds, source, reference) for reference in references],
+                axis=0,
+            )
+            formatted = run_sample_contrast(
+                source,
+                contrast,
+                contrast_type="balanced_rest",
+                n_replicates=n_replicates,
+                reference_mask=reference_mask,
+            )
+        except Exception as exc:
+            formatted = _empty_result(
+                "de_failed",
+                n_source=int(np.count_nonzero(source_mask)),
+                n_reference=int(np.count_nonzero(reference_mask)),
+                min_cells=int(min_cells),
+                min_replicates=required_min_replicates,
+                details=str(exc),
+            )
+            formatted.update(model_info)
+            formatted["method"] = "pseudobulk-deseq2-sample-metadata"
+            formatted["contrast_type"] = "balanced_rest"
+        results.setdefault(source, {})[rest_reference] = formatted
+
+    unique_pairs = [
+        (source, reference)
+        for source_index, source in enumerate(selected_retained)
+        for reference in selected_retained[source_index + 1:]
+    ]
+    pair_diagnostics: Dict[str, Dict[str, Dict[str, Any]]] = {}
+    for source, reference in unique_pairs:
+        source_reps = set(fit_meta.loc[fit_meta["_pb_group"] == source, "_pb_replicate"].astype(str))
+        reference_reps = set(fit_meta.loc[fit_meta["_pb_group"] == reference, "_pb_replicate"].astype(str))
+        n_replicates = min(len(source_reps), len(reference_reps))
+        source_mask = category_cell_mask(source)
+        reference_mask = category_cell_mask(reference)
+        if n_replicates < required_min_replicates:
+            for skipped_source, skipped_reference, skipped_source_mask, skipped_reference_mask in (
+                (source, reference, source_mask, reference_mask),
+                (reference, source, reference_mask, source_mask),
+            ):
+                empty = _empty_result(
+                    "insufficient_replicates",
+                    n_source=int(np.count_nonzero(skipped_source_mask)),
+                    n_reference=int(np.count_nonzero(skipped_reference_mask)),
+                    min_cells=int(min_cells),
+                    min_replicates=required_min_replicates,
+                    details=f"{n_replicates} replicate(s) available per category",
+                )
+                empty.update(model_info)
+                empty["method"] = "pseudobulk-deseq2-sample-metadata"
+                empty["contrast_type"] = "category_vs_category"
+                results.setdefault(skipped_source, {})[skipped_reference] = empty
+            continue
+        keep_positions = np.flatnonzero(fit_meta["_pb_group"].isin([source, reference]).to_numpy())
+        pair_diagnostics.setdefault(source, {})[reference] = _compute_pseudobulk_sample_diagnostics(
+            fit_counts[keep_positions],
+            fit_meta.iloc[keep_positions].copy(),
+        )
+        try:
+            forward = run_sample_contrast(
+                source,
+                _shared_group_contrast(dds, source, reference),
+                contrast_type="category_vs_category",
+                n_replicates=n_replicates,
+                reference_mask=reference_mask,
+            )
+            reverse = run_sample_contrast(
+                reference,
+                _shared_group_contrast(dds, reference, source),
+                contrast_type="category_vs_category",
+                n_replicates=n_replicates,
+                reference_mask=source_mask,
+            )
+        except Exception as exc:
+            forward = _empty_result(
+                "de_failed",
+                n_source=int(np.count_nonzero(source_mask)),
+                n_reference=int(np.count_nonzero(reference_mask)),
+                min_cells=int(min_cells),
+                min_replicates=required_min_replicates,
+                details=str(exc),
+            )
+            forward.update(model_info)
+            forward["method"] = "pseudobulk-deseq2-sample-metadata"
+            forward["contrast_type"] = "category_vs_category"
+            reverse = _empty_result(
+                "de_failed",
+                n_source=int(np.count_nonzero(reference_mask)),
+                n_reference=int(np.count_nonzero(source_mask)),
+                min_cells=int(min_cells),
+                min_replicates=required_min_replicates,
+                details=str(exc),
+            )
+            reverse.update(model_info)
+            reverse["method"] = "pseudobulk-deseq2-sample-metadata"
+            reverse["contrast_type"] = "category_vs_category"
+        results.setdefault(source, {})[reference] = forward
+        results.setdefault(reference, {})[source] = reverse
+
+    if not results:
+        return None
+    results["_summary"] = {
+        "category_gene_means": aggregate_summary,
+        "replicate": str(replicate),
+        "groupby": str(groupby),
+        "counts_layer": counts_layer_used,
+        "pairwise_categories": selected_pairwise_categories,
+        "model_formula": f"~ {groupby}",
+        "model_categories": retained_categories,
+        "rest_definition": "balanced_equal_category_weight",
+        "diagnostics": "pairwise",
+        **({"pair_diagnostics": pair_diagnostics} if pair_diagnostics else {}),
+    }
+    return results
 
 
 def _compute_pseudobulk_group_de_shared(

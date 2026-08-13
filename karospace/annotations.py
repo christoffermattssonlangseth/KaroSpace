@@ -1,4 +1,4 @@
-"""Utilities for integrating KaroSpace polygon annotations into AnnData."""
+"""Utilities for integrating KaroSpace polygon regions into AnnData."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ import pandas as pd
 def _load_annotation_payload(
     annotations: str | Path | Mapping[str, Any],
 ) -> MutableMapping[str, Any]:
-    """Load polygon annotation payload from a JSON path or a dict-like object."""
+    """Load polygon region payload from a JSON path or a dict-like object."""
     if isinstance(annotations, (str, Path)):
         with Path(annotations).expanduser().open("r", encoding="utf-8") as handle:
             payload = json.load(handle)
@@ -109,7 +109,7 @@ def integrate_polygon_annotations(
     delimiter: str = "|",
 ) -> Any:
     """
-    Integrate exported KaroSpace polygon annotations into an AnnData object.
+    Integrate exported KaroSpace polygon regions into an AnnData object.
 
     The function writes two obs columns:
     - ``label_key``: joined polygon labels per cell (string; NA if not annotated)
@@ -122,7 +122,7 @@ def integrate_polygon_annotations(
     adata
         AnnData object to annotate.
     annotations
-        Path to an exported annotation JSON file or an equivalent mapping.
+        Path to an exported regions JSON file or an equivalent mapping.
     label_key
         obs column name for per-cell polygon labels.
     count_key

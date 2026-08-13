@@ -478,7 +478,7 @@ def _run_export_cli(argv=None):
         "--interaction-markers-top-targets",
         type=int,
         default=8,
-        help="Number of target cell types to evaluate per source for contact-conditioned markers. (default: 8)"
+        help="Number of target categories to evaluate per source for contact-conditioned markers. (default: 8)"
     )
     neighborhood_args.add_argument(
         "--interaction-markers-top-genes",

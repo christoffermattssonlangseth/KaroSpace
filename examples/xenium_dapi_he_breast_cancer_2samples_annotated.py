@@ -186,8 +186,8 @@ def main() -> None:
     print(f"Done!\n  {SIDECAR_OUTPUT}\n  {PACKAGE_OUTPUT}")
     print(
         "Open a section, then use the overlay dropdown (H&E Overlay controls) or the "
-        "global 'Overlay' switch to toggle DAPI <-> H&E. Color defaults to the "
-        "annotated cell types (leiden_label)."
+        "global 'Overlay' switch to toggle DAPI <-> H&E. The default annotation is "
+        "leiden_label."
     )
 
 
