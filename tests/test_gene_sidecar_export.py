@@ -382,6 +382,10 @@ def test_sidecar_export_writes_aux_and_updates_html_contract(tmp_path):
     assert "<kbd>/</kbd>" in html_text
 
     assert "<kbd>I</kbd>" in html_text
+    assert ".filter-group { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; min-width: 0;" in html_text
+    assert ".filter-group.outline-filter-group { margin-left: auto; }" in html_text
+    assert "@media (max-width: 720px)" in html_text
+    assert ".filter-group.outline-filter-group { margin-left: 0; width: 100%; }" in html_text
     assert "function toggleLegendPanel()" in html_text
     assert "function toggleInsightsPanel()" in html_text
     assert "function navigateModalSection(step)" in html_text

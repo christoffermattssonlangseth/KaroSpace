@@ -1989,12 +1989,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             opacity: 0.9;
             transform: rotate(-90deg);
         }}
-        .filter-group {{ display: flex; align-items: center; gap: 4px; }}
-        .filter-group label {{ font-size: 10px; color: var(--muted-color); text-transform: capitalize; }}
-        .filter-chips {{ display: flex; gap: 3px; flex-wrap: wrap; }}
+        .filter-group {{ display: flex; align-items: center; gap: 4px; flex-wrap: wrap; min-width: 0; max-width: 100%; }}
+        .filter-group label {{ font-size: 10px; color: var(--muted-color); text-transform: capitalize; flex: 0 0 auto; }}
+        .filter-group.outline-filter-group {{ margin-left: auto; }}
+        .filter-chips {{ display: flex; gap: 3px; flex-wrap: wrap; min-width: 0; max-width: 100%; flex: 1 1 140px; }}
         .filter-chip {{
             display: inline-flex;
             align-items: center;
+            max-width: 100%;
             padding: 2px 6px;
             font-size: 10px;
             border: 1px solid var(--border-color);
@@ -2003,6 +2005,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             color: var(--text-color);
             cursor: pointer;
             transition: all 0.15s;
+            overflow-wrap: anywhere;
+        }}
+        .outline-filter-legend {{ display: flex; gap: 8px; align-items: center; flex-wrap: wrap; min-width: 0; max-width: 100%; }}
+        .outline-filter-item {{ display: flex; align-items: center; gap: 3px; font-size: 10px; min-width: 0; }}
+        @media (max-width: 720px) {{
+            .filter-bar {{ align-items: flex-start; gap: 8px; }}
+            .filter-group {{ flex: 1 1 100%; }}
+            .filter-group.outline-filter-group {{ margin-left: 0; width: 100%; }}
         }}
         .filter-chip:hover {{ filter: brightness(1.08); }}
         .filter-chip.active {{
@@ -2168,6 +2178,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             background: var(--accent-fill);
             border-color: var(--accent-border);
             color: var(--accent-on-fill);
+        }}
+        .focused-modal-tool-toggle.danger {{
+            background: var(--danger-bg);
+            border-color: var(--danger-border);
+            color: var(--danger-text);
+        }}
+        .focused-modal-tool-toggle.danger:hover {{
+            background: color-mix(in srgb, var(--danger-bg) 82%, var(--danger-text));
+            border-color: var(--danger-text);
+            color: var(--danger-text);
         }}
         .focused-modal-tool-toggle.hidden {{
             display: none !important;
@@ -7124,7 +7144,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         </div>
                     </div>
                     <button class="focused-modal-tool-toggle hidden" id="focused-modal-neighbor-toggle" type="button" title="Neighbor hops" aria-label="Neighbor hops">
-                        <svg viewBox="0 0 24 24" aria-hidden="true" data-icon="share-2"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"></line><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"></line></svg>
+                        <svg viewBox="0 0 24 24" aria-hidden="true" data-icon="waypoints"><circle cx="12" cy="4.5" r="2.5"></circle><circle cx="4.5" cy="12" r="2.5"></circle><circle cx="19.5" cy="12" r="2.5"></circle><circle cx="12" cy="19.5" r="2.5"></circle><path d="m10.2 6.3-3.9 3.9"></path><path d="m13.8 6.3 3.9 3.9"></path><path d="M7 12h10"></path><path d="m10.2 17.7-3.9-3.9"></path><path d="m13.8 17.7 3.9-3.9"></path></svg>
                     </button>
                     <div class="focused-neighbor-panel" id="focused-neighbor-panel">
                         <div class="visual-params-title">Neighborhood</div>
@@ -9048,6 +9068,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let tutorialSelectionFindMoreClicked = false;
     let tutorialSelectionMarkersClicked = false;
     let tutorialModuleCreateClicked = false;
+    let tutorialAnnotationRowSelected = false;
     const tutorialSteps = [
         {{
             title: 'Overview of panels',
@@ -9280,10 +9301,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'Hide or show all categories using this button.'
             ], {{ action: ensureLegendOpen, nextLabel: tryIt }}),
             step('Spotlight a category', ['#legend-spotlight-toggle'], [
-                'Spotlight mode focuses attention on one selected category while muting the rest.'
+                'Spotlight mode highlights the sample tag under your cursor while muting the rest.'
             ], {{ action: ensureLegendOpen, nextLabel: tryIt }}),
             step('Legend export controls', ['#legend-export-toggle', '#legend-export-menu'], [
-                'Legend export downloads palettes or category labels so manual edits can be reused.'
+                'Legend export downloads the current palettes and manually defined labels so they can be imported & reused.'
             ], {{ action: ensureLegendOpen, nextLabel: tryIt }}),
             step('Legend import controls', ['#legend-import-toggle', '#legend-import-menu'], [
                 'Legend import restores a previously exported palette or category label file.'
@@ -9344,10 +9365,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'The gene-expression area compares expression in the selected cells against the current reference.',
                 'Bars show mean expression and percent expressed for each displayed gene.'
             ], {{ action: () => {{ openTutorialInsightsPanel('compare', 'selection'); updateSelectionInfo?.(); }}, nextLabel: tryIt }}),
-            step('Pan mode', ['#umap-pan-btn', '#visual-spatial-tools'], [
+            step('Pan mode', ['#umap-pan-btn', '#visual-spatial-tools', '#grid'], [
                 'Pan mode is the default interaction mode for moving around the spatial view, and navigate without selecting cells.',
                 'It is useful to swap section panels in the central grid.'
-            ], {{ nextLabel: tryIt }}),
+            ], {{ combineTargets: true, nextLabel: tryIt }}),
             step('Lasso selection mode', ['#umap-lasso-btn', '#grid .section-panel:not(.filtered-out):nth-of-type(2)'], [
                 'Lasso mode lets you draw around cells directly on the spatial panels to select cells.'
             ], {{ action: () => {{
@@ -9380,7 +9401,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             step('Create annotation from selection', ['#selection-create-annotation-btn', '#visual-spatial-tools'], [
                 'When cells are selected, you can create a region annotation from them.',
                 'Region annotations are user-defined spatial cell sets stored in the viewer session.'
-            ], {{ task: 'If you have a selection, create a small test annotation, by clicking the button.', requiresAnnotationCreated: true, nextLabel: tryIt }}),
+            ], {{ action: () => {{ tutorialAnnotationRowSelected = false; if (typeof setInsightsMode === 'function') setInsightsMode('annotate'); updateSelectionCreateAnnotationButtonState?.(); }}, task: 'If you have a selection, create a small test annotation, by clicking the button, then select it from the Region list.', requiresSelectedAnnotationRow: true, nextLabel: tryIt }}),
             step('Deselect selected cells', ['#umap-lasso-btn', '#umap-selection-info'], [
                 'Selected cells can be cleared from either the lasso button when it is shown as a cross or from the selection chip.',
                 'Both controls clear the active selected-cell set.'
@@ -9402,10 +9423,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             step('Gene expression scale', ['#gene-params-panel', '#gene-params-toggle'], [
                 'Modify the default scaling of a gene to highlight its expression. Scaling can be propagated to the other gene in the Split setup to compare gene expression.'
             ], {{ action: () => prepareTutorialGeneExpressionScaleStep(), positionTarget: '#gene-params-panel', placement: 'right', prepareDelay: 360, nextLabel: tryIt }}),
-            step('Sidecar gene loading note', ['#gene-input-shell', '#gene-discovery-panel'], [
-                'In sidecar mode, the HTML contains no gene expression vectors and fetches genes from nearby sidecar files.',
-                'If the viewer is opened with file://, browsers can block those fetches. Serve the folder or use a .karospace package.'
-            ], {{ condition: () => !!DATA.gene_aux_url, action: () => safeTutorialClick('#default-source-gene'), task: 'Try searching for a gene that was not initially embedded and watch the loading status.', nextLabel: tryIt }}),
             step('Modality selector', ['#modality-control-group', '#modality-select'], [
                 'If multiple modalities were exported, the modality selector switches the feature namespace.',
                 'For example, RNA genes and protein features can be searched separately.'
@@ -9440,14 +9457,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             step('Create annotation groups', ['#modal-annotations-create-group', '#modal-annotation-section'], [
                 'Annotation groups help organize multiple regions into a hierarchy.'
             ], {{ action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('annotate'); }}, nextLabel: tryIt }}),
-            step('Import annotations', ['#modal-annotations-import', '#modal-annotation-section'], [
-                'Annotation import uploads a Region annotation JSON and restores saved regions in the viewer.'
-            ], {{ action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('annotate'); }}, nextLabel: tryIt }}),
             step('Export annotations', ['#modal-annotations-export', '#modal-annotation-section'], [
                 'Annotation export downloads your user-created regions as JSON.'
             ], {{ action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('annotate'); }}, nextLabel: tryIt }}),
+            step('Import annotations', ['#modal-annotations-import', '#modal-annotation-section'], [
+                'Annotation import uploads a Region annotation JSON and restores saved regions in the viewer.'
+            ], {{ action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('annotate'); }}, nextLabel: tryIt }}),
             step('Module gene picker', ['#gene-module-gene-picker', '#gene-module-draft-genes', '#insights-module-panel'], [
-                'The draft area shows which genes will be saved into the next module.'
+                'The gene picker dropdown shows which genes will be saved into the next module.'
             ], {{ action: () => {{ if (typeof closeModal === 'function') closeModal(); if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); if (typeof setInsightsMode === 'function') setInsightsMode('module'); }}, task: 'Use the gene picker to add genes into the module list.', requiresModuleDraftGene: true, nextLabel: tryIt }}),
             step('Create module', ['#gene-module-create', '#insights-module-panel'], [
                 'Each gene in the module will get a scaled expression and the average expression will be calculated.'
@@ -9565,19 +9582,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             step('Compare Simple design panel', ['#cluster-de-results .comparison-info', '#cluster-de-results .agg-group', '#cluster-de-results .agg-group-meta'], [
                 'Simple design contains category-versus-category pseudobulk DE results when they were exported.',
                 'The panel can contain warnings, marker tables, MA/volcano plots, sample diagnostics, and pathway enrichment.'
-            ], {{ action: () => openTutorialInsightsPanel('compare', 'cell-de'), combineTargets: true, prepareDelay: 520, nextLabel: tryIt }}),
+            ], {{ action: () => {{ ensureTutorialPseudobulkDEAnnotation(); openTutorialInsightsPanel('compare', 'cell-de'); ensureTutorialPseudobulkDEAnnotation(); renderClusterDE?.(); }}, combineTargets: true, prepareDelay: 520, nextLabel: tryIt }}),
             step('Compare Simple design controls', ['#cluster-de-source', '#cluster-de-reference'], [
                 'Annotation A and Annotation B define the active category-versus-category contrast.',
                 'Changing them updates the DE table, plots, diagnostics, and pathway section.'
-            ], {{ action: () => openTutorialInsightsPanel('compare', 'cell-de'), task: 'Choose Annotation A and B if selectors are available.', combineTargets: true, prepareDelay: 420, nextLabel: tryIt }}),
+            ], {{ action: () => {{ ensureTutorialPseudobulkDEAnnotation(); openTutorialInsightsPanel('compare', 'cell-de'); ensureTutorialPseudobulkDEAnnotation(); renderClusterDE?.(); }}, task: 'Choose Annotation A and B if selectors are available.', combineTargets: true, prepareDelay: 420, nextLabel: tryIt }}),
             step('Compare Simple design view switch', ['#cluster-de-section-title', '#cluster-de-results .cluster-de-panel-mode-switch'], [
                 'The Simple design switch separates the contrast into Raw table, Genes, and Samples views.',
                 'Raw table shows exact DE rows, Genes shows MA and volcano plots, and Samples shows pseudobulk diagnostics such as PCA or distance matrix.'
-            ], {{ action: () => openTutorialInsightsPanel('compare', 'cell-de'), combineTargets: true, prepareDelay: 420, scrollDelay: 620, spotlightPadding: 2, nextLabel: tryIt }}),
+            ], {{ action: () => {{ ensureTutorialPseudobulkDEAnnotation(); openTutorialInsightsPanel('compare', 'cell-de'); ensureTutorialPseudobulkDEAnnotation(); renderClusterDE?.(); }}, combineTargets: true, prepareDelay: 420, scrollDelay: 620, spotlightPadding: 2, nextLabel: tryIt }}),
             step('Compare Simple design pathway switch', ['#pathway-enrichment-title', '#compare-tab-cell-de-content [data-pathway-annotation-select]', '#compare-tab-cell-de-content .pathway-panel-mode-switch'], [
                 'When pathway enrichment is available, the pathway switch changes between ORA pathways and GSEA enrichment.',
                 'ORA summarizes significant DE genes, while GSEA follows a ranked gene list across the full contrast.'
-            ], {{ condition: hasPathwayPanel, action: () => openTutorialInsightsPanel('compare', 'cell-de'), combineTargets: true, prepareDelay: 520, scrollDelay: 720, spotlightPadding: 2, nextLabel: tryIt }}),
+            ], {{ condition: hasPathwayPanel, action: () => {{ ensureTutorialPseudobulkDEAnnotation(); openTutorialInsightsPanel('compare', 'cell-de'); ensureTutorialPseudobulkDEAnnotation(); renderClusterDE?.(); }}, combineTargets: true, prepareDelay: 520, scrollDelay: 720, spotlightPadding: 2, nextLabel: tryIt }}),
             step('Open Compare > Relationships', '[data-insights-tree-leaf="river"][data-insights-tree-parent="compare"]', [
                 'Open Visualization, then Compare, then Relationships to inspect how two annotations correspond.'
             ], {{ action: () => openTutorialVisualizationLeafMenu('compare', 'river'), task: 'Click Relationships in Compare.', nextLabel: tryIt }}),
@@ -10037,6 +10054,38 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (typeof activateInsightsSubtab === 'function') activateInsightsSubtab(topLevel, subtab);
     }}
 
+    function getTutorialPseudobulkGroupby() {{
+        const available = typeof getAvailablePseudobulkDEColors === 'function'
+            ? getAvailablePseudobulkDEColors()
+            : Object.keys(DATA.pseudobulk_de || {{}}).filter(key => !String(key).startsWith('_'));
+        return available.find(color => hasPseudobulkDEForAnnotation?.(color)) || available[0] || null;
+    }}
+
+    function ensureTutorialPseudobulkDEAnnotation() {{
+        const groupby = getTutorialPseudobulkGroupby();
+        if (!groupby) return false;
+        explorationColorCol = groupby;
+        clusterDeGroupby = groupby;
+        const select = document.getElementById('exploration-color-select');
+        if (select && Array.from(select.options || []).some(option => option.value === groupby)) {{
+            select.value = groupby;
+        }}
+        const categories = typeof getClusterDECategories === 'function' ? getClusterDECategories(groupby) : [];
+        if (categories.length) {{
+            if (!clusterDeSourceCategory || !categories.includes(clusterDeSourceCategory)) {{
+                clusterDeSourceCategory = categories[0];
+            }}
+            if (
+                !clusterDeReferenceCategory
+                || !categories.includes(clusterDeReferenceCategory)
+                || clusterDeReferenceCategory === clusterDeSourceCategory
+            ) {{
+                clusterDeReferenceCategory = categories.find(category => category !== clusterDeSourceCategory) || null;
+            }}
+        }}
+        return true;
+    }}
+
     function isTutorialElementVisible(el) {{
         if (!el || !(el instanceof Element)) return false;
         const style = window.getComputedStyle(el);
@@ -10113,6 +10162,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             width: Math.min(window.innerWidth - 16, rect.width + spotlightPadding * 2),
             height: Math.min(window.innerHeight - 16, rect.height + spotlightPadding * 2)
         }};
+        let highlightedRects = [{{
+            left: padded.left,
+            top: padded.top,
+            right: padded.left + padded.width,
+            bottom: padded.top + padded.height,
+        }}];
         spotlight.style.left = padded.left + 'px';
         spotlight.style.top = padded.top + 'px';
         spotlight.style.width = Math.max(24, padded.width) + 'px';
@@ -10128,6 +10183,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     bottom: Math.min(window.innerHeight - 8, targetRect.bottom + spotlightPadding),
                 }};
             }});
+            if (rects.length) highlightedRects = rects;
             if (rects.length > 1) {{
                 spotlight.classList.add('tutorial-spotlight-multi');
                 const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -10157,26 +10213,87 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const cardRect = card.getBoundingClientRect();
         const cardW = cardRect.width || Math.min(380, window.innerWidth - 28);
         const cardH = cardRect.height || 220;
-        let left = positionRect.right + margin;
-        let top = positionRect.top;
-        if (step?.placement === 'below') {{
-            left = positionRect.left;
-            top = positionRect.bottom + margin;
-        }} else if (step?.placement === 'above') {{
-            left = positionRect.left;
-            top = positionRect.top - cardH - margin;
-        }} else if (step?.placement === 'right') {{
-            left = positionRect.right + margin;
-            top = positionRect.top;
+        const placementAnchor = positionEl || target;
+        const effectivePlacement = step?.placement
+            || (placementAnchor?.closest?.('#color-panel, .color-panel-mode') ? 'left' : null);
+        const clampCardPosition = (candidate) => {{
+            let left = Number(candidate.left);
+            let top = Number(candidate.top);
+            if (!Number.isFinite(left)) left = margin;
+            if (!Number.isFinite(top)) top = margin;
+            left = Math.max(margin, Math.min(window.innerWidth - cardW - margin, left));
+            top = Math.max(margin, Math.min(window.innerHeight - cardH - margin, top));
+            return {{ left, top }};
+        }};
+        const cardRectForPosition = (candidate) => ({{
+            left: candidate.left,
+            top: candidate.top,
+            right: candidate.left + cardW,
+            bottom: candidate.top + cardH,
+        }});
+        const rectIntersectionArea = (a, b) => {{
+            const w = Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left));
+            const h = Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+            return w * h;
+        }};
+        const highlightedOverlapArea = (candidate) => {{
+            const cardCandidateRect = cardRectForPosition(candidate);
+            return highlightedRects.reduce((sum, targetRect) => (
+                sum + rectIntersectionArea(cardCandidateRect, targetRect)
+            ), 0);
+        }};
+        const candidateForPlacement = (placement) => {{
+            if (placement === 'below') return {{ left: positionRect.left, top: positionRect.bottom + margin }};
+            if (placement === 'above') return {{ left: positionRect.left, top: positionRect.top - cardH - margin }};
+            if (placement === 'left') return {{ left: positionRect.left - cardW - margin, top: positionRect.top }};
+            return {{ left: positionRect.right + margin, top: positionRect.top }};
+        }};
+        const preferredPlacement = ['right', 'left', 'below', 'above'].includes(effectivePlacement)
+            ? effectivePlacement
+            : 'right';
+        const placements = [
+            preferredPlacement,
+            ...['right', 'left', 'below', 'above'].filter(item => item !== preferredPlacement),
+        ];
+        const viewportCandidates = () => ([
+            {{ left: margin, top: margin }},
+            {{ left: window.innerWidth - cardW - margin, top: margin }},
+            {{ left: margin, top: window.innerHeight - cardH - margin }},
+            {{ left: window.innerWidth - cardW - margin, top: window.innerHeight - cardH - margin }},
+            {{ left: (window.innerWidth - cardW) / 2, top: margin }},
+            {{ left: (window.innerWidth - cardW) / 2, top: window.innerHeight - cardH - margin }},
+        ]);
+        let bestPosition = null;
+        let bestOverlap = Number.POSITIVE_INFINITY;
+        const placementCandidates = placements.map(placement => candidateForPlacement(placement));
+        for (const rawCandidate of [...placementCandidates, ...viewportCandidates()]) {{
+            const candidate = clampCardPosition(rawCandidate);
+            const overlap = highlightedOverlapArea(candidate);
+            if (overlap <= 0) {{
+                bestPosition = candidate;
+                bestOverlap = 0;
+                break;
+            }}
+            if (overlap < bestOverlap) {{
+                bestPosition = candidate;
+                bestOverlap = overlap;
+            }}
         }}
-        if (left + cardW > window.innerWidth - margin) left = positionRect.left - cardW - margin;
-        if (left < margin) left = Math.min(Math.max(margin, positionRect.left), window.innerWidth - cardW - margin);
-        if (top + cardH > window.innerHeight - margin) top = window.innerHeight - cardH - margin;
-        if (top < margin) top = margin;
+        let left = bestPosition ? bestPosition.left : margin;
+        let top = bestPosition ? bestPosition.top : margin;
         if (window.innerWidth < 720) {{
-            left = Math.max(margin, Math.min(window.innerWidth - cardW - margin, margin));
-            top = positionRect.bottom + margin;
-            if (top + cardH > window.innerHeight - margin) top = Math.max(margin, positionRect.top - cardH - margin);
+            const currentPosition = {{ left, top }};
+            const mobileCandidates = [
+                clampCardPosition({{ left: margin, top: positionRect.bottom + margin }}),
+                clampCardPosition({{ left: margin, top: positionRect.top - cardH - margin }}),
+            ];
+            const mobileBest = mobileCandidates.reduce((best, candidate) => (
+                highlightedOverlapArea(candidate) < highlightedOverlapArea(best) ? candidate : best
+            ), mobileCandidates[0]);
+            if (highlightedOverlapArea(mobileBest) <= highlightedOverlapArea(currentPosition)) {{
+                left = mobileBest.left;
+                top = mobileBest.top;
+            }}
         }}
         card.style.left = Math.round(left) + 'px';
         card.style.top = Math.round(top) + 'px';
@@ -10257,6 +10374,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (step.requiresRegionB) return selectedCellsB.size > 0;
         if (step.requiresRegionBCleared) return !tutorialRegionBClearStepStarted || selectedCellsB.size === 0;
         if (step.requiresAnnotationCreated) return annotationAlreadyCreatedForCurrentSelection?.() === true;
+        if (step.requiresSelectedAnnotationRow) return tutorialAnnotationRowSelected === true;
         if (step.requiresNoSelection) return selectedCells.size === 0 && selectedCellsB.size === 0;
         if (step.requiresQuerySelection) return selectedCellsFromQuery && selectedCells.size > 0;
         if (step.requiresModalOpen) return !!modalSection;
@@ -10284,6 +10402,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         else if (blocked && step?.requiresRegionB) next.title = 'Select Region B to continue';
         else if (blocked && step?.requiresRegionBCleared) next.title = 'Click the blue cross to clear Region B';
         else if (blocked && step?.requiresAnnotationCreated) next.title = 'Create an annotation from the selection to continue';
+        else if (blocked && step?.requiresSelectedAnnotationRow) next.title = 'Select the new Region row to continue';
         else if (blocked && step?.requiresNoSelection) next.title = 'Clear the selected cells to continue';
         else if (blocked && step?.requiresQuerySelection) next.title = 'Select cells with the query to continue';
         else if (blocked && step?.requiresModalOpen) next.title = 'Click the highlighted section to open the modal view';
@@ -10464,6 +10583,25 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         showTutorialStep(tutorialStepIndex + increment, increment);
     }}
 
+    function scheduleTutorialReposition(delay = 0) {{
+        if (!tutorialActive) return;
+        const token = tutorialRenderToken;
+        const run = () => {{
+            if (!tutorialActive || token !== tutorialRenderToken) return;
+            const step = tutorialSteps[tutorialStepIndex];
+            const target = step ? findTutorialTarget(step) : null;
+            if (target) positionTutorialCard(target, step);
+        }};
+        if (Number(delay) > 0) {{
+            window.setTimeout(run, Number(delay));
+            return;
+        }}
+        window.requestAnimationFrame(() => {{
+            run();
+            window.setTimeout(run, 60);
+        }});
+    }}
+
     function setTutorialOpen(open, completed = false, force = false) {{
         if (!TUTORIAL_CONFIG.enabled && !force) return;
         const overlay = document.getElementById('tutorial-overlay');
@@ -10518,6 +10656,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         document.getElementById('tutorial-chapter-select')?.addEventListener('change', (event) => {{
             jumpTutorialToChapter(String(event.target.value || ''));
         }});
+        document.addEventListener('click', () => {{
+            if (!tutorialActive) return;
+            scheduleTutorialReposition();
+        }}, true);
     }}
 
     function initKeyboardShortcuts() {{
@@ -10703,6 +10845,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const icons = {{
             eye: '<svg viewBox="0 0 24 24" aria-hidden="true" data-icon="eye"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"></path><circle cx="12" cy="12" r="3"></circle></svg>',
             eyeOff: '<svg viewBox="0 0 24 24" aria-hidden="true" data-icon="eye-off"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"></path><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"></path><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"></path><path d="m2 2 20 20"></path></svg>',
+            image: '<svg viewBox="0 0 24 24" aria-hidden="true" data-icon="image"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"></rect><circle cx="9" cy="9" r="2"></circle><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"></path></svg>',
+            x: '<svg viewBox="0 0 24 24" aria-hidden="true" data-icon="x"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>',
         }};
         return icons[icon] || '';
     }}
@@ -10713,6 +10857,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (panel && toggle) panel.style.top = `${{toggle.offsetTop}}px`;
         const heState = modalSection ? sectionImageStates[modalSection.id] : null;
         const hasHeImage = !!(heState && heState.layers && heState.layers.length);
+        if (toggle) {{
+            toggle.innerHTML = getLucideInlineSvg(hasHeImage ? 'x' : 'image');
+            toggle.classList.toggle('danger', hasHeImage);
+            toggle.title = hasHeImage ? 'Remove image overlay' : 'H&E options';
+            toggle.setAttribute('aria-label', toggle.title);
+        }}
 
         const layerTarget = document.getElementById('focused-he-layer-select');
         const layerRow = document.getElementById('focused-he-layer-row');
@@ -20139,6 +20289,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const annotationId = Number(rowMain.dataset.annotationSelect);
                 if (!Number.isFinite(annotationId)) return;
                 selectCellsFromAnnotation(annotationId);
+                if (tutorialActive && tutorialSteps[tutorialStepIndex]?.requiresSelectedAnnotationRow) {{
+                    tutorialAnnotationRowSelected = true;
+                    updateTutorialStepGate?.();
+                }}
             }};
             rowMain.addEventListener('click', (event) => {{
                 if (event.target?.closest?.('input, button, select, textarea, a, [contenteditable="true"], [data-annotation-drag-handle]')) return;
@@ -31268,12 +31422,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         // Add outline legend if outline metadata exists
         if (OUTLINE_BY && filters[OUTLINE_BY] && filters[OUTLINE_BY].length > 0) {{
             const outlineLabel = formatMetadataLabel(OUTLINE_BY);
-            html += `<div class="filter-group" style="margin-left: auto;">
+            html += `<div class="filter-group outline-filter-group">
                 <label>Outline (${{
                     outlineLabel
                 }}):</label>
-                <div style="display: flex; gap: 8px; align-items: center;">
-                    ${{filters[OUTLINE_BY].map(v => `<span style="display: flex; align-items: center; gap: 3px; font-size: 10px;">
+                <div class="outline-filter-legend">
+                    ${{filters[OUTLINE_BY].map(v => `<span class="outline-filter-item">
                         <span style="width: 12px; height: 12px; border: 3px solid ${{getOutlineColor(v)}}; border-radius: 2px;"></span>
                         ${{v}}
                     </span>`).join('')}}
@@ -31443,6 +31597,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 : 'No image loaded';
         }}
         updateFocusedHePanelState();
+    }}
+
+    function clearFocusedSectionImageOverlay() {{
+        if (!modalSection) return false;
+        const sectionId = modalSection.id;
+        if (!sectionImageStates[sectionId]) return false;
+        delete sectionImageStates[sectionId];
+        setModalHeOptionsVisible(false);
+        refreshModalHeControls();
+        renderModalSection();
+        rerenderSectionPanel(sectionId);
+        updateFocusedHePanelState();
+        return true;
     }}
 
     function createSourcePanelGhost(sourcePanel) {{
@@ -32110,6 +32277,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }});
         document.getElementById('focused-modal-he-toggle')?.addEventListener('click', () => {{
             if (!modalSection) return;
+            if (sectionImageStates[modalSection.id]?.layers?.length) {{
+                clearFocusedSectionImageOverlay();
+                return;
+            }}
             const enable = !modalHeOptionsVisible;
             resetFocusedModalTools(enable ? 'he' : null);
             setModalHeOptionsVisible(enable);
@@ -33298,8 +33469,7 @@ def export_to_html(
         Minimum overlap between a pathway and a comparison gene universe.
     pathway_gsea_permutations : int
         Label permutations used for compact preranked GSEA p-values.
-        Pathway comparisons are processed in parallel using up to
-        pseudobulk_n_cpus workers.
+        Pathway comparisons are processed sequentially.
     neighbor_stats_groupby : list, optional
         Obs columns to compute neighbor composition stats for (categorical only).
         If None/empty, neighbor stats are not computed.
@@ -33652,13 +33822,57 @@ def export_to_html(
             f"Top pathways stored per direction: {int(pathway_top_n)}.",
             level=2,
         )
-        log_detail(
-            f"Parallel pathway workers: {int(pseudobulk_n_cpus)}.",
-            level=2,
-        )
-
         def _log_pathway_progress(event: Mapping[str, Any]) -> None:
-            if event.get("event") != "comparison_done":
+            event_name = str(event.get("event") or "")
+            if event_name == "gene_sets_loading":
+                source_name = str(event.get("source") or "")
+                if source_name == "reactome":
+                    log_detail(
+                        f"Loading Reactome pathway gene sets for organism={str(event.get('organism') or pathway_organism or 'Human')}.",
+                        level=2,
+                    )
+                else:
+                    log_detail(
+                        f"Loading pathway gene sets from {int(event.get('gmt_count') or 0)} GMT file(s).",
+                        level=2,
+                    )
+                return
+            if event_name == "gene_sets_loaded":
+                source_name = str(event.get("source") or "")
+                gene_set_count = int(event.get("gene_set_count") or 0)
+                if source_name == "reactome":
+                    log_detail(
+                        f"Loaded {gene_set_count:,} pathway gene sets from "
+                        f"{str(event.get('library') or 'Reactome')} "
+                        f"({str(event.get('organism') or pathway_organism or 'Human')}).",
+                        level=2,
+                    )
+                elif source_name == "gmt":
+                    files = event.get("files") or []
+                    log_detail(
+                        f"Loaded {gene_set_count:,} pathway gene sets from {len(files)} GMT file(s).",
+                        level=2,
+                    )
+                else:
+                    log_detail(f"Loaded {gene_set_count:,} pathway gene sets.", level=2)
+                return
+            if event_name == "gene_sets_failed":
+                log_warning(
+                    "pathway gene sets unavailable "
+                    f"({str(event.get('reason') or 'unavailable')}: {str(event.get('error') or 'unknown error')})."
+                )
+                return
+            if event_name == "comparisons_queued":
+                log_detail(
+                    f"Queued {int(event.get('total') or 0):,} pathway comparisons for sequential processing."
+                )
+                if int(event.get("gsea_permutations") or 0) > 0:
+                    log_detail(
+                        "Comparison logs appear when each ORA/GSEA task returns.",
+                        level=2,
+                    )
+                return
+            if event_name != "comparison_done":
                 return
             source = str(event.get("source") or "Annotation A")
             reference = str(event.get("reference") or "Annotation B")
@@ -33690,7 +33904,7 @@ def export_to_html(
             min_overlap=int(pathway_min_overlap),
             gsea_permutations=int(pathway_gsea_permutations),
             organism=str(pathway_organism or "Human"),
-            n_cpus=int(pseudobulk_n_cpus),
+            n_cpus=1,
             progress_callback=_log_pathway_progress,
         )
         if not data["pathway_settings"].get("available"):
@@ -33698,21 +33912,6 @@ def export_to_html(
             error = data["pathway_settings"].get("error")
             log_warning(f"pathway enrichment unavailable ({reason}{': ' + error if error else ''}).")
         else:
-            source = data["pathway_settings"].get("source") or "pathway source"
-            gene_set_count = int(data["pathway_settings"].get("gene_set_count") or 0)
-            if source == "reactome":
-                library = data["pathway_settings"].get("library") or "Reactome"
-                organism = data["pathway_settings"].get("organism") or str(pathway_organism or "Human")
-                log_detail(
-                    f"Loaded {gene_set_count:,} pathway gene sets from {library} ({organism}).",
-                    level=2,
-                )
-            elif source == "gmt":
-                files = data["pathway_settings"].get("files") or []
-                log_detail(
-                    f"Loaded {gene_set_count:,} pathway gene sets from {len(files)} GMT file(s).",
-                    level=2,
-                )
             log_detail(
                 f"Stored pathway enrichment for "
                 f"{int(data['pathway_settings'].get('enriched_comparisons') or 0):,}/"

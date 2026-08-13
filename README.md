@@ -15,7 +15,7 @@ Visit [KaroSpace Website](https://karospace.se/).
 
 - [x] **Modal interaction** — Browse many sections in a responsive grid, then zoom and pan any section in detail
 - [x] **Section filters** — Filter visible sections by exported metadata such as stage, condition, region, sex, model, sample, or batch
-- [x] **UMAP to sections connection** — Magic Wand lasso works in UMAP and modal view with synced highlights
+- [x] **UMAP to sections connection** — Lasso selection works in UMAP and modal view with synced highlights
 - [x] **Cells selection composition** — Selected-cell totals and per-type counts with expandable scrollable lists
 - [x] **Region polygon annotation** — Save lasso selections as persistent annotations, reorder labels, and export JSON for downstream integration
 - [x] **Region-to-region comparison** — Compare drawn regions or annotations directly in the viewer, export JSON/CSV reports, and search top hits

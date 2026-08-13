@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
 
@@ -306,6 +305,41 @@ def _running_enrichment_score(scores: np.ndarray, hit_mask: np.ndarray) -> Tuple
     return (max_es if abs(max_es) >= abs(min_es) else min_es), cumulative
 
 
+def _fast_enrichment_score(scores: np.ndarray, hit_indices: Sequence[int]) -> Tuple[float, int]:
+    """Compute weighted GSEA ES without allocating a full running profile."""
+    n_genes = int(scores.size)
+    hits = np.asarray(hit_indices, dtype=np.int64)
+    n_hits = int(hits.size)
+    if n_genes == 0 or n_hits == 0 or n_hits >= n_genes:
+        return 0.0, 0
+
+    weights = np.abs(scores)
+    hit_weights = weights[hits]
+    hit_weight_sum = float(hit_weights.sum())
+    if hit_weight_sum <= 0:
+        hit_weights = np.ones(n_hits, dtype=float)
+        hit_weight_sum = float(n_hits)
+
+    hit_cumsum = np.cumsum(hit_weights / hit_weight_sum)
+    hit_order = np.arange(n_hits, dtype=np.int64)
+    miss_penalty = 1.0 / float(n_genes - n_hits)
+    misses_before_or_at_hit = hits - hit_order
+
+    running_at_hits = hit_cumsum - misses_before_or_at_hit * miss_penalty
+    running_before_hits = np.concatenate(([0.0], hit_cumsum[:-1])) - misses_before_or_at_hit * miss_penalty
+
+    max_pos = int(np.argmax(running_at_hits))
+    max_es = float(running_at_hits[max_pos])
+    min_candidates = np.concatenate((running_before_hits, np.asarray([0.0], dtype=float)))
+    min_pos = int(np.argmin(min_candidates))
+    min_es = float(min_candidates[min_pos])
+    if abs(max_es) >= abs(min_es):
+        return max_es, int(hits[max_pos])
+    if min_pos >= n_hits:
+        return min_es, n_genes - 1
+    return min_es, max(0, int(hits[min_pos]) - 1)
+
+
 def _sample_indices(length: int, max_points: int, extra: Iterable[int] = ()) -> List[int]:
     if length <= 0:
         return []
@@ -373,23 +407,28 @@ def _gsea_rows(
     raw: List[Dict[str, Any]] = []
     pvals: List[float] = []
     n_perm = max(0, int(permutations))
+    null_cache: Dict[int, np.ndarray] = {}
+
+    def _null_scores_for_hit_count(hit_count: int) -> np.ndarray:
+        cached = null_cache.get(int(hit_count))
+        if cached is not None:
+            return cached
+        null_scores = np.empty(n_perm, dtype=float)
+        for perm_idx in range(n_perm):
+            random_hits = np.sort(rng.choice(len(genes), size=int(hit_count), replace=False))
+            null_scores[perm_idx], _peak_idx = _fast_enrichment_score(scores, random_hits)
+        null_cache[int(hit_count)] = null_scores
+        return null_scores
 
     for term, pathway_genes in matched_sets.items():
         hit_indices = sorted(gene_index[gene] for gene in pathway_genes if gene in gene_index)
         if len(hit_indices) < int(min_overlap) or len(hit_indices) >= len(genes):
             continue
-        hit_mask = np.zeros(len(genes), dtype=bool)
-        hit_mask[hit_indices] = True
-        es, running = _running_enrichment_score(scores, hit_mask)
+        es, peak_idx = _fast_enrichment_score(scores, hit_indices)
         if es == 0:
             continue
         if n_perm > 0:
-            null_scores = np.empty(n_perm, dtype=float)
-            for perm_idx in range(n_perm):
-                random_hits = rng.choice(len(genes), size=len(hit_indices), replace=False)
-                random_mask = np.zeros(len(genes), dtype=bool)
-                random_mask[random_hits] = True
-                null_scores[perm_idx], _ = _running_enrichment_score(scores, random_mask)
+            null_scores = _null_scores_for_hit_count(len(hit_indices))
             if es >= 0:
                 denom_values = null_scores[null_scores > 0]
                 denom = float(np.mean(denom_values)) if denom_values.size else float(np.mean(np.abs(null_scores)))
@@ -402,12 +441,11 @@ def _gsea_rows(
         else:
             pval = 1.0
             nes = float(es)
-        peak_idx = int(np.argmax(running) if es >= 0 else np.argmin(running))
         if es >= 0:
-            leading = [gene for idx, gene in enumerate(genes[: peak_idx + 1]) if hit_mask[idx]]
+            leading = [genes[idx] for idx in hit_indices if idx <= peak_idx]
             direction = "positive"
         else:
-            leading = [gene for idx, gene in enumerate(genes[peak_idx:]) if hit_mask[peak_idx + idx]]
+            leading = [genes[idx] for idx in hit_indices if idx >= peak_idx]
             direction = "negative"
         raw.append({
             "term": str(term),
@@ -555,7 +593,7 @@ def add_pathway_enrichment_to_pseudobulk_de(
         "max_pathway_size": int(max_pathway_size),
         "gsea_permutations": int(gsea_permutations),
         "organism": organism,
-        "n_cpus": max(1, int(n_cpus)),
+        "n_cpus": 1,
         "comparisons": 0,
         "enriched_comparisons": 0,
     }
@@ -579,6 +617,15 @@ def add_pathway_enrichment_to_pseudobulk_de(
         return settings
 
     try:
+        if progress_callback is not None:
+            progress_callback({
+                "event": "gene_sets_loading",
+                "source": "reactome" if pathway_gmt is None or pathway_gmt == "" else "gmt",
+                "organism": organism,
+                "gmt_count": 0 if pathway_gmt is None or pathway_gmt == "" else (
+                    1 if isinstance(pathway_gmt, str) else len(list(pathway_gmt))
+                ),
+            })
         gene_sets, source_info = load_pathway_gene_sets(pathway_gmt, organism=organism)
     except Exception as exc:
         settings["reason"] = "pathway_gene_sets_unavailable"
@@ -586,6 +633,11 @@ def add_pathway_enrichment_to_pseudobulk_de(
         return settings
     settings.update(source_info)
     settings["available"] = True
+    if progress_callback is not None:
+        progress_callback({
+            "event": "gene_sets_loaded",
+            **source_info,
+        })
 
     def _compute_comparison(item: Tuple[int, str, str, str, Dict[str, Any]]) -> Dict[str, Any]:
         submit_index, color_col, source, reference, result = item
@@ -643,19 +695,17 @@ def add_pathway_enrichment_to_pseudobulk_de(
         (idx, color_col, source, reference, result)
         for idx, (color_col, source, reference, result) in enumerate(comparison_items, start=1)
     ]
-    max_workers = min(max(1, int(n_cpus)), max(1, total_comparisons))
-    if max_workers <= 1 or total_comparisons <= 1:
-        for item in indexed_items:
-            comparison_count += 1
-            if _store_completed(_compute_comparison(item), comparison_count):
-                enriched_count += 1
-    else:
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [executor.submit(_compute_comparison, item) for item in indexed_items]
-            for future in as_completed(futures):
-                comparison_count += 1
-                if _store_completed(future.result(), comparison_count):
-                    enriched_count += 1
+    if progress_callback is not None:
+        progress_callback({
+            "event": "comparisons_queued",
+            "total": int(total_comparisons),
+            "workers": 1,
+            "gsea_permutations": int(gsea_permutations),
+        })
+    for item in indexed_items:
+        comparison_count += 1
+        if _store_completed(_compute_comparison(item), comparison_count):
+            enriched_count += 1
     settings["comparisons"] = int(comparison_count)
     settings["enriched_comparisons"] = int(enriched_count)
     return settings
