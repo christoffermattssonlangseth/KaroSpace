@@ -19,13 +19,13 @@ from karospace import load_spatial_data, export_to_html
 H5AD_PATH = '/Volumes/processing2/RRmap/data/cell_paper_mana.h5ad'#'/Volumes/processing2/RRmap/data/EAE_proseg_clustered_louvain_leiden_all_sections_annotated_rotated_scVI_mana_embedding_clustered.h5ad'
 
 # Load the dataset
-# - groupby: column in adata.obs that identifies each section
+# - section_key: column in adata.obs that identifies each section
 # - spatial_key: key in adata.obsm containing coordinates (default: 'spatial')
 dataset = load_spatial_data(
     H5AD_PATH,
-    groupby="sample_id",  # adjust to match your data
+    section_key="sample_id",  # adjust to match your data
     # Choose which obs columns appear as filter chips in the viewer
-    metadata_section=["time_type", "region",'SCORE','SEX'],
+    section_metadata=["time_type", "region",'SCORE','SEX'],
     metadata_value_order={
         "course": [],
     },
@@ -33,7 +33,7 @@ dataset = load_spatial_data(
 )
 
 print(f"Loaded {dataset.n_sections} sections with {dataset.n_cells:,} total cells")
-print(f"Available color columns: {dataset.obs_columns[:10]}...")  # first 10
+print(f"Available annotation columns: {dataset.obs_columns[:10]}...")  # first 10
 
 # Choose gene source for expression:
 # - True: use highly variable genes (if present, capped to 20)
@@ -46,7 +46,7 @@ OUTLINE_BY = "course"
 export_to_html(
     dataset,
     output_path="CELL-PAPER.html",
-    main_cells_annotation='Annotation 3 (medium with DA)',  # Initial color (categorical)
+    main_cell_annotation='Annotation 3 (medium with DA)',  # Initial annotation (categorical)
     title="KaroSpace",
     min_panel_size=120,  # minimum panel width in pixels, grid auto-adjusts
     spot_size="auto",  # adaptive default based on section density
@@ -54,7 +54,7 @@ export_to_html(
     outline_by=OUTLINE_BY,  # metadata column for panel outline colors
 
     # Include additional color options for the dropdown
-    cells_annotations=[
+    cell_annotations=[
        'NON_DA', 'DA', 'Annotation 1 (broad)',
        'Annotation 2 (medium)',
        'Annotation 4 (high)', 'Annotation 3 (medium with DA)_colors',
@@ -65,7 +65,7 @@ export_to_html(
 
     # Pre-load specific genes for expression visualization
     # These will be available in the gene input field
-    genes=[
+    features=[
         # Example marker genes - replace with your genes of interest
          # A1
     "H2-D1", "B2m", "C4b", "Gfap", "Serpina3n","Cd74"
@@ -74,9 +74,9 @@ export_to_html(
     use_hvgs=USE_HVGS,
     hvg_limit=500,
 
-    # Compute marker genes for these categorical color columns
+    # Compute marker genes for these categorical annotation columns
     # (appears in the Color panel under "Marker genes")
-    marker_genes_groupby=[
+    marker_gene_annotations=[
        'Annotation 3 (medium with DA)','leiden_mana_1.5',
        'leiden_mana_2','compartment'
     ],
@@ -85,12 +85,12 @@ export_to_html(
 
 # The viewer now supports:
 # 1. Filter by course (peak_I, peak_II, peak_III) or other metadata
-# 2. Switch between different color columns
+# 2. Switch between different annotation columns
 # 3. View gene expression for pre-loaded genes
 # 4. Click to expand sections with zoom/pan
 # 5. Toggle categories on/off in the legend
 
 print("\nDone! Open CELL-PAPER.html in a browser.")
 print("Use the filter chips to show only specific courses (e.g., peak_III)")
-print("Use the Color dropdown to switch between different annotations")
+print("Use the Annotation selector to switch between different annotations")
 print("Type a gene name to view expression (must be in the genes list)")

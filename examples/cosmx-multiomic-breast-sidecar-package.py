@@ -24,8 +24,8 @@ H5AD_PATH = os.environ.get(
     "../KaroSpaceDataWrangling/notebooks/data/cosmx_multiomic_breast/cosmx_multiomic_breast.h5ad",
 )
 
-PRIMARY_COLOR = "leiden_rna"
-ADDITIONAL_COLORS = [
+PRIMARY_ANNOTATION = "leiden_rna"
+ADDITIONAL_ANNOTATIONS = [
     "leiden_protein",
 ]
 
@@ -33,7 +33,7 @@ ADDITIONAL_COLORS = [
 BASE_NAME = "cosmx-multiomic-breast"
 SIDECAR_OUTPUT = f"{BASE_NAME}-sidecar.html"
 PACKAGE_OUTPUT = f"{BASE_NAME}.karospace"
-GENE_AUX_PATH = f"{BASE_NAME}.genes.json"
+FEATURE_MANIFEST_PATH = f"{BASE_NAME}.features.json"
 
 if not Path(H5AD_PATH).exists():
     raise SystemExit(
@@ -44,9 +44,9 @@ if not Path(H5AD_PATH).exists():
 print(f"Loading CosMx dataset: {H5AD_PATH}")
 dataset = load_spatial_data(
     H5AD_PATH,
-    groupby="sample", # 'sample' identifies the sections in this dataset
+    section_key="sample", # 'sample' identifies the sections in this dataset
     spatial_key="spatial",
-    metadata_section=[
+    section_metadata=[
         "sample",
         "tissue",
         "Run_Tissue_name",
@@ -59,35 +59,35 @@ print(f"Detected modalities: {list(dataset.modalities.keys())}")
 
 # Common export settings favoring large-scale multiomic performance
 common_kwargs = dict(
-    main_cells_annotation=PRIMARY_COLOR,
+    main_cell_annotation=PRIMARY_ANNOTATION,
     title="CosMx Multiomic Breast Cancer",
     min_panel_size=150,
     spot_size="auto",
     downsample=None, # Keep all cells for high-res exploration
-    cells_annotations=ADDITIONAL_COLORS,
+    cell_annotations=ADDITIONAL_ANNOTATIONS,
     
     # Feature discovery
-    genes=[],        # Can specify initial genes if desired
+    features=[],        # Can specify initial genes if desired
     use_hvgs=True,
     hvg_limit=50,
     
     # Storage and encoding
-    gene_storage="sidecar",
-    gene_encoding="auto",
-    gene_value_encoding="uint8", # Quantization for smaller sidecar shards
-    gene_aux_path=GENE_AUX_PATH,
-    gene_sidecar_shard_size=128,
+    feature_storage="sidecar",
+    feature_encoding="auto",
+    feature_value_encoding="uint8", # Quantization for smaller sidecar shards
+    feature_manifest_path=FEATURE_MANIFEST_PATH,
+    feature_sidecar_shard_size=128,
     
     # Analytics
-    marker_genes_groupby=[
+    marker_gene_annotations=[
         "leiden_rna",
         "leiden_protein",
     ],
-    neighbor_stats_groupby=[
+    neighbor_stats_annotations=[
         "leiden_rna",
         "leiden_protein",
     ],
-    cluster_de_groupby=[
+    pseudobulk_de_annotations=[
         "leiden_rna",
         "leiden_protein",
     ],
@@ -113,7 +113,7 @@ export_to_html(
 
 print(f"\nSuccess! Wrote:")
 print(f"  1. Sidecar Viewer: {SIDECAR_OUTPUT}")
-print(f"  2. Gene Manifest: {GENE_AUX_PATH}")
-print(f"  3. Shard Directory: {Path(GENE_AUX_PATH).with_suffix('')}/")
+print(f"  2. Gene Manifest: {FEATURE_MANIFEST_PATH}")
+print(f"  3. Shard Directory: {Path(FEATURE_MANIFEST_PATH).with_suffix('')}/")
 print(f"  4. KaroSpace Package: {PACKAGE_OUTPUT}")
 print(f"  5. Local Loader: {Path(PACKAGE_OUTPUT).with_suffix('.loader.html')}")

@@ -24,8 +24,8 @@ SECTION_IMAGES = {
     "Balo-2": "/Users/yuk.kit.lor/bioinfo/XeniumAlign/Balo2_hne.tif",
 }
 
-PRIMARY_COLOR = "leiden_2_names"
-ADDITIONAL_COLORS = [
+PRIMARY_ANNOTATION = "leiden_2_names"
+ADDITIONAL_ANNOTATIONS = [
     "n_genes_by_counts",
     "n_counts",
     "n_genes",
@@ -54,47 +54,47 @@ CLUSTER_COLUMNS = [
 
 SIDECAR_OUTPUT = "balo_may2026.html"
 PACKAGE_OUTPUT = "balo_may2026.karospace"
-GENE_AUX_PATH  = "balo_may2026.genes.json"
+FEATURE_MANIFEST_PATH  = "balo_may2026.features.json"
 
 if not Path(H5AD_PATH).exists():
     raise SystemExit(f"H5AD not found: {H5AD_PATH}\nSet BALO_H5AD_PATH or update the path above.")
 
 dataset = load_spatial_data(
     H5AD_PATH,
-    groupby="sample_id",
+    section_key="sample_id",
     spatial_key="spatial",
-    metadata_section=["sample_id"],
+    section_metadata=["sample_id"],
 )
 
 print(f"Loaded {dataset.n_sections} sections, {dataset.n_cells:,} cells")
 print(f"Section IDs: {[s.section_id for s in dataset.sections]}")
 
 common_kwargs = dict(
-    main_cells_annotation=PRIMARY_COLOR,
+    main_cell_annotation=PRIMARY_ANNOTATION,
     title="Balo Lesion May 2026",
     min_panel_size=120,
     spot_size="auto",
     outline_by=None,
-    cells_annotations=ADDITIONAL_COLORS,
-    genes=[],
+    cell_annotations=ADDITIONAL_ANNOTATIONS,
+    features=[],
     use_hvgs=False,
     hvg_limit=50,
-    gene_storage="sidecar",
-    gene_encoding="auto",
-    gene_value_encoding="uint8",
-    gene_aux_path=GENE_AUX_PATH,
-    gene_sidecar_shard_size=128,
-    marker_genes_groupby=CLUSTER_COLUMNS,
+    feature_storage="sidecar",
+    feature_encoding="auto",
+    feature_value_encoding="uint8",
+    feature_manifest_path=FEATURE_MANIFEST_PATH,
+    feature_sidecar_shard_size=128,
+    marker_gene_annotations=CLUSTER_COLUMNS,
     marker_genes_top_n=30,
-    neighbor_stats_groupby=CLUSTER_COLUMNS,
+    neighbor_stats_annotations=CLUSTER_COLUMNS,
     neighbor_stats_permutations=0,
     neighbor_stats_seed=42,
-    cluster_de_groupby=CLUSTER_COLUMNS,
-    cluster_de_top_n=20,
-    cluster_de_method="t-test",
-    cluster_de_layer=None,
-    cluster_de_min_cells=20,
-    interaction_markers_groupby=None,
+    pseudobulk_de_annotations=CLUSTER_COLUMNS,
+    pseudobulk_de_top_n=20,
+    pseudobulk_de_method="t-test",
+    pseudobulk_de_layer=None,
+    pseudobulk_de_min_cells=20,
+    interaction_marker_annotations=None,
     section_images=SECTION_IMAGES or None,
     section_images_max_px=4096,
 )

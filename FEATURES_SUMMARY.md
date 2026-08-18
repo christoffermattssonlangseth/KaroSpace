@@ -16,9 +16,9 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 - SpatialData input is normalized to one AnnData table via `spatialdata_table` / `--spatialdata-table`.
 - If full SpatialData construction fails because unrelated image or label elements are invalid, KaroSpace can fall back to reading the selected AnnData table directly from `tables/<table>`.
 - `inspect_input_file(...)` / `--inspect-input` reports available `adata.obs` metadata, value types, examples, and missing-value counts without building sections, downsampling, exporting HTML, or running analytics.
-- Section grouping uses `groupby`; SpatialData region metadata can be used automatically when `sample_id` is absent.
-- Section metadata is split into `metadata_section` for visual filter chips and `metadata_section_extra` for stored section metadata that is not displayed as filter chips.
-- Cell annotation dropdowns use `main_cells_annotation` plus `cells_annotations`.
+- Section grouping uses `section_key`; SpatialData region metadata can be used automatically when `sample_id` is absent.
+- Section metadata is split into `section_metadata` for visual filter chips and `section_metadata_extra` for stored section metadata that is not displayed as filter chips.
+- Cell annotation dropdowns use `main_cell_annotation` plus `cell_annotations`.
 - Optional payloads include UMAP coordinates, neighborhood graphs, image overlays, deconvolution keys, modules, sidecar genes, pseudobulk DE, pathways, spatial genes, category means, and gene correlations.
 
 ## 3. Introduction
@@ -209,7 +209,7 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 - Spatially variable genes are computed with Moran's I for up to `spatial_variable_genes_n` variable genes on the full input cell set.
 - Category gene means are derived from embedded pseudobulk DE genes and feed per-sample/category distribution panels.
 - Gene correlations are computed from category means and feed related-gene suggestions.
-- Full-cell spatial dispersion is computed before HTML downsampling for the main cell annotation and requested `cells_annotations`.
+- Full-cell spatial dispersion is computed before HTML downsampling for the main cell annotation and requested `cell_annotations`.
 
 ## 22. Sharing and Storage
 
@@ -229,17 +229,17 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 - CLI supports:
   - H5AD and SpatialData `.zarr` inputs
   - `--inspect-input`
-  - `--main-cells-annotation`
-  - `--cells-annotations`
-  - `--metadata-section`
-  - `--metadata-section-extra`
+  - `--main-cell-annotation`
+  - `--cell-annotations`
+  - `--section-metadata`
+  - `--section-metadata-extra`
   - `--spatialdata-table`
   - gene encoding and sidecar storage controls
   - pseudobulk DE controls
   - pathway enrichment controls
   - neighbor stats and interaction-marker controls
   - section rotations and image overlays
-- GUI supports inspect/validate/export workflows, searchable annotation/gene editors, presets, and advanced settings for gene storage, pseudobulk DE, neighbor stats, and interaction markers.
+- GUI supports inspect/validate/export workflows, searchable annotation/gene editors, presets, and advanced settings for feature storage, pseudobulk DE, neighbor stats, and interaction markers.
 
 ## 24. Practical Notes
 

@@ -52,15 +52,15 @@ def _normalize_indices(values: Sequence[Any] | None, n_obs: int) -> list[int]:
 def _resolve_from_local_indices(
     adata,
     *,
-    groupby: str,
+    section_key: str,
     section_id: str,
     local_indices: Sequence[Any] | None,
 ) -> list[int]:
-    """Resolve section-local indices to global obs indices using adata.obs[groupby]."""
-    if groupby not in adata.obs.columns:
+    """Resolve section-local indices to global obs indices using adata.obs[section_key]."""
+    if section_key not in adata.obs.columns:
         return []
 
-    groups = adata.obs[groupby].astype(str).to_numpy()
+    groups = adata.obs[section_key].astype(str).to_numpy()
     section_positions = np.flatnonzero(groups == str(section_id))
     if section_positions.size == 0:
         return []
@@ -139,7 +139,7 @@ def integrate_polygon_annotations(
     """
     payload = _load_annotation_payload(annotations)
     polygons = payload.get("polygons", [])
-    groupby = payload.get("groupby")
+    section_key = payload.get("section_key")
 
     labels_by_cell: list[list[str]] = [[] for _ in range(adata.n_obs)]
     resolved_polygons: list[dict[str, Any]] = []
@@ -154,10 +154,10 @@ def integrate_polygon_annotations(
 
         global_indices = _normalize_indices(polygon.get("cell_global_indices"), adata.n_obs)
 
-        if not global_indices and section_id and groupby:
+        if not global_indices and section_id and section_key:
             global_indices = _resolve_from_local_indices(
                 adata,
-                groupby=str(groupby),
+                section_key=str(section_key),
                 section_id=section_id,
                 local_indices=polygon.get("cell_local_indices"),
             )
@@ -187,7 +187,7 @@ def integrate_polygon_annotations(
     adata.uns[uns_key] = {
         "format": payload.get("format"),
         "created_at": payload.get("created_at"),
-        "groupby": groupby,
+        "section_key": section_key,
         "n_polygons": len(resolved_polygons),
         "polygons_storage": "columnar-json-v1",
         "polygons": _columnarize_polygon_metadata(resolved_polygons),

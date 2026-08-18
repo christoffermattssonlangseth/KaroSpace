@@ -530,7 +530,7 @@ def _fit_deseq2_pair(
         from pydeseq2.ds import DeseqStats
     except Exception as exc:  # pragma: no cover - depends on optional runtime import
         raise RuntimeError(
-            "PyDESeq2 is required for pseudobulk cluster DE. Install KaroSpace with "
+            "PyDESeq2 is required for pseudobulk pseudobulk DE. Install KaroSpace with "
             "pydeseq2 support or run `pip install pydeseq2`."
         ) from exc
 
@@ -1659,7 +1659,7 @@ def compute_pseudobulk_interaction_markers(
 
 def compute_pseudobulk_sample_metadata_de(
     adata,
-    groupby: str,
+    annotation_key: str,
     *,
     replicate: str,
     pairwise_categories: Optional[Sequence[str]] = None,
@@ -1676,16 +1676,16 @@ def compute_pseudobulk_sample_metadata_de(
     n_cpus: int = 1,
 ) -> Optional[Dict[str, Dict[str, Dict[str, Any]]]]:
     """Compute pseudobulk DE for metadata fixed per biological replicate."""
-    if groupby not in adata.obs.columns:
-        log_warning(f"sample-metadata pseudobulk DE annotation '{groupby}' not found in obs.", level=2)
+    if annotation_key not in adata.obs.columns:
+        log_warning(f"sample-metadata pseudobulk DE annotation '{annotation_key}' not found in obs.", level=2)
         return None
     if replicate not in adata.obs.columns:
         log_warning(f"sample-metadata pseudobulk DE replicate '{replicate}' not found in obs.", level=2)
         return None
 
-    col = adata.obs[groupby]
+    col = adata.obs[annotation_key]
     if pd.api.types.is_numeric_dtype(col):
-        log_warning(f"sample-metadata pseudobulk DE annotation '{groupby}' is numeric; skipping.", level=2)
+        log_warning(f"sample-metadata pseudobulk DE annotation '{annotation_key}' is numeric; skipping.", level=2)
         return None
     if not isinstance(col.dtype, CategoricalDtype):
         col = col.astype("category")
@@ -1701,7 +1701,7 @@ def compute_pseudobulk_sample_metadata_de(
         if missing:
             log_warning(
                 "requested Simple design pairwise categories not found in "
-                f"'{groupby}': {', '.join(missing)}.",
+                f"'{annotation_key}': {', '.join(missing)}.",
                 level=2,
             )
 
@@ -1729,7 +1729,7 @@ def compute_pseudobulk_sample_metadata_de(
     if mixed_replicates:
         preview = ", ".join(sorted(mixed_replicates)[:5])
         log_warning(
-            f"sample-metadata pseudobulk DE for '{groupby}' was skipped: annotation is not "
+            f"sample-metadata pseudobulk DE for '{annotation_key}' was skipped: annotation is not "
             f"fixed within replicate '{replicate}' ({preview}).",
             level=2,
         )
@@ -1742,7 +1742,7 @@ def compute_pseudobulk_sample_metadata_de(
             else f"{available} biological replicate(s) are available; need >= {required_min_replicates}"
         )
         log_warning(
-            f"sample-metadata pseudobulk DE for '{groupby}' was skipped: {reason} "
+            f"sample-metadata pseudobulk DE for '{annotation_key}' was skipped: {reason} "
             f"(replicate annotation: '{replicate}').",
             level=2,
         )
@@ -1799,7 +1799,7 @@ def compute_pseudobulk_sample_metadata_de(
         )
     if len(retained_categories) < 2:
         log_warning(
-            f"sample-metadata pseudobulk DE for '{groupby}' was skipped: fewer than two categories have "
+            f"sample-metadata pseudobulk DE for '{annotation_key}' was skipped: fewer than two categories have "
             f">= {required_min_replicates} replicate pseudobulks with >= {int(min_cells)} cells.",
             level=2,
         )
@@ -1817,14 +1817,14 @@ def compute_pseudobulk_sample_metadata_de(
     residual_df = int(len(model_meta) - design_rank)
     if design_rank < design_columns or residual_df <= 0:
         log_warning(
-            f"sample-metadata pseudobulk DE for '{groupby}' was skipped: the "
-            f"~ {groupby} design is rank-deficient or has no residual degrees of freedom "
+            f"sample-metadata pseudobulk DE for '{annotation_key}' was skipped: the "
+            f"~ {annotation_key} design is rank-deficient or has no residual degrees of freedom "
             f"(rank {design_rank}/{design_columns}; residual df {residual_df}).",
             level=2,
         )
         return None
     log_detail(
-        f"Validated sample-level DESeq2 design ~ {groupby}: "
+        f"Validated sample-level DESeq2 design ~ {annotation_key}: "
         f"rank {design_rank}/{design_columns}; residual df {residual_df}",
         level=2,
     )
@@ -1838,7 +1838,7 @@ def compute_pseudobulk_sample_metadata_de(
     )
     if not fit_meta.attrs.get("gene_names"):
         log_warning(
-            f"sample-metadata pseudobulk DE for '{groupby}' was skipped: no genes meet "
+            f"sample-metadata pseudobulk DE for '{annotation_key}' was skipped: no genes meet "
             f"min_gene_counts={max(0, int(min_gene_counts))}.",
             level=2,
         )
@@ -1846,7 +1846,7 @@ def compute_pseudobulk_sample_metadata_de(
 
     log_detail(
         "Fitting sample-level DESeq2 model "
-        f"(~ {groupby}; {fit_counts.shape[0]} pseudobulk samples, {fit_counts.shape[1]} genes).",
+        f"(~ {annotation_key}; {fit_counts.shape[0]} pseudobulk samples, {fit_counts.shape[1]} genes).",
         level=2,
     )
     fit_started = time.perf_counter()
@@ -1860,7 +1860,7 @@ def compute_pseudobulk_sample_metadata_de(
             n_cpus=n_cpus,
         )
     except Exception as exc:
-        log_warning(f"sample-metadata pseudobulk DE fit for '{groupby}' failed ({exc}).", level=2)
+        log_warning(f"sample-metadata pseudobulk DE fit for '{annotation_key}' failed ({exc}).", level=2)
         return None
     log_detail(
         f"Sample-level DESeq2 model fit completed in {_format_duration(time.perf_counter() - fit_started)}.",
@@ -1868,7 +1868,7 @@ def compute_pseudobulk_sample_metadata_de(
     )
 
     model_info = {
-        "model_formula": f"~ {groupby}",
+        "model_formula": f"~ {annotation_key}",
         "model_categories": retained_categories,
         "contrast_reference": "balanced_rest",
     }
@@ -2183,10 +2183,10 @@ def compute_pseudobulk_sample_metadata_de(
     results["_summary"] = {
         "category_gene_means": aggregate_summary,
         "replicate": str(replicate),
-        "groupby": str(groupby),
+        "annotation_key": str(annotation_key),
         "counts_layer": counts_layer_used,
         "pairwise_categories": selected_pairwise_categories,
-        "model_formula": f"~ {groupby}",
+        "model_formula": f"~ {annotation_key}",
         "model_categories": retained_categories,
         "rest_definition": "balanced_equal_category_weight",
         "diagnostics": "pairwise",
@@ -2197,7 +2197,7 @@ def compute_pseudobulk_sample_metadata_de(
 
 def _compute_pseudobulk_group_de_shared(
     adata,
-    groupby: str,
+    annotation_key: str,
     *,
     replicate: str,
     pairwise_categories: Optional[Sequence[str]] = None,
@@ -2220,16 +2220,16 @@ def _compute_pseudobulk_group_de_shared(
     source category minus the equally weighted mean of all
     other retained category coefficients. It is not a pooled-cell rest.
     """
-    if groupby not in adata.obs.columns:
-        log_warning(f"pseudobulk DE annotation '{groupby}' not found in obs.", level=2)
+    if annotation_key not in adata.obs.columns:
+        log_warning(f"pseudobulk DE annotation '{annotation_key}' not found in obs.", level=2)
         return None
     if replicate not in adata.obs.columns:
         log_warning(f"pseudobulk DE replicate '{replicate}' not found in obs.", level=2)
         return None
 
-    col = adata.obs[groupby]
+    col = adata.obs[annotation_key]
     if pd.api.types.is_numeric_dtype(col):
-        log_warning(f"pseudobulk DE annotation '{groupby}' is numeric; skipping.", level=2)
+        log_warning(f"pseudobulk DE annotation '{annotation_key}' is numeric; skipping.", level=2)
         return None
     if not isinstance(col.dtype, CategoricalDtype):
         col = col.astype("category")
@@ -2245,7 +2245,7 @@ def _compute_pseudobulk_group_de_shared(
         if missing:
             log_warning(
                 "requested Simple design pairwise categories not found in "
-                f"'{groupby}': {', '.join(missing)}.",
+                f"'{annotation_key}': {', '.join(missing)}.",
                 level=2,
             )
 
@@ -2270,7 +2270,7 @@ def _compute_pseudobulk_group_de_shared(
             else f"{available} biological replicate(s) are available; need >= {required_min_replicates}"
         )
         log_warning(
-            f"pseudobulk DE for '{groupby}' was skipped: {reason} "
+            f"pseudobulk DE for '{annotation_key}' was skipped: {reason} "
             f"(replicate annotation: '{replicate}').",
             level=2,
         )
@@ -2328,7 +2328,7 @@ def _compute_pseudobulk_group_de_shared(
         )
     if len(retained_categories) < 2:
         log_warning(
-            f"pseudobulk DE for '{groupby}' was skipped: fewer than two categories have "
+            f"pseudobulk DE for '{annotation_key}' was skipped: fewer than two categories have "
             f">= {required_min_replicates} replicate pseudobulks with >= {int(min_cells)} cells.",
             level=2,
         )
@@ -2352,14 +2352,14 @@ def _compute_pseudobulk_group_de_shared(
     residual_df = int(len(model_meta) - design_rank)
     if design_rank < design_columns or residual_df <= 0:
         log_warning(
-            f"shared pseudobulk DE for '{groupby}' was skipped: the "
-            f"~ {replicate} + {groupby} design is rank-deficient or has no residual "
+            f"shared pseudobulk DE for '{annotation_key}' was skipped: the "
+            f"~ {replicate} + {annotation_key} design is rank-deficient or has no residual "
             f"degrees of freedom (rank {design_rank}/{design_columns}; residual df {residual_df}).",
             level=2,
         )
         return None
     log_detail(
-        f"Validated shared DESeq2 design ~ {replicate} + {groupby}: "
+        f"Validated shared DESeq2 design ~ {replicate} + {annotation_key}: "
         f"rank {design_rank}/{design_columns}; residual df {residual_df}",
         level=2,
     )
@@ -2385,7 +2385,7 @@ def _compute_pseudobulk_group_de_shared(
     )
     if not fit_meta.attrs.get("gene_names"):
         log_warning(
-            f"shared pseudobulk DE for '{groupby}' was skipped: no genes meet "
+            f"shared pseudobulk DE for '{annotation_key}' was skipped: no genes meet "
             f"min_gene_counts={max(0, int(min_gene_counts))}.",
             level=2,
         )
@@ -2417,7 +2417,7 @@ def _compute_pseudobulk_group_de_shared(
             n_cpus=n_cpus,
         )
     except Exception as exc:
-        log_warning(f"shared pseudobulk DE fit for '{groupby}' failed ({exc}).", level=2)
+        log_warning(f"shared pseudobulk DE fit for '{annotation_key}' failed ({exc}).", level=2)
         return None
 
     fit_elapsed = time.perf_counter() - fit_started
@@ -2428,11 +2428,11 @@ def _compute_pseudobulk_group_de_shared(
     log_detail(
         f"Shared DESeq2 fit output: {len(retained_categories)} categories, "
         f"{fit_counts.shape[0]} pseudobulk samples, {fit_counts.shape[1]} genes "
-        f"(~ {replicate} + {groupby}; design rank {design_rank}/{design_columns})",
+        f"(~ {replicate} + {annotation_key}; design rank {design_rank}/{design_columns})",
         level=2,
     )
     model_info = {
-        "model_formula": f"~ {replicate} + {groupby}",
+        "model_formula": f"~ {replicate} + {annotation_key}",
         "model_categories": retained_categories,
         "contrast_reference": "balanced_rest",
     }
@@ -2849,10 +2849,10 @@ def _compute_pseudobulk_group_de_shared(
     results["_summary"] = {
         "category_gene_means": aggregate_summary,
         "replicate": str(replicate),
-        "groupby": str(groupby),
+        "annotation_key": str(annotation_key),
         "counts_layer": counts_layer_used,
         "pairwise_categories": selected_pairwise_categories,
-        "model_formula": f"~ {replicate} + {groupby}",
+        "model_formula": f"~ {replicate} + {annotation_key}",
         "model_categories": retained_categories,
         "rest_definition": "balanced_equal_category_weight",
         "diagnostics": "pairwise",
@@ -2863,7 +2863,7 @@ def _compute_pseudobulk_group_de_shared(
 
 def compute_pseudobulk_group_de(
     adata,
-    groupby: str,
+    annotation_key: str,
     *,
     replicate: str,
     pairwise_categories: Optional[Sequence[str]] = None,
@@ -2886,7 +2886,7 @@ def compute_pseudobulk_group_de(
     """
     return _compute_pseudobulk_group_de_shared(
         adata,
-        groupby,
+        annotation_key,
         replicate=replicate,
         pairwise_categories=pairwise_categories,
         counts_layer=counts_layer,

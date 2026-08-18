@@ -44,11 +44,11 @@ OUTPUT_DIR = REPO_ROOT
 IMAGE_DIR = OUTPUT_DIR / "xenium_dapi_he_breast2_annotated_images"
 SIDECAR_OUTPUT = str(OUTPUT_DIR / "xenium_dapi_he_breast_cancer_2samples_annotated.html")
 PACKAGE_OUTPUT = str(OUTPUT_DIR / "xenium_dapi_he_breast_cancer_2samples_annotated.karospace")
-GENE_AUX_PATH = str(OUTPUT_DIR / "xenium_dapi_he_breast_cancer_2samples_annotated.genes.json")
+FEATURE_MANIFEST_PATH = str(OUTPUT_DIR / "xenium_dapi_he_breast_cancer_2samples_annotated.features.json")
 
 # The annotated label column is the most useful default; keep raw leiden available too.
-PRIMARY_COLOR = "leiden_label"
-ADDITIONAL_COLORS = [
+PRIMARY_ANNOTATION = "leiden_label"
+ADDITIONAL_ANNOTATIONS = [
     "leiden_label",
     "leiden",
     "total_counts",
@@ -123,15 +123,15 @@ def main() -> None:
     print("Loading spatial data...")
     dataset = load_spatial_data(
         H5AD_PATH,
-        groupby="sample_id",
+        section_key="sample_id",
         spatial_key="spatial",
-        metadata_section=["sample_id"],
+        section_metadata=["sample_id"],
     )
     print(f"  {dataset.n_sections} section(s), {dataset.n_cells:,} cells")
     print(f"  section IDs: {[s.section_id for s in dataset.sections]}")
 
     # Attach each section's OWN image pair (rep1 images -> rep1, rep2 -> rep2).
-    # The section_id from groupby='sample_id' equals the uns/spatial sample key.
+    # The section_id from section_key='sample_id' equals the uns/spatial sample key.
     section_images = {}
     for s in dataset.sections:
         layers = images_by_sample.get(str(s.section_id))
@@ -143,43 +143,43 @@ def main() -> None:
         section_images = None
 
     common_kwargs = dict(
-        main_cells_annotation=PRIMARY_COLOR,
+        main_cell_annotation=PRIMARY_ANNOTATION,
         title="Breast Cancer Xenium (2 samples, annotated) — DAPI + H&E",
         min_panel_size=140,
         spot_size="auto",
         outline_by=None,
-        cells_annotations=ADDITIONAL_COLORS,
-        genes=[],
+        cell_annotations=ADDITIONAL_ANNOTATIONS,
+        features=[],
         use_hvgs=False,
-        gene_storage="sidecar",
-        gene_encoding="auto",
-        gene_value_encoding="uint8",
-        gene_sidecar_shard_size=128,
-        marker_genes_groupby=CLUSTER_COLUMNS,
+        feature_storage="sidecar",
+        feature_encoding="auto",
+        feature_value_encoding="uint8",
+        feature_sidecar_shard_size=128,
+        marker_gene_annotations=CLUSTER_COLUMNS,
         marker_genes_top_n=30,
-        neighbor_stats_groupby=CLUSTER_COLUMNS,
+        neighbor_stats_annotations=CLUSTER_COLUMNS,
         neighbor_stats_permutations=0,
-        cluster_de_groupby=CLUSTER_COLUMNS,
-        cluster_de_top_n=20,
-        cluster_de_method="t-test",
-        cluster_de_layer=None,
-        interaction_markers_groupby=None,
+        pseudobulk_de_annotations=CLUSTER_COLUMNS,
+        pseudobulk_de_top_n=20,
+        pseudobulk_de_method="t-test",
+        pseudobulk_de_layer=None,
+        interaction_marker_annotations=None,
         section_images=section_images,
         section_images_max_px=4096,
     )
 
-    # The sidecar writes its gene manifest next to the HTML (full path is fine);
+    # The sidecar writes its feature manifest next to the HTML (full path is fine);
     # the .karospace packager requires a bare filename (it lives inside the archive).
     print("Exporting sidecar HTML...")
     export_to_html(
-        dataset, output_path=SIDECAR_OUTPUT, gene_aux_path=GENE_AUX_PATH, **common_kwargs
+        dataset, output_path=SIDECAR_OUTPUT, feature_manifest_path=FEATURE_MANIFEST_PATH, **common_kwargs
     )
 
     print("Packaging .karospace archive...")
     export_to_html(
         dataset,
         output_path=PACKAGE_OUTPUT,
-        gene_aux_path=Path(GENE_AUX_PATH).name,
+        feature_manifest_path=Path(FEATURE_MANIFEST_PATH).name,
         **common_kwargs,
     )
 

@@ -24,8 +24,8 @@ H5AD_PATH = os.environ.get(
     "../KaroSpaceDataWrangling/notebooks/data/cosmx_multiomic_breast/cosmx_multiomic_breast.companion.ready.h5ad",
 )
 
-PRIMARY_COLOR = "leiden_rna"
-ADDITIONAL_COLORS = [
+PRIMARY_ANNOTATION = "leiden_rna"
+ADDITIONAL_ANNOTATIONS = [
     "leiden_protein",
 
 ]
@@ -34,7 +34,7 @@ ADDITIONAL_COLORS = [
 BASE_NAME = "cosmx-multiomic-breast-companion"
 SIDECAR_OUTPUT = f"{BASE_NAME}-sidecar.html"
 PACKAGE_OUTPUT = f"{BASE_NAME}.karospace"
-GENE_AUX_PATH = f"{BASE_NAME}.genes.json"
+FEATURE_MANIFEST_PATH = f"{BASE_NAME}.features.json"
 
 if not Path(H5AD_PATH).exists():
     raise SystemExit(
@@ -45,9 +45,9 @@ if not Path(H5AD_PATH).exists():
 print(f"Loading Companion Ready CosMx dataset: {H5AD_PATH}")
 dataset = load_spatial_data(
     H5AD_PATH,
-    groupby="sample",
+    section_key="sample",
     spatial_key="spatial",
-    metadata_section=[
+    section_metadata=[
         "sample",
         "tissue",
         "Run_Tissue_name",
@@ -59,38 +59,38 @@ print(f"Loaded {dataset.n_sections} sections with {dataset.n_cells:,} total cell
 print(f"Detected modalities: {list(dataset.modalities.keys())}")
 
 # Common export settings
-# Note: marker_genes_groupby and other analytics columns will automatically
+# Note: marker_gene_annotations and other analytics columns will automatically
 # pick up precomputed values from adata.uns['karospace_companion'] if available.
 common_kwargs = dict(
-    main_cells_annotation=PRIMARY_COLOR,
+    main_cell_annotation=PRIMARY_ANNOTATION,
     title="CosMx Multiomic Breast Cancer (Companion)",
     min_panel_size=150,
     spot_size="auto",
     downsample=None,
-    cells_annotations=ADDITIONAL_COLORS,
+    cell_annotations=ADDITIONAL_ANNOTATIONS,
     
     # Feature discovery
-    genes=[],
+    features=[],
     use_hvgs=False, # Often companion files already have preferred genes or markers
     hvg_limit=50,
     
     # Storage and encoding
-    gene_storage="sidecar",
-    gene_encoding="auto",
-    gene_value_encoding="uint8",
-    gene_aux_path=GENE_AUX_PATH,
-    gene_sidecar_shard_size=128,
+    feature_storage="sidecar",
+    feature_encoding="auto",
+    feature_value_encoding="uint8",
+    feature_manifest_path=FEATURE_MANIFEST_PATH,
+    feature_sidecar_shard_size=128,
     
     # Analytics - set these to the columns used during companion precomputation
-    marker_genes_groupby=[
+    marker_gene_annotations=[
         "leiden_rna",
         "leiden_protein",
     ],
-    neighbor_stats_groupby=[
+    neighbor_stats_annotations=[
         "leiden_rna",
         "leiden_protein",
     ],
-    cluster_de_groupby=[
+    pseudobulk_de_annotations=[
         "leiden_rna",
         "leiden_protein",
     ],
@@ -115,7 +115,7 @@ export_to_html(
 
 print(f"\nSuccess! Wrote companion-powered viewer:")
 print(f"  1. Sidecar Viewer: {SIDECAR_OUTPUT}")
-print(f"  2. Gene Manifest: {GENE_AUX_PATH}")
-print(f"  3. Shard Directory: {Path(GENE_AUX_PATH).with_suffix('')}/")
+print(f"  2. Gene Manifest: {FEATURE_MANIFEST_PATH}")
+print(f"  3. Shard Directory: {Path(FEATURE_MANIFEST_PATH).with_suffix('')}/")
 print(f"  4. KaroSpace Package: {PACKAGE_OUTPUT}")
 print(f"  5. Local Loader: {Path(PACKAGE_OUTPUT).with_suffix('.loader.html')}")

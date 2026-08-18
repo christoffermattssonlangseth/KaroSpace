@@ -70,37 +70,37 @@ def _run_export_cli(argv=None):
         ),
     )
     viewer_args.add_argument(
-        "--main-cells-annotation",
+        "--main-cell-annotation",
         type=str,
         default="leiden",
-        dest="main_cells_annotation",
+        dest="main_cell_annotation",
         help="Main cell annotation column or gene shown first in the viewer (default: leiden)"
     )
     viewer_args.add_argument(
-        "--cells-annotations",
+        "--cell-annotations",
         type=str,
         default="",
-        dest="cells_annotations",
+        dest="cell_annotations",
         help="Comma-separated extra cell obs annotation columns to embed as selectable annotations "
              "(e.g. a second clustering). Needed to compare annotations in the River plot."
     )
     gene_args.add_argument(
-        "--genes",
+        "--features",
         type=str,
         default="",
-        help="Comma-separated genes to preload for expression visualization. In embedded mode, significant DE genes are embedded automatically up to the configured cap."
+        help="Comma-separated features to preload for expression visualization. In embedded mode, significant DE genes are embedded automatically up to the configured cap."
     )
     dataset_args.add_argument(
-        "-g", "--groupby",
+        "--section-key",
         type=str,
         default="sample_id",
-        help="Column to group sections by (default: sample_id)"
+        help="Column to identify sections (default: sample_id)"
     )
     dataset_args.add_argument(
-        "--group-order",
+        "--section-order",
         type=str,
         default="",
-        help="Comma-separated section/group IDs to control section ordering."
+        help="Comma-separated section IDs to control section ordering."
     )
     dataset_args.add_argument(
         "--spatial-key",
@@ -145,20 +145,20 @@ def _run_export_cli(argv=None):
         ),
     )
     metadata_args.add_argument(
-        "--metadata-section",
+        "--section-metadata",
         type=str,
         default="",
-        dest="metadata_section",
+        dest="section_metadata",
         help=(
             "Comma-separated obs columns to use as section metadata and visual filter chips "
             "(e.g. strain,region,Batch,Slide). Empty uses loader defaults."
         ),
     )
     metadata_args.add_argument(
-        "--metadata-section-extra",
+        "--section-metadata-extra",
         type=str,
         default="",
-        dest="metadata_section_extra",
+        dest="section_metadata_extra",
         help=(
             "Comma-separated obs columns to store as section metadata without adding "
             "visual filter chips."
@@ -238,34 +238,34 @@ def _run_export_cli(argv=None):
         ),
     )
     gene_args.add_argument(
-        "--gene-encoding",
+        "--feature-encoding",
         choices=["auto", "dense", "sparse"],
         default="auto",
-        help="Gene vector encoding. 'sparse' stores only non-zero indices/values (smaller HTML for zero-inflated data). (default: auto)"
+        help="Feature vector encoding. 'sparse' stores only non-zero indices/values (smaller HTML for zero-inflated data). (default: auto)"
     )
     gene_args.add_argument(
-        "--gene-value-encoding",
+        "--feature-value-encoding",
         choices=["uint16", "uint8"],
         default="uint16",
-        help="Sidecar/package gene value encoding for binary shards. (default: uint16)"
+        help="Sidecar/package feature value encoding for binary shards. (default: uint16)"
     )
     gene_args.add_argument(
-        "--gene-storage",
+        "--feature-storage",
         choices=["embedded", "sidecar"],
         default="embedded",
-        help="Store requested/top DE gene expression vectors in the HTML (`embedded`) or write all gene expression vectors to an auxiliary sidecar (`sidecar`). (default: embedded)"
+        help="Store requested/top DE feature vectors in the HTML (`embedded`) or write all feature vectors to a sidecar (`sidecar`). (default: embedded)"
     )
     gene_args.add_argument(
-        "--gene-aux-path",
+        "--feature-manifest-path",
         type=str,
         default=None,
-        help="Optional output path for the gene sidecar JSON when --gene-storage sidecar."
+        help="Optional output path for the feature sidecar JSON when --feature-storage sidecar."
     )
     gene_args.add_argument(
-        "--gene-sidecar-shard-size",
+        "--feature-sidecar-shard-size",
         type=int,
         default=256,
-        help="Number of genes/features per sidecar shard. (default: 256)"
+        help="Number of features per sidecar shard. (default: 256)"
     )
     gene_args.add_argument(
         "--modalities",
@@ -273,14 +273,14 @@ def _run_export_cli(argv=None):
         default=None,
         help=(
             "Comma-separated list of modalities to export (e.g. 'rna,protein'). "
-            "Defaults to all detected. Non-default modalities require --gene-storage sidecar."
+            "Defaults to all detected. Non-default modalities require --feature-storage sidecar."
         ),
     )
     gene_args.add_argument(
-        "--gene-sparse-zero-threshold",
+        "--feature-sparse-zero-threshold",
         type=float,
         default=0.8,
-        help="Only used with --gene-encoding auto. Use sparse encoding when zero fraction >= threshold. (default: 0.8)"
+        help="Only used with --feature-encoding auto. Use sparse encoding when zero fraction >= threshold. (default: 0.8)"
     )
     neighborhood_args.add_argument(
         "--neighbor-permutations",
@@ -289,17 +289,17 @@ def _run_export_cli(argv=None):
         help="Neighbor enrichment permutation count. Use 0 to disable, or 'auto' (default) which disables for very large datasets."
     )
     neighborhood_args.add_argument(
-        "--neighbor-stats-groupby",
+        "--neighbor-stats-annotations",
         type=str,
         default="auto",
-        help="Comma-separated obs columns to compute neighbor composition stats for. Use 'auto' (default) to match --main-cells-annotation; empty disables."
+        help="Comma-separated obs columns to compute neighbor composition stats for. Use 'auto' (default) to match --main-cell-annotation; empty disables."
     )
     pseudobulk_args.add_argument(
         "--pseudobulk",
         type=str,
         default="auto",
         help=(
-            "Category pseudobulk DE mode. Use 'auto' to analyze --main-cells-annotation "
+            "Category pseudobulk DE mode. Use 'auto' to analyze --main-cell-annotation "
             "and --pseudobulk-additional-annotations, or 'None' to disable. (default: auto)"
         )
     )
@@ -309,7 +309,7 @@ def _run_export_cli(argv=None):
         default="",
         help=(
             "Comma-separated additional annotation columns to analyze when pseudobulk or "
-            "interaction markers are enabled. --main-cells-annotation is included automatically."
+            "interaction markers are enabled. --main-cell-annotation is included automatically."
         )
     )
     pseudobulk_args.add_argument(
@@ -318,7 +318,7 @@ def _run_export_cli(argv=None):
         default=None,
         help=(
             "Obs annotation to use as the biological replicate in pseudobulk analyses. "
-            "Defaults to --groupby."
+            "Defaults to --section-key."
         )
     )
     pseudobulk_args.add_argument(
@@ -329,7 +329,7 @@ def _run_export_cli(argv=None):
             "Categories to include in Simple design category-versus-category contrasts. "
             "Use comma-separated categories only with one pseudobulk annotation. With "
             "--pseudobulk-additional-annotations, use a JSON object keyed by annotation "
-            "or a nested JSON list in order [main-cells-annotation, additional...], e.g. "
+            "or a nested JSON list in order [main-cell-annotation, additional...], e.g. "
             "'{\"Anno_L1\":[\"Astrocyte\",\"B cell\"],\"region\":[\"Cortex\"]}'. "
             "In zsh/bash, wrap the whole JSON value in single quotes so inner double "
             "quotes are preserved. "
@@ -387,7 +387,7 @@ def _run_export_cli(argv=None):
         default=20,
         help=(
             "Maximum significant DE genes to auto-embed per category/contact comparison in embedded mode. "
-            "Ignored by --gene-storage sidecar, where all gene expression vectors are written to the sidecar. (default: 20)"
+            "Ignored by --feature-storage sidecar, where all gene expression vectors are written to the sidecar. (default: 20)"
         ),
     )
     pseudobulk_args.add_argument(
@@ -470,7 +470,7 @@ def _run_export_cli(argv=None):
         type=str,
         default="auto",
         help=(
-            "Contact-conditioned pseudobulk marker mode. Use 'auto' to analyze --main-cells-annotation "
+            "Contact-conditioned pseudobulk marker mode. Use 'auto' to analyze --main-cell-annotation "
             "and --pseudobulk-additional-annotations, or 'None' to disable. (default: auto)"
         )
     )
@@ -511,7 +511,7 @@ def _run_export_cli(argv=None):
         help="Number of top correlated genes to show per embedded gene in the discovery panel. Use 0 to disable. (default: 10)"
     )
     gene_args.add_argument(
-        "--cluster-means-n-genes",
+        "--category-means-n-genes",
         type=int,
         default=500,
         help="Maximum embedded pseudobulk-DE genes to expose in category mean summaries. Use 0 to disable. (default: 500)"
@@ -657,15 +657,15 @@ def _run_export_cli(argv=None):
         print(f"Error: {option_name} must be 'auto' or 'None'", file=sys.stderr)
         sys.exit(2)
 
-    if str(args.neighbor_stats_groupby).lower() == "auto":
-        neighbor_stats_groupby = [args.main_cells_annotation]
+    if str(args.neighbor_stats_annotations).lower() == "auto":
+        neighbor_stats_annotations = [args.main_cell_annotation]
     else:
-        neighbor_stats_groupby = _parse_csv(args.neighbor_stats_groupby)
+        neighbor_stats_annotations = _parse_csv(args.neighbor_stats_annotations)
     pseudobulk_mode = _parse_auto_or_none(args.pseudobulk, "--pseudobulk")
     interaction_markers_mode = _parse_auto_or_none(args.interaction_markers, "--interaction-markers")
     pseudobulk_additional_annotations = _parse_csv(args.pseudobulk_additional_annotations)
     pseudobulk_annotation_columns = [
-        args.main_cells_annotation,
+        args.main_cell_annotation,
         *(pseudobulk_additional_annotations or []),
     ]
     try:
@@ -679,11 +679,11 @@ def _run_export_cli(argv=None):
         sys.exit(2)
     pathway_gmt = _parse_csv(args.pathway_gmt) or None
     pathway_organism = str(args.pathway_organism or "Human").strip() or "Human"
-    cells_annotations = _parse_csv(args.cells_annotations)
-    genes = _parse_csv(args.genes)
-    group_order = _parse_csv(args.group_order)
-    metadata_section = _parse_csv(args.metadata_section)
-    metadata_section_extra = _parse_csv(args.metadata_section_extra)
+    cell_annotations = _parse_csv(args.cell_annotations)
+    features = _parse_csv(args.features)
+    section_order = _parse_csv(args.section_order)
+    section_metadata = _parse_csv(args.section_metadata)
+    section_metadata_extra = _parse_csv(args.section_metadata_extra)
     metadata_labels_raw = _parse_json_object(args.metadata_labels, "--metadata-labels")
     metadata_labels = {
         str(key): str(value)
@@ -730,19 +730,19 @@ def _run_export_cli(argv=None):
 
     # Load and export
     load_kwargs = {
-        "groupby": args.groupby,
+        "section_key": args.section_key,
         "spatial_key": args.spatial_key,
     }
     if args.spatialdata_table:
         load_kwargs["spatialdata_table"] = args.spatialdata_table
     if spatial_columns is not None:
         load_kwargs["spatial_columns"] = spatial_columns
-    if group_order is not None:
-        load_kwargs["group_order"] = group_order
-    if metadata_section is not None:
-        load_kwargs["metadata_section"] = metadata_section
-    if metadata_section_extra is not None:
-        load_kwargs["metadata_section_extra"] = metadata_section_extra
+    if section_order is not None:
+        load_kwargs["section_order"] = section_order
+    if section_metadata is not None:
+        load_kwargs["section_metadata"] = section_metadata
+    if section_metadata_extra is not None:
+        load_kwargs["section_metadata_extra"] = section_metadata_extra
     if metadata_value_order is not None:
         load_kwargs["metadata_value_order"] = metadata_value_order
     if args.metadata_max_columns is not None:
@@ -756,9 +756,9 @@ def _run_export_cli(argv=None):
     output_path = export_to_html(
         dataset,
         output_path=args.output,
-        main_cells_annotation=args.main_cells_annotation,
-        cells_annotations=cells_annotations,
-        genes=genes,
+        main_cell_annotation=args.main_cell_annotation,
+        cell_annotations=cell_annotations,
+        features=features,
         title=args.title,
         modalities=modalities_arg,
         min_panel_size=args.min_panel_size,
@@ -768,14 +768,14 @@ def _run_export_cli(argv=None):
         metadata_labels=metadata_labels,
         viewer_info_html=viewer_info_html,
         tutorial=args.tutorial,
-        gene_encoding=args.gene_encoding,
-        gene_value_encoding=args.gene_value_encoding,
-        gene_storage=args.gene_storage,
-        gene_aux_path=args.gene_aux_path,
-        gene_sidecar_shard_size=args.gene_sidecar_shard_size,
-        gene_sparse_zero_threshold=args.gene_sparse_zero_threshold,
+        feature_encoding=args.feature_encoding,
+        feature_value_encoding=args.feature_value_encoding,
+        feature_storage=args.feature_storage,
+        feature_manifest_path=args.feature_manifest_path,
+        feature_sidecar_shard_size=args.feature_sidecar_shard_size,
+        feature_sparse_zero_threshold=args.feature_sparse_zero_threshold,
         neighbor_stats_permutations=neighbor_perms,
-        neighbor_stats_groupby=neighbor_stats_groupby,
+        neighbor_stats_annotations=neighbor_stats_annotations,
         neighbor_stats_seed=args.neighbor_stats_seed,
         interaction_markers_top_targets=args.interaction_markers_top_targets,
         interaction_markers_top_genes=args.interaction_markers_top_genes,
@@ -806,14 +806,14 @@ def _run_export_cli(argv=None):
         section_rotations=section_rotations,
         deconvolutions=deconvolutions,
         gene_correlation_top_n=args.gene_correlation_top_n,
-        cluster_means_n_genes=args.cluster_means_n_genes,
+        category_means_n_genes=args.category_means_n_genes,
         spatial_variable_genes_n=args.spatial_variable_genes_n,
         scalebar_unit=args.scalebar_unit,
         section_images=section_images,
         section_images_max_px=args.section_images_max_px,
     )
 
-    if args.gene_storage == "sidecar":
+    if args.feature_storage == "sidecar":
         output_obj = Path(output_path).expanduser()
         print(
             "Done! Sidecar gene loading requires HTTP(S). "
@@ -841,13 +841,13 @@ def _run_package_sidecar_cli(argv=None):
         help="Output .karospace file path (default: <html stem>.karospace)",
     )
     parser.add_argument(
-        "--gene-aux-path",
+        "--feature-manifest-path",
         type=str,
         default=None,
-        help="Optional actual path to the sidecar gene manifest JSON if it differs from the path referenced in the HTML.",
+        help="Optional actual path to the sidecar feature manifest JSON if it differs from the path referenced in the HTML.",
     )
     parser.add_argument(
-        "--gene-shard-dir",
+        "--feature-shard-dir",
         type=str,
         default=None,
         help="Optional actual path to the sidecar shard directory if it differs from the manifest stem directory.",
@@ -872,8 +872,8 @@ def _run_package_sidecar_cli(argv=None):
     package_path = package_sidecar_viewer(
         html_path,
         output_path=args.output,
-        gene_manifest_path=args.gene_aux_path,
-        gene_shard_dir=args.gene_shard_dir,
+        feature_manifest_path=args.feature_manifest_path,
+        feature_shard_dir=args.feature_shard_dir,
         loader_output_path=args.loader_output,
     )
     print(f"Done! Share {package_path} together with its .loader.html opener.")

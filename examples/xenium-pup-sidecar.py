@@ -30,55 +30,55 @@ if H5AD_PATH.startswith("/path/to/"):
 
 PRIMARY_CLUSTER = "leiden_0.5"
 ANALYTICS_COLUMNS = [PRIMARY_CLUSTER, "leiden_0.1", "leiden_1", "leiden_1.5", "leiden_2"]
-cells_annotations=ANALYTICS_COLUMNS[1:],
-marker_genes_groupby=ANALYTICS_COLUMNS,
-cluster_de_groupby=ANALYTICS_COLUMNS,
-neighbor_stats_groupby=ANALYTICS_COLUMNS,
+cell_annotations=ANALYTICS_COLUMNS[1:],
+marker_gene_annotations=ANALYTICS_COLUMNS,
+pseudobulk_de_annotations=ANALYTICS_COLUMNS,
+neighbor_stats_annotations=ANALYTICS_COLUMNS,
 OUTPUT_PATH = "xenium-mouse-pup-sidecar.html"
-GENE_AUX_PATH = "xenium-mouse-pup-sidecar.genes.json"
+FEATURE_MANIFEST_PATH = "xenium-mouse-pup-sidecar.features.json"
 
 dataset = load_spatial_data(
     H5AD_PATH,
-    groupby="sample_id",
-    metadata_section=[],
+    section_key="sample_id",
+    section_metadata=[],
     metadata_value_order={
         "condition": [],
     },
 )
 
 print(f"Loaded {dataset.n_sections} sections with {dataset.n_cells:,} total cells")
-print(f"Available color columns: {dataset.obs_columns[:10]}...")
+print(f"Available annotation columns: {dataset.obs_columns[:10]}...")
 
 export_to_html(
       dataset,
       output_path=OUTPUT_PATH,
-      main_cells_annotation=PRIMARY_CLUSTER,
+      main_cell_annotation=PRIMARY_CLUSTER,
       title="KaroSpace",
       min_panel_size=120,
       spot_size="auto",
       downsample=10_000_000,
       outline_by=None,
-      cells_annotations=ANALYTICS_COLUMNS[1:],
-      genes=[],
+      cell_annotations=ANALYTICS_COLUMNS[1:],
+      features=[],
       use_hvgs=False,
       hvg_limit=50,
-      gene_storage="sidecar",
-      gene_aux_path=GENE_AUX_PATH,
-      gene_sidecar_shard_size=8,
-      marker_genes_groupby=ANALYTICS_COLUMNS,
+      feature_storage="sidecar",
+      feature_manifest_path=FEATURE_MANIFEST_PATH,
+      feature_sidecar_shard_size=8,
+      marker_gene_annotations=ANALYTICS_COLUMNS,
       marker_genes_top_n=50,
-      cluster_de_groupby=ANALYTICS_COLUMNS,
-      cluster_de_top_n=20,
-      cluster_de_method="t-test",
-      cluster_de_layer="normalized",
-      cluster_de_min_cells=20,
-      neighbor_stats_groupby=ANALYTICS_COLUMNS,
+      pseudobulk_de_annotations=ANALYTICS_COLUMNS,
+      pseudobulk_de_top_n=20,
+      pseudobulk_de_method="t-test",
+      pseudobulk_de_layer="normalized",
+      pseudobulk_de_min_cells=20,
+      neighbor_stats_annotations=ANALYTICS_COLUMNS,
       neighbor_stats_permutations=0,
       neighbor_stats_seed=42,
-      interaction_markers_groupby=None,
+      interaction_marker_annotations=None,
   )
 
 print(f"\nDone! Open {OUTPUT_PATH} through a local web server.")
-print(f"This export also writes {GENE_AUX_PATH} for lazy downstream gene loading.")
+print(f"This export also writes {FEATURE_MANIFEST_PATH} for lazy downstream gene loading.")
 print("Example: python -m http.server 8765")
 print(f"Then open: http://127.0.0.1:8765/{OUTPUT_PATH}")

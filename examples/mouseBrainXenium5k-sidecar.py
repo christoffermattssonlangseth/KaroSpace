@@ -41,26 +41,26 @@ ENABLE_ANALYTICS = True
 # Load the dataset
 dataset = load_spatial_data(
     H5AD_PATH,
-    groupby="sample_id",
-    metadata_section=[""],
+    section_key="sample_id",
+    section_metadata=[""],
     metadata_value_order={
        
     },
 )
 
 print(f"Loaded {dataset.n_sections} sections with {dataset.n_cells:,} total cells")
-print(f"Available color columns: {dataset.obs_columns[:10]}...")
+print(f"Available annotation columns: {dataset.obs_columns[:10]}...")
 
 export_to_html(
     dataset,
     output_path="mouseBrainXenium5k.html",
-    main_cells_annotation=PRIMARY_CLUSTER,
+    main_cell_annotation=PRIMARY_CLUSTER,
     title="KaroSpace",
     min_panel_size=120,
     spot_size="auto",
     downsample=100000,
     outline_by=None,
-    cells_annotations=[
+    cell_annotations=[
         "CellCharter_5",
         "CellCharter_15",
         "CellCharter_20",
@@ -68,7 +68,7 @@ export_to_html(
         "leiden_0.5",
         "leiden_1.0",
     ],
-    genes=[
+    features=[
         "Arg1",
         "Cd74",
         "Cldn11",
@@ -90,20 +90,20 @@ export_to_html(
     use_hvgs=USE_HVGS,
     hvg_limit=200,
     gene_correlation_top_n=10,
-    cluster_means_n_genes=500,
-    gene_storage="sidecar",
-    gene_aux_path="mouseBrainXenium5k.genes.json",
-    marker_genes_groupby=ANALYTICS_COLUMNS if ENABLE_ANALYTICS else None,
+    category_means_n_genes=500,
+    feature_storage="sidecar",
+    feature_manifest_path="mouseBrainXenium5k.features.json",
+    marker_gene_annotations=ANALYTICS_COLUMNS if ENABLE_ANALYTICS else None,
     marker_genes_top_n=30,
-    neighbor_stats_groupby=ANALYTICS_COLUMNS if ENABLE_ANALYTICS else None,
+    neighbor_stats_annotations=ANALYTICS_COLUMNS if ENABLE_ANALYTICS else None,
     neighbor_stats_permutations=0,
     neighbor_stats_seed=42,
-    cluster_de_groupby=ANALYTICS_COLUMNS if ENABLE_ANALYTICS else None,
-    cluster_de_top_n=20,
-    cluster_de_method="t-test",
-    cluster_de_layer="normalized",
-    cluster_de_min_cells=20,
-    interaction_markers_groupby=None,
+    pseudobulk_de_annotations=ANALYTICS_COLUMNS if ENABLE_ANALYTICS else None,
+    pseudobulk_de_top_n=20,
+    pseudobulk_de_method="t-test",
+    pseudobulk_de_layer="normalized",
+    pseudobulk_de_min_cells=20,
+    interaction_marker_annotations=None,
     interaction_markers_top_targets=6,
     interaction_markers_top_genes=15,
     interaction_markers_min_cells=30,
@@ -111,6 +111,6 @@ export_to_html(
 )
 
 print("\nDone! Open mouseBrainXenium5k.html through a local web server.")
-print("This export also writes mouseBrainXenium5k.genes.json for lazy downstream gene loading.")
+print("This export also writes mouseBrainXenium5k.features.json for lazy downstream gene loading.")
 print("Example: python -m http.server 8765")
 print("Then open: http://127.0.0.1:8765/mouseBrainXenium5k.html")

@@ -30,15 +30,15 @@ if H5AD_PATH.startswith("/path/to/"):
 # Load the dataset
 dataset = load_spatial_data(
     H5AD_PATH,
-    groupby="sample_id",
-    metadata_section=['condition'],
+    section_key="sample_id",
+    section_metadata=['condition'],
     metadata_value_order={
         "stage": [],
     },
 )
 
 print(f"Loaded {dataset.n_sections} sections with {dataset.n_cells:,} total cells")
-print(f"Available color columns: {dataset.obs_columns[:10]}...")
+print(f"Available annotation columns: {dataset.obs_columns[:10]}...")
 
 # Choose gene source for expression:
 # - True: use highly variable genes (if present, capped to hvg_limit)
@@ -50,16 +50,16 @@ ENABLE_ANALYTICS = True
 export_to_html(
     dataset,
     output_path="BALO.html",
-    main_cells_annotation="leiden_2",
+    main_cell_annotation="leiden_2",
     title="KaroSpace",
     min_panel_size=120,
     spot_size="auto",
     downsample=100000,
     outline_by=OUTLINE_BY,
-    cells_annotations=[
+    cell_annotations=[
         'leiden_0.5',
     ],
-    genes=[
+    features=[
      #   "Arg1",
      #   "Cd74",
      #   "Cldn11",
@@ -80,18 +80,18 @@ export_to_html(
     ],
     use_hvgs=USE_HVGS,
     hvg_limit=200,
-    gene_storage="sidecar",
-    gene_aux_path="BALO.genes.json",
-    marker_genes_groupby=['leiden_0.5'] if ENABLE_ANALYTICS else None,
+    feature_storage="sidecar",
+    feature_manifest_path="BALO.features.json",
+    marker_gene_annotations=['leiden_0.5'] if ENABLE_ANALYTICS else None,
     marker_genes_top_n=50,
     neighbor_stats_permutations=25 if ENABLE_ANALYTICS else 0,
-    cluster_de_groupby=["leiden_2"],
-    cluster_de_top_n=20,
-    cluster_de_method="t-test",
-    cluster_de_layer="normalized",
-    cluster_de_min_cells=20,
+    pseudobulk_de_annotations=["leiden_2"],
+    pseudobulk_de_top_n=20,
+    pseudobulk_de_method="t-test",
+    pseudobulk_de_layer="normalized",
+    pseudobulk_de_min_cells=20,
     neighbor_stats_seed=42,
-    interaction_markers_groupby=None,
+    interaction_marker_annotations=None,
     interaction_markers_top_targets=6,
     interaction_markers_top_genes=15,
     interaction_markers_min_cells=30,
@@ -99,6 +99,6 @@ export_to_html(
 )
 
 print("\nDone! Open BALO.html through a local web server.")
-print("This export also writes BALO.genes.json for lazy downstream gene loading.")
+print("This export also writes BALO.features.json for lazy downstream gene loading.")
 print("Example: python -m http.server 8765")
 print("Then open: http://127.0.0.1:8765/BALO.html")

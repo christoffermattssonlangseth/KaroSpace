@@ -717,19 +717,18 @@
 
         const manifest = await archive.readJson(PACKAGE_MANIFEST_PATH);
         const validated = validatePackageManifest(manifest, archive);
-        const packagedGeneManifest = await archive.readJson(validated.geneManifestPath);
+        const packagedFeatureManifest = await archive.readJson(validated.featureManifestPath);
         if (
-          !packagedGeneManifest ||
-          (packagedGeneManifest.format !== 'karospace-gene-sidecar-manifest-v2' &&
-           packagedGeneManifest.format !== 'karospace-gene-sidecar-manifest-v3' &&
-           packagedGeneManifest.format !== 'karospace-gene-sidecar-manifest-v4')
+          !packagedFeatureManifest ||
+          (packagedFeatureManifest.format !== 'karospace-feature-sidecar-manifest-v3' &&
+           packagedFeatureManifest.format !== 'karospace-feature-sidecar-manifest-v4')
         ) {
-          const actualFormat = packagedGeneManifest && Object.prototype.hasOwnProperty.call(packagedGeneManifest, 'format')
-            ? JSON.stringify(packagedGeneManifest.format)
+          const actualFormat = packagedFeatureManifest && Object.prototype.hasOwnProperty.call(packagedFeatureManifest, 'format')
+            ? JSON.stringify(packagedFeatureManifest.format)
             : 'missing';
           throw new Error(
-            'Packaged gene manifest format is not supported at '
-            + validated.geneManifestPath
+            'Packaged feature manifest format is not supported at '
+            + validated.featureManifestPath
             + ': '
             + actualFormat
           );
@@ -738,7 +737,7 @@
         return {
           manifest,
           validated,
-          packagedGeneManifest,
+          packagedFeatureManifest,
           entryHtml: await archive.readText(validated.entryHtml),
         };
       }
@@ -758,24 +757,24 @@
         if (viewer.mode !== 'sidecar-package') {
           throw new Error('Unsupported viewer mode: ' + String(viewer.mode || ''));
         }
-        if (viewer.gene_storage !== 'sidecar') {
-          throw new Error('Package viewer must declare gene_storage=sidecar');
+        if (viewer.feature_storage !== 'sidecar') {
+          throw new Error('Package viewer must declare feature_storage=sidecar');
         }
-        const geneManifestPath = normalizePackagePath(viewer.gene_manifest_path || '');
-        if (!geneManifestPath || !archive.has(geneManifestPath)) {
-          throw new Error('Packaged gene manifest is missing');
+        const featureManifestPath = normalizePackagePath(viewer.feature_manifest_path || '');
+        if (!featureManifestPath || !archive.has(featureManifestPath)) {
+          throw new Error('Packaged feature manifest is missing');
         }
-        const shardDir = normalizePackagePath(viewer.gene_shard_dir || '');
+        const shardDir = normalizePackagePath(viewer.feature_shard_dir || '');
         if (!shardDir) {
           throw new Error('Package shard directory is missing');
         }
         const declaredFiles = manifest.files || {};
-        if (!declaredFiles[entryHtml] || !declaredFiles[geneManifestPath]) {
+        if (!declaredFiles[entryHtml] || !declaredFiles[featureManifestPath]) {
           throw new Error('Package manifest files section is incomplete');
         }
         return {
           entryHtml,
-          geneManifestPath,
+          featureManifestPath,
           shardDir,
         };
       }

@@ -19,13 +19,13 @@ from karospace import load_spatial_data, export_to_html
 H5AD_PATH = '/Volumes/processing2/xenium-pancreas/data/xenium_pancreas_clustered_mana.h5ad'#'/Volumes/processing2/RRmap/data/EAE_proseg_clustered_louvain_leiden_all_sections_annotated_rotated_scVI_mana_embedding_clustered.h5ad'
 
 # Load the dataset
-# - groupby: column in adata.obs that identifies each section
+# - section_key: column in adata.obs that identifies each section
 # - spatial_key: key in adata.obsm containing coordinates (default: 'spatial')
 dataset = load_spatial_data(
     H5AD_PATH,
-    groupby="sample_id",  # adjust to match your data
+    section_key="sample_id",  # adjust to match your data
     # Choose which obs columns appear as filter chips in the viewer
-    metadata_section=['condition'],
+    section_metadata=['condition'],
     metadata_value_order={
         "stage": [
                   ],
@@ -34,7 +34,7 @@ dataset = load_spatial_data(
 )
 
 print(f"Loaded {dataset.n_sections} sections with {dataset.n_cells:,} total cells")
-print(f"Available color columns: {dataset.obs_columns[:10]}...")  # first 10
+print(f"Available annotation columns: {dataset.obs_columns[:10]}...")  # first 10
 
 # Choose gene source for expression:
 # - True: use highly variable genes (if present, capped to 20)
@@ -47,7 +47,7 @@ OUTLINE_BY = "condition"
 export_to_html(
     dataset,
     output_path="pancreas.html",
-    main_cells_annotation="leiden_2",  # Initial color (categorical)
+    main_cell_annotation="leiden_2",  # Initial annotation (categorical)
     title="KaroSpace",
     min_panel_size=120,  # minimum panel width in pixels, grid auto-adjusts
     spot_size="auto",  # adaptive default based on section density
@@ -55,13 +55,13 @@ export_to_html(
     outline_by=OUTLINE_BY,  # metadata column for panel outline colors
 
     # Include additional color options for the dropdown
-    cells_annotations=[
+    cell_annotations=[
        'leiden_0.5', 'leiden_1', 'leiden_1.5', 'leiden_2', 'gmm_mana_5', 'gmm_mana_8', 'gmm_mana_10', 'gmm_mana_12', 'gmm_mana_15', 'gmm_mana_20'
     ],
 
     # Pre-load specific genes for expression visualization
     # These will be available in the gene input field
-    genes=[
+    features=[
         # Example marker genes - replace with your genes of interest
         "Arg1",
         #"C3",
@@ -93,9 +93,9 @@ export_to_html(
     use_hvgs=USE_HVGS,
     hvg_limit=100,
 
-    # Compute marker genes for these categorical color columns
+    # Compute marker genes for these categorical annotation columns
     # (appears in the Color panel under "Marker genes")
-    marker_genes_groupby=[
+    marker_gene_annotations=[
         'leiden_0.5', 'leiden_1', 'leiden_1.5', 'leiden_2', 'gmm_mana_5', 'gmm_mana_8', 'gmm_mana_10', 'gmm_mana_12', 'gmm_mana_15', 'gmm_mana_20'
     ],
     marker_genes_top_n=50,
@@ -103,7 +103,7 @@ export_to_html(
     neighbor_stats_permutations=25,
     neighbor_stats_seed=42,
     # Contact-conditioned interaction markers (source near target vs source not near target).
-    interaction_markers_groupby=None,
+    interaction_marker_annotations=None,
     interaction_markers_top_targets=6,
     interaction_markers_top_genes=15,
     interaction_markers_min_cells=30,
@@ -112,12 +112,12 @@ export_to_html(
 
 # The viewer now supports:
 # 1. Filter by course (peak_I, peak_II, peak_III) or other metadata
-# 2. Switch between different color columns
+# 2. Switch between different annotation columns
 # 3. View gene expression for pre-loaded genes
 # 4. Click to expand sections with zoom/pan
 # 5. Toggle categories on/off in the legend
 
 print("\nDone! Open pancreas.html in a browser.")
 print("Use the filter chips to show only specific courses (e.g., peak_III)")
-print("Use the Color dropdown to switch between different annotations")
+print("Use the Annotation selector to switch between different annotations")
 print("Type a gene name to view expression (must be in the genes list)")

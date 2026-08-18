@@ -25,15 +25,15 @@ H5AD_PATH = os.environ.get(
 
 USE_HVGS = False
 OUTLINE_BY = "stage"
-PRIMARY_COLOR = "anno_L2"
+PRIMARY_ANNOTATION = "anno_L2"
 SIDECAR_OUTPUT = "RRMap-sidecar.html"
 PACKAGE_OUTPUT = "RRMap.karospace"
-GENE_AUX_PATH = "RRMap.genes.json"
+FEATURE_MANIFEST_PATH = "RRMap.features.json"
 
 dataset = load_spatial_data(
     H5AD_PATH,
-    groupby="sample_id",
-    metadata_section=["stage", "condition", "day_of_sacrifice", "score_sacrifice", "region", "sex", "model"],
+    section_key="sample_id",
+    section_metadata=["stage", "condition", "day_of_sacrifice", "score_sacrifice", "region", "sex", "model"],
     metadata_value_order={
         "stage": [
             "MOG CFA",
@@ -54,16 +54,16 @@ dataset = load_spatial_data(
 )
 
 print(f"Loaded {dataset.n_sections} sections with {dataset.n_cells:,} total cells")
-print(f"Available color columns: {dataset.obs_columns[:10]}...")
+print(f"Available annotation columns: {dataset.obs_columns[:10]}...")
 
 common_kwargs = dict(
-    main_cells_annotation=PRIMARY_COLOR,
+    main_cell_annotation=PRIMARY_ANNOTATION,
     title="KaroSpace",
     min_panel_size=120,
     spot_size="auto",
     downsample=100000,
     outline_by=OUTLINE_BY,
-    cells_annotations=[
+    cell_annotations=[
         "anno_L3",
         "anno_L2",
         "anno_L1",
@@ -77,7 +77,7 @@ common_kwargs = dict(
         "sex",
         "model",
     ],
-    genes=[
+    features=[
         "Arg1",
         "Cd74",
         "Cldn11",
@@ -98,11 +98,11 @@ common_kwargs = dict(
     ],
     use_hvgs=USE_HVGS,
     hvg_limit=50,
-    gene_storage="sidecar",
-    gene_encoding="auto",
-    gene_value_encoding="uint8",
-    gene_aux_path=GENE_AUX_PATH,
-    marker_genes_groupby=[
+    feature_storage="sidecar",
+    feature_encoding="auto",
+    feature_value_encoding="uint8",
+    feature_manifest_path=FEATURE_MANIFEST_PATH,
+    marker_gene_annotations=[
         "anno_L3",
         "anno_L2",
         "anno_L1",
@@ -114,7 +114,7 @@ common_kwargs = dict(
     marker_genes_top_n=50,
     neighbor_stats_permutations=25,
     neighbor_stats_seed=42,
-    interaction_markers_groupby=None,
+    interaction_marker_annotations=None,
     interaction_markers_top_targets=6,
     interaction_markers_top_genes=15,
     interaction_markers_min_cells=30,
@@ -134,10 +134,10 @@ export_to_html(
 )
 
 print(f"\nDone! Wrote unpacked sidecar viewer: {SIDECAR_OUTPUT}")
-print(f"  - gene manifest: {GENE_AUX_PATH}")
-print(f"  - shard directory: {Path(GENE_AUX_PATH).with_suffix('')}")
+print(f"  - feature manifest: {FEATURE_MANIFEST_PATH}")
+print(f"  - shard directory: {Path(FEATURE_MANIFEST_PATH).with_suffix('')}")
 print(f"Wrote packaged viewer: {PACKAGE_OUTPUT}")
 print(f"  - local opener: {Path(PACKAGE_OUTPUT).with_suffix('.loader.html')}")
 print("Share either route:")
-print(f"  - local web server flow: {SIDECAR_OUTPUT} + {GENE_AUX_PATH} + shard directory")
+print(f"  - local web server flow: {SIDECAR_OUTPUT} + {FEATURE_MANIFEST_PATH} + shard directory")
 print(f"  - no-install local package flow: {PACKAGE_OUTPUT} + {Path(PACKAGE_OUTPUT).with_suffix('.loader.html')}")

@@ -602,7 +602,7 @@ def add_pathway_enrichment_to_pseudobulk_de(
         return settings
 
     comparison_items: List[Tuple[str, str, str, Dict[str, Any]]] = []
-    for color_col, by_source in pseudobulk_de.items():
+    for annotation_col, by_source in pseudobulk_de.items():
         if not isinstance(by_source, dict):
             continue
         for source, by_reference in by_source.items():
@@ -611,7 +611,7 @@ def add_pathway_enrichment_to_pseudobulk_de(
             for reference, result in by_reference.items():
                 if str(reference).startswith("_") or not isinstance(result, dict):
                     continue
-                comparison_items.append((str(color_col), str(source), str(reference), result))
+                comparison_items.append((str(annotation_col), str(source), str(reference), result))
     if not comparison_items:
         settings["reason"] = "no_pseudobulk_comparisons"
         return settings
@@ -640,7 +640,7 @@ def add_pathway_enrichment_to_pseudobulk_de(
         })
 
     def _compute_comparison(item: Tuple[int, str, str, str, Dict[str, Any]]) -> Dict[str, Any]:
-        submit_index, color_col, source, reference, result = item
+        submit_index, annotation_col, source, reference, result = item
         enrichment = enrich_pseudobulk_result(
             result,
             gene_sets,
@@ -654,7 +654,7 @@ def add_pathway_enrichment_to_pseudobulk_de(
         gsea = (enrichment or {}).get("gsea") if isinstance(enrichment, dict) else {}
         return {
             "submit_index": int(submit_index),
-            "color_col": color_col,
+            "annotation_col": annotation_col,
             "source": source,
             "reference": reference,
             "result": result,
@@ -677,7 +677,7 @@ def add_pathway_enrichment_to_pseudobulk_de(
                 "index": int(completion_index),
                 "total": int(total_comparisons),
                 "submit_index": int(completed["submit_index"]),
-                "color_col": completed["color_col"],
+                "annotation_col": completed["annotation_col"],
                 "source": completed["source"],
                 "reference": completed["reference"],
                 "ora_up": int(completed["ora_up"]),
@@ -692,8 +692,8 @@ def add_pathway_enrichment_to_pseudobulk_de(
     enriched_count = 0
     total_comparisons = len(comparison_items)
     indexed_items = [
-        (idx, color_col, source, reference, result)
-        for idx, (color_col, source, reference, result) in enumerate(comparison_items, start=1)
+        (idx, annotation_col, source, reference, result)
+        for idx, (annotation_col, source, reference, result) in enumerate(comparison_items, start=1)
     ]
     if progress_callback is not None:
         progress_callback({

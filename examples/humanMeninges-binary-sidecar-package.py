@@ -26,15 +26,15 @@ H5AD_PATH = os.environ.get(
     "/Users/chrislangseth/work/karolinska_institutet/projects/KaroSpaceDataWrangling/data/humanMeninges/humanMeninges_loom_celllevel_combined.h5ad",
 )
 
-PRIMARY_COLOR = "CellCharter_20"
-ADDITIONAL_COLORS = [
+PRIMARY_ANNOTATION = "CellCharter_20"
+ADDITIONAL_ANNOTATIONS = [
     "CellCharter_15",
     "CellCharter_10",
     "CellCharter_5",
 ]
 SIDECAR_OUTPUT = "human-meninges-binary-sidecar.html"
 PACKAGE_OUTPUT = "human-meninges-binary.karospace"
-GENE_AUX_PATH = "human-meninges-binary.genes.json"
+FEATURE_MANIFEST_PATH = "human-meninges-binary.features.json"
 
 if not Path(H5AD_PATH).exists():
     raise SystemExit(
@@ -44,40 +44,40 @@ if not Path(H5AD_PATH).exists():
 
 dataset = load_spatial_data(
     H5AD_PATH,
-    groupby="sample_id",
-    metadata_section=[],
+    section_key="sample_id",
+    section_metadata=[],
 )
 
 print(f"Loaded {dataset.n_sections} sections with {dataset.n_cells:,} total cells")
-print(f"Available color columns: {dataset.obs_columns[:10]}...")
+print(f"Available annotation columns: {dataset.obs_columns[:10]}...")
 
 common_kwargs = dict(
-    main_cells_annotation=PRIMARY_COLOR,
+    main_cell_annotation=PRIMARY_ANNOTATION,
     title="Human Meninges",
     min_panel_size=120,
     spot_size="auto",
     downsample=10_000_000,
     outline_by=None,
-    cells_annotations=ADDITIONAL_COLORS,
-    genes=[],
+    cell_annotations=ADDITIONAL_ANNOTATIONS,
+    features=[],
     use_hvgs=False,
     hvg_limit=50,
-    gene_storage="sidecar",
-    gene_encoding="auto",
-    gene_value_encoding="uint16",
-    gene_aux_path=GENE_AUX_PATH,
-    gene_sidecar_shard_size=16,
-    marker_genes_groupby=[PRIMARY_COLOR] + ADDITIONAL_COLORS,
+    feature_storage="sidecar",
+    feature_encoding="auto",
+    feature_value_encoding="uint16",
+    feature_manifest_path=FEATURE_MANIFEST_PATH,
+    feature_sidecar_shard_size=16,
+    marker_gene_annotations=[PRIMARY_ANNOTATION] + ADDITIONAL_ANNOTATIONS,
     marker_genes_top_n=30,
-    neighbor_stats_groupby=[PRIMARY_COLOR] + ADDITIONAL_COLORS,
+    neighbor_stats_annotations=[PRIMARY_ANNOTATION] + ADDITIONAL_ANNOTATIONS,
     neighbor_stats_permutations=0,
     neighbor_stats_seed=42,
-    cluster_de_groupby=[PRIMARY_COLOR],
-    cluster_de_top_n=20,
-    cluster_de_method="t-test",
-    cluster_de_layer=None,
-    cluster_de_min_cells=20,
-    interaction_markers_groupby=None,
+    pseudobulk_de_annotations=[PRIMARY_ANNOTATION],
+    pseudobulk_de_top_n=20,
+    pseudobulk_de_method="t-test",
+    pseudobulk_de_layer=None,
+    pseudobulk_de_min_cells=20,
+    interaction_marker_annotations=None,
 )
 
 export_to_html(
@@ -93,10 +93,10 @@ export_to_html(
 )
 
 print(f"\nDone! Wrote unpacked binary sidecar viewer: {SIDECAR_OUTPUT}")
-print(f"  - gene manifest: {GENE_AUX_PATH}")
-print(f"  - shard directory: {Path(GENE_AUX_PATH).with_suffix('')}")
+print(f"  - feature manifest: {FEATURE_MANIFEST_PATH}")
+print(f"  - shard directory: {Path(FEATURE_MANIFEST_PATH).with_suffix('')}")
 print(f"Wrote packaged binary viewer: {PACKAGE_OUTPUT}")
 print(f"  - local opener: {Path(PACKAGE_OUTPUT).with_suffix('.loader.html')}")
 print("Share either route:")
-print(f"  - local web server flow: {SIDECAR_OUTPUT} + {GENE_AUX_PATH} + shard directory")
+print(f"  - local web server flow: {SIDECAR_OUTPUT} + {FEATURE_MANIFEST_PATH} + shard directory")
 print(f"  - no-install local package flow: {PACKAGE_OUTPUT} + {Path(PACKAGE_OUTPUT).with_suffix('.loader.html')}")

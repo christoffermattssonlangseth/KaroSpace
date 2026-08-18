@@ -19,50 +19,50 @@ PRIMARY_CLUSTER = "leiden_2_names_sub"
 USE_HVGS = False
 ENABLE_ANALYTICS = True
 OUTPUT_PATH = "BALO.karospace"
-GENE_AUX_PATH = "BALO.genes.json"
+FEATURE_MANIFEST_PATH = "BALO.features.json"
 
 dataset = load_spatial_data(
     H5AD_PATH,
-    groupby="sample_id",
-    metadata_section=[
+    section_key="sample_id",
+    section_metadata=[
         "sample_id",
         "run",
     ],
 )
 
 print(f"Loaded {dataset.n_sections} sections with {dataset.n_cells:,} total cells")
-print(f"Available color columns: {dataset.obs_columns[:10]}...")
+print(f"Available annotation columns: {dataset.obs_columns[:10]}...")
 
 export_to_html(
     dataset,
     output_path=OUTPUT_PATH,
-    main_cells_annotation=PRIMARY_CLUSTER,
+    main_cell_annotation=PRIMARY_CLUSTER,
     title="KaroSpace",
     min_panel_size=120,
     spot_size="auto",
     downsample=100000,
     outline_by="sample_id",
-    cells_annotations=[
+    cell_annotations=[
         "leiden_2",
         "leiden_0.5",
         "run",
     ],
-    genes=[],
+    features=[],
     use_hvgs=USE_HVGS,
     hvg_limit=200,
-    gene_storage="sidecar",
-    gene_aux_path=GENE_AUX_PATH,
-    marker_genes_groupby=[PRIMARY_CLUSTER] if ENABLE_ANALYTICS else None,
+    feature_storage="sidecar",
+    feature_manifest_path=FEATURE_MANIFEST_PATH,
+    marker_gene_annotations=[PRIMARY_CLUSTER] if ENABLE_ANALYTICS else None,
     marker_genes_top_n=30,
-    neighbor_stats_groupby=[PRIMARY_CLUSTER] if ENABLE_ANALYTICS else None,
+    neighbor_stats_annotations=[PRIMARY_CLUSTER] if ENABLE_ANALYTICS else None,
     neighbor_stats_permutations=0,
     neighbor_stats_seed=42,
-    cluster_de_groupby=[PRIMARY_CLUSTER] if ENABLE_ANALYTICS else None,
-    cluster_de_top_n=20,
-    cluster_de_method="t-test",
-    cluster_de_layer="normalized",
-    cluster_de_min_cells=20,
-    interaction_markers_groupby=None,
+    pseudobulk_de_annotations=[PRIMARY_CLUSTER] if ENABLE_ANALYTICS else None,
+    pseudobulk_de_top_n=20,
+    pseudobulk_de_method="t-test",
+    pseudobulk_de_layer="normalized",
+    pseudobulk_de_min_cells=20,
+    interaction_marker_annotations=None,
 )
 
 print(f"\nDone! Share {OUTPUT_PATH} together with BALO.loader.html.")

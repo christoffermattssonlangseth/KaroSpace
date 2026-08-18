@@ -33,8 +33,8 @@ H5AD_PATH = os.environ.get(
 )
 
 # Annotation columns present in obs that are meaningful to color by.
-PRIMARY_COLOR = "celltype"
-ADDITIONAL_COLORS = [
+PRIMARY_ANNOTATION = "celltype"
+ADDITIONAL_ANNOTATIONS = [
     "celltype",
     "subclass",
     "sample_id",
@@ -48,7 +48,7 @@ ANNOTATION_GROUPBYS = [
 
 SIDECAR_OUTPUT = "stomics-slim-binary-sidecar.html"
 PACKAGE_OUTPUT = "stomics-slim-binary.karospace"
-GENE_AUX_PATH = "stomics-slim-binary.genes.json"
+FEATURE_MANIFEST_PATH = "stomics-slim-binary.features.json"
 
 if not Path(H5AD_PATH).exists():
     raise SystemExit(
@@ -58,44 +58,44 @@ if not Path(H5AD_PATH).exists():
 
 dataset = load_spatial_data(
     H5AD_PATH,
-    groupby="sample_id",
+    section_key="sample_id",
     spatial_key="spatial",
-    metadata_section=[
+    section_metadata=[
         "subclass",
         "celltype",
     ],
 )
 
 print(f"Loaded {dataset.n_sections} sections with {dataset.n_cells:,} total cells")
-print(f"Available color columns: {dataset.obs_columns[:10]}...")
+print(f"Available annotation columns: {dataset.obs_columns[:10]}...")
 
 common_kwargs = dict(
-    main_cells_annotation=PRIMARY_COLOR,
+    main_cell_annotation=PRIMARY_ANNOTATION,
     title="STOMICS.slim",
     min_panel_size=120,
     spot_size="auto",
     downsample=10_000_000,
     outline_by=None,
-    cells_annotations=ADDITIONAL_COLORS,
-    genes=[],
+    cell_annotations=ADDITIONAL_ANNOTATIONS,
+    features=[],
     use_hvgs=False,
     hvg_limit=50,
-    gene_storage="sidecar",
-    gene_encoding="auto",
-    gene_value_encoding="uint8",
-    gene_aux_path=GENE_AUX_PATH,
-    gene_sidecar_shard_size=128,
-    marker_genes_groupby=ANNOTATION_GROUPBYS,
+    feature_storage="sidecar",
+    feature_encoding="auto",
+    feature_value_encoding="uint8",
+    feature_manifest_path=FEATURE_MANIFEST_PATH,
+    feature_sidecar_shard_size=128,
+    marker_gene_annotations=ANNOTATION_GROUPBYS,
     marker_genes_top_n=30,
-    neighbor_stats_groupby=ANNOTATION_GROUPBYS,
+    neighbor_stats_annotations=ANNOTATION_GROUPBYS,
     neighbor_stats_permutations=0,
     neighbor_stats_seed=42,
-    cluster_de_groupby=ANNOTATION_GROUPBYS,
-    cluster_de_top_n=20,
-    cluster_de_method="t-test",
-    cluster_de_layer=None,
-    cluster_de_min_cells=20,
-    interaction_markers_groupby=None,
+    pseudobulk_de_annotations=ANNOTATION_GROUPBYS,
+    pseudobulk_de_top_n=20,
+    pseudobulk_de_method="t-test",
+    pseudobulk_de_layer=None,
+    pseudobulk_de_min_cells=20,
+    interaction_marker_annotations=None,
 )
 
 export_to_html(
@@ -111,12 +111,12 @@ export_to_html(
 )
 
 print(f"\nDone! Wrote unpacked binary sidecar viewer: {SIDECAR_OUTPUT}")
-print(f"  - gene manifest: {GENE_AUX_PATH}")
-print(f"  - shard directory: {Path(GENE_AUX_PATH).with_suffix('')}")
+print(f"  - feature manifest: {FEATURE_MANIFEST_PATH}")
+print(f"  - shard directory: {Path(FEATURE_MANIFEST_PATH).with_suffix('')}")
 print(f"Wrote packaged binary viewer: {PACKAGE_OUTPUT}")
 print(f"  - local opener: {Path(PACKAGE_OUTPUT).with_suffix('.loader.html')}")
 print("Share either route:")
-print(f"  - local web server flow: {SIDECAR_OUTPUT} + {GENE_AUX_PATH} + shard directory")
+print(f"  - local web server flow: {SIDECAR_OUTPUT} + {FEATURE_MANIFEST_PATH} + shard directory")
 print(
     "  - no-install local package flow: "
     f"{PACKAGE_OUTPUT} + {Path(PACKAGE_OUTPUT).with_suffix('.loader.html')}"

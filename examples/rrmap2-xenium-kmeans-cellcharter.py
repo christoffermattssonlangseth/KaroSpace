@@ -50,12 +50,12 @@ LEIDEN = [
 ]
 ALL_CLUSTERINGS = LEIDEN + CELLCHARTER
 
-PRIMARY_COLOR = "leiden_2.5"
-ADDITIONAL_COLORS = ALL_CLUSTERINGS + METADATA_COLS
+PRIMARY_ANNOTATION = "leiden_2.5"
+ADDITIONAL_ANNOTATIONS = ALL_CLUSTERINGS + METADATA_COLS
 
 SIDECAR_OUTPUT = "rrmap2-xenium-kmeans-cellcharter.html"
 PACKAGE_OUTPUT = "rrmap2-xenium-kmeans-cellcharter.karospace"
-GENE_AUX_PATH = "rrmap2-xenium-kmeans-cellcharter.genes.json"
+FEATURE_MANIFEST_PATH = "rrmap2-xenium-kmeans-cellcharter.features.json"
 
 
 def main() -> None:
@@ -67,39 +67,39 @@ def main() -> None:
     print("Loading spatial data (15 GB / ~1.4M cells — this can take a while)...")
     dataset = load_spatial_data(
         H5AD_PATH,
-        groupby="kmeans_split_id",
+        section_key="kmeans_split_id",
         spatial_key="spatial",
-        metadata_section=METADATA_COLS,
+        section_metadata=METADATA_COLS,
     )
     print(f"  Loaded {dataset.n_sections} sections with {dataset.n_cells:,} total cells")
 
     common_kwargs = dict(
-        main_cells_annotation=PRIMARY_COLOR,
+        main_cell_annotation=PRIMARY_ANNOTATION,
         title="RRMAP2 Xenium All Samples — kmeans / CellCharter",
         min_panel_size=120,
         spot_size="auto",
         downsample=10_000_000,
         outline_by=None,
-        cells_annotations=ADDITIONAL_COLORS,
-        genes=[],
+        cell_annotations=ADDITIONAL_ANNOTATIONS,
+        features=[],
         use_hvgs=False,
-        gene_storage="sidecar",
-        gene_encoding="auto",
-        gene_value_encoding="uint8",
-        gene_aux_path=GENE_AUX_PATH,
-        gene_sidecar_shard_size=128,
+        feature_storage="sidecar",
+        feature_encoding="auto",
+        feature_value_encoding="uint8",
+        feature_manifest_path=FEATURE_MANIFEST_PATH,
+        feature_sidecar_shard_size=128,
         # All clusterings get analytics (cheap precomputed companion lookups).
-        marker_genes_groupby=ALL_CLUSTERINGS,
+        marker_gene_annotations=ALL_CLUSTERINGS,
         marker_genes_top_n=30,
-        neighbor_stats_groupby=ALL_CLUSTERINGS,
+        neighbor_stats_annotations=ALL_CLUSTERINGS,
         neighbor_stats_permutations=0,
         neighbor_stats_seed=42,
-        cluster_de_groupby=ALL_CLUSTERINGS,
-        cluster_de_top_n=20,
-        cluster_de_method="t-test",
-        cluster_de_layer=None,
-        cluster_de_min_cells=20,
-        interaction_markers_groupby=None,
+        pseudobulk_de_annotations=ALL_CLUSTERINGS,
+        pseudobulk_de_top_n=20,
+        pseudobulk_de_method="t-test",
+        pseudobulk_de_layer=None,
+        pseudobulk_de_min_cells=20,
+        interaction_marker_annotations=None,
     )
 
     print("Exporting binary-sidecar viewer...")
@@ -108,7 +108,7 @@ def main() -> None:
     print("Packaging .karospace archive...")
     export_to_html(dataset, output_path=PACKAGE_OUTPUT, **common_kwargs)
 
-    print(f"\nDone!\n  sidecar: {SIDECAR_OUTPUT} (+ {GENE_AUX_PATH} + shard dir)")
+    print(f"\nDone!\n  sidecar: {SIDECAR_OUTPUT} (+ {FEATURE_MANIFEST_PATH} + shard dir)")
     print(f"  package: {PACKAGE_OUTPUT} (+ {Path(PACKAGE_OUTPUT).with_suffix('.loader.html')})")
     print("Coloured by leiden_2.5; switch between all leiden / CellCharter resolutions in the colour selector.")
 

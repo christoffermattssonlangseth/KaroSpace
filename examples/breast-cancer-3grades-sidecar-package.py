@@ -9,7 +9,7 @@ companion-ready h5ad and writes:
 What the h5ad exposes for coloring:
   - leiden               (21 transcriptional clusters)
   - cellcharter_domains  (26 spatial domains; the canonical CellCharter track)
-  - all panel genes (streamed to the binary gene sidecar)
+  - all panel genes (streamed to the binary feature sidecar)
   - sample_id, which doubles as the per-section tumor/grade label:
         DCIS_IDC_Grade1, IDC_Grade2, IDC_Grade3
 
@@ -50,19 +50,19 @@ METADATA_VALUE_ORDER = {
 METADATA_LABELS = {"sample_id": "Tumor / grade"}
 
 # The two cluster/domain tracks the insights views run on.
-PRIMARY_COLOR = "leiden"
-ADDITIONAL_COLORS = ["leiden", "cellcharter_domains", "sample_id"]
+PRIMARY_ANNOTATION = "leiden"
+ADDITIONAL_ANNOTATIONS = ["leiden", "cellcharter_domains", "sample_id"]
 
 # Categorical annotations used for analytics. These are exactly the columns the
 # companion was prepared on, so the export reuses the precomputed marker genes /
-# cluster DE (instant, computed on the `normalized` layer) instead of recomputing
+# pseudobulk DE (instant, computed on the `normalized` layer) instead of recomputing
 # on the raw-count X. `sample_id` is intentionally NOT here: it is the per-section
-# tumor/grade label (metadata + color), not an insights DE groupby.
+# tumor/grade label (metadata + color), not an insights DE section_key.
 ANNOTATION_GROUPBYS = ["leiden", "cellcharter_domains"]
 
 SIDECAR_OUTPUT = "breast-cancer-3grades-binary-sidecar.html"
 PACKAGE_OUTPUT = "breast-cancer-3grades-binary.karospace"
-GENE_AUX_PATH = "breast-cancer-3grades-binary.genes.json"
+FEATURE_MANIFEST_PATH = "breast-cancer-3grades-binary.features.json"
 
 if not Path(H5AD_PATH).exists():
     raise SystemExit(
@@ -72,14 +72,14 @@ if not Path(H5AD_PATH).exists():
 
 dataset = load_spatial_data(
     H5AD_PATH,
-    groupby=GROUPBY,
+    section_key=GROUPBY,
     spatial_key="spatial",
-    metadata_section=METADATA_COLUMNS,
+    section_metadata=METADATA_COLUMNS,
     metadata_value_order=METADATA_VALUE_ORDER,
 )
 
 print(f"Loaded {dataset.n_sections} sections with {dataset.n_cells:,} total cells")
-print(f"Available color columns: {dataset.obs_columns[:10]}...")
+print(f"Available annotation columns: {dataset.obs_columns[:10]}...")
 
 
 def extract_he_images(dataset, out_dir="breast-cancer-3grades-he"):
@@ -111,35 +111,35 @@ def extract_he_images(dataset, out_dir="breast-cancer-3grades-he"):
 SECTION_IMAGES = extract_he_images(dataset)
 
 common_kwargs = dict(
-    main_cells_annotation=PRIMARY_COLOR,
+    main_cell_annotation=PRIMARY_ANNOTATION,
     title="Breast Cancer (3 grades)",
     min_panel_size=120,
     spot_size="auto",
     downsample=10_000_000,
     outline_by=None,
-    cells_annotations=ADDITIONAL_COLORS,
+    cell_annotations=ADDITIONAL_ANNOTATIONS,
     metadata_labels=METADATA_LABELS,
     section_images=SECTION_IMAGES,
     section_images_max_px=4096,
-    genes=[],
+    features=[],
     use_hvgs=False,
     hvg_limit=50,
-    gene_storage="sidecar",
-    gene_encoding="auto",
-    gene_value_encoding="uint8",
-    gene_aux_path=GENE_AUX_PATH,
-    gene_sidecar_shard_size=128,
-    marker_genes_groupby=ANNOTATION_GROUPBYS,
+    feature_storage="sidecar",
+    feature_encoding="auto",
+    feature_value_encoding="uint8",
+    feature_manifest_path=FEATURE_MANIFEST_PATH,
+    feature_sidecar_shard_size=128,
+    marker_gene_annotations=ANNOTATION_GROUPBYS,
     marker_genes_top_n=30,
-    neighbor_stats_groupby=ANNOTATION_GROUPBYS,
+    neighbor_stats_annotations=ANNOTATION_GROUPBYS,
     neighbor_stats_permutations=0,
     neighbor_stats_seed=42,
-    cluster_de_groupby=ANNOTATION_GROUPBYS,
-    cluster_de_top_n=20,
-    cluster_de_method="t-test",
-    cluster_de_layer=None,
-    cluster_de_min_cells=20,
-    interaction_markers_groupby=None,
+    pseudobulk_de_annotations=ANNOTATION_GROUPBYS,
+    pseudobulk_de_top_n=20,
+    pseudobulk_de_method="t-test",
+    pseudobulk_de_layer=None,
+    pseudobulk_de_min_cells=20,
+    interaction_marker_annotations=None,
 )
 
 export_to_html(
@@ -155,12 +155,12 @@ export_to_html(
 )
 
 print(f"\nDone! Wrote unpacked binary sidecar viewer: {SIDECAR_OUTPUT}")
-print(f"  - gene manifest: {GENE_AUX_PATH}")
-print(f"  - shard directory: {Path(GENE_AUX_PATH).with_suffix('')}")
+print(f"  - feature manifest: {FEATURE_MANIFEST_PATH}")
+print(f"  - shard directory: {Path(FEATURE_MANIFEST_PATH).with_suffix('')}")
 print(f"Wrote packaged binary viewer: {PACKAGE_OUTPUT}")
 print(f"  - local opener: {Path(PACKAGE_OUTPUT).with_suffix('.loader.html')}")
 print("Share either route:")
-print(f"  - local web server flow: {SIDECAR_OUTPUT} + {GENE_AUX_PATH} + shard directory")
+print(f"  - local web server flow: {SIDECAR_OUTPUT} + {FEATURE_MANIFEST_PATH} + shard directory")
 print(
     "  - no-install local package flow: "
     f"{PACKAGE_OUTPUT} + {Path(PACKAGE_OUTPUT).with_suffix('.loader.html')}"

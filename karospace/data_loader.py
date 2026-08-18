@@ -29,13 +29,13 @@ from .console import log_detail, log_step, log_warning
 sc = ad  # Compatibility alias; this module only needs AnnData/read_h5ad, not Scanpy.
 COMPANION_ANALYTICS_STORAGE = "json-string-v1"
 COMPANION_ANALYTICS_JSON_FIELDS = {
-    "cluster_de_json": "cluster_de",
+    "pseudobulk_de_json": "pseudobulk_de",
     "pseudobulk_de_json": "pseudobulk_de",
     "neighbor_stats_json": "neighbor_stats",
     "interaction_markers_json": "interaction_markers",
     "gene_correlations_json": "gene_correlations",
     "spatial_variable_genes_json": "spatial_variable_genes",
-    "cluster_gene_means_json": "cluster_gene_means",
+    "category_gene_means_json": "category_gene_means",
 }
 
 
@@ -790,25 +790,25 @@ def _get_spatialdata_attrs(adata: sc.AnnData) -> Dict[str, Any]:
         return {}
 
 
-def _resolve_groupby_for_spatialdata(
+def _resolve_section_key_for_spatialdata(
     adata: sc.AnnData,
-    groupby: str,
+    section_key: str,
     spatialdata_table_key: Optional[str],
 ) -> str:
-    if spatialdata_table_key is None or groupby in adata.obs.columns:
-        return groupby
+    if spatialdata_table_key is None or section_key in adata.obs.columns:
+        return section_key
 
     attrs = _get_spatialdata_attrs(adata)
     region_key_raw = attrs.get("region_key")
     region_key = str(region_key_raw).strip() if region_key_raw is not None else ""
-    if groupby == "sample_id" and region_key and region_key in adata.obs.columns:
+    if section_key == "sample_id" and region_key and region_key in adata.obs.columns:
         print(
-            f"  Note: groupby 'sample_id' not found; using SpatialData region_key "
+            f"  Note: section_key 'sample_id' not found; using SpatialData region_key "
             f"'{region_key}' for sections."
         )
         return region_key
 
-    if groupby == "sample_id":
+    if section_key == "sample_id":
         regions = _normalize_spatialdata_region_list(attrs.get("region"))
         fallback_col = "_karospace_spatialdata_region"
         if len(regions) == 1:
@@ -822,11 +822,11 @@ def _resolve_groupby_for_spatialdata(
                 )
         adata.obs[fallback_col] = pd.Categorical([value] * adata.n_obs)
         print(
-            f"  Note: groupby 'sample_id' not found; using '{fallback_col}' for one SpatialData section."
+            f"  Note: section_key 'sample_id' not found; using '{fallback_col}' for one SpatialData section."
         )
         return fallback_col
 
-    return groupby
+    return section_key
 
 
 def inspect_input_file(data: Any, spatialdata_table: Optional[str] = None) -> Dict[str, Any]:
@@ -1047,11 +1047,11 @@ class SpatialDataset:
     """Container for spatial transcriptomics dataset."""
     adata: sc.AnnData
     sections: List[SectionData]
-    groupby: str
+    section_key: str
     obs_columns: List[str]
     var_names: List[str]
-    metadata_section: List[str] = field(default_factory=list)
-    metadata_section_extra: List[str] = field(default_factory=list)
+    section_metadata: List[str] = field(default_factory=list)
+    section_metadata_extra: List[str] = field(default_factory=list)
     metadata_value_order: Optional[Dict[str, List[str]]] = None
     modalities: Dict[str, Modality] = field(default_factory=dict)
     default_modality: str = "rna"
@@ -1068,11 +1068,11 @@ class SpatialDataset:
                     cleaned.append(text)
             return list(dict.fromkeys(cleaned))
 
-        if self.metadata_section:
-            self.metadata_section = _clean(self.metadata_section)
+        if self.section_metadata:
+            self.section_metadata = _clean(self.section_metadata)
         else:
-            self.metadata_section = []
-        self.metadata_section_extra = _clean(self.metadata_section_extra)
+            self.section_metadata = []
+        self.section_metadata_extra = _clean(self.section_metadata_extra)
 
     @property
     def n_sections(self) -> int:
@@ -1162,7 +1162,7 @@ class SpatialDataset:
     def get_section_indices(self) -> Dict[str, np.ndarray]:
         """Get cell indices for each section."""
         indices = {}
-        gvals = self.adata.obs[self.groupby].astype(str).to_numpy()
+        gvals = self.adata.obs[self.section_key].astype(str).to_numpy()
         for section in self.sections:
             indices[section.section_id] = np.flatnonzero(gvals == section.section_id)
         return indices
@@ -1170,7 +1170,7 @@ class SpatialDataset:
     def get_metadata_filters(self) -> Dict[str, List[str]]:
         """Get unique values for filterable metadata columns."""
         filters = {}
-        for col in self.metadata_section:
+        for col in self.section_metadata:
             if col in self.adata.obs.columns:
                 unique_vals = list(self.adata.obs[col].dropna().astype(str).unique())
                 custom_order = None
@@ -1214,73 +1214,73 @@ class SpatialDataset:
             export_indices[section.section_id] = np.asarray(idx)
         return export_indices
 
-    def _collect_gene_data(
+    def _collect_feature_data(
         self,
-        genes: Optional[List[str]] = None,
+        features: Optional[List[str]] = None,
         modality: Optional[str] = None,
     ) -> Dict[str, Dict[str, Union[np.ndarray, float]]]:
         """Collect feature vectors and ranges for export within a modality."""
-        gene_data: Dict[str, Dict[str, Union[np.ndarray, float]]] = {}
+        feature_data: Dict[str, Dict[str, Union[np.ndarray, float]]] = {}
         mod = self._resolve_modality(modality)
         feature_set = set(mod.feature_names) if mod is not None else set(self.adata.var_names)
-        for gene in genes or []:
-            if gene not in feature_set:
+        for feature in features or []:
+            if feature not in feature_set:
                 continue
             try:
-                vals, _, _ = self.get_annotation_data(gene, modality=modality)
+                vals, _, _ = self.get_annotation_data(feature, modality=modality)
                 finite = np.isfinite(vals)
-                gene_vmin = float(np.nanmin(vals[finite])) if finite.any() else 0.0
-                gene_vmax = float(np.nanmax(vals[finite])) if finite.any() else 1.0
-                gene_data[gene] = {
+                feature_vmin = float(np.nanmin(vals[finite])) if finite.any() else 0.0
+                feature_vmax = float(np.nanmax(vals[finite])) if finite.any() else 1.0
+                feature_data[feature] = {
                     "values": vals,
-                    "vmin": gene_vmin,
-                    "vmax": gene_vmax,
+                    "vmin": feature_vmin,
+                    "vmax": feature_vmax,
                 }
             except Exception as e:
-                print(f"  Warning: Could not load feature '{gene}': {e}")
-        return gene_data
+                print(f"  Warning: Could not load feature '{feature}': {e}")
+        return feature_data
 
     @staticmethod
-    def _resolve_gene_encodings(
-        gene_data: Dict[str, Dict[str, Union[np.ndarray, float]]],
-        gene_encoding: str,
-        gene_sparse_zero_threshold: float,
+    def _resolve_feature_encodings(
+        feature_data: Dict[str, Dict[str, Union[np.ndarray, float]]],
+        feature_encoding: str,
+        feature_sparse_zero_threshold: float,
     ) -> Dict[str, str]:
-        gene_encodings: Dict[str, str] = {}
-        for gene, gdata in gene_data.items():
-            if gene_encoding == "dense":
-                gene_encodings[gene] = "dense"
-            elif gene_encoding == "sparse":
-                gene_encodings[gene] = "sparse"
+        feature_encodings: Dict[str, str] = {}
+        for feature, fdata in feature_data.items():
+            if feature_encoding == "dense":
+                feature_encodings[feature] = "dense"
+            elif feature_encoding == "sparse":
+                feature_encodings[feature] = "sparse"
             else:
-                vals = np.asarray(gdata["values"])
+                vals = np.asarray(fdata["values"])
                 finite = np.isfinite(vals)
                 nonzero = finite & (vals != 0)
                 zero_frac = 1.0
                 if vals.size:
                     zero_frac = 1.0 - (float(np.count_nonzero(nonzero)) / float(vals.size))
-                gene_encodings[gene] = "sparse" if zero_frac >= float(gene_sparse_zero_threshold) else "dense"
-        return gene_encodings
+                feature_encodings[feature] = "sparse" if zero_frac >= float(feature_sparse_zero_threshold) else "dense"
+        return feature_encodings
 
     @staticmethod
-    def _validate_gene_export_options(
-        gene_encoding: str,
-        gene_sparse_zero_threshold: float,
-        gene_sparse_pack_min_nnz: int,
+    def _validate_feature_export_options(
+        feature_encoding: str,
+        feature_sparse_zero_threshold: float,
+        feature_sparse_pack_min_nnz: int,
     ) -> None:
-        gene_encoding = str(gene_encoding or "auto").lower()
-        if gene_encoding not in {"auto", "dense", "sparse"}:
-            raise ValueError("gene_encoding must be one of: 'auto', 'dense', 'sparse'")
-        if not (0.0 <= float(gene_sparse_zero_threshold) <= 1.0):
-            raise ValueError("gene_sparse_zero_threshold must be between 0 and 1")
-        if int(gene_sparse_pack_min_nnz) < 0:
-            raise ValueError("gene_sparse_pack_min_nnz must be >= 0")
+        feature_encoding = str(feature_encoding or "auto").lower()
+        if feature_encoding not in {"auto", "dense", "sparse"}:
+            raise ValueError("feature_encoding must be one of: 'auto', 'dense', 'sparse'")
+        if not (0.0 <= float(feature_sparse_zero_threshold) <= 1.0):
+            raise ValueError("feature_sparse_zero_threshold must be between 0 and 1")
+        if int(feature_sparse_pack_min_nnz) < 0:
+            raise ValueError("feature_sparse_pack_min_nnz must be >= 0")
 
     @staticmethod
-    def _validate_gene_value_encoding(gene_value_encoding: str) -> str:
-        normalized = str(gene_value_encoding or "uint16").lower()
+    def _validate_feature_value_encoding(feature_value_encoding: str) -> str:
+        normalized = str(feature_value_encoding or "uint16").lower()
         if normalized not in {"uint16", "uint8"}:
-            raise ValueError("gene_value_encoding must be one of: 'uint16', 'uint8'")
+            raise ValueError("feature_value_encoding must be one of: 'uint16', 'uint8'")
         return normalized
 
     @staticmethod
@@ -1308,7 +1308,7 @@ class SpatialDataset:
             return cls._quantize_to_uint(values, vmin, vmax, 65535, np.uint16)
         if value_encoding == "uint8":
             return cls._quantize_to_uint(values, vmin, vmax, 255, np.uint8)
-        raise ValueError(f"Unsupported quantized gene value encoding: {value_encoding}")
+        raise ValueError(f"Unsupported quantized feature value encoding: {value_encoding}")
 
     @staticmethod
     def _estimate_packed_dense_bytes(n_values: int, nan_count: int = 0, value_bytes: int = 4) -> int:
@@ -1319,26 +1319,26 @@ class SpatialDataset:
         return max(0, int(nnz)) * (4 + max(1, int(value_bytes))) + max(0, int(nan_count)) * 4
 
     @staticmethod
-    def _gene_value_encoding_bytes(gene_value_encoding: str) -> int:
-        if gene_value_encoding == "uint16":
+    def _feature_value_encoding_bytes(feature_value_encoding: str) -> int:
+        if feature_value_encoding == "uint16":
             return 2
-        if gene_value_encoding == "uint8":
+        if feature_value_encoding == "uint8":
             return 1
         return 4
 
     @classmethod
-    def _resolve_sidecar_gene_encoding_mode(
+    def _resolve_sidecar_feature_encoding_mode(
         cls,
-        resolved_gene_encoding: str,
+        resolved_feature_encoding: str,
         n_values: int,
         nonzero_count: int,
         nan_count: int,
-        gene_sparse_zero_threshold: float,
-        gene_value_encoding: str,
+        feature_sparse_zero_threshold: float,
+        feature_value_encoding: str,
     ) -> str:
-        if resolved_gene_encoding == "dense":
+        if resolved_feature_encoding == "dense":
             return "dense"
-        if resolved_gene_encoding == "sparse":
+        if resolved_feature_encoding == "sparse":
             return "sparse"
 
         zero_frac = 1.0
@@ -1348,19 +1348,19 @@ class SpatialDataset:
         # Sidecar payloads compare packed dense quantized buffers against packed
         # sparse index/value buffers. Prefer sparse whenever it is explicitly
         # requested via zero-threshold or whenever it is estimated to be smaller.
-        value_bytes = cls._gene_value_encoding_bytes(gene_value_encoding)
+        value_bytes = cls._feature_value_encoding_bytes(feature_value_encoding)
         dense_bytes = cls._estimate_packed_dense_bytes(n_values, nan_count, value_bytes=value_bytes)
         sparse_bytes = cls._estimate_packed_sparse_bytes(nonzero_count, nan_count, value_bytes=value_bytes)
-        if zero_frac >= float(gene_sparse_zero_threshold) or sparse_bytes <= dense_bytes:
+        if zero_frac >= float(feature_sparse_zero_threshold) or sparse_bytes <= dense_bytes:
             return "sparse"
         return "dense"
 
     @staticmethod
-    def _serialize_gene_section_values(
+    def _serialize_feature_section_values(
         section_vals: np.ndarray,
         mode: str,
-        gene_sparse_pack: bool,
-        gene_sparse_pack_min_nnz: int,
+        feature_sparse_pack: bool,
+        feature_sparse_pack_min_nnz: int,
         b64_encoder,
     ) -> Dict:
         if mode == "sparse":
@@ -1368,7 +1368,7 @@ class SpatialDataset:
             nonzero = finite & (section_vals != 0)
             nz_idx = np.flatnonzero(nonzero).astype(np.uint32)
             nz_vals = np.asarray(section_vals[nonzero], dtype=np.float32)
-            if bool(gene_sparse_pack) and int(nz_idx.size) >= int(gene_sparse_pack_min_nnz):
+            if bool(feature_sparse_pack) and int(nz_idx.size) >= int(feature_sparse_pack_min_nnz):
                 sparse_entry = {
                     "ib64": b64_encoder(np.asarray(nz_idx, dtype="<u4")),
                     "vb64": b64_encoder(np.asarray(nz_vals, dtype="<f4")),
@@ -1387,21 +1387,21 @@ class SpatialDataset:
             "dense": [float(v) if np.isfinite(v) else None for v in section_vals]
         }
 
-    def to_gene_sidecar_data(
+    def to_feature_sidecar_data(
         self,
-        genes: Optional[List[str]] = None,
+        features: Optional[List[str]] = None,
         downsample: Optional[int] = None,
         export_indices: Optional[Dict[str, np.ndarray]] = None,
-        gene_encoding: str = "auto",
-        gene_value_encoding: str = "uint16",
-        gene_sparse_zero_threshold: float = 0.8,
-        gene_sparse_pack: bool = True,
-        gene_sparse_pack_min_nnz: int = 256,
+        feature_encoding: str = "auto",
+        feature_value_encoding: str = "uint16",
+        feature_sparse_zero_threshold: float = 0.8,
+        feature_sparse_pack: bool = True,
+        feature_sparse_pack_min_nnz: int = 256,
         modality: Optional[str] = None,
     ) -> Dict:
-        """Export a gene-major sidecar payload for downstream viewer loading."""
-        self._validate_gene_export_options(gene_encoding, gene_sparse_zero_threshold, gene_sparse_pack_min_nnz)
-        resolved_value_encoding = self._validate_gene_value_encoding(gene_value_encoding)
+        """Export a feature-major sidecar payload for downstream viewer loading."""
+        self._validate_feature_export_options(feature_encoding, feature_sparse_zero_threshold, feature_sparse_pack_min_nnz)
+        resolved_value_encoding = self._validate_feature_value_encoding(feature_value_encoding)
         export_indices = export_indices or self._get_export_section_indices(downsample=downsample)
 
         mod = self._resolve_modality(modality)
@@ -1412,13 +1412,13 @@ class SpatialDataset:
             feature_pos = {n: i for i, n in enumerate(self.adata.var_names)}
             source_matrix = self.adata.layers["normalized"] if "normalized" in self.adata.layers else self.adata.X
 
-        unique_genes = []
+        unique_features = []
         seen = set()
-        for gene in genes or []:
-            if gene in seen or gene not in feature_pos:
+        for feature in features or []:
+            if feature in seen or feature not in feature_pos:
                 continue
-            seen.add(gene)
-            unique_genes.append(gene)
+            seen.add(feature)
+            unique_features.append(feature)
 
         def _b64(arr: np.ndarray) -> str:
             import base64
@@ -1426,15 +1426,15 @@ class SpatialDataset:
             carr = np.ascontiguousarray(arr)
             return base64.b64encode(carr.tobytes(order="C")).decode("ascii")
 
-        genes_payload = {}
-        genes_meta = {}
-        gene_encodings: Dict[str, str] = {}
-        gene_value_encodings: Dict[str, str] = {}
-        if unique_genes:
-            gene_indices = [feature_pos[gene] for gene in unique_genes]
+        features_payload = {}
+        features_meta = {}
+        feature_encodings: Dict[str, str] = {}
+        feature_value_encodings: Dict[str, str] = {}
+        if unique_features:
+            feature_indices = [feature_pos[feature] for feature in unique_features]
             expr_layer = source_matrix
-            batch = expr_layer[:, gene_indices]
-            resolved_gene_encoding = str(gene_encoding or "auto").lower()
+            batch = expr_layer[:, feature_indices]
+            resolved_feature_encoding = str(feature_encoding or "auto").lower()
 
             if issparse(batch):
                 batch_csr = batch.tocsr()
@@ -1444,41 +1444,41 @@ class SpatialDataset:
                     for section in self.sections
                 }
                 n_obs = int(batch.shape[0])
-                for gene_pos, gene in enumerate(unique_genes):
-                    col = batch_csc.getcol(gene_pos)
+                for feature_pos_idx, feature in enumerate(unique_features):
+                    col = batch_csc.getcol(feature_pos_idx)
                     raw_vals = np.asarray(col.data, dtype=float).ravel()
                     finite_vals = raw_vals[np.isfinite(raw_vals)]
                     if finite_vals.size:
                         raw_min = float(np.min(finite_vals))
                         raw_max = float(np.max(finite_vals))
                         has_implicit_zeros = int(np.count_nonzero(col.data != 0)) < n_obs
-                        gene_vmin = min(0.0, raw_min) if has_implicit_zeros else raw_min
-                        gene_vmax = max(0.0, raw_max) if has_implicit_zeros else raw_max
+                        feature_vmin = min(0.0, raw_min) if has_implicit_zeros else raw_min
+                        feature_vmax = max(0.0, raw_max) if has_implicit_zeros else raw_max
                     else:
-                        gene_vmin = 0.0
-                        gene_vmax = 0.0
+                        feature_vmin = 0.0
+                        feature_vmax = 0.0
 
-                    if resolved_gene_encoding == "dense":
+                    if resolved_feature_encoding == "dense":
                         mode = "dense"
-                    elif resolved_gene_encoding == "sparse":
+                    elif resolved_feature_encoding == "sparse":
                         mode = "sparse"
                     else:
                         finite_mask = np.isfinite(raw_vals)
                         nonzero_mask = finite_mask & (raw_vals != 0)
-                        mode = self._resolve_sidecar_gene_encoding_mode(
-                            resolved_gene_encoding=resolved_gene_encoding,
+                        mode = self._resolve_sidecar_feature_encoding_mode(
+                            resolved_feature_encoding=resolved_feature_encoding,
                             n_values=n_obs,
                             nonzero_count=int(np.count_nonzero(nonzero_mask)),
                             nan_count=int(raw_vals.size - np.count_nonzero(finite_mask)),
-                            gene_sparse_zero_threshold=gene_sparse_zero_threshold,
-                            gene_value_encoding=resolved_value_encoding,
+                            feature_sparse_zero_threshold=feature_sparse_zero_threshold,
+                            feature_value_encoding=resolved_value_encoding,
                         )
-                    gene_encodings[gene] = mode
-                    gene_value_encodings[gene] = resolved_value_encoding
+                    feature_encodings[feature] = mode
+                    feature_value_encodings[feature] = resolved_value_encoding
 
                     sections_payload = {}
                     for section in self.sections:
-                        sec_col = section_batches[section.section_id].getcol(gene_pos)
+                        sec_col = section_batches[section.section_id].getcol(feature_pos_idx)
                         if mode == "sparse":
                             section_vals = np.asarray(sec_col.data, dtype=float).ravel()
                             section_idx = np.asarray(sec_col.indices, dtype=np.int64).ravel()
@@ -1487,7 +1487,7 @@ class SpatialDataset:
                             nz_idx = section_idx[nonzero].astype(np.uint32, copy=False)
                             nz_vals = section_vals[nonzero].astype(np.float32, copy=False)
                             if resolved_value_encoding in {"uint16", "uint8"}:
-                                quantized = self._quantize_values(nz_vals, gene_vmin, gene_vmax, resolved_value_encoding)
+                                quantized = self._quantize_values(nz_vals, feature_vmin, feature_vmax, resolved_value_encoding)
                                 sparse_entry = {
                                     "ib64": _b64(np.asarray(nz_idx, dtype="<u4")),
                                     ("vq16b64" if resolved_value_encoding == "uint16" else "vq8b64"): _b64(
@@ -1498,7 +1498,7 @@ class SpatialDataset:
                                     ),
                                 }
                             else:
-                                if bool(gene_sparse_pack) and int(nz_idx.size) >= int(gene_sparse_pack_min_nnz):
+                                if bool(feature_sparse_pack) and int(nz_idx.size) >= int(feature_sparse_pack_min_nnz):
                                     sparse_entry = {
                                         "ib64": _b64(np.asarray(nz_idx, dtype="<u4")),
                                         "vb64": _b64(np.asarray(nz_vals, dtype="<f4")),
@@ -1518,8 +1518,8 @@ class SpatialDataset:
                             if resolved_value_encoding in {"uint16", "uint8"}:
                                 quantized = self._quantize_values(
                                     np.where(finite_mask, dense_vals, 0.0),
-                                    gene_vmin,
-                                    gene_vmax,
+                                    feature_vmin,
+                                    feature_vmax,
                                     resolved_value_encoding,
                                 )
                                 dense_entry = {
@@ -1543,45 +1543,45 @@ class SpatialDataset:
                                 dense_entry["nan"] = np.flatnonzero(~finite_mask).astype(int).tolist()
                             sections_payload[section.section_id] = dense_entry
 
-                    genes_payload[gene] = {"sections": sections_payload}
-                    genes_meta[gene] = {"vmin": gene_vmin, "vmax": gene_vmax}
+                    features_payload[feature] = {"sections": sections_payload}
+                    features_meta[feature] = {"vmin": feature_vmin, "vmax": feature_vmax}
             else:
                 batch_dense = np.asarray(batch)
                 if batch_dense.ndim == 1:
                     batch_dense = batch_dense.reshape(-1, 1)
-                for gene_pos, gene in enumerate(unique_genes):
-                    vals = np.asarray(batch_dense[:, gene_pos], dtype=float).ravel()
+                for feature_pos_idx, feature in enumerate(unique_features):
+                    vals = np.asarray(batch_dense[:, feature_pos_idx], dtype=float).ravel()
                     finite = np.isfinite(vals)
-                    gene_vmin = float(np.nanmin(vals[finite])) if finite.any() else 0.0
-                    gene_vmax = float(np.nanmax(vals[finite])) if finite.any() else 0.0
-                    if resolved_gene_encoding == "dense":
+                    feature_vmin = float(np.nanmin(vals[finite])) if finite.any() else 0.0
+                    feature_vmax = float(np.nanmax(vals[finite])) if finite.any() else 0.0
+                    if resolved_feature_encoding == "dense":
                         mode = "dense"
-                    elif resolved_gene_encoding == "sparse":
+                    elif resolved_feature_encoding == "sparse":
                         mode = "sparse"
                     else:
                         nonzero = finite & (vals != 0)
-                        mode = self._resolve_sidecar_gene_encoding_mode(
-                            resolved_gene_encoding=resolved_gene_encoding,
+                        mode = self._resolve_sidecar_feature_encoding_mode(
+                            resolved_feature_encoding=resolved_feature_encoding,
                             n_values=int(vals.size),
                             nonzero_count=int(np.count_nonzero(nonzero)),
                             nan_count=int(vals.size - np.count_nonzero(finite)),
-                            gene_sparse_zero_threshold=gene_sparse_zero_threshold,
-                            gene_value_encoding=resolved_value_encoding,
+                            feature_sparse_zero_threshold=feature_sparse_zero_threshold,
+                            feature_value_encoding=resolved_value_encoding,
                         )
-                    gene_encodings[gene] = mode
-                    gene_value_encodings[gene] = resolved_value_encoding
+                    feature_encodings[feature] = mode
+                    feature_value_encodings[feature] = resolved_value_encoding
 
                     sections_payload = {}
                     for section in self.sections:
                         idx = export_indices[section.section_id]
-                        section_vals = np.asarray(batch_dense[idx, gene_pos], dtype=np.float32).ravel()
+                        section_vals = np.asarray(batch_dense[idx, feature_pos_idx], dtype=np.float32).ravel()
                         if mode == "dense":
                             finite_mask = np.isfinite(section_vals)
                             if resolved_value_encoding in {"uint16", "uint8"}:
                                 quantized = self._quantize_values(
                                     np.where(finite_mask, section_vals, 0.0),
-                                    gene_vmin,
-                                    gene_vmax,
+                                    feature_vmin,
+                                    feature_vmax,
                                     resolved_value_encoding,
                                 )
                                 dense_entry = {
@@ -1610,7 +1610,7 @@ class SpatialDataset:
                             nz_idx = np.flatnonzero(nonzero).astype(np.uint32)
                             nz_vals = np.asarray(section_vals[nonzero], dtype=np.float32)
                             if resolved_value_encoding in {"uint16", "uint8"}:
-                                quantized = self._quantize_values(nz_vals, gene_vmin, gene_vmax, resolved_value_encoding)
+                                quantized = self._quantize_values(nz_vals, feature_vmin, feature_vmax, resolved_value_encoding)
                                 sparse_entry = {
                                     "ib64": _b64(np.asarray(nz_idx, dtype="<u4")),
                                     ("vq16b64" if resolved_value_encoding == "uint16" else "vq8b64"): _b64(
@@ -1621,11 +1621,11 @@ class SpatialDataset:
                                     ),
                                 }
                             else:
-                                sections_payload[section.section_id] = self._serialize_gene_section_values(
+                                sections_payload[section.section_id] = self._serialize_feature_section_values(
                                     section_vals=section_vals,
                                     mode=mode,
-                                    gene_sparse_pack=gene_sparse_pack,
-                                    gene_sparse_pack_min_nnz=gene_sparse_pack_min_nnz,
+                                    feature_sparse_pack=feature_sparse_pack,
+                                    feature_sparse_pack_min_nnz=feature_sparse_pack_min_nnz,
                                     b64_encoder=_b64,
                                 )
                                 continue
@@ -1633,29 +1633,29 @@ class SpatialDataset:
                             if nan_idx.size:
                                 sparse_entry["nan"] = nan_idx.tolist()
                             sections_payload[section.section_id] = {"sparse": sparse_entry}
-                    genes_payload[gene] = {"sections": sections_payload}
-                    genes_meta[gene] = {"vmin": gene_vmin, "vmax": gene_vmax}
+                    features_payload[feature] = {"sections": sections_payload}
+                    features_meta[feature] = {"vmin": feature_vmin, "vmax": feature_vmax}
 
         return {
-            "format": "karospace-gene-sidecar-v1",
+            "format": "karospace-feature-sidecar-v1",
             "modality": (mod.name if mod is not None else "rna"),
-            "genes_meta": genes_meta,
-            "gene_encodings": gene_encodings,
-            "gene_value_encodings": gene_value_encodings,
-            "genes": genes_payload,
+            "features_meta": features_meta,
+            "feature_encodings": feature_encodings,
+            "feature_value_encodings": feature_value_encodings,
+            "features": features_payload,
         }
 
     def to_json_data(
         self,
         annotation: str,
         downsample: Optional[int] = None,
-        cells_annotations: Optional[List[str]] = None,
-        genes: Optional[List[str]] = None,
-        gene_encoding: str = "auto",
-        gene_sparse_zero_threshold: float = 0.8,
-        gene_sparse_pack: bool = True,
-        gene_sparse_pack_min_nnz: int = 256,
-        pseudobulk_de_groupby: Optional[List[str]] = None,
+        cell_annotations: Optional[List[str]] = None,
+        features: Optional[List[str]] = None,
+        feature_encoding: str = "auto",
+        feature_sparse_zero_threshold: float = 0.8,
+        feature_sparse_pack: bool = True,
+        feature_sparse_pack_min_nnz: int = 256,
+        pseudobulk_de_annotations: Optional[List[str]] = None,
         pseudobulk_replicate_annotation: Optional[str] = None,
         pseudobulk_simple_constrast_categories: Any = None,
         pseudobulk_counts_layer: Optional[str] = "counts",
@@ -1670,8 +1670,8 @@ class SpatialDataset:
         pseudobulk_deseq2_fit_type: str = "parametric",
         pseudobulk_n_cpus: int = 1,
         pseudobulk_embed_top_n_per_comparison: int = 20,
-        interaction_markers_groupby: Optional[List[str]] = None,
-        neighbor_stats_groupby: Optional[List[str]] = None,
+        interaction_marker_annotations: Optional[List[str]] = None,
+        neighbor_stats_annotations: Optional[List[str]] = None,
         neighbor_stats_permutations: int = 0,
         neighbor_stats_seed: int = 0,
         interaction_markers_top_targets: int = 8,
@@ -1690,30 +1690,30 @@ class SpatialDataset:
             Initial cell annotation column or gene
         downsample : int, optional
             If set, randomly downsample to this many cells per section
-        cells_annotations : list, optional
+        cell_annotations : list, optional
             Additional cell obs columns to include for annotation switching.
-        genes : list, optional
-            Gene names to include for expression visualization
-        gene_encoding : str
+        features : list, optional
+            Feature names to include for expression visualization
+        feature_encoding : str
             "dense", "sparse", or "auto" (default: "auto"). When "sparse" (or when
-            "auto" decides to use sparse), per-section gene vectors are stored as
+            "auto" decides to use sparse), per-section feature vectors are stored as
             (index, value) pairs for non-zero entries to reduce HTML size for
             zero-inflated expression matrices.
-        gene_sparse_zero_threshold : float
-            Only used when gene_encoding="auto". Use sparse encoding when the
+        feature_sparse_zero_threshold : float
+            Only used when feature_encoding="auto". Use sparse encoding when the
             fraction of zeros is >= this threshold (default: 0.8).
-        gene_sparse_pack : bool
-            When using sparse gene encoding, store indices/values as base64 typed arrays
+        feature_sparse_pack : bool
+            When using sparse feature encoding, store indices/values as base64 typed arrays
             (smaller + faster JSON parse for large datasets). Default: True.
-        gene_sparse_pack_min_nnz : int
+        feature_sparse_pack_min_nnz : int
             Only pack sparse arrays when non-zero entries in a section are >= this value.
             Default: 256.
-        pseudobulk_de_groupby : list, optional
+        pseudobulk_de_annotations : list, optional
             Internal list of obs columns to compute shared-fit pseudobulk DE for.
             Exporter supplies the initial annotation and pseudobulk additional annotations.
         pseudobulk_replicate_annotation : str, optional
             Obs annotation used as the biological replicate for pseudobulk analyses.
-            Defaults to the dataset groupby annotation.
+            Defaults to the dataset section_key annotation.
         pseudobulk_simple_constrast_categories : list or dict, optional
             Categories to include in Simple design category-versus-category
             contrasts. Use a flat list only when one annotation is analyzed.
@@ -1757,10 +1757,10 @@ class SpatialDataset:
             Maximum significant DE genes to auto-embed per category or contact
             comparison in embedded mode. Ignored in sidecar mode, where all gene
             expression vectors are written to the sidecar.
-        interaction_markers_groupby : list, optional
+        interaction_marker_annotations : list, optional
             Internal list of obs columns to compute contact-conditioned
             pseudobulk interaction markers for. Empty/None disables them.
-        neighbor_stats_groupby : list, optional
+        neighbor_stats_annotations : list, optional
             Obs columns to compute neighbor composition stats for (categorical only)
         neighbor_stats_permutations : int
             Number of permutations for neighbor enrichment z-scores (0 disables)
@@ -1846,11 +1846,11 @@ class SpatialDataset:
 
         # Build list of all annotations to export
         all_colors = [annotation]
-        if cells_annotations:
-            all_colors.extend([c for c in cells_annotations if c != annotation and c in self.obs_columns])
+        if cell_annotations:
+            all_colors.extend([c for c in cell_annotations if c != annotation and c in self.obs_columns])
 
         # Pre-compute all color data
-        color_data = {}
+        annotation_data = {}
         for col in all_colors:
             try:
                 vals, is_cont, cats = self.get_annotation_data(col)
@@ -1872,7 +1872,7 @@ class SpatialDataset:
                     col_vmax = float(np.nanmax(vals[finite])) if finite.any() else 1.0
                 else:
                     col_vmin, col_vmax = None, None
-                color_data[col] = {
+                annotation_data[col] = {
                     "values": vals,
                     "is_continuous": is_cont,
                     "categories": cats,
@@ -1922,8 +1922,8 @@ class SpatialDataset:
                     "dominant": dominant,
                 }
 
-        gene_encoding = str(gene_encoding or "auto").lower()
-        self._validate_gene_export_options(gene_encoding, gene_sparse_zero_threshold, gene_sparse_pack_min_nnz)
+        feature_encoding = str(feature_encoding or "auto").lower()
+        self._validate_feature_export_options(feature_encoding, feature_sparse_zero_threshold, feature_sparse_pack_min_nnz)
         if int(pseudobulk_min_cells_per_sample) < 1:
             raise ValueError("pseudobulk_min_cells_per_sample must be >= 1")
         if int(pseudobulk_embed_top_n_per_comparison) < 0:
@@ -1948,7 +1948,7 @@ class SpatialDataset:
         if umap_coords is not None:
             umap_f4 = np.asarray(umap_coords, dtype=np.float32, order="C")
 
-        for col, cdata in color_data.items():
+        for col, cdata in annotation_data.items():
             if cdata.get("is_continuous"):
                 cdata["_values_f4"] = np.asarray(cdata["values"], dtype=np.float32, order="C")
             else:
@@ -1959,17 +1959,17 @@ class SpatialDataset:
         metadata_filters = self.get_metadata_filters()
         companion_analytics = self.get_companion_analytics()
 
-        def _prepare_neighbor_stats_groupby(
-            groupby_name: str,
+        def _prepare_neighbor_stats_annotations(
+            annotation_key: str,
             precomputed_entry: Optional[dict] = None,
         ) -> Tuple[Optional[dict], Optional[dict]]:
-            if groupby_name not in self.adata.obs.columns:
-                log_warning(f"neighbor stats annotation '{groupby_name}' not found in obs.", level=1)
+            if annotation_key not in self.adata.obs.columns:
+                log_warning(f"neighbor stats annotation '{annotation_key}' not found in obs.", level=1)
                 return None, None
 
-            col = self.adata.obs[groupby_name]
+            col = self.adata.obs[annotation_key]
             if pd.api.types.is_numeric_dtype(col):
-                log_warning(f"neighbor stats annotation '{groupby_name}' is numeric; skipping.", level=1)
+                log_warning(f"neighbor stats annotation '{annotation_key}' is numeric; skipping.", level=1)
                 return None, None
             if not isinstance(col.dtype, CategoricalDtype):
                 col = col.astype("category")
@@ -1978,7 +1978,7 @@ class SpatialDataset:
             codes = col.cat.codes.to_numpy()
             valid_mask = codes >= 0
             if not valid_mask.any():
-                log_warning(f"neighbor stats annotation '{groupby_name}' has no valid categories.", level=1)
+                log_warning(f"neighbor stats annotation '{annotation_key}' has no valid categories.", level=1)
                 return None, None
 
             if valid_mask.all():
@@ -1992,7 +1992,7 @@ class SpatialDataset:
 
             n_cells = np.bincount(labels, minlength=len(categories)).astype(int)
             if graph is None or graph.shape[0] == 0:
-                log_warning(f"neighbor stats annotation '{groupby_name}' has an empty graph.", level=1)
+                log_warning(f"neighbor stats annotation '{annotation_key}' has an empty graph.", level=1)
                 return None, None
 
             def _build_context(entry_counts, entry_zscore, entry_n_cells, entry_mean_degree):
@@ -2013,7 +2013,7 @@ class SpatialDataset:
                 ]
                 if companion_categories and companion_categories != categories:
                     log_warning(
-                        f"companion neighbor stats '{groupby_name}' category mismatch; recomputing.",
+                        f"companion neighbor stats '{annotation_key}' category mismatch; recomputing.",
                         level=1,
                     )
                 else:
@@ -2062,7 +2062,7 @@ class SpatialDataset:
                         return entry, _build_context(counts, zscore, n_cells_ctx, mean_degree)
                     except Exception as exc:
                         log_warning(
-                            f"companion neighbor stats '{groupby_name}' malformed; recomputing ({exc}).",
+                            f"companion neighbor stats '{annotation_key}' malformed; recomputing ({exc}).",
                             level=1,
                         )
 
@@ -2308,7 +2308,7 @@ class SpatialDataset:
         def _compute_full_dispersion_stats(log_as_neighbor_child: bool = False) -> Dict[str, List[Dict[str, Any]]]:
             dispersion: Dict[str, List[Dict[str, Any]]] = {}
             candidates: Dict[str, Tuple[List[str], np.ndarray]] = {}
-            for col, cdata in color_data.items():
+            for col, cdata in annotation_data.items():
                 if cdata.get("is_continuous"):
                     continue
                 cats = [str(cat) for cat in (cdata.get("categories") or [])]
@@ -2322,23 +2322,23 @@ class SpatialDataset:
                 f"{'s' if len(candidates) != 1 else ''}; output feeds Neighbors > Dispersion."
             )
             log_detail(message, level=1)
-            for color_col, (cats, labels) in candidates.items():
+            for annotation_col, (cats, labels) in candidates.items():
                 rows = _compute_full_dispersion_for_labels(
                     categories=cats,
                     labels_full=labels,
                     graph_full=neighbor_graph,
                 )
                 if rows:
-                    dispersion[color_col] = rows
+                    dispersion[annotation_col] = rows
                     log_detail(
-                        f"{color_col}: stored dispersion rows for {len(rows)} categor"
+                        f"{annotation_col}: stored dispersion rows for {len(rows)} categor"
                         f"{'ies' if len(rows) != 1 else 'y'}.",
                         level=2,
                     )
             return dispersion
 
         replicate_override = str(pseudobulk_replicate_annotation or "").strip()
-        pseudobulk_replicate_name = replicate_override or str(self.groupby)
+        pseudobulk_replicate_name = replicate_override or str(self.section_key)
         if pseudobulk_replicate_name not in self.adata.obs.columns:
             raise ValueError(
                 "pseudobulk_replicate_annotation "
@@ -2346,46 +2346,46 @@ class SpatialDataset:
             )
         marker_genes = {}
         pseudobulk_de = {}
-        requested_pseudobulk_de_groupby = list(pseudobulk_de_groupby or [])
-        pseudobulk_simple_categories_by_groupby = normalize_pseudobulk_simple_constrast_categories(
+        requested_pseudobulk_de_annotations = list(pseudobulk_de_annotations or [])
+        pseudobulk_simple_categories_by_annotation = normalize_pseudobulk_simple_constrast_categories(
             pseudobulk_simple_constrast_categories,
-            requested_pseudobulk_de_groupby,
+            requested_pseudobulk_de_annotations,
         )
-        pending_pseudobulk_de_groupby = list(requested_pseudobulk_de_groupby)
+        pending_pseudobulk_de_annotations = list(requested_pseudobulk_de_annotations)
         companion_pseudobulk_de = (
             companion_analytics.get("pseudobulk_de")
-            or companion_analytics.get("cluster_de")
+            or companion_analytics.get("pseudobulk_de")
         )
         if (
             not replicate_override
-            and pending_pseudobulk_de_groupby
+            and pending_pseudobulk_de_annotations
             and isinstance(companion_pseudobulk_de, dict)
         ):
-            reused_pseudobulk_de_groupby = [
-                groupby_name
-                for groupby_name in pending_pseudobulk_de_groupby
-                if groupby_name in companion_pseudobulk_de
+            reused_pseudobulk_de_annotations = [
+                annotation_key
+                for annotation_key in pending_pseudobulk_de_annotations
+                if annotation_key in companion_pseudobulk_de
             ]
-            if reused_pseudobulk_de_groupby:
+            if reused_pseudobulk_de_annotations:
                 log_step(
                     f"Reusing KaroSpaceCompanion pseudobulk DE for "
-                    f"{len(reused_pseudobulk_de_groupby)} annotation column"
-                    f"{'s' if len(reused_pseudobulk_de_groupby) != 1 else ''}."
+                    f"{len(reused_pseudobulk_de_annotations)} annotation column"
+                    f"{'s' if len(reused_pseudobulk_de_annotations) != 1 else ''}."
                 )
-                for groupby_name in reused_pseudobulk_de_groupby:
-                    pseudobulk_de[groupby_name] = _strip_category_pseudobulk_sample_diagnostics(
-                        companion_pseudobulk_de[groupby_name]
+                for annotation_key in reused_pseudobulk_de_annotations:
+                    pseudobulk_de[annotation_key] = _strip_category_pseudobulk_sample_diagnostics(
+                        companion_pseudobulk_de[annotation_key]
                     )
-            pending_pseudobulk_de_groupby = [
-                groupby_name
-                for groupby_name in pending_pseudobulk_de_groupby
-                if groupby_name not in pseudobulk_de
+            pending_pseudobulk_de_annotations = [
+                annotation_key
+                for annotation_key in pending_pseudobulk_de_annotations
+                if annotation_key not in pseudobulk_de
             ]
-        if pending_pseudobulk_de_groupby:
+        if pending_pseudobulk_de_annotations:
             log_step(
                 f"Computing pseudobulk differential expression for "
-                f"{len(pending_pseudobulk_de_groupby)} annotation column"
-                f"{'s' if len(pending_pseudobulk_de_groupby) != 1 else ''}; "
+                f"{len(pending_pseudobulk_de_annotations)} annotation column"
+                f"{'s' if len(pending_pseudobulk_de_annotations) != 1 else ''}; "
                 "output feeds Insights > Compare > Per sample."
             )
             pseudobulk_min_cells_n = int(pseudobulk_min_cells_per_sample)
@@ -2399,24 +2399,24 @@ class SpatialDataset:
 
             from .pseudobulk import compute_pseudobulk_group_de, compute_pseudobulk_sample_metadata_de
 
-            section_metadata_columns = set(self.metadata_section or [])
-            section_metadata_columns.update(self.metadata_section_extra or [])
+            section_metadata_columns = set(self.section_metadata or [])
+            section_metadata_columns.update(self.section_metadata_extra or [])
 
-            def _use_sample_metadata_pseudobulk(groupby_name: str) -> bool:
-                if groupby_name not in section_metadata_columns:
+            def _use_sample_metadata_pseudobulk(annotation_key: str) -> bool:
+                if annotation_key not in section_metadata_columns:
                     return False
-                if groupby_name not in self.adata.obs.columns:
+                if annotation_key not in self.adata.obs.columns:
                     return False
-                frame = self.adata.obs[[pseudobulk_replicate_name, groupby_name]].dropna()
+                frame = self.adata.obs[[pseudobulk_replicate_name, annotation_key]].dropna()
                 if frame.empty:
                     return False
                 replicate_values = frame[pseudobulk_replicate_name].astype(str)
-                group_values = frame[groupby_name].astype(str)
+                group_values = frame[annotation_key].astype(str)
                 unique_per_replicate = group_values.groupby(replicate_values).nunique()
                 if bool((unique_per_replicate > 1).any()):
                     mixed = sorted(unique_per_replicate[unique_per_replicate > 1].index.astype(str))[:5]
                     log_warning(
-                        f"section metadata '{groupby_name}' is not fixed within "
+                        f"section metadata '{annotation_key}' is not fixed within "
                         f"pseudobulk replicate '{pseudobulk_replicate_name}' "
                         f"({', '.join(mixed)}); using replicate-adjusted category pseudobulk.",
                         level=2,
@@ -2424,28 +2424,28 @@ class SpatialDataset:
                     return False
                 return True
 
-            for groupby_name in pending_pseudobulk_de_groupby:
-                groupby_pairwise_categories = (
-                    (pseudobulk_simple_categories_by_groupby or {}).get(groupby_name)
-                    if pseudobulk_simple_categories_by_groupby
+            for annotation_key in pending_pseudobulk_de_annotations:
+                annotation_pairwise_categories = (
+                    (pseudobulk_simple_categories_by_annotation or {}).get(annotation_key)
+                    if pseudobulk_simple_categories_by_annotation
                     else None
                 )
-                sample_metadata_model = _use_sample_metadata_pseudobulk(groupby_name)
+                sample_metadata_model = _use_sample_metadata_pseudobulk(annotation_key)
                 log_step(
-                    f"Pseudobulk DE: annotation column {groupby_name}; replicate={pseudobulk_replicate_name}",
+                    f"Pseudobulk DE: annotation column {annotation_key}; replicate={pseudobulk_replicate_name}",
                     level=1,
                 )
                 pairwise_categories_label = (
-                    ", ".join(str(value) for value in groupby_pairwise_categories)
-                    if groupby_pairwise_categories
+                    ", ".join(str(value) for value in annotation_pairwise_categories)
+                    if annotation_pairwise_categories
                     else "all categories"
                 )
                 log_detail("Parameters:", level=2)
                 log_detail(
                     (
-                        f"model=sample_metadata(~ {groupby_name})"
+                        f"model=sample_metadata(~ {annotation_key})"
                         if sample_metadata_model
-                        else f"model=shared_all_category(~ {pseudobulk_replicate_name} + {groupby_name})"
+                        else f"model=shared_all_category(~ {pseudobulk_replicate_name} + {annotation_key})"
                     ),
                     level=3,
                 )
@@ -2468,11 +2468,11 @@ class SpatialDataset:
                     if sample_metadata_model
                     else compute_pseudobulk_group_de
                 )
-                groupby_results = compute_de(
+                annotation_results = compute_de(
                     self.adata,
-                    groupby_name,
+                    annotation_key,
                     replicate=pseudobulk_replicate_name,
-                    pairwise_categories=groupby_pairwise_categories,
+                    pairwise_categories=annotation_pairwise_categories,
                     counts_layer=pseudobulk_counts_layer,
                     min_cell_counts=pseudobulk_min_cell_counts_n,
                     min_gene_counts=pseudobulk_min_gene_counts_n,
@@ -2485,50 +2485,50 @@ class SpatialDataset:
                     fit_type=pseudobulk_deseq2_fit_type,
                     n_cpus=max(1, int(pseudobulk_n_cpus)),
                 )
-                if groupby_results:
-                    pseudobulk_de[groupby_name] = groupby_results
+                if annotation_results:
+                    pseudobulk_de[annotation_key] = annotation_results
 
         # Compute neighbor composition stats
         neighbor_stats = {}
         neighbor_stats_context = {}
-        requested_neighbor_stats_groupby = list(neighbor_stats_groupby or [])
-        requested_neighbor_stats_groupby_set = set(requested_neighbor_stats_groupby)
+        requested_neighbor_stats_annotations = list(neighbor_stats_annotations or [])
+        requested_neighbor_stats_annotations_set = set(requested_neighbor_stats_annotations)
         companion_neighbor_stats = companion_analytics.get("neighbor_stats")
-        if requested_neighbor_stats_groupby and isinstance(companion_neighbor_stats, dict):
-            reused_neighbor_groupby = [
-                groupby_name
-                for groupby_name in requested_neighbor_stats_groupby
-                if groupby_name in companion_neighbor_stats
+        if requested_neighbor_stats_annotations and isinstance(companion_neighbor_stats, dict):
+            reused_neighbor_annotations = [
+                annotation_key
+                for annotation_key in requested_neighbor_stats_annotations
+                if annotation_key in companion_neighbor_stats
             ]
-            if reused_neighbor_groupby:
+            if reused_neighbor_annotations:
                 log_step(
-                    f"Reusing KaroSpaceCompanion neighbor stats for {len(reused_neighbor_groupby)} "
-                    f"annotation column{'s' if len(reused_neighbor_groupby) != 1 else ''}; "
+                    f"Reusing KaroSpaceCompanion neighbor stats for {len(reused_neighbor_annotations)} "
+                    f"annotation column{'s' if len(reused_neighbor_annotations) != 1 else ''}; "
                     "output feeds Neighbors > Enrichment/Interactions."
                 )
-                for groupby_name in reused_neighbor_groupby:
-                    neighbor_stats[groupby_name] = companion_neighbor_stats[groupby_name]
+                for annotation_key in reused_neighbor_annotations:
+                    neighbor_stats[annotation_key] = companion_neighbor_stats[annotation_key]
 
-        pending_neighbor_stats_groupby = [
-            groupby_name
-            for groupby_name in requested_neighbor_stats_groupby
-            if groupby_name not in neighbor_stats
+        pending_neighbor_stats_annotations = [
+            annotation_key
+            for annotation_key in requested_neighbor_stats_annotations
+            if annotation_key not in neighbor_stats
         ]
         printed_neighbor_stats_header = False
-        if neighbor_graph is not None and pending_neighbor_stats_groupby:
-            for groupby_name in pending_neighbor_stats_groupby:
-                log_step(f"Neighbor stats: annotation column {groupby_name}")
+        if neighbor_graph is not None and pending_neighbor_stats_annotations:
+            for annotation_key in pending_neighbor_stats_annotations:
+                log_step(f"Neighbor stats: annotation column {annotation_key}")
                 log_detail(
                     "Computing observed neighbor composition; output feeds Neighbors > Enrichment "
                     "and Neighbors > Interactions.",
                     level=1,
                 )
                 printed_neighbor_stats_header = True
-                entry, context = _prepare_neighbor_stats_groupby(groupby_name)
+                entry, context = _prepare_neighbor_stats_annotations(annotation_key)
                 if entry is None or context is None:
                     continue
-                neighbor_stats[groupby_name] = entry
-                neighbor_stats_context[groupby_name] = context
+                neighbor_stats[annotation_key] = entry
+                neighbor_stats_context[annotation_key] = context
                 log_detail(
                     f"Stored neighbor matrix for {len(entry.get('categories') or [])} categories.",
                     level=1,
@@ -2537,37 +2537,37 @@ class SpatialDataset:
         # Compute contact-conditioned interaction markers:
         # for source S and target T, compare source cells contacting T vs source cells not contacting T.
         interaction_markers = {}
-        requested_interaction_markers_groupby = list(interaction_markers_groupby or [])
-        pending_interaction_markers_groupby = list(requested_interaction_markers_groupby)
+        requested_interaction_marker_annotations = list(interaction_marker_annotations or [])
+        pending_interaction_marker_annotations = list(requested_interaction_marker_annotations)
         companion_interaction_markers = companion_analytics.get("interaction_markers")
         if (
             not replicate_override
-            and pending_interaction_markers_groupby
+            and pending_interaction_marker_annotations
             and isinstance(companion_interaction_markers, dict)
         ):
-            reused_interaction_groupby = [
-                groupby_name
-                for groupby_name in pending_interaction_markers_groupby
-                if groupby_name in companion_interaction_markers
+            reused_interaction_annotations = [
+                annotation_key
+                for annotation_key in pending_interaction_marker_annotations
+                if annotation_key in companion_interaction_markers
             ]
-            if reused_interaction_groupby:
+            if reused_interaction_annotations:
                 log_step(
                     f"Reusing KaroSpaceCompanion interaction markers for "
-                    f"{len(reused_interaction_groupby)} "
-                    f"annotation column{'s' if len(reused_interaction_groupby) != 1 else ''}."
+                    f"{len(reused_interaction_annotations)} "
+                    f"annotation column{'s' if len(reused_interaction_annotations) != 1 else ''}."
                 )
-                for groupby_name in reused_interaction_groupby:
-                    interaction_markers[groupby_name] = companion_interaction_markers[groupby_name]
-            pending_interaction_markers_groupby = [
-                groupby_name
-                for groupby_name in pending_interaction_markers_groupby
-                if groupby_name not in interaction_markers
+                for annotation_key in reused_interaction_annotations:
+                    interaction_markers[annotation_key] = companion_interaction_markers[annotation_key]
+            pending_interaction_marker_annotations = [
+                annotation_key
+                for annotation_key in pending_interaction_marker_annotations
+                if annotation_key not in interaction_markers
             ]
-        if neighbor_graph is not None and pending_interaction_markers_groupby:
+        if neighbor_graph is not None and pending_interaction_marker_annotations:
             log_step(
                 f"Computing contact-conditioned pseudobulk interaction markers for "
-                f"{len(pending_interaction_markers_groupby)} annotation column"
-                f"{'s' if len(pending_interaction_markers_groupby) != 1 else ''}; "
+                f"{len(pending_interaction_marker_annotations)} annotation column"
+                f"{'s' if len(pending_interaction_marker_annotations) != 1 else ''}; "
                 "output feeds Neighbors > Interactions."
             )
             top_targets = int(interaction_markers_top_targets)
@@ -2578,32 +2578,32 @@ class SpatialDataset:
             interaction_min_rep_n = int(pseudobulk_min_replicates)
             from .pseudobulk import compute_pseudobulk_interaction_markers
 
-            for groupby_name in pending_interaction_markers_groupby:
+            for annotation_key in pending_interaction_marker_annotations:
                 log_step(
-                    f"Interaction markers: annotation column {groupby_name}; replicate={interaction_replicate_name}",
+                    f"Interaction markers: annotation column {annotation_key}; replicate={interaction_replicate_name}",
                     level=1,
                 )
-                if groupby_name not in neighbor_stats_context:
+                if annotation_key not in neighbor_stats_context:
                     companion_neighbor_entry = None
                     if isinstance(companion_neighbor_stats, dict):
-                        companion_neighbor_entry = companion_neighbor_stats.get(groupby_name)
-                    entry, context = _prepare_neighbor_stats_groupby(
-                        groupby_name,
+                        companion_neighbor_entry = companion_neighbor_stats.get(annotation_key)
+                    entry, context = _prepare_neighbor_stats_annotations(
+                        annotation_key,
                         precomputed_entry=companion_neighbor_entry,
                     )
                     if context is not None:
-                        neighbor_stats_context[groupby_name] = context
+                        neighbor_stats_context[annotation_key] = context
                     if (
                         entry is not None
-                        and groupby_name in requested_neighbor_stats_groupby_set
-                        and groupby_name not in neighbor_stats
+                        and annotation_key in requested_neighbor_stats_annotations_set
+                        and annotation_key not in neighbor_stats
                     ):
-                        neighbor_stats[groupby_name] = entry
+                        neighbor_stats[annotation_key] = entry
 
-                ctx = neighbor_stats_context.get(groupby_name)
+                ctx = neighbor_stats_context.get(annotation_key)
                 if ctx is None:
                     log_warning(
-                        f"interaction markers '{groupby_name}' unavailable "
+                        f"interaction markers '{annotation_key}' unavailable "
                         "(missing neighbor stats for this annotation).",
                         level=2,
                     )
@@ -2619,7 +2619,7 @@ class SpatialDataset:
 
                 group_interactions = compute_pseudobulk_interaction_markers(
                     self.adata,
-                    groupby_name,
+                    annotation_key,
                     replicate=interaction_replicate_name,
                     graph=graph,
                     obs_idx=obs_idx,
@@ -2644,7 +2644,7 @@ class SpatialDataset:
                     n_cpus=max(1, int(pseudobulk_n_cpus)),
                 )
                 if group_interactions:
-                    interaction_markers[groupby_name] = group_interactions
+                    interaction_markers[annotation_key] = group_interactions
 
         dispersion_stats = _compute_full_dispersion_stats(
             log_as_neighbor_child=printed_neighbor_stats_header
@@ -2770,7 +2770,7 @@ class SpatialDataset:
                     markers[str(color_name)] = color_markers
             return markers
 
-        requested_genes = list(genes or [])
+        requested_features = list(features or [])
         de_embed_limit = int(pseudobulk_embed_top_n_per_comparison)
         de_gene_candidates = []
         de_gene_candidates.extend(
@@ -2792,7 +2792,7 @@ class SpatialDataset:
         export_genes = list(
             dict.fromkeys(
                 gene
-                for gene in [*requested_genes, *de_gene_candidates]
+                for gene in [*requested_features, *de_gene_candidates]
                 if gene in self.adata.var_names
             )
         )
@@ -2812,8 +2812,8 @@ class SpatialDataset:
             float(pseudobulk_log2fc_cutoff),
         )
 
-        gene_data = self._collect_gene_data(export_genes)
-        gene_encodings = self._resolve_gene_encodings(gene_data, gene_encoding, gene_sparse_zero_threshold)
+        feature_data = self._collect_feature_data(export_genes)
+        feature_encodings = self._resolve_feature_encodings(feature_data, feature_encoding, feature_sparse_zero_threshold)
 
         # Build section data with all color layers
         sections_data = []
@@ -2831,7 +2831,7 @@ class SpatialDataset:
             # Build color values for this section
             section_colors = {}
             section_colors_b64 = {}
-            for col, cdata in color_data.items():
+            for col, cdata in annotation_data.items():
                 section_vals = cdata.get("_values_f4", cdata["values"])[idx]
                 section_colors_b64[col] = _b64(section_vals.astype("<f4", copy=False))
 
@@ -2851,14 +2851,14 @@ class SpatialDataset:
             # Build gene expression values for this section
             section_genes_dense = {}
             section_genes_sparse = {}
-            for gene, gdata in gene_data.items():
+            for gene, gdata in feature_data.items():
                 section_vals = gdata["values"][idx]
-                mode = gene_encodings.get(gene, "dense")
-                payload = self._serialize_gene_section_values(
+                mode = feature_encodings.get(gene, "dense")
+                payload = self._serialize_feature_section_values(
                     section_vals=np.asarray(section_vals),
                     mode=mode,
-                    gene_sparse_pack=gene_sparse_pack,
-                    gene_sparse_pack_min_nnz=gene_sparse_pack_min_nnz,
+                    feature_sparse_pack=feature_sparse_pack,
+                    feature_sparse_pack_min_nnz=feature_sparse_pack_min_nnz,
                     b64_encoder=_b64,
                 )
                 if "sparse" in payload:
@@ -2927,9 +2927,9 @@ class SpatialDataset:
             sections_data.append(section_entry)
 
         # Build color metadata
-        colors_meta = {}
+        annotations_meta = {}
         uns = getattr(self.adata, "uns", {}) or {}
-        for col, cdata in color_data.items():
+        for col, cdata in annotation_data.items():
             meta = {
                 "is_continuous": cdata["is_continuous"],
                 "categories": cdata["categories"],
@@ -2956,10 +2956,10 @@ class SpatialDataset:
                             meta["palette"] = palette_list
                     except Exception:
                         pass
-            colors_meta[col] = meta
+            annotations_meta[col] = meta
         # Deconvolution proportion entries: appear as additional categorical annotation modes.
         for decon_name, ddata in decon_data.items():
-            colors_meta[decon_name] = {
+            annotations_meta[decon_name] = {
                 "is_continuous": False,
                 "is_proportions": True,
                 "categories": list(ddata["categories"]),
@@ -2969,16 +2969,16 @@ class SpatialDataset:
             }
 
         # Build gene metadata
-        genes_meta = {}
-        for gene, gdata in gene_data.items():
-            genes_meta[gene] = {
+        features_meta = {}
+        for gene, gdata in feature_data.items():
+            features_meta[gene] = {
                 "vmin": gdata["vmin"],
                 "vmax": gdata["vmax"],
             }
 
         return {
-            "initial_color": annotation,
-            "groupby": self.groupby,
+            "initial_annotation": annotation,
+            "section_key": self.section_key,
             "pseudobulk_replicate_annotation": pseudobulk_replicate_name,
             "pseudobulk_settings": {
                 "min_replicates": max(2, int(pseudobulk_min_replicates)),
@@ -2993,19 +2993,19 @@ class SpatialDataset:
                 "log2fc_cutoff": float(pseudobulk_log2fc_cutoff),
                 "embed_top_n_per_comparison": int(pseudobulk_embed_top_n_per_comparison),
             },
-            "colors_meta": colors_meta,
-            "genes_meta": genes_meta,
-            "gene_encodings": gene_encodings,
+            "annotations_meta": annotations_meta,
+            "features_meta": features_meta,
+            "feature_encodings": feature_encodings,
             "metadata_filters": metadata_filters,
-            "metadata_section": list(self.metadata_section),
-            "metadata_section_extra": list(self.metadata_section_extra),
+            "section_metadata": list(self.section_metadata),
+            "section_metadata_extra": list(self.section_metadata_extra),
             "n_sections": len(sections_data),
             "total_cells": sum(s["n_cells"] for s in sections_data),
-            "loaded_genes": len(genes_meta),
+            "loaded_features": len(features_meta),
             "sections": sections_data,
-            "available_colors": list(color_data.keys()) + list(decon_data.keys()),
+            "available_annotations": list(annotation_data.keys()) + list(decon_data.keys()),
             "available_deconvolutions": list(decon_data.keys()),
-            "available_genes": list(gene_data.keys()),
+            "available_features": list(feature_data.keys()),
             "marker_genes": marker_genes,
             "pseudobulk_de": pseudobulk_de,
             "has_umap": umap_coords is not None,
@@ -3085,12 +3085,12 @@ def _detect_modalities(adata: sc.AnnData) -> Dict[str, Modality]:
 
 def load_spatial_data(
     path: Any,
-    groupby: str = "sample_id",
+    section_key: str = "sample_id",
     spatial_key: str = "spatial",
     spatial_columns: Optional[Tuple[str, str]] = None,
-    group_order: Optional[List[str]] = None,
-    metadata_section: Optional[List[str]] = None,
-    metadata_section_extra: Optional[List[str]] = None,
+    section_order: Optional[List[str]] = None,
+    section_metadata: Optional[List[str]] = None,
+    section_metadata_extra: Optional[List[str]] = None,
     metadata_value_order: Optional[Dict[str, List[str]]] = None,
     metadata_max_columns: Optional[int] = None,
     spatialdata_table: Optional[str] = None,
@@ -3103,23 +3103,23 @@ def load_spatial_data(
     path : str, AnnData, or SpatialData
         Path to an .h5ad file, path to a SpatialData .zarr store, an AnnData
         object, or a SpatialData object.
-    groupby : str
-        Column in obs to group sections by
+    section_key : str
+        Column in obs to identify sections
     spatial_key : str
         Key in obsm containing spatial coordinates
     spatial_columns : tuple, optional
         Two obs columns (x, y) used to create ``adata.obsm[spatial_key]`` before
         loading. Use this when coordinates are stored as separate metadata
         columns rather than an obsm matrix.
-    group_order : list, optional
+    section_order : list, optional
         Custom order for sections
-    metadata_section : list, optional
+    section_metadata : list, optional
         Obs columns to use for section metadata and visual filter chips.
-    metadata_section_extra : list, optional
+    section_metadata_extra : list, optional
         Additional obs columns to store as section metadata without visual filter chips.
     metadata_value_order : dict, optional
         Custom ordering for metadata values per column (e.g. {"course": ["A", "B"]})
-        If group_order is not provided, the first key in this dict is used to order sections
+        If section_order is not provided, the first key in this dict is used to order sections
         by that metadata column (unknowns last, then section_id sort).
     metadata_max_columns : int, optional
         Limit the number of metadata columns used (order preserved)
@@ -3137,21 +3137,21 @@ def load_spatial_data(
     log_step(f"Loading input data from {source_label}")
     log_detail(f"Loaded AnnData table with {adata.n_obs:,} cells x {adata.n_vars:,} genes.")
 
-    groupby = _resolve_groupby_for_spatialdata(adata, groupby, spatialdata_table_key)
+    section_key = _resolve_section_key_for_spatialdata(adata, section_key, spatialdata_table_key)
 
     if spatial_columns is not None:
         spatial_key = _set_spatial_from_obs_columns(adata, spatial_columns, spatial_key)
     else:
         spatial_key = _resolve_spatial_key(adata, spatial_key)
 
-    if groupby not in adata.obs.columns:
-        raise ValueError(f"Groupby column '{groupby}' not found in adata.obs")
+    if section_key not in adata.obs.columns:
+        raise ValueError(f"Section key column '{section_key}' not found in adata.obs")
 
     # Determine section order
-    gser = adata.obs[groupby]
+    gser = adata.obs[section_key]
     gser_str = gser.astype(str)
-    if group_order is not None:
-        section_ids = [str(g) for g in group_order if str(g) in gser_str.unique()]
+    if section_order is not None:
+        section_ids = [str(g) for g in section_order if str(g) in gser_str.unique()]
     else:
         order_by_meta = None
         if metadata_value_order:
@@ -3178,7 +3178,7 @@ def load_spatial_data(
 
     log_detail(
         f"Resolved {len(section_ids)} section{'s' if len(section_ids) != 1 else ''} "
-        f"from obs column '{groupby}'."
+        f"from obs column '{section_key}'."
     )
 
     def _clean_column_list(values: Optional[List[str]]) -> List[str]:
@@ -3192,23 +3192,23 @@ def load_spatial_data(
         return list(dict.fromkeys(cleaned))
 
     # Determine section metadata columns.
-    if metadata_section is None:
-        metadata_section = ["course", "region", "condition", "timepoint", "last_score", "last_day"]
+    if section_metadata is None:
+        section_metadata = ["course", "region", "condition", "timepoint", "last_score", "last_day"]
     else:
-        metadata_section = _clean_column_list(metadata_section)
-    metadata_section_extra = _clean_column_list(metadata_section_extra)
+        section_metadata = _clean_column_list(section_metadata)
+    section_metadata_extra = _clean_column_list(section_metadata_extra)
     if metadata_max_columns is not None:
         if metadata_max_columns < 0:
             raise ValueError("metadata_max_columns must be >= 0")
-        metadata_section = metadata_section[:metadata_max_columns]
-    section_metadata_columns = list(dict.fromkeys([*metadata_section, *metadata_section_extra]))
+        section_metadata = section_metadata[:metadata_max_columns]
+    section_metadata_columns = list(dict.fromkeys([*section_metadata, *section_metadata_extra]))
     if section_metadata_columns:
         log_detail(
             "Section metadata columns: "
             + ", ".join(section_metadata_columns)
             + (
-                f" ({len(metadata_section)} shown in the visual params bar; "
-                f"{len(metadata_section_extra)} stored as section-only metadata)."
+                f" ({len(section_metadata)} shown in the visual params bar; "
+                f"{len(section_metadata_extra)} stored as section-only metadata)."
             )
         )
     else:
@@ -3255,11 +3255,11 @@ def load_spatial_data(
     return SpatialDataset(
         adata=adata,
         sections=sections,
-        groupby=groupby,
+        section_key=section_key,
         obs_columns=obs_columns,
         var_names=list(adata.var_names),
-        metadata_section=metadata_section,
-        metadata_section_extra=metadata_section_extra,
+        section_metadata=section_metadata,
+        section_metadata_extra=section_metadata_extra,
         metadata_value_order=metadata_value_order,
         modalities=modalities,
         default_modality=default_modality,

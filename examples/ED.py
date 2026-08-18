@@ -19,13 +19,13 @@ from karospace import load_spatial_data, export_to_html
 H5AD_PATH = '/Volumes/processing2/erectile_dysfunction/data/adata/ED_5k_filtered_clustered_cytetype_cellcharter_metadata_subset_updated_mana.h5ad'#'/Volumes/processing2/RRmap/data/EAE_proseg_clustered_louvain_leiden_all_sections_annotated_rotated_scVI_mana_embedding_clustered.h5ad'
 
 # Load the dataset
-# - groupby: column in adata.obs that identifies each section
+# - section_key: column in adata.obs that identifies each section
 # - spatial_key: key in adata.obsm containing coordinates (default: 'spatial')
 dataset = load_spatial_data(
     H5AD_PATH,
-    groupby="sample_name_updated",  # adjust to match your data
+    section_key="sample_name_updated",  # adjust to match your data
     # Choose which obs columns appear as filter chips in the viewer
-    metadata_section=[
+    section_metadata=[
         "condition_subtype",
         "Other pathologies",
         "PAT-ID",
@@ -38,7 +38,7 @@ dataset = load_spatial_data(
 )
 
 print(f"Loaded {dataset.n_sections} sections with {dataset.n_cells:,} total cells")
-print(f"Available color columns: {dataset.obs_columns[:10]}...")  # first 10
+print(f"Available annotation columns: {dataset.obs_columns[:10]}...")  # first 10
 
 # Choose gene source for expression:
 # - True: use highly variable genes (if present, capped to 20)
@@ -51,7 +51,7 @@ OUTLINE_BY = "condition_subtype"
 export_to_html(
     dataset,
     output_path="erectile-dys-Göritz-lab.html",
-    main_cells_annotation='cytetype_annotation_leiden_3.5',  # Initial color (categorical)
+    main_cell_annotation='cytetype_annotation_leiden_3.5',  # Initial annotation (categorical)
     title="KaroSpace",
     min_panel_size=120,  # minimum panel width in pixels, grid auto-adjusts
     spot_size="auto",  # adaptive default based on section density
@@ -59,7 +59,7 @@ export_to_html(
     outline_by=OUTLINE_BY,  # metadata column for panel outline colors
 
     # Include additional color options for the dropdown
-    cells_annotations=[
+    cell_annotations=[
        'leiden_0.5', 'leiden_1', 'leiden_1.5',
        'leiden_2', 'leiden_2.5',
        'leiden_3', 'leiden_3.5', 'cytetype_annotation_leiden_3.5',
@@ -74,7 +74,7 @@ export_to_html(
 
     # Pre-load specific genes for expression visualization
     # These will be available in the gene input field
-    genes=[
+    features=[
         # Example marker genes - replace with your genes of interest
          # A1
     
@@ -83,9 +83,9 @@ export_to_html(
     use_hvgs=USE_HVGS,
     hvg_limit=50,
 
-    # Compute marker genes for these categorical color columns
+    # Compute marker genes for these categorical annotation columns
     # (appears in the Color panel under "Marker genes")
-    marker_genes_groupby=[
+    marker_gene_annotations=[
        'leiden_0.5', 'leiden_1', 'leiden_1.5',
        'leiden_2', 'leiden_2.5',
        'leiden_3', 'leiden_3.5', 'cytetype_annotation_leiden_3.5',
@@ -101,12 +101,12 @@ export_to_html(
 
 # The viewer now supports:
 # 1. Filter by course (peak_I, peak_II, peak_III) or other metadata
-# 2. Switch between different color columns
+# 2. Switch between different annotation columns
 # 3. View gene expression for pre-loaded genes
 # 4. Click to expand sections with zoom/pan
 # 5. Toggle categories on/off in the legend
 
 print("\nDone! Open erectile-dys-Göritz-lab.html in a browser.")
 print("Use the filter chips to show only specific courses (e.g., peak_III)")
-print("Use the Color dropdown to switch between different annotations")
+print("Use the Annotation selector to switch between different annotations")
 print("Type a gene name to view expression (must be in the genes list)")

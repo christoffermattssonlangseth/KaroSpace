@@ -127,9 +127,9 @@ for column in report["metadata"]:
 
 dataset = load_spatial_data(
     "your_data.h5ad",
-    groupby="sample_id",  # Column identifying each section
-    metadata_section=["course", "region", "condition"],  # Section metadata shown in the visual params bar/filter chips
-    metadata_section_extra=["patient_id", "slide_id"],  # Section metadata stored without visual params bar chips
+    section_key="sample_id",  # Column identifying each section
+    section_metadata=["course", "region", "condition"],  # Section metadata shown in the visual params bar/filter chips
+    section_metadata_extra=["patient_id", "slide_id"],  # Section metadata stored without visual params bar chips
     metadata_value_order={
         "course": ["naive", "peak_I", "peak_II", "peak_III"],
     },
@@ -138,26 +138,26 @@ dataset = load_spatial_data(
 export_to_html(
     dataset,
     output_path="viewer.html",
-    main_cells_annotation="cell_type",    # Main cell-annotation column shown first
+    main_cell_annotation="cell_type",    # Main cell-annotation column shown first
     title="KaroSpace",
     tutorial=False,              # In development; set True to add the detailed guided HTML tutorial
     min_panel_size=150,          # Min panel width (responsive autoscaling)
     spot_size="auto",            # Adaptive by section density (or set a fixed number)
     downsample=30000,            # Max cells per section
-    cells_annotations=[          # Extra cell obs annotation columns for annotation dropdowns
+    cell_annotations=[          # Extra cell obs annotation columns for annotation dropdowns
         "leiden",
         "condition",
     ],
-    genes=[                      # Pre-load genes for expression view
+    features=[                      # Pre-load genes for expression view
         "Cd4",
         "Cd8a",
         "Gfap",
     ],
-    gene_encoding="auto",        # "auto" | "dense" | "sparse"
-    gene_storage="embedded",     # "embedded" | "sidecar"
-    gene_aux_path=None,          # Optional manifest path; defaults to viewer.genes.json
-    gene_sparse_zero_threshold=0.8,
-    neighbor_stats_groupby=["cell_type"],
+    feature_encoding="auto",        # "auto" | "dense" | "sparse"
+    feature_storage="embedded",     # "embedded" | "sidecar"
+    feature_manifest_path=None,          # Optional manifest path; defaults to viewer.features.json
+    feature_sparse_zero_threshold=0.8,
+    neighbor_stats_annotations=["cell_type"],
     neighbor_stats_permutations=20,
     pseudobulk="auto",           # Use None to disable category pseudobulk DE
     pseudobulk_additional_annotations=["cell_type"],
@@ -188,7 +188,7 @@ You can also pass an already-loaded `AnnData` object:
 ```python
 dataset = load_spatial_data(
     adata,
-    groupby="sample_id",
+    section_key="sample_id",
 )
 ```
 
@@ -205,10 +205,10 @@ report = inspect_input_file(sdata, spatialdata_table="table")
 dataset = load_spatial_data(
     sdata,
     spatialdata_table="table",  # or "cells", depending on your object
-    groupby="sample_id",
+    section_key="sample_id",
 )
 
-export_to_html(dataset, "viewer.html", main_cells_annotation="cell_type")
+export_to_html(dataset, "viewer.html", main_cell_annotation="cell_type")
 ```
 
 ### Command Line
@@ -222,27 +222,27 @@ karospace your_data.h5ad --inspect-input
 SpatialData `.zarr` stores are also supported:
 
 ```bash
-karospace your_spatialdata.zarr -o viewer.html --main-cells-annotation cell_type --spatialdata-table table
+karospace your_spatialdata.zarr -o viewer.html --main-cell-annotation cell_type --spatialdata-table table
 ```
 
 ```bash
 karospace your_data.h5ad \
   -o viewer.html \
-  --groupby sample_id \
-  --metadata-section course,region,condition \
-  --metadata-section-extra patient_id,slide_id \
+  --section-key sample_id \
+  --section-metadata course,region,condition \
+  --section-metadata-extra patient_id,slide_id \
   --metadata-value-order '{"course":["naive","peak_I","peak_II","peak_III"]}' \
-  --main-cells-annotation cell_type \
+  --main-cell-annotation cell_type \
   --title "KaroSpace" \
   --min-panel-size 150 \
   --spot-size auto \
   --downsample 30000 \
-  --cells-annotations leiden,condition \
-  --genes Cd4,Cd8a,Gfap \
-  --gene-encoding auto \
-  --gene-storage embedded \
-  --gene-sparse-zero-threshold 0.8 \
-  --neighbor-stats-groupby cell_type \
+  --cell-annotations leiden,condition \
+  --features Cd4,Cd8a,Gfap \
+  --feature-encoding auto \
+  --feature-storage embedded \
+  --feature-sparse-zero-threshold 0.8 \
+  --neighbor-stats-annotations cell_type \
   --neighbor-permutations 20 \
   --pseudobulk auto \
   --pseudobulk-additional-annotations cell_type \
@@ -269,16 +269,16 @@ karospace your_data.h5ad \
 |--------|-------------|---------|
 | `-o, --output` | Output HTML file path | `karospace.html` |
 | `--inspect-input` | Read input metadata and exit without building sections, downsampling, exporting HTML, or running analytics | off |
-| `--main-cells-annotation` | Main cell-annotation column shown first in the viewer | `leiden` |
-| `--cells-annotations` | Comma-separated extra cell obs annotation columns to embed as selectable cell annotations | empty |
-| `--genes` | Comma-separated genes to preload; significant pseudobulk DE genes are embedded automatically up to the per-comparison cap | empty |
+| `--main-cell-annotation` | Main cell-annotation column shown first in the viewer | `leiden` |
+| `--cell-annotations` | Comma-separated extra cell obs annotation columns to embed as selectable cell annotations | empty |
+| `--features` | Comma-separated genes to preload; significant pseudobulk DE genes are embedded automatically up to the per-comparison cap | empty |
 | `--metadata-labels` | JSON object mapping metadata/obs column keys to display labels in the viewer UI | empty |
-| `--metadata-section` | Comma-separated obs columns to use as section metadata shown in the visual params bar/filter chips | loader defaults |
-| `--metadata-section-extra` | Comma-separated obs columns to store as section metadata without visual params bar/filter chips | empty |
+| `--section-metadata` | Comma-separated obs columns to use as section metadata shown in the visual params bar/filter chips | loader defaults |
+| `--section-metadata-extra` | Comma-separated obs columns to store as section metadata without visual params bar/filter chips | empty |
 | `--metadata-value-order` | JSON object mapping metadata columns to ordered value lists | empty |
 | `--metadata-max-columns` | Limit metadata columns used, preserving order | empty |
-| `-g, --groupby` | Column to group sections by | `sample_id` |
-| `--group-order` | Comma-separated section/group IDs to control section order | empty |
+| `-g, --section-key` | Column to identify sections | `sample_id` |
+| `--section-order` | Comma-separated section IDs to control section order | empty |
 | `--spatial-key` | Key in `adata.obsm` containing spatial coordinates, or target key created from `--spatial-x/--spatial-y` | `spatial` |
 | `--spatial-x` | Obs/metadata column to use as X coordinates; requires `--spatial-y` | empty |
 | `--spatial-y` | Obs/metadata column to use as Y coordinates; requires `--spatial-x` | empty |
@@ -291,15 +291,15 @@ karospace your_data.h5ad \
 | `--viewer-info-html` | HTML string shown in the viewer Info tab | default info |
 | `--viewer-info-html-file` | Path to an HTML fragment shown in the viewer Info tab | empty |
 | `--tutorial` | (in development) Embed the detailed guided HTML tutorial; users start it from the graduation-cap control and are asked to click, tweak, search, and inspect controls | off |
-| `--gene-encoding` | Gene vector encoding (`auto`, `dense`, `sparse`) | `auto` |
-| `--gene-value-encoding` | Sidecar/package gene value encoding for binary shards (`uint16`, `uint8`) | `uint16` |
-| `--gene-storage` | Gene storage mode: `embedded` stores requested/top DE expression vectors in the HTML; `sidecar` stores all gene expression vectors outside the HTML | `embedded` |
-| `--gene-aux-path` | Path for the gene sidecar manifest JSON | auto |
-| `--gene-sidecar-shard-size` | Genes/features per sidecar shard | `256` |
-| `--gene-sparse-zero-threshold` | Zero fraction threshold for `auto` sparse encoding | `0.8` |
+| `--feature-encoding` | Gene vector encoding (`auto`, `dense`, `sparse`) | `auto` |
+| `--feature-value-encoding` | Sidecar/package gene value encoding for binary shards (`uint16`, `uint8`) | `uint16` |
+| `--feature-storage` | Feature storage mode: `embedded` stores requested/top DE expression vectors in the HTML; `sidecar` stores all gene expression vectors outside the HTML | `embedded` |
+| `--feature-manifest-path` | Path for the feature sidecar manifest JSON | auto |
+| `--feature-sidecar-shard-size` | Genes/features per sidecar shard | `256` |
+| `--feature-sparse-zero-threshold` | Zero fraction threshold for `auto` sparse encoding | `0.8` |
 | `--modalities` | Comma-separated modalities to export | all detected |
 | `--neighbor-permutations` | Permutations for neighbor enrichment z-scores | `auto` |
-| `--neighbor-stats-groupby` | Obs columns for neighbor composition stats (`auto` or comma-separated) | `auto` |
+| `--neighbor-stats-annotations` | Obs columns for neighbor composition stats (`auto` or comma-separated) | `auto` |
 | `--neighbor-stats-seed` | Random seed for neighbor enrichment permutations | `0` |
 | `--interaction-markers` | Contact-conditioned pseudobulk marker mode (`auto`, `None`) | `auto` |
 | `--interaction-markers-top-targets` | Target categories evaluated per source for contact-conditioned markers | `8` |
@@ -307,10 +307,10 @@ karospace your_data.h5ad \
 | `--interaction-markers-min-cells` | Minimum cells per replicate contact+ and contact- pseudobulk sample | `30` |
 | `--interaction-markers-min-neighbors` | Minimum target neighbors to classify contact+ source cells | `1` |
 | `--pseudobulk` | Category pseudobulk DE mode (`auto`, `None`) | `auto` |
-| `--pseudobulk-additional-annotations` | Additional annotation columns to analyze when pseudobulk or interaction markers are enabled. `--main-cells-annotation` is included automatically | empty |
-| `--pseudobulk-replicate-annotation` | Obs annotation to use as the biological replicate for pseudobulk analyses; defaults to `--groupby` | `--groupby` |
+| `--pseudobulk-additional-annotations` | Additional annotation columns to analyze when pseudobulk or interaction markers are enabled. `--main-cell-annotation` is included automatically | empty |
+| `--pseudobulk-replicate-annotation` | Obs annotation to use as the biological replicate for pseudobulk analyses; defaults to `--section-key` | `--section-key` |
 | `--pseudobulk-counts-layer` | Raw-count AnnData layer for pseudobulk aggregation; use `None` for `adata.X` | `counts` |
-| `--pseudobulk-simple-constrast-categories` | Categories to report in category-versus-category contrasts. Use `A,B` only with one pseudobulk annotation. With `--pseudobulk-additional-annotations`, use annotation-specific JSON wrapped in single quotes, such as `'{"Anno_L1":["Astrocyte","B cell"],"region":["Cortex"]}'`, or a nested list matching `[main-cells-annotation, additional...]` | empty |
+| `--pseudobulk-simple-constrast-categories` | Categories to report in category-versus-category contrasts. Use `A,B` only with one pseudobulk annotation. With `--pseudobulk-additional-annotations`, use annotation-specific JSON wrapped in single quotes, such as `'{"Anno_L1":["Astrocyte","B cell"],"region":["Cortex"]}'`, or a nested list matching `[main-cell-annotation, additional...]` | empty |
 | `--pseudobulk-min-cells-per-sample` | Minimum cells required in each replicate × annotation pseudobulk sample before it can enter the shared DESeq2 fit | `20` |
 | `--pseudobulk-min-cells-per-pseudobulk` | Alias for `--pseudobulk-min-cells-per-sample` | `20` |
 | `--pseudobulk-min-replicates` | Minimum paired replicates required for each reported contrast | `2` |
@@ -328,7 +328,7 @@ karospace your_data.h5ad \
 | `--pathway-gsea-permutations` | Permutations for compact preranked GSEA p-values; use `0` for ES/NES only | `100` |
 | `--section-rotations` | Comma-separated `section_id:angle` pairs | empty |
 | `--gene-correlation-top-n` | Correlated genes shown per embedded gene in discovery panel | `10` |
-| `--cluster-means-n-genes` | Maximum embedded pseudobulk-DE genes used for category mean summaries; use `0` to disable | `500` |
+| `--category-means-n-genes` | Maximum embedded pseudobulk-DE genes used for category mean summaries; use `0` to disable | `500` |
 | `--spatial-variable-genes-n` | Top variable genes scored with Moran's I; use `0` to disable | `200` |
 | `--deconvolutions` | JSON object mapping deconvolution labels to obs/obsm keys | empty |
 | `--section-images` | JSON object mapping section IDs to image paths/specs | empty |
@@ -352,10 +352,10 @@ Use `inspect_input_file(...)` in Python or `--inspect-input` on the CLI to list 
 Internally, SpatialData input is normalized to one AnnData table before export. The selected table must satisfy the same requirements as a regular AnnData input:
 
 - **`adata.obsm['spatial']`** — 2D coordinates for each cell (x, y)
-- **`adata.obs[groupby]`** — Column identifying which section each cell belongs to
+- **`adata.obs[section_key]`** — Column identifying which section each cell belongs to
 - **Categorical or numeric columns in `adata.obs`** — For assigning cell annotations and visualizing cells
 
-For SpatialData tables, use `spatialdata_table="..."` / `--spatialdata-table ...` when the object contains more than one table. If the default `groupby="sample_id"` is missing, KaroSpace uses the table's SpatialData `region_key` automatically when available. If no per-cell region key exists, the table is exported as one section.
+For SpatialData tables, use `spatialdata_table="..."` / `--spatialdata-table ...` when the object contains more than one table. If the default `section_key="sample_id"` is missing, KaroSpace uses the table's SpatialData `region_key` automatically when available. If no per-cell region key exists, the table is exported as one section.
 
 If a SpatialData `.zarr` store contains invalid non-table elements, such as images with missing transformations, KaroSpace falls back to reading the selected AnnData table directly from `tables/<table>` instead of failing the whole export. The image/label elements are ignored by this fallback; pass separate section images with `--section-images` if you want image overlays in the viewer.
 
@@ -374,19 +374,19 @@ a different target key.
 
 ### Optional metadata
 
-Use `metadata_section=[...]` / `--metadata-section ...` for section-level obs columns that should appear in the visual params bar and filter chips. Use `metadata_section_extra=[...]` / `--metadata-section-extra ...` for section-level metadata that should be stored in the viewer payload but not shown as filter chips.
+Use `section_metadata=[...]` / `--section-metadata ...` for section-level obs columns that should appear in the visual params bar and filter chips. Use `section_metadata_extra=[...]` / `--section-metadata-extra ...` for section-level metadata that should be stored in the viewer payload but not shown as filter chips.
 
 - `course` — Experimental phase (e.g., `"naive"`, `"peak_I"`); sections are outlined by this column when present
 - `region`, `condition`, `timepoint` — Typical section metadata shown as filter chips
 
-Use `cells_annotations=[...]` / `--cells-annotations ...` for additional cell-level annotation columns that should be available in annotation dropdowns and comparison panels.
+Use `cell_annotations=[...]` / `--cell-annotations ...` for additional cell-level annotation columns that should be available in annotation dropdowns and comparison panels.
 
 Control display order of metadata values and section ordering via `metadata_value_order`:
 
 ```python
 dataset = load_spatial_data(
     "your_data.h5ad",
-    groupby="sample_id",
+    section_key="sample_id",
     metadata_value_order={
         "course": ["naive", "peak_I", "peak_II", "peak_III"],
     },
@@ -401,7 +401,7 @@ If `adata.uns["{col}_colors"]` exists (scanpy convention — list of hex aligned
 
 If `adata.obsp` contains a neighbor graph (`spatial_connectivities`, `connectivities`, `neighbors`, or `neighbor_graph`), KaroSpace exposes graph overlay and neighbor-hover controls.
 
-`Insights → Neighbors → Enrichment` and `Interactions` use neighbor composition statistics for the selected Exploration annotation. If no graph or no stats exist for that annotation, the viewer shows a yellow warning and lists the annotations that do have neighbor stats. `Insights → Neighbors → Dispersion` is computed from all cells before HTML downsampling for the main cells annotation and any requested `cells_annotations`, then summarizes whether each category is clustered, random, or dispersed relative to the observed all-cell layout.
+`Insights → Neighbors → Enrichment` and `Interactions` use neighbor composition statistics for the selected Exploration annotation. If no graph or no stats exist for that annotation, the viewer shows a yellow warning and lists the annotations that do have neighbor stats. `Insights → Neighbors → Dispersion` is computed from all cells before HTML downsampling for the main cells annotation and any requested `cell_annotations`, then summarizes whether each category is clustered, random, or dispersed relative to the observed all-cell layout.
 
 ### Optional pseudobulk category selection
 
@@ -410,7 +410,7 @@ Pseudobulk category DE is precomputed automatically for the initial `main cells 
 When selecting specific pairwise categories from the command line, wrap listed values in single quotes:
 
 ```bash
---main-cells-annotation Anno_L1_curated \
+--main-cell-annotation Anno_L1_curated \
 --pseudobulk-additional-annotations region \
 --pseudobulk-simple-constrast-categories '{"Anno_L1_curated":["Astrocyte","B cell"],"region":["Cortex"]}'
 ```
@@ -422,7 +422,7 @@ KaroSpace has three practical export modes:
 | Mode | Output | Best for | How to open |
 | --- | --- | --- | --- |
 | Embedded HTML | `viewer.html` | Small to medium gene payloads, easiest sharing | Double-click or open the file in a browser |
-| Sidecar viewer | `viewer.html` + `viewer.genes.json` + `viewer.genes/` | Large gene payloads with lazy gene loading | Serve the directory over HTTP(S), then open the HTML URL |
+| Sidecar viewer | `viewer.html` + `viewer.features.json` + `viewer.features/` | Large gene payloads with lazy gene loading | Serve the directory over HTTP(S), then open the HTML URL |
 | `.karospace` package | `viewer.karospace` + optional `viewer.loader.html` | One-file sharing of a sidecar viewer | Drop the package into the hosted loader or the generated local loader |
 
 Sidecar mode keeps the initial HTML smaller by moving all gene expression vectors into a manifest and binary shard files. The viewer fetches those shards only when a gene is needed. This is useful when many genes or modalities would make a single HTML file too large.
@@ -434,10 +434,10 @@ CLI:
 ```bash
 karospace your_data.h5ad \
   -o viewer.html \
-  --main-cells-annotation cell_type \
-  --genes Cd4,Cd8a,Gfap \
-  --gene-storage sidecar \
-  --gene-aux-path viewer.genes.json
+  --main-cell-annotation cell_type \
+  --features Cd4,Cd8a,Gfap \
+  --feature-storage sidecar \
+  --feature-manifest-path viewer.features.json
 ```
 
 Python API:
@@ -445,15 +445,15 @@ Python API:
 ```python
 from karospace import load_spatial_data, export_to_html
 
-dataset = load_spatial_data("your_data.h5ad", groupby="sample_id")
+dataset = load_spatial_data("your_data.h5ad", section_key="sample_id")
 
 export_to_html(
     dataset,
     output_path="viewer.html",
-    main_cells_annotation="cell_type",
-    genes=["Cd4", "Cd8a", "Gfap"],
-    gene_storage="sidecar",
-    gene_aux_path="viewer.genes.json"
+    main_cell_annotation="cell_type",
+    features=["Cd4", "Cd8a", "Gfap"],
+    feature_storage="sidecar",
+    feature_manifest_path="viewer.features.json"
 )
 ```
 
@@ -461,15 +461,15 @@ This writes:
 
 ```text
 viewer.html
-viewer.genes.json
-viewer.genes/
+viewer.features.json
+viewer.features/
   000.bin
   001.bin
   ...
 ```
 
 > [!IMPORTANT]
-> Keep all three together. The HTML contains the viewer and embedded summary data, but no gene expression vectors in sidecar mode; `viewer.genes.json` is the sidecar manifest; `viewer.genes/` contains the binary gene shards.
+> Keep all three together. The HTML contains the viewer and embedded summary data, but no gene expression vectors in sidecar mode; `viewer.features.json` is the sidecar manifest; `viewer.features/` contains the binary feature shards.
 
 ### Open a sidecar viewer
 
@@ -489,7 +489,7 @@ http://localhost:8000/viewer.html
 ```
 
 > [!TIP]
-> For deployment, upload the HTML, manifest, and shard directory with the same relative paths to GitHub Pages, S3, an institutional web server, or a lab intranet. If `viewer.html` references `viewer.genes.json`, then `viewer.genes.json` must be next to the HTML and its `viewer.genes/` shard directory must also be next to the HTML unless you intentionally used matching custom paths.
+> For deployment, upload the HTML, manifest, and shard directory with the same relative paths to GitHub Pages, S3, an institutional web server, or a lab intranet. If `viewer.html` references `viewer.features.json`, then `viewer.features.json` must be next to the HTML and its `viewer.features/` shard directory must also be next to the HTML unless you intentionally used matching custom paths.
 
 ### Create a `.karospace` package directly
 
@@ -500,9 +500,9 @@ CLI :
 ```bash
 karospace your_data.h5ad \
   -o viewer.karospace \
-  --main-cells-annotation cell_type \
-  --gene-storage sidecar \
-  --gene-aux-path viewer.genes.json
+  --main-cell-annotation cell_type \
+  --feature-storage sidecar \
+  --feature-manifest-path viewer.features.json
 ```
 
 Python API:
@@ -511,9 +511,9 @@ Python API:
 export_to_html(
     dataset,
     output_path="viewer.karospace",
-    main_cells_annotation="cell_type",
-    gene_storage="sidecar",
-    gene_aux_path="viewer.genes.json",
+    main_cell_annotation="cell_type",
+    feature_storage="sidecar",
+    feature_manifest_path="viewer.features.json",
 )
 ```
 
@@ -540,8 +540,8 @@ karospace package-sidecar viewer.html --output viewer.karospace
 # Explicit form: use this when the manifest or shard directory is not next to the HTML.
 karospace package-sidecar viewer.html \
   --output viewer.karospace \
-  --gene-aux-path viewer.genes.json \
-  --gene-shard-dir viewer.genes \
+  --feature-manifest-path viewer.features.json \
+  --feature-shard-dir viewer.features \
   --loader-output viewer.loader.html
 ```
 
@@ -549,9 +549,9 @@ karospace package-sidecar viewer.html \
 
 > [!TIP]
 > - **The viewer opens but genes do not load**: check that the HTML is served over HTTP(S), not opened with `file://`.
-> - **404 for `viewer.genes.json` or `.bin` shards**: keep `viewer.html`, `viewer.genes.json`, and `viewer.genes/` in the same relative layout used at export time.
-> - **Custom `--gene-aux-path`**: for normal sidecar HTML it may be a path; for direct `.karospace` export it must be a filename inside the package.
-> - **Large packages**: increase `--gene-sidecar-shard-size` for fewer shard files, decrease it for smaller individual requests.
+> - **404 for `viewer.features.json` or `.bin` shards**: keep `viewer.html`, `viewer.features.json`, and `viewer.features/` in the same relative layout used at export time.
+> - **Custom `--feature-manifest-path`**: for normal sidecar HTML it may be a path; for direct `.karospace` export it must be a filename inside the package.
+> - **Large packages**: increase `--feature-sidecar-shard-size` for fewer shard files, decrease it for smaller individual requests.
 
 ## Integrate polygon regions back into AnnData
 
