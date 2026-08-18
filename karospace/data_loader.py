@@ -1661,7 +1661,7 @@ class SpatialDataset:
         pseudobulk_counts_layer: Optional[str] = "counts",
         pseudobulk_min_cell_counts: int = 0,
         pseudobulk_min_gene_counts: int = 0,
-        pseudobulk_min_cells_per_sample: int = 20,
+        pseudobulk_min_cells_per_pseudobulk: int = 20,
         pseudobulk_min_replicates: int = 2,
         pseudobulk_min_pct_expressed: float = 0.0,
         pseudobulk_p_adjust_method: str = "fdr_bh",
@@ -1730,7 +1730,7 @@ class SpatialDataset:
         pseudobulk_min_gene_counts : int
             Exclude genes below this total raw pseudobulk-count threshold in the
             shared DESeq2 fit. Zero disables filtering.
-        pseudobulk_min_cells_per_sample : int
+        pseudobulk_min_cells_per_pseudobulk : int
             Minimum cells required in each replicate x annotation pseudobulk
             sample before it can enter the shared DESeq2 fit. Default: 20.
         pseudobulk_min_replicates : int
@@ -1924,8 +1924,8 @@ class SpatialDataset:
 
         feature_encoding = str(feature_encoding or "auto").lower()
         self._validate_feature_export_options(feature_encoding, feature_sparse_zero_threshold, feature_sparse_pack_min_nnz)
-        if int(pseudobulk_min_cells_per_sample) < 1:
-            raise ValueError("pseudobulk_min_cells_per_sample must be >= 1")
+        if int(pseudobulk_min_cells_per_pseudobulk) < 1:
+            raise ValueError("pseudobulk_min_cells_per_pseudobulk must be >= 1")
         if int(pseudobulk_embed_top_n_per_comparison) < 0:
             raise ValueError("pseudobulk_embed_top_n_per_comparison must be >= 0")
         if int(interaction_markers_top_targets) < 1:
@@ -2388,7 +2388,7 @@ class SpatialDataset:
                 f"{'s' if len(pending_pseudobulk_de_annotations) != 1 else ''}; "
                 "output feeds Insights > Compare > Per sample."
             )
-            pseudobulk_min_cells_n = int(pseudobulk_min_cells_per_sample)
+            pseudobulk_min_cells_n = int(pseudobulk_min_cells_per_pseudobulk)
             pseudobulk_min_cell_counts_n = int(pseudobulk_min_cell_counts)
             pseudobulk_min_gene_counts_n = int(pseudobulk_min_gene_counts)
             pseudobulk_min_rep_n = int(pseudobulk_min_replicates)
@@ -2984,7 +2984,7 @@ class SpatialDataset:
                 "min_replicates": max(2, int(pseudobulk_min_replicates)),
                 "min_cell_counts": int(pseudobulk_min_cell_counts),
                 "min_gene_counts": int(pseudobulk_min_gene_counts),
-                "min_cells_per_sample": int(pseudobulk_min_cells_per_sample),
+                "min_cells_per_pseudobulk": int(pseudobulk_min_cells_per_pseudobulk),
                 "n_cpus": max(1, int(pseudobulk_n_cpus)),
                 "diagnostics": "pairwise",
                 "p_adjust_method": str(pseudobulk_p_adjust_method or "fdr_bh"),

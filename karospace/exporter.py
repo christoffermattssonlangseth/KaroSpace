@@ -33331,7 +33331,7 @@ def export_to_html(
     pseudobulk_counts_layer: Optional[str] = "counts",
     pseudobulk_min_cell_counts: int = 0,
     pseudobulk_min_gene_counts: int = 0,
-    pseudobulk_min_cells_per_sample: int = 20,
+    pseudobulk_min_cells_per_pseudobulk: int = 20,
     pseudobulk_min_replicates: int = 2,
     pseudobulk_min_pct_expressed: float = 0.0,
     pseudobulk_p_adjust_method: str = "fdr_bh",
@@ -33452,7 +33452,7 @@ def export_to_html(
     pseudobulk_min_gene_counts : int
         Exclude genes below this total raw pseudobulk-count threshold in the
         shared DESeq2 fit. Zero disables filtering.
-    pseudobulk_min_cells_per_sample : int
+    pseudobulk_min_cells_per_pseudobulk : int
         Minimum cells required in each replicate x annotation pseudobulk sample
         before it can enter the shared DESeq2 fit. Default: 20.
     pseudobulk_min_replicates : int
@@ -33635,8 +33635,8 @@ def export_to_html(
         raise ValueError("pseudobulk_min_cell_counts must be >= 0")
     if int(pseudobulk_min_gene_counts) < 0:
         raise ValueError("pseudobulk_min_gene_counts must be >= 0")
-    if int(pseudobulk_min_cells_per_sample) < 1:
-        raise ValueError("pseudobulk_min_cells_per_sample must be >= 1")
+    if int(pseudobulk_min_cells_per_pseudobulk) < 1:
+        raise ValueError("pseudobulk_min_cells_per_pseudobulk must be >= 1")
     if int(pseudobulk_n_cpus) < 1:
         raise ValueError("pseudobulk_n_cpus must be >= 1")
     if int(pseudobulk_embed_top_n_per_comparison) < 0:
@@ -33741,7 +33741,7 @@ def export_to_html(
         pseudobulk_counts_layer=pseudobulk_counts_layer,
         pseudobulk_min_cell_counts=pseudobulk_min_cell_counts,
         pseudobulk_min_gene_counts=pseudobulk_min_gene_counts,
-        pseudobulk_min_cells_per_sample=pseudobulk_min_cells_per_sample,
+        pseudobulk_min_cells_per_pseudobulk=pseudobulk_min_cells_per_pseudobulk,
         pseudobulk_min_replicates=pseudobulk_min_replicates,
         pseudobulk_min_pct_expressed=pseudobulk_min_pct_expressed,
         pseudobulk_p_adjust_method=correction_method,

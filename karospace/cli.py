@@ -362,9 +362,8 @@ def _run_export_cli(argv=None):
         ),
     )
     pseudobulk_args.add_argument(
-        "--pseudobulk-min-cells-per-sample",
         "--pseudobulk-min-cells-per-pseudobulk",
-        dest="pseudobulk_min_cells_per_sample",
+        dest="pseudobulk_min_cells_per_pseudobulk",
         type=int,
         default=20,
         help=(
@@ -788,7 +787,7 @@ def _run_export_cli(argv=None):
         pseudobulk_counts_layer=_parse_optional_layer(args.pseudobulk_counts_layer),
         pseudobulk_min_cell_counts=args.pseudobulk_min_cell_counts,
         pseudobulk_min_gene_counts=args.pseudobulk_min_gene_counts,
-        pseudobulk_min_cells_per_sample=args.pseudobulk_min_cells_per_sample,
+        pseudobulk_min_cells_per_pseudobulk=args.pseudobulk_min_cells_per_pseudobulk,
         pseudobulk_min_replicates=args.pseudobulk_min_replicates,
         pseudobulk_min_pct_expressed=args.pseudobulk_min_pct_expressed,
         pseudobulk_p_adjust_method=args.pseudobulk_p_adjust_method,

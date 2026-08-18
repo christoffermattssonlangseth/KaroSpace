@@ -16,7 +16,7 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 - SpatialData input is normalized to one AnnData table via `spatialdata_table` / `--spatialdata-table`.
 - If full SpatialData construction fails because unrelated image or label elements are invalid, KaroSpace can fall back to reading the selected AnnData table directly from `tables/<table>`.
 - `inspect_input_file(...)` / `--inspect-input` reports available `adata.obs` metadata, value types, examples, and missing-value counts without building sections, downsampling, exporting HTML, or running analytics.
-- Section grouping uses `section_key`; SpatialData region metadata can be used automatically when `sample_id` is absent.
+- Section grouping uses `section_key` to group metadata by section.
 - Section metadata is split into `section_metadata` for visual filter chips and `section_metadata_extra` for stored section metadata that is not displayed as filter chips.
 - Cell annotation dropdowns use `main_cell_annotation` plus `cell_annotations`.
 - Optional payloads include UMAP coordinates, neighborhood graphs, image overlays, deconvolution keys, modules, sidecar genes, pseudobulk DE, pathways, spatial genes, category means, and gene correlations.
@@ -34,12 +34,11 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 - The Info button opens dataset notes, viewer context, and keyboard shortcut reminders.
 - The message-circle-question-mark button opens the button guide.
 - The button guide explains icon-only controls using the actual icons shown in the viewer.
-- Keyboard shortcuts include `I` for toggling the Insights panel.
 
 ## 5. Session Tools
 
 - The theme button switches light and dark modes.
-- The screenshot menu exports the current grid view only, with size and transparent-background options.
+- The screenshot menu exports the current grid view, with size and transparent-background options.
 - Session export downloads a JSON state file containing annotations, hidden categories, and current views.
 - Session import restores a previously exported session JSON.
 - The annotation export menu contains broad data, category, and annotation export actions.
@@ -69,15 +68,14 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 - Pan mode is the default movement mode for navigating section panels.
 - Lasso mode selects cells directly in spatial panels.
 - The compare-selection workflow creates Region A and Region B cell sets for side-by-side comparison.
-- Region B can be cleared with the cross-format compare button.
+- Regions can be cleared with the cross-format compare button.
 - Selected cells can be saved as a region annotation.
 - Selected cells can be cleared from the lasso/cross control or from the selection chip.
-- The query tool can select cells from annotation values, genes, or section metadata.
+- The cell search tool can select cells from annotation values, genes, or section metadata.
 
 ## 9. Modal View
 
 - Clicking a section opens a high-detail modal view.
-- Modal entry hides stretched intermediate cells and renders the section after the modal frame is open.
 - Modal zoom controls change magnification.
 - Modal rotation controls adjust visual section orientation.
 - Neighbor controls appear when a neighbor graph is available and can display graph edges or hover-neighbor rings.
@@ -104,12 +102,11 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 
 ## 12. Insights Modes
 
-- Insights is the right-side workspace for selected cells, regions, gene modules, and built-in analysis panels.
-- Selection mode shows compact summaries for active lasso, UMAP, or query selections.
+- Insights is the workspace for selected cells, regions, gene modules, and built-in analysis panels.
+- Selection mode shows compact summaries for active lasso, UMAP, or cell search selections.
 - Region mode stores, selects, groups, imports, exports, recolors, and deletes user-created spatial regions or cell sets.
 - Module mode creates gene modules and displays module scores like expression layers.
 - Exploration mode contains the Visualization menu tree and the built-in analysis panels.
-- The Exploration annotation selector is independent from the main grid annotation selector.
 
 ## 13. Selection Workflow
 
@@ -122,7 +119,7 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 ## 14. Region Workflow
 
 - Region creation starts from selected cells.
-- Regions can be created from modal or grid lasso selections.
+- Regions can be created from cell search tool or lasso selections.
 - Each region row represents a saved spatial region or cell group.
 - Clicking a region row selects its cells.
 - Clicking a group row selects the union of cells from nested regions.
@@ -132,7 +129,7 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 
 ## 15. Module Workflow
 
-- The module panel has a gene picker and a draft gene list.
+- The module panel has a gene picker.
 - Creating a module scales each gene and computes an average module score.
 - Module scores can be loaded into the spatial viewer like gene expression.
 - Module definitions can be imported or exported as JSON.
@@ -167,12 +164,12 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 
 ## 19. Exploration > Compare
 
-- `Compare > Per cell > Selections` analyzes active lasso/query selections and is the detailed view behind Selection Find More.
+- `Compare > Per cell > Selections` analyzes active lasso/cell selections and is the detailed view behind Selection Find More.
 - `Compare > Per cell > Regions` compares saved region annotations and can run region comparisons similar to selection comparisons.
 - `Compare > Per cell > Annotations` compares categories within the selected annotation using per-cell summaries.
 - `Compare > Per sample > Simple design` displays category-versus-category pseudobulk DE when exported.
-- Simple design includes explanatory calculation popovers, double-dipping warnings, expression-percent filtering warnings, raw tables, markers, MA plots, volcano plots, PCA, distance matrix diagnostics, and pathway enrichment.
-- Simple design has a full-width switch with Raw table, Genes, and Samples views.
+- Simple design includes raw tables, markers, MA plots, volcano plots, PCA, distance matrix diagnostics, and pathway enrichment.
+- Simple design metrics can be shown as Raw table, Genes, and Samples views.
 - DE genes are filtered with `padj < cutoff` and `abs(log2FC) >= cutoff`.
 - Genes below the minimum percent-expressed threshold in both compared groups are removed before `DeseqStats`, so they do not enter contrast-level multiple-testing correction.
 - The pseudobulk marker lists are ordered by adjusted p-value then log2FC and can expand from the first displayed rows.
@@ -180,7 +177,6 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 - Pathway Enrichment displays ORA pathways and GSEA enrichment in a separate panel.
 - ORA uses significant DE genes favoring the selected annotation.
 - ORA is shown as a dot plot with GeneRatio on x, pathway labels on y, dot size as gene count, fill color as `-log10(adjusted p-value)`, and border color indicating adjusted p-value threshold.
-- ORA tables chip adjusted p-values and `-log10` adjusted p-values by significance.
 - GSEA uses the retained ranked gene list after model and expression-percent filtering.
 - GSEA profiles can be selected from a pathway dropdown and are displayed as enrichment-profile plots with hits and ranked-metric context.
 - ORA and GSEA sections can switch between plot and raw table and include download buttons.
@@ -191,7 +187,6 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 - `Neighbors > Enrichment` summarizes which annotation categories are spatially adjacent more or less often than expected.
 - Enrichment can be displayed as a table, network, or chord view.
 - Optional neighbor permutations add enrichment z-scores; with zero permutations, observed counts, shares, cell counts, and mean degree still remain available.
-- Yellow warnings appear when no neighbor graph exists or when the selected Exploration annotation has no neighbor stats; warnings list annotations with available stats.
 - `Neighbors > Interactions` compares source cells based on which target categories they touch.
 - Interaction markers are contact-conditioned pseudobulk marker results when exported.
 - Interaction controls choose the source category and filter target names.
@@ -201,7 +196,7 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 ## 21. Exported Analytics
 
 - Pseudobulk DE uses raw counts grouped by replicate and annotation.
-- Pseudobulk samples require at least `pseudobulk_min_cells_per_sample` cells before entering the shared DESeq2 fit.
+- Pseudobulk samples require at least `pseudobulk_min_cells_per_pseudobulk` cells before entering the shared DESeq2 fit.
 - Category-versus-category contrasts are extracted from a shared fit per annotation column.
 - Balanced-rest contrasts compare one category against the equally weighted mean of retained other categories.
 - Pairwise PCA and distance diagnostics are generated for selected pseudobulk comparisons.
@@ -217,33 +212,9 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 - Sidecar mode writes all gene expression vectors to a manifest and binary shard directory for lazy loading over HTTP(S).
 - `.karospace` packages wrap sidecar exports into one shareable ZIP-based package with a local or hosted loader.
 - Generated HTML is static; re-export is required to pick up new viewer code or new analytics.
-- Old exported HTML files do not gain new behavior automatically.
 
-## 23. API, CLI, and GUI Configuration
-
-- API entry points include:
-  - `inspect_input_file(...)`
-  - `load_spatial_data(...)`
-  - `export_to_html(...)`
-  - `integrate_polygon_annotations(...)`
-- CLI supports:
-  - H5AD and SpatialData `.zarr` inputs
-  - `--inspect-input`
-  - `--main-cell-annotation`
-  - `--cell-annotations`
-  - `--section-metadata`
-  - `--section-metadata-extra`
-  - `--spatialdata-table`
-  - gene encoding and sidecar storage controls
-  - pseudobulk DE controls
-  - pathway enrichment controls
-  - neighbor stats and interaction-marker controls
-  - section rotations and image overlays
-- GUI supports inspect/validate/export workflows, searchable annotation/gene editors, presets, and advanced settings for feature storage, pseudobulk DE, neighbor stats, and interaction markers.
-
-## 24. Practical Notes
+## 23. Practical Notes
 
 - Large datasets may produce large HTML files; downsampling, sparse encoding, sidecar storage, and `.karospace` packages are the main size/performance levers.
 - Sidecar HTML should be served over HTTP(S); direct `file://` loading can block sidecar fetches.
 - Many Exploration panels depend on optional exported payloads. When data is missing, the HTML shows warnings or hides unavailable controls instead of crashing.
-- Most plot and table download buttons export the currently visible analysis panel, while broad session and annotation exports live in the top toolbar.

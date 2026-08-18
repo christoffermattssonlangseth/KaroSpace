@@ -32,10 +32,6 @@ Visit [KaroSpace Website](https://karospace.se/).
 - [x] **Compact sidecar** — Keep large gene matrices outside the HTML with lazy-loaded sidecar manifests and binary shards for lighter initial viewer files
 - [x] **Shareable packages** — Export as `.karospace` bundles (ZIP + viewer HTML)
 
-## Features in Development
-
-- [ ] **Guided Tutorial** — Experimental guided HTML walkthrough for the main controls and analysis panels. Enable it with `tutorial=True` in Python API or `--tutorial` on the command line.
-
 ## Quick Start
 
 A GUI version of KaroSpace (`KaroSpaceBuilder`) has been developed to allow researchers with moderate computational skills to create HTML file.
@@ -63,14 +59,6 @@ If KaroSpaceBuilder is already installed, launch with:
 ```bash
 karospacebuilder   # or: karospace-gui
 ```
-
-**Workflow:**
-1. Launch the app and pick a preset (`Default`, `Pancreas`, or `Lightweight`)
-2. In `Basic`, set input `.h5ad` and output path, then click `Inspect`
-3. In `Annotations & Genes`, build cell-annotation columns and gene lists with the searchable editors
-4. Open `Advanced` only if needed, then export
-
-Output is written to `<output_dir>/index.html`.
 
 ## Installation
 
@@ -140,13 +128,12 @@ export_to_html(
     output_path="viewer.html",
     main_cell_annotation="cell_type",    # Main cell-annotation column shown first
     title="KaroSpace",
-    tutorial=False,              # In development; set True to add the detailed guided HTML tutorial
     min_panel_size=150,          # Min panel width (responsive autoscaling)
     spot_size="auto",            # Adaptive by section density (or set a fixed number)
     downsample=30000,            # Max cells per section
     cell_annotations=[          # Extra cell obs annotation columns for annotation dropdowns
         "leiden",
-        "condition",
+        "niche",
     ],
     features=[                      # Pre-load genes for expression view
         "Cd4",
@@ -160,21 +147,21 @@ export_to_html(
     neighbor_stats_annotations=["cell_type"],
     neighbor_stats_permutations=20,
     pseudobulk="auto",           # Use None to disable category pseudobulk DE
-    pseudobulk_additional_annotations=["cell_type"],
+    pseudobulk_additional_annotations=["niche"],
     pseudobulk_counts_layer="counts",
-    pseudobulk_min_cells_per_sample=20,
-    pseudobulk_min_pct_expressed=0.0,
+    pseudobulk_min_cells_per_pseudobulk=20,
+    pseudobulk_min_pct_expressed=0.2,
     pseudobulk_p_adjust_method="fdr_bh",
     pseudobulk_padj_cutoff=0.05,
-    pseudobulk_log2fc_cutoff=0.5,
+    pseudobulk_log2fc_cutoff=1,
     pseudobulk_deseq2_fit_type="parametric",
     pseudobulk_n_cpus=1,
     pseudobulk_embed_top_n_per_comparison=20,
     pathway_gmt=None,            # default Reactome via GSEApy; or "reactome.gmt"
-    pathway_organism="Human",
+    pathway_organism="Mouse",
     pathway_top_n=20,
     pathway_min_overlap=3,
-    pathway_gsea_permutations=100,
+    pathway_gsea_permutations=1000,
     interaction_markers="auto",  # Use None to disable contact-conditioned marker DE
     section_rotations={
         "sample_a": 37.5,
@@ -237,7 +224,7 @@ karospace your_data.h5ad \
   --min-panel-size 150 \
   --spot-size auto \
   --downsample 30000 \
-  --cell-annotations leiden,condition \
+  --cell-annotations leiden, niche \
   --features Cd4,Cd8a,Gfap \
   --feature-encoding auto \
   --feature-storage embedded \
@@ -245,20 +232,20 @@ karospace your_data.h5ad \
   --neighbor-stats-annotations cell_type \
   --neighbor-permutations 20 \
   --pseudobulk auto \
-  --pseudobulk-additional-annotations cell_type \
+  --pseudobulk-additional-annotations niche \
   --pseudobulk-counts-layer counts \
-  --pseudobulk-min-cells-per-sample 20 \
-  --pseudobulk-min-pct-expressed 0.0 \
+  --pseudobulk-min-cells-per-pseudobulk 20 \
+  --pseudobulk-min-pct-expressed 0.2 \
   --pseudobulk-p-adjust-method fdr_bh \
   --pseudobulk-padj-cutoff 0.05 \
-  --pseudobulk-log2fc-cutoff 0.5 \
+  --pseudobulk-log2fc-cutoff 1 \
   --pseudobulk-deseq2-fit-type parametric \
   --pseudobulk-n-cpus 1 \
   --pseudobulk-embed-top-n-per-comparison 20 \
-  --pathway-organism Human \
+  --pathway-organism Mouse \
   --pathway-top-n 20 \
   --pathway-min-overlap 3 \
-  --pathway-gsea-permutations 100 \
+  --pathway-gsea-permutations 1000 \
   --interaction-markers auto \
   --section-rotations sample_a:37.5,sample_b:-90
 ```
@@ -271,12 +258,12 @@ karospace your_data.h5ad \
 | `--inspect-input` | Read input metadata and exit without building sections, downsampling, exporting HTML, or running analytics | off |
 | `--main-cell-annotation` | Main cell-annotation column shown first in the viewer | `leiden` |
 | `--cell-annotations` | Comma-separated extra cell obs annotation columns to embed as selectable cell annotations | empty |
-| `--features` | Comma-separated genes to preload; significant pseudobulk DE genes are embedded automatically up to the per-comparison cap | empty |
-| `--metadata-labels` | JSON object mapping metadata/obs column keys to display labels in the viewer UI | empty |
+| `--features` | Comma-separated features or genes to preload; significant pseudobulk DE genes are embedded automatically up to the per-comparison cap | empty |
 | `--section-metadata` | Comma-separated obs columns to use as section metadata shown in the visual params bar/filter chips | loader defaults |
 | `--section-metadata-extra` | Comma-separated obs columns to store as section metadata without visual params bar/filter chips | empty |
 | `--metadata-value-order` | JSON object mapping metadata columns to ordered value lists | empty |
 | `--metadata-max-columns` | Limit metadata columns used, preserving order | empty |
+| `--metadata-labels` | JSON object mapping metadata/obs column keys to display labels in the viewer UI | empty |
 | `-g, --section-key` | Column to identify sections | `sample_id` |
 | `--section-order` | Comma-separated section IDs to control section order | empty |
 | `--spatial-key` | Key in `adata.obsm` containing spatial coordinates, or target key created from `--spatial-x/--spatial-y` | `spatial` |
@@ -287,7 +274,7 @@ karospace your_data.h5ad \
 | `--spot-size` | Cell/spot size (`auto` or positive number) | `auto` |
 | `--downsample` | Max cells per section | None |
 | `--title` | Page title | `KaroSpace` |
-| `--outlineby` | Metadata column used to paint panel outlines; use `None` to disable. If the same column is in metadata, outlines reuse the metadata/annotation palette | `course` |
+| `--outlineby` | Metadata column used to paint panel outlines; use `None` to disable | None |
 | `--viewer-info-html` | HTML string shown in the viewer Info tab | default info |
 | `--viewer-info-html-file` | Path to an HTML fragment shown in the viewer Info tab | empty |
 | `--tutorial` | (in development) Embed the detailed guided HTML tutorial; users start it from the graduation-cap control and are asked to click, tweak, search, and inspect controls | off |
@@ -310,22 +297,21 @@ karospace your_data.h5ad \
 | `--pseudobulk-additional-annotations` | Additional annotation columns to analyze when pseudobulk or interaction markers are enabled. `--main-cell-annotation` is included automatically | empty |
 | `--pseudobulk-replicate-annotation` | Obs annotation to use as the biological replicate for pseudobulk analyses; defaults to `--section-key` | `--section-key` |
 | `--pseudobulk-counts-layer` | Raw-count AnnData layer for pseudobulk aggregation; use `None` for `adata.X` | `counts` |
-| `--pseudobulk-simple-constrast-categories` | Categories to report in category-versus-category contrasts. Use `A,B` only with one pseudobulk annotation. With `--pseudobulk-additional-annotations`, use annotation-specific JSON wrapped in single quotes, such as `'{"Anno_L1":["Astrocyte","B cell"],"region":["Cortex"]}'`, or a nested list matching `[main-cell-annotation, additional...]` | empty |
-| `--pseudobulk-min-cells-per-sample` | Minimum cells required in each replicate × annotation pseudobulk sample before it can enter the shared DESeq2 fit | `20` |
-| `--pseudobulk-min-cells-per-pseudobulk` | Alias for `--pseudobulk-min-cells-per-sample` | `20` |
+| `--pseudobulk-simple-constrast-categories` | Categories to report in category-versus-category contrasts. With `--pseudobulk-additional-annotations`, use annotation-specific JSON wrapped in single quotes, such as `'{"cell_type":["Astrocyte","B cell"],"region":["Cortex"]}'`, or a nested list matching `[main-cell-annotation, additional...]` | empty |
+| `--pseudobulk-min-cells-per-pseudobulk` | Minimum cells required in each replicate × annotation pseudobulk sample before it can enter the shared DESeq2 fit | `20` |
 | `--pseudobulk-min-replicates` | Minimum paired replicates required for each reported contrast | `2` |
 | `--pseudobulk-min-pct-expressed` | Minimum fraction of cells expressing a gene required in at least one compared group before `DeseqStats`; values >1 are interpreted as percentages | `0` |
 | `--pseudobulk-p-adjust-method` | Multiple-testing correction method (`fdr_bh`, `bonferroni`, `holm`, `none`) | `fdr_bh` |
 | `--pseudobulk-padj-cutoff` | Adjusted p-value threshold for DE calls and plot coloring; DE genes must pass `padj < cutoff` | `0.05` |
-| `--pseudobulk-log2fc-cutoff` | Absolute log2FC cutoff for volcano highlighting and DE table inclusion | `0.5` |
+| `--pseudobulk-log2fc-cutoff` | Absolute log2FC cutoff for volcano highlighting and DE table inclusion | `1` |
 | `--pseudobulk-deseq2-fit-type` | PyDESeq2 dispersion trend fit type; use `mean` to avoid parametric trend fallback warnings | `parametric` |
 | `--pseudobulk-n-cpus` | CPU workers for the shared DESeq2 fit and maximum parallel shared-fit contrasts | `1` |
 | `--pseudobulk-embed-top-n-per-comparison` | Significant DE genes to auto-embed per category/contact comparison in embedded mode; ignored by sidecar mode because all gene expression vectors are sidecar-loaded | `20` |
 | `--pathway-gmt` | GMT pathway file(s) for ORA/GSEA after Simple design DE; omitted uses Reactome via GSEApy | Reactome |
-| `--pathway-organism` | Organism passed to GSEApy for default Reactome loading, e.g. `Human` or `Mouse` | `Human` |
+| `--pathway-organism` | Organism passed to GSEApy for default Reactome loading, e.g. `Human` or `Mouse` | `Mouse` |
 | `--pathway-top-n` | Maximum ORA/GSEA pathways stored per direction and comparison | `20` |
 | `--pathway-min-overlap` | Minimum pathway/query gene overlap for ORA/GSEA reporting | `3` |
-| `--pathway-gsea-permutations` | Permutations for compact preranked GSEA p-values; use `0` for ES/NES only | `100` |
+| `--pathway-gsea-permutations` | Permutations for compact preranked GSEA p-values | `100` |
 | `--section-rotations` | Comma-separated `section_id:angle` pairs | empty |
 | `--gene-correlation-top-n` | Correlated genes shown per embedded gene in discovery panel | `10` |
 | `--category-means-n-genes` | Maximum embedded pseudobulk-DE genes used for category mean summaries; use `0` to disable | `500` |
@@ -387,6 +373,7 @@ Control display order of metadata values and section ordering via `metadata_valu
 dataset = load_spatial_data(
     "your_data.h5ad",
     section_key="sample_id",
+    section_metadata="course,
     metadata_value_order={
         "course": ["naive", "peak_I", "peak_II", "peak_III"],
     },
@@ -401,18 +388,20 @@ If `adata.uns["{col}_colors"]` exists (scanpy convention — list of hex aligned
 
 If `adata.obsp` contains a neighbor graph (`spatial_connectivities`, `connectivities`, `neighbors`, or `neighbor_graph`), KaroSpace exposes graph overlay and neighbor-hover controls.
 
+If the export is downsampled, the visible graph overlay and neighbor-hover controls are downsampled with the displayed cells, so edges to cells that were not exported are not shown.
+
 `Insights → Neighbors → Enrichment` and `Interactions` use neighbor composition statistics for the selected Exploration annotation. If no graph or no stats exist for that annotation, the viewer shows a yellow warning and lists the annotations that do have neighbor stats. `Insights → Neighbors → Dispersion` is computed from all cells before HTML downsampling for the main cells annotation and any requested `cell_annotations`, then summarizes whether each category is clustered, random, or dispersed relative to the observed all-cell layout.
 
 ### Optional pseudobulk category selection
 
-Pseudobulk category DE is precomputed automatically for the initial `main cells annotation` column unless `pseudobulk=None` / `--pseudobulk None` is used, and shown in `Insights → Compare → Per sample → Simple design`. KaroSpace aggregates raw counts by replicate and annotation, keeps replicate × annotation pseudobulk samples with at least `pseudobulk_min_cells_per_sample` / `--pseudobulk-min-cells-per-sample` cells, fits one shared `~ replicate + annotation` DESeq2 model per annotation column, then extracts category-versus-category contrasts. It also extracts a balanced-rest contrast for every category: the category minus the equally weighted mean of all other retained annotation categories. Genes that do not reach `pseudobulk_min_pct_expressed` / `--pseudobulk-min-pct-expressed` in at least one compared group are removed before `DeseqStats`, so they do not enter the contrast-level multiple-testing correction. Pairwise PCA/distance diagnostics are generated automatically for selected category pairs.
+Pseudobulk category DE is precomputed automatically for the initial `main cells annotation` column unless `pseudobulk=None` / `--pseudobulk None` is used, and shown in `Insights → Compare → Per sample → Simple design`. KaroSpace aggregates raw counts by replicate and annotation, keeps replicate × annotation pseudobulk samples with at least `pseudobulk_min_cells_per_pseudobulk` / `--pseudobulk-min-cells-per-pseudobulk` cells, fits one shared `~ replicate + annotation` DESeq2 model per annotation column, then extracts category-versus-category contrasts. It also extracts a balanced-rest contrast for every category: the category minus the equally weighted mean of all other retained annotation categories. Genes that do not reach `pseudobulk_min_pct_expressed` / `--pseudobulk-min-pct-expressed` in at least one compared group are removed before `DeseqStats`, so they do not enter the contrast-level multiple-testing correction. Pairwise PCA/distance diagnostics are generated automatically for selected category pairs.
 
 When selecting specific pairwise categories from the command line, wrap listed values in single quotes:
 
 ```bash
---main-cell-annotation Anno_L1_curated \
+--main-cell-annotation cell_type \
 --pseudobulk-additional-annotations region \
---pseudobulk-simple-constrast-categories '{"Anno_L1_curated":["Astrocyte","B cell"],"region":["Cortex"]}'
+--pseudobulk-simple-constrast-categories '{"cell_type":["Astrocyte","B cell"],"region":["Cortex"]}'
 ```
 
 ## Deployment and Sharing
@@ -469,7 +458,7 @@ viewer.features/
 ```
 
 > [!IMPORTANT]
-> Keep all three together. The HTML contains the viewer and embedded summary data, but no gene expression vectors in sidecar mode; `viewer.features.json` is the sidecar manifest; `viewer.features/` contains the binary feature shards.
+> Keep all three elements together. The HTML contains the viewer and embedded summary data, but no gene expression vectors in sidecar mode; `viewer.features.json` is the sidecar manifest; `viewer.features/` contains the binary feature shards.
 
 ### Open a sidecar viewer
 
@@ -493,7 +482,7 @@ http://localhost:8000/viewer.html
 
 ### Create a `.karospace` package directly
 
-Use `.karospace` output when you want sidecar loading but prefer one shareable file:
+Use `.karospace` output when you want sidecar loading with a more compact shareable file:
 
 CLI :
 
