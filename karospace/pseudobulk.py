@@ -1948,7 +1948,45 @@ def compute_pseudobulk_sample_metadata_de(
 
     selected_retained = [category for category in selected_pairwise_categories if category in retained_categories]
     rest_reference = "__rest__"
+    balanced_rest_total = len(retained_categories)
+    balanced_rest_completed = 0
+    log_detail(
+        f"{balanced_rest_total} sample-metadata category-versus-balanced-rest contrasts from the sample-level fit; "
+        "output feeds category-versus-rest marker summaries.",
+        level=2,
+    )
+
+    def log_sample_contrast_result(
+        progress: str,
+        label: str,
+        formatted: Dict[str, Any],
+        *,
+        error: Optional[str] = None,
+        status: str,
+    ) -> None:
+        if error:
+            log_step(f"[{progress}] {label}: failed ({error})", level=3)
+            return
+        log_step(f"[{progress}] {label}: {status}", level=3)
+        if _normalize_pct_threshold(min_pct_expressed) > 0:
+            retained_count = int(formatted.get("min_pct_retained_gene_count") or 0)
+            prefilter_count = int(formatted.get("min_pct_prefilter_gene_count") or 0)
+            log_detail(
+                f"Minimum % cells retained {retained_count} "
+                f"of {prefilter_count} fitted genes for DeseqStats",
+                level=4,
+            )
+        log_detail(
+            f"{_count_threshold_passing_genes(formatted)} "
+            f"genes pass the DE thresholds (padj < {float(padj_cutoff):g} "
+            f"and |log2FC| >= {float(log2fc_cutoff):g})",
+            level=4,
+        )
+
     for source in retained_categories:
+        balanced_rest_completed += 1
+        progress = f"{balanced_rest_completed}/{balanced_rest_total}"
+        label = f"{source} vs balanced rest"
         references = [category for category in retained_categories if category != source]
         replicate_counts = [
             int(fit_meta.loc[fit_meta["_pb_group"] == category, "_pb_replicate"].nunique())
@@ -1970,6 +2008,13 @@ def compute_pseudobulk_sample_metadata_de(
             empty["method"] = "pseudobulk-deseq2-sample-metadata"
             empty["contrast_type"] = "balanced_rest"
             results.setdefault(source, {})[rest_reference] = empty
+            log_sample_contrast_result(
+                progress,
+                label,
+                empty,
+                error=f"insufficient replicates ({n_replicates}; need >= {required_min_replicates})",
+                status="skipped",
+            )
             continue
         try:
             contrast = np.mean(
@@ -1983,6 +2028,8 @@ def compute_pseudobulk_sample_metadata_de(
                 n_replicates=n_replicates,
                 reference_mask=reference_mask,
             )
+            error = None
+            status = "sample-level DESeq2 contrast returned"
         except Exception as exc:
             formatted = _empty_result(
                 "de_failed",
@@ -1995,14 +2042,25 @@ def compute_pseudobulk_sample_metadata_de(
             formatted.update(model_info)
             formatted["method"] = "pseudobulk-deseq2-sample-metadata"
             formatted["contrast_type"] = "balanced_rest"
+            error = str(exc)
+            status = "failed"
         results.setdefault(source, {})[rest_reference] = formatted
+        log_sample_contrast_result(progress, label, formatted, error=error, status=status)
 
     unique_pairs = [
         (source, reference)
         for source_index, source in enumerate(selected_retained)
         for reference in selected_retained[source_index + 1:]
     ]
+    directed_pairs = len(selected_retained) * max(0, len(selected_retained) - 1)
+    pairwise_completed = 0
     pair_diagnostics: Dict[str, Dict[str, Dict[str, Any]]] = {}
+    log_detail(
+        f"{len(selected_retained)} selected sample-metadata categories -> {directed_pairs} "
+        f"category-versus-category contrasts from {len(unique_pairs)} fitted pairwise comparison"
+        f"{'s' if len(unique_pairs) != 1 else ''}; output feeds Raw table, Genes, and Pathway Enrichment.",
+        level=2,
+    )
     for source, reference in unique_pairs:
         source_reps = set(fit_meta.loc[fit_meta["_pb_group"] == source, "_pb_replicate"].astype(str))
         reference_reps = set(fit_meta.loc[fit_meta["_pb_group"] == reference, "_pb_replicate"].astype(str))
@@ -2026,6 +2084,14 @@ def compute_pseudobulk_sample_metadata_de(
                 empty["method"] = "pseudobulk-deseq2-sample-metadata"
                 empty["contrast_type"] = "category_vs_category"
                 results.setdefault(skipped_source, {})[skipped_reference] = empty
+                pairwise_completed += 1
+                log_sample_contrast_result(
+                    f"{pairwise_completed}/{directed_pairs}",
+                    f"{skipped_source} vs {skipped_reference}",
+                    empty,
+                    error=f"insufficient replicates ({n_replicates}; need >= {required_min_replicates})",
+                    status="skipped",
+                )
             continue
         keep_positions = np.flatnonzero(fit_meta["_pb_group"].isin([source, reference]).to_numpy())
         pair_diagnostics.setdefault(source, {})[reference] = _compute_pseudobulk_sample_diagnostics(
@@ -2047,6 +2113,10 @@ def compute_pseudobulk_sample_metadata_de(
                 n_replicates=n_replicates,
                 reference_mask=source_mask,
             )
+            forward_error = None
+            reverse_error = None
+            forward_status = "sample-level DESeq2 contrast returned"
+            reverse_status = "sample-level DESeq2 contrast returned"
         except Exception as exc:
             forward = _empty_result(
                 "de_failed",
@@ -2070,11 +2140,46 @@ def compute_pseudobulk_sample_metadata_de(
             reverse.update(model_info)
             reverse["method"] = "pseudobulk-deseq2-sample-metadata"
             reverse["contrast_type"] = "category_vs_category"
+            forward_error = str(exc)
+            reverse_error = str(exc)
+            forward_status = "failed"
+            reverse_status = "failed"
         results.setdefault(source, {})[reference] = forward
         results.setdefault(reference, {})[source] = reverse
+        pairwise_completed += 1
+        log_sample_contrast_result(
+            f"{pairwise_completed}/{directed_pairs}",
+            f"{source} vs {reference}",
+            forward,
+            error=forward_error,
+            status=forward_status,
+        )
+        pairwise_completed += 1
+        log_sample_contrast_result(
+            f"{pairwise_completed}/{directed_pairs}",
+            f"{reference} vs {source}",
+            reverse,
+            error=reverse_error,
+            status=reverse_status,
+        )
 
     if not results:
         return None
+    stored_sources = [
+        key for key, value in results.items()
+        if not str(key).startswith("_") and isinstance(value, dict)
+    ]
+    stored_contrasts = sum(
+        1
+        for source in stored_sources
+        for reference in (results.get(source) or {})
+        if not str(reference).startswith("_")
+    )
+    log_detail(
+        f"Stored sample-metadata pseudobulk result payload: {len(stored_sources)} source categories, "
+        f"{stored_contrasts} contrasts, {'with' if pair_diagnostics else 'without'} pairwise diagnostics.",
+        level=2,
+    )
     results["_summary"] = {
         "category_gene_means": aggregate_summary,
         "replicate": str(replicate),

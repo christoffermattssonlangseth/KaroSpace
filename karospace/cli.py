@@ -233,8 +233,8 @@ def _run_export_cli(argv=None):
         "--tutorial",
         action="store_true",
         help=(
-            "Embed the interactive guided tutorial and show an in-page control "
-            "to start it."
+            "(in development) Embed the interactive guided tutorial and show "
+            "an in-page control to start it."
         ),
     )
     gene_args.add_argument(

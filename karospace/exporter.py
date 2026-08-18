@@ -7666,7 +7666,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return isEmbeddedViewerGene(gene) || isSidecarViewerGene(gene);
     }}
     function getCategoryVsRestGenes(colorCol = explorationColorCol || currentColor || '') {{
-        const byCategory = (DATA.pseudobulk_de || {{}})[colorCol] || {{}};
+        const pseudobulkKey = getPseudobulkDEColorKey(colorCol);
+        const byCategory = (DATA.pseudobulk_de || {{}})[pseudobulkKey] || {{}};
         const summaryGenes = byCategory?._summary?.category_gene_means?.genes;
         if (Array.isArray(summaryGenes) && summaryGenes.length) {{
             return uniqueSortedFeatures(summaryGenes);
@@ -15899,7 +15900,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function buildMarkerGenesCsv(colorCol) {{
-        const byColor = (DATA.pseudobulk_de || {{}})[colorCol] || null;
+        const pseudobulkKey = getPseudobulkDEColorKey(colorCol);
+        const byColor = (DATA.pseudobulk_de || {{}})[pseudobulkKey] || null;
         if (!byColor || typeof byColor !== 'object') return '';
         const rows = [['color_column', 'category', 'reference', 'rank', 'gene', 'base_mean', 'log2fc', 'pvalue', 'padj', 'score', 'pct_source', 'pct_reference']];
         Object.entries(byColor).forEach(([sourceCategory, bucket]) => {{
@@ -18053,8 +18055,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             .sort((a, b) => a.localeCompare(b));
     }}
 
+    function getPseudobulkDEColorKey(colorCol) {{
+        const key = String(colorCol || '');
+        const payload = DATA.pseudobulk_de || {{}};
+        if (payload[key]) return key;
+        if (key.startsWith(SECTION_METADATA_COLOR_PREFIX)) {{
+            const metadataKey = key.slice(SECTION_METADATA_COLOR_PREFIX.length);
+            if (payload[metadataKey]) return metadataKey;
+        }}
+        return key;
+    }}
+
     function hasPseudobulkDEForAnnotation(colorCol) {{
-        const groups = colorCol ? (DATA.pseudobulk_de || {{}})[colorCol] : null;
+        const groups = colorCol ? (DATA.pseudobulk_de || {{}})[getPseudobulkDEColorKey(colorCol)] : null;
         return !!(groups && typeof groups === 'object'
             && Object.keys(groups).some((key) => !String(key).startsWith('_')));
     }}
@@ -18120,7 +18133,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function getAvailableComparisonColors() {{
         const withDE = new Set(Object.keys(DATA.pseudobulk_de || {{}}));
-        return getCategoricalColorColumns().sort((a, b) => {{
+        return Array.from(new Set([...getCategoricalColorColumns(), ...getAvailablePseudobulkDEColors()])).sort((a, b) => {{
             const aHas = withDE.has(a), bHas = withDE.has(b);
             if (aHas !== bHas) return bHas - aHas;
             return a.localeCompare(b);
@@ -18130,7 +18143,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function getClusterDECategories(colorCol) {{
         if (!colorCol) return [];
         const fromMeta = getCategoriesForColorColumn(colorCol).map(value => String(value));
-        const fromData = Object.keys((DATA.pseudobulk_de || {{}})[colorCol] || {{}})
+        const pseudobulkKey = getPseudobulkDEColorKey(colorCol);
+        const fromData = Object.keys((DATA.pseudobulk_de || {{}})[pseudobulkKey] || {{}})
             .filter((value) => !String(value).startsWith('_'))
             .map((value) => formatCategoryLabel(colorCol, value));
         return Array.from(new Set([...fromMeta, ...fromData]));
@@ -18256,16 +18270,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function getPairwiseClusterDEResult(colorCol, sourceCategory, referenceCategory) {{
+        const pseudobulkKey = getPseudobulkDEColorKey(colorCol);
         const rawSource = resolveRawCategoryValue(colorCol, sourceCategory);
         const rawReference = resolveRawCategoryValue(colorCol, referenceCategory);
-        return (((DATA.pseudobulk_de || {{}})[colorCol] || {{}})[rawSource] || {{}})[rawReference] || null;
+        return (((DATA.pseudobulk_de || {{}})[pseudobulkKey] || {{}})[rawSource] || {{}})[rawReference] || null;
     }}
 
     function getPseudobulkPairDiagnostics(colorCol, sourceCategory, referenceCategory, result = null) {{
         if (result?.pseudobulk_samples) return result.pseudobulk_samples;
+        const pseudobulkKey = getPseudobulkDEColorKey(colorCol);
         const rawSource = resolveRawCategoryValue(colorCol, sourceCategory);
         const rawReference = resolveRawCategoryValue(colorCol, referenceCategory);
-        const diagnostics = (DATA.pseudobulk_de || {{}})[colorCol]?._summary?.pair_diagnostics || {{}};
+        const diagnostics = (DATA.pseudobulk_de || {{}})[pseudobulkKey]?._summary?.pair_diagnostics || {{}};
         return diagnostics?.[rawSource]?.[rawReference]
             || diagnostics?.[rawReference]?.[rawSource]
             || null;
@@ -25156,7 +25172,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function getRestOrFallbackDEResults(colorCol, category) {{
-        const byCategory = (DATA.pseudobulk_de || {{}})[colorCol] || {{}};
+        const pseudobulkKey = getPseudobulkDEColorKey(colorCol);
+        const byCategory = (DATA.pseudobulk_de || {{}})[pseudobulkKey] || {{}};
         const rawCategory = resolveRawCategoryValue(colorCol, category);
         const bucket = byCategory[String(rawCategory)] || byCategory[String(category)] || null;
         if (!bucket || typeof bucket !== 'object') return [];
@@ -25567,9 +25584,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             return;
         }}
 
-        const deForColor = (DATA.pseudobulk_de || {{}})[markerColorCol] || null;
+        const markerPseudobulkKey = getPseudobulkDEColorKey(markerColorCol);
+        const deForColor = (DATA.pseudobulk_de || {{}})[markerPseudobulkKey] || null;
         const hasDEForColor = !!(deForColor && typeof deForColor === 'object' && Object.keys(deForColor).some((key) => !String(key).startsWith('_')));
-        const groupMarkers = markers[markerColorCol] || {{}};
+        const groupMarkers = markers[markerColorCol] || markers[markerPseudobulkKey] || {{}};
         if (!hasDEForColor) {{
             if (exportBtn) exportBtn.disabled = true;
             container.innerHTML = '';
@@ -26101,7 +26119,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function getPseudobulkGeneMeansPayload(colorCol) {{
-        const summary = (DATA.pseudobulk_de || {{}})[colorCol]?._summary?.category_gene_means;
+        const pseudobulkKey = getPseudobulkDEColorKey(colorCol);
+        const summary = (DATA.pseudobulk_de || {{}})[pseudobulkKey]?._summary?.category_gene_means;
         const summaryGenes = Array.isArray(summary?.genes) ? summary.genes.map(gene => String(gene)) : [];
         if (summaryGenes.length && summary?.means) {{
             return {{
@@ -27958,9 +27977,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
 
         const activeAnnotation = String(explorationColorCol || '');
-        if (availableGroupbys.includes(activeAnnotation)) {{
-            if (clusterDeGroupby !== activeAnnotation) {{
-                clusterDeGroupby = activeAnnotation;
+        const activePseudobulkAnnotation = getPseudobulkDEColorKey(activeAnnotation);
+        if (availableGroupbys.includes(activePseudobulkAnnotation)) {{
+            if (clusterDeGroupby !== activePseudobulkAnnotation) {{
+                clusterDeGroupby = activePseudobulkAnnotation;
                 clusterDeSourceCategory = null;
                 clusterDeReferenceCategory = null;
             }}
@@ -28001,8 +28021,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!container) return;
 
         const {{ availableGroupbys, categories }} = syncClusterDEControls();
-        const activeAnnotation = String(explorationColorCol || '');
-        const selectedAnnotation = availableGroupbys.includes(activeAnnotation) ? activeAnnotation : null;
+        const selectedAnnotation = clusterDeGroupby && availableGroupbys.includes(clusterDeGroupby)
+            ? clusterDeGroupby
+            : null;
         if (!selectedAnnotation || !hasPseudobulkDEForAnnotation(selectedAnnotation)) {{
             const availableComparisons = getAvailablePseudobulkDEColors();
             const comparisonChips = availableComparisons.length
@@ -28067,6 +28088,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             DATA.pseudobulk_replicate_annotation || DATA.groupby || 'replicate'
         );
         const conditionMetadata = formatMetadataLabel(clusterDeGroupby);
+        const modelFormula = String(contrastResult?.model_formula || `~ ${{replicateMetadata}} + ${{conditionMetadata}}`);
         const pseudobulkSettings = DATA.pseudobulk_settings || {{}};
         const minReplicates = Math.max(1, Number(
             contrastResult?.min_replicates_required ?? pseudobulkSettings.min_replicates ?? 2
@@ -28101,7 +28123,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const contrastInfo = `
             <div class="comparison-info-warning"><strong>Warning.</strong> If annotations were defined from the same expression patterns being tested here, DE results can be inflated by double dipping. Interpret these marker genes as exploratory unless the annotations were defined independently or validated on independent data.</div>
             <div class="comparison-info">
-                <strong>DESeq2 contrast.</strong> Shared model: ~ ${{escapeHtml(replicateMetadata)}} + ${{escapeHtml(conditionMetadata)}}.
+                <strong>DESeq2 contrast.</strong> Model: ${{escapeHtml(modelFormula)}}.
                 <div class="comparison-info-settings">
                     <span><code>--pseudobulk-min-replicates</code> ≥ ${{minReplicates}}</span>
                     <span><code>--pseudobulk-p-adjust-method</code> = ${{escapeHtml(pAdjustMethod)}}</span>
@@ -33372,7 +33394,8 @@ def export_to_html(
     viewer_info_html : str, optional
         HTML string shown in the Info tab of the Insights panel.
     tutorial : bool
-        Embed the guided HTML tutorial and show an in-page control to start it.
+        In development. Embed the guided HTML tutorial and show an in-page
+        control to start it.
     cells_annotations : list, optional
         Additional cell obs columns to include for annotation switching.
     genes : list, optional
