@@ -1754,7 +1754,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .icon-btn svg {{
             width: 16px;
             height: 16px;
-            stroke: currentAnnotation;
+            stroke: currentColor;
             fill: none;
             stroke-width: 2;
             stroke-linecap: round;
@@ -2115,7 +2115,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .gene-params-toggle svg {{
             width: 16px;
             height: 16px;
-            stroke: currentAnnotation;
+            stroke: currentColor;
             fill: none;
             stroke-width: 2;
             stroke-linecap: round;
@@ -2125,7 +2125,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .visual-params-toggle svg {{
             width: 16px;
             height: 16px;
-            stroke: currentAnnotation;
+            stroke: currentColor;
             fill: none;
             stroke-width: 2;
             stroke-linecap: round;
@@ -2154,7 +2154,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .focused-modal-tool-toggle svg {{
             width: 16px;
             height: 16px;
-            stroke: currentAnnotation;
+            stroke: currentColor;
             fill: none;
             stroke-width: 2;
             stroke-linecap: round;
@@ -2337,7 +2337,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .focused-he-icon-btn svg {{
             width: 15px;
             height: 15px;
-            stroke: currentAnnotation;
+            stroke: currentColor;
             fill: none;
             stroke-width: 2;
             stroke-linecap: round;
@@ -2630,7 +2630,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .section-rotate-btn svg {{
             width: 14px;
             height: 14px;
-            stroke: currentAnnotation;
+            stroke: currentColor;
             fill: none;
             stroke-width: 2;
             stroke-linecap: round;
@@ -3123,7 +3123,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .button-help-icon svg {{
             width: 15px;
             height: 15px;
-            stroke: currentAnnotation;
+            stroke: currentColor;
             fill: none;
             stroke-width: 2;
             stroke-linecap: round;
@@ -3221,6 +3221,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         .tutorial-overlay.active {{
             display: block;
+            pointer-events: auto;
         }}
         .tutorial-spotlight {{
             position: fixed;
@@ -3346,6 +3347,51 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             font-size: 12px;
             line-height: 1.4;
             font-weight: 600;
+            position: relative;
+            overflow: hidden;
+        }}
+        .tutorial-task-text {{
+            display: block;
+        }}
+        .tutorial-task.is-loading .tutorial-task-text::after {{
+            content: "...";
+            position: absolute;
+            right: 9px;
+            bottom: 7px;
+            display: block;
+            width: 1.4em;
+            overflow: hidden;
+            text-align: left;
+            color: var(--muted-text);
+            animation: tutorialTaskDots 1s steps(4, end) infinite;
+        }}
+        .tutorial-task.tutorial-task-shine {{
+            border-color: var(--accent-color);
+            box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-color) 26%, transparent);
+        }}
+        .tutorial-task.tutorial-task-shine::after {{
+            content: "";
+            position: absolute;
+            inset: -35% -55%;
+            background: linear-gradient(
+                115deg,
+                transparent 0%,
+                transparent 34%,
+                color-mix(in srgb, white 72%, transparent) 48%,
+                transparent 62%,
+                transparent 100%
+            );
+            transform: translateX(-60%);
+            animation: tutorialTaskShine 1.1s ease-in-out infinite;
+            pointer-events: none;
+        }}
+        @keyframes tutorialTaskShine {{
+            from {{ transform: translateX(-60%); }}
+            to {{ transform: translateX(60%); }}
+        }}
+        @keyframes tutorialTaskDots {{
+            0% {{ width: 0; }}
+            100% {{ width: 1.4em; }}
         }}
         .tutorial-close {{
             width: 28px;
@@ -4744,7 +4790,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .legend-btn.icon-only svg {{
             width: 15px;
             height: 15px;
-            stroke: currentAnnotation;
+            stroke: currentColor;
             fill: none;
             stroke-width: 2;
             stroke-linecap: round;
@@ -5050,7 +5096,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .modal-header-icon svg {{
             width: 16px;
             height: 16px;
-            stroke: currentAnnotation;
+            stroke: currentColor;
             fill: none;
             stroke-width: 2;
             stroke-linecap: round;
@@ -5571,7 +5617,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .selection-summary-find-markers svg {{
             width: 15px;
             height: 15px;
-            stroke: currentAnnotation;
+            stroke: currentColor;
             fill: none;
             stroke-width: 2;
             stroke-linecap: round;
@@ -5615,7 +5661,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .selection-summary-find-more svg {{
             width: 14px;
             height: 14px;
-            stroke: currentAnnotation;
+            stroke: currentColor;
             fill: none;
             stroke-width: 2;
             stroke-linecap: round;
@@ -5814,7 +5860,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .selection-query-close svg {{
             width: 14px;
             height: 14px;
-            stroke: currentAnnotation;
+            stroke: currentColor;
             fill: none;
             stroke-width: 2;
             stroke-linecap: round;
@@ -5925,7 +5971,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .selection-query-clear-input svg {{
             width: 12px;
             height: 12px;
-            stroke: currentAnnotation;
+            stroke: currentColor;
             fill: none;
             stroke-width: 2.4;
             stroke-linecap: round;
@@ -5967,7 +6013,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .selection-query-icon-btn svg {{
             width: 15px;
             height: 15px;
-            stroke: currentAnnotation;
+            stroke: currentColor;
             fill: none;
             stroke-width: 2;
             stroke-linecap: round;
@@ -6001,7 +6047,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .selection-summary-compare-btn.icon-only svg {{
             width: 15px;
             height: 15px;
-            stroke: currentAnnotation;
+            stroke: currentColor;
             fill: none;
             stroke-width: 2;
             stroke-linecap: round;
@@ -6285,7 +6331,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .modal-annotation-row-actions svg {{
             width: 14px;
             height: 14px;
-            stroke: currentAnnotation;
+            stroke: currentColor;
             fill: none;
             stroke-width: 2;
             stroke-linecap: round;
@@ -6294,7 +6340,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .modal-annotation-drag-handle svg {{
             width: 14px;
             height: 14px;
-            stroke: currentAnnotation;
+            stroke: currentColor;
             fill: none;
             stroke-width: 2;
             stroke-linecap: round;
@@ -6586,7 +6632,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .umap-btn.icon-only svg {{
             width: 16px;
             height: 16px;
-            stroke: currentAnnotation;
+            stroke: currentColor;
         }}
         .umap-tool-wrap {{
             position: relative;
@@ -6689,7 +6735,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .umap-selection-clear svg {{
             width: 12px;
             height: 12px;
-            stroke: currentAnnotation;
+            stroke: currentColor;
             fill: none;
             stroke-width: 2;
             stroke-linecap: round;
@@ -6901,7 +6947,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 <h1>{title}</h1>
                 <button class="info-trigger" id="info-trigger" type="button" title="Viewer info" aria-expanded="false" aria-controls="info-popover" data-help="Open viewer notes with dataset context, control tips, and usage guidance.">Info</button>
                 <button class="icon-btn" id="app-help-trigger" type="button" title="Button guide" aria-label="Button guide" aria-expanded="false" aria-controls="app-help-popover" data-help="Open a guide to the unique buttons and icon controls in this viewer.">
-                    <svg class="lucide lucide-message-circle-question-mark" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentAnnotation" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <svg class="lucide lucide-message-circle-question-mark" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"></path>
                         <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
                         <path d="M12 17h.01"></path>
@@ -9069,144 +9115,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let tutorialSelectionMarkersClicked = false;
     let tutorialModuleCreateClicked = false;
     let tutorialAnnotationRowSelected = false;
-    const tutorialSteps = [
-        {{
-            title: 'Overview of panels',
-            target: ['#grid-stage', '#grid', '.main-container'],
-            body: [
-                'The main grid displays every exported section. Use it to scan spatial patterns across samples, open a section, and keep the broad dataset context visible.',
-                'The right-side legend and Insights panel are companion panels: one controls visible categories, the other summarizes analyses.'
-            ]
-        }},
-        {{
-            title: 'Annotation selector and categories',
-            target: ['#visual-color-controls', '#color-select', '#legend'],
-            body: [
-                'The annotation selector controls how cells are colored in every section.',
-                'The legend lists the categories for the selected annotation. It also lets you hide, spotlight, rename, recolor, and export category information.'
-            ]
-        }},
-        {{
-            title: 'Section filters',
-            target: ['#filter-bar', '#visual-params-bar'],
-            body: [
-                'Section filters reduce the grid to the samples or metadata values you want to inspect.',
-                'These filters affect the visible panels without changing the exported data stored in the viewer.'
-            ]
-        }},
-        {{
-            title: 'Search and load genes',
-            target: ['#visual-gene-controls', '#gene-input-shell', '#gene-input'],
-            action: () => safeTutorialClick('#default-source-gene'),
-            body: [
-                'Switch to Gene mode and search a gene or feature name to paint expression on the spatial panels.',
-                'Loaded genes can be reused in modal views, comparisons, and gene-focused Insights panels.'
-            ]
-        }},
-        {{
-            title: 'Sidecar gene loading',
-            target: ['#gene-input-shell', '#visual-gene-controls'],
-            condition: () => !!DATA.feature_manifest_url,
-            action: () => safeTutorialClick('#default-source-gene'),
-            body: [
-                'This viewer uses sidecar gene loading. The HTML starts smaller because gene expression vectors live in the sidecar manifest and shard files.',
-                'Open sidecar viewers through HTTP or a .karospace loader so the browser is allowed to fetch additional genes.'
-            ]
-        }},
-        {{
-            title: 'Lasso selection',
-            target: ['#umap-lasso-btn', '#visual-spatial-tools'],
-            body: [
-                'The lasso tool selects cells directly from the spatial view.',
-                'Selections feed the Selection panel, focused views, per-cell comparison, and region annotation workflows.'
-            ]
-        }},
-        {{
-            title: 'Modal zoom view',
-            target: ['#modal .modal-header-tool-group', '#modal-canvas-container', '#modal'],
-            action: () => {{
-                if (!modalSection && Array.isArray(DATA.sections) && DATA.sections.length && typeof openModal === 'function') {{
-                    openModal(DATA.sections[0].id);
-                }}
-            }},
-            body: [
-                'Clicking a section opens the modal view. Here you can zoom, pan, rotate, inspect cells, overlay images, and work with region tools in more detail.',
-                'The modal keeps the high-detail section workflow separate from the overview grid.'
-            ]
-        }},
-        {{
-            title: 'Split compare',
-            target: ['#overview-mode-split', '#split-expression-scale-section', '#visual-params-bar'],
-            action: () => {{
-                if (typeof closeModal === 'function') closeModal();
-                safeTutorialClick('#overview-mode-split');
-            }},
-            body: [
-                'Split mode compares two visual layers side by side across the same spatial coordinates.',
-                'Use it for annotation-versus-annotation, gene-versus-gene, or annotation-versus-gene checks without losing section alignment.'
-            ]
-        }},
-        {{
-            title: 'Insights panel',
-            target: ['#color-panel', '#color-toggle', '#insights-exploration-panel'],
-            action: () => {{
-                if (typeof closeModal === 'function') closeModal();
-                if (typeof openInsightsMode === 'function') openInsightsMode('exploration');
-            }},
-            body: [
-                'Insights contains summary views, gene panels, comparisons, and neighborhood analyses.',
-                'The Visualization menu inside Insights chooses which analysis panel is displayed.'
-            ]
-        }},
-        {{
-            title: 'Pseudobulk DE plots',
-            target: ['#pseudobulk-de-results', '#compare-tab-cell-de-content', '#color-tab-compare-content'],
-            condition: tutorialHasPseudobulk,
-            action: () => openTutorialInsightsPanel('compare', 'cell-de'),
-            body: [
-                'The Simple design pseudobulk section shows category-versus-category DE results from the exported pseudobulk analysis.',
-                'Use the raw table, gene plots, sample diagnostics, and pathway enrichment views to inspect the contrast.'
-            ]
-        }},
-        {{
-            title: 'Neighborhood and interactions',
-            target: ['#color-tab-neighbors-content', '#neighbor-stats', '#interaction-browser'],
-            condition: tutorialHasNeighborhoods,
-            action: () => openTutorialInsightsPanel('neighbors', 'enrichment'),
-            body: [
-                'Neighborhood panels summarize spatial neighbor composition, interaction marker results, and dispersion.',
-                'These panels depend on the neighbor graph and the annotations selected during export.'
-            ]
-        }},
-        {{
-            title: 'Region and region DE',
-            target: ['#modal-annotation-section', '#insights-annotate-toggle', '#compare-tab-regions-content'],
-            action: () => {{
-                if (!modalSection && Array.isArray(DATA.sections) && DATA.sections.length && typeof openModal === 'function') {{
-                    openModal(DATA.sections[0].id);
-                }}
-                if (typeof setInsightsMode === 'function') setInsightsMode('annotate');
-            }},
-            body: [
-                'Regions are user-drawn annotations created from selected cells in the modal workflow.',
-                'After regions exist, the Regions comparison panel can summarize and compare those cell sets, including region-level DE where available.'
-            ]
-        }},
-        {{
-            title: 'Export buttons',
-            target: ['#export-menu-wrap', '#screenshot-menu-wrap', '#save-session-btn'],
-            action: () => {{
-                if (typeof closeModal === 'function') closeModal();
-            }},
-            body: [
-                'Export controls download screenshots, sessions, legends, annotations, tables, plots, and data bundles depending on the active panel.',
-                'Use session export when you want to preserve viewer state such as rotations, selections, hidden categories, and annotations.'
-            ]
-        }}
-    ];
+    let tutorialCurrentChapter = null;
+    let tutorialTaskHighlightTimer = null;
+    let tutorialTaskHighlightStopTimer = null;
+    let tutorialTaskRunTimer = null;
+    let tutorialNextEnableTimer = null;
+    let tutorialNextDisabledStep = null;
+    const TUTORIAL_TASK_NEXT_DISABLE_MS = 4000;
+    const tutorialSteps = [];
 
     function buildDetailedTutorialSteps() {{
-        const step = (title, target, body, extra = {{}}) => ({{ title, target, body, ...extra }});
+        const step = (title, target, body, extra = {{}}) => ({{ storyMode: true, title, target, body, ...extra }});
         const tryIt = 'Next';
         const hasRegionRows = () => !!document.querySelector('.modal-annotation-row');
         const hasPathwayPanel = () => !!document.querySelector('[data-pathway-annotation-select], .cluster-PA-result, .cluster-pa-result');
@@ -9229,7 +9148,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const rawSteps = [
             step('Welcome the KaroSpace', ['#grid-stage', '#grid', '.main-container'], [
                 'KaroSpace is a self-contained spatial viewer. The central grid is where you inspect sections, while the surrounding controls change color, expression, filters, and analysis panels.'
-            ], {{ task: 'Complete actions in this box to finish the tutorial', nextLabel: tryIt, scroll: false }}),
+            ], {{ nextLabel: tryIt, scroll: false }}),
             step('Section filter bar', ['#filter-bar', '#visual-params-bar'], [
                 'The filter bar contains section-level metadata filters when they were exported.',
                 'Filters reduce what is visible in the grid and help you review one condition, slide, patient, or batch at a time.'
@@ -9273,7 +9192,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             step('Annotation selector', ['#visual-color-controls', '#color-select'], [
                 'The annotation selector chooses which cell-level annotation colors every section.',
                 'This is the main starting point for browsing annotations, clusters, or other categorical cell labels.'
-            ], {{ task: 'Open the dropdown and pick another annotation if one is available.', nextLabel: tryIt }}),
+            ], {{ nextLabel: tryIt }}),
             step('Open split mode', ['#overview-mode-split', '#visual-params-bar'], [
                 'Split mode compares two visual layers in the same spatial panels.',
                 'This is the easiest way to compare two annotations, two genes, or annotation versus gene.'
@@ -9365,11 +9284,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'The gene-expression area compares expression in the selected cells against the current reference.',
                 'Bars show mean expression and percent expressed for each displayed gene.'
             ], {{ action: () => {{ openTutorialInsightsPanel('compare', 'selection'); updateSelectionInfo?.(); }}, nextLabel: tryIt }}),
-            step('Pan mode', ['#umap-pan-btn', '#visual-spatial-tools', '#grid'], [
+            step('Pan mode', '#umap-pan-btn', [
                 'Pan mode is the default interaction mode for moving around the spatial view, and navigate without selecting cells.',
                 'It is useful to swap section panels in the central grid.'
-            ], {{ combineTargets: true, nextLabel: tryIt }}),
-            step('Lasso selection mode', ['#umap-lasso-btn', '#grid .section-panel:not(.filtered-out):nth-of-type(2)'], [
+            ], {{ nextLabel: tryIt }}),
+            step('Lasso selection mode', ['#umap-lasso-btn', '#grid .section-panel:not(.filtered-out):nth-of-type(1)'], [
                 'Lasso mode lets you draw around cells directly on the spatial panels to select cells.'
             ], {{ action: () => {{
                 if (typeof closeModal === 'function') closeModal();
@@ -9382,7 +9301,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 updateUMAPLassoButtonState?.();
                 updateSelectionInfo?.();
             }}, task: 'Select the lasso tool and draw a small selection on one visible section to continue.', requiresSelection: true, combineTargets: true, nextLabel: tryIt }}),
-            step('Compare two selections', ['#umap-compare-btn', '#grid .section-panel:not(.filtered-out):nth-of-type(2)'], [
+            step('Compare two selections', ['#umap-compare-btn', '#grid .section-panel:not(.filtered-out):nth-of-type(1)'], [
                 'The compare button starts a Region A / Region B selection workflow.',
                 'Use it to compare two manually selected spatial cell sets before committing to annotations.'
             ], {{ action: () => {{
@@ -9397,11 +9316,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}, task: 'Click the compare button, then draw Region B to continue.', requiresRegionB: true, combineTargets: true, nextLabel: tryIt }}),
             step('Clear Region B selection', ['#umap-compare-btn', '#visual-spatial-tools'], [
                 'When Regions are selected, the compare buttons change to a cross to deselect the cells.'
-            ], {{ action: () => {{ tutorialRegionBClearStepStarted = selectedCellsB.size > 0; updateUMAPCompareButtonState?.(); }}, task: 'Click the cross to deselect Region B and return to a single active selection.', requiresRegionBCleared: true, nextLabel: tryIt }}),
+            ], {{ action: () => {{ tutorialRegionBClearStepStarted = selectedCellsB.size > 0; updateUMAPCompareButtonState?.(); }}, task: 'Click the cross to deselect Region B and return to a single active selection.', requiresRegionBCleared: true, positionTarget: '#visual-spatial-tools', placement: 'above', avoidTarget: '#grid .section-panel:not(.filtered-out):nth-of-type(1)', nextLabel: tryIt }}),
             step('Create region from selection', ['#selection-create-annotation-btn', '#visual-spatial-tools'], [
                 'When cells are selected, you can create a region annotation from them.',
                 'Regions are user-defined spatial cell sets stored in the viewer session.'
-            ], {{ action: () => {{ tutorialAnnotationRowSelected = false; if (typeof setInsightsMode === 'function') setInsightsMode('annotate'); updateSelectionCreateAnnotationButtonState?.(); }}, task: 'If you have a selection, create a small test annotation, by clicking the button, then select it from the Region list.', requiresSelectedAnnotationRow: true, nextLabel: tryIt }}),
+            ], {{ action: () => {{ tutorialAnnotationRowSelected = false; if (typeof setInsightsMode === 'function') setInsightsMode('annotate'); updateSelectionCreateAnnotationButtonState?.(); }}, task: 'If you have a selection, create a small test annotation, by clicking the button, then select it from the Region list.', requiresSelectedAnnotationRow: true, positionTarget: '#visual-spatial-tools', placement: 'above', avoidTarget: '#grid .section-panel:not(.filtered-out):nth-of-type(1)', nextLabel: tryIt }}),
             step('Deselect selected cells', ['#umap-lasso-btn', '#umap-selection-info'], [
                 'Selected cells can be cleared from either the lasso button when it is shown as a cross or from the selection chip.',
                 'Both controls clear the active selected-cell set.'
@@ -9711,10 +9630,597 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         let currentChapter = 'Introduction';
         return rawSteps.map((tutorialStep) => {{
             if (chapterStarts.has(tutorialStep.title)) currentChapter = chapterStarts.get(tutorialStep.title);
-            return {{ ...tutorialStep, chapter: currentChapter }};
+            const chapteredStep = {{ ...tutorialStep, chapter: currentChapter }};
+            if (currentChapter === 'Insights') {{
+                const existingAvoidTargets = Array.isArray(chapteredStep.avoidTarget)
+                    ? chapteredStep.avoidTarget
+                    : (chapteredStep.avoidTarget ? [chapteredStep.avoidTarget] : []);
+                return {{
+                    ...chapteredStep,
+                    placement: chapteredStep.placement || 'left',
+                    avoidTarget: [...existingAvoidTargets, '#color-panel'],
+                }};
+            }}
+            return chapteredStep;
         }});
     }}
-    tutorialSteps.splice(0, tutorialSteps.length, ...buildDetailedTutorialSteps());
+
+    function getTutorialVisibleSection() {{
+        const panels = Array.from(document.querySelectorAll('.section-panel:not(.filtered-out)'));
+        for (const panel of panels) {{
+            const section = sectionById.get(panel.dataset.sectionId || '');
+            if (section && Number(section.x?.length || section.n_cells || 0) > 0) return section;
+        }}
+        return (DATA.sections || []).find(section => Number(section?.x?.length || section?.n_cells || 0) > 0) || null;
+    }}
+
+    function getTutorialSelectionIndices(section, maxCells = 80, offset = 0) {{
+        if (!section) return [];
+        ensureSectionXY(section);
+        const n = Number(section.x?.length || section.n_cells || 0);
+        if (!(n > 0)) return [];
+        const points = [];
+        let xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity;
+        for (let i = 0; i < n; i++) {{
+            const x = Number(section.x?.[i]);
+            const y = Number(section.y?.[i]);
+            if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+            xmin = Math.min(xmin, x);
+            xmax = Math.max(xmax, x);
+            ymin = Math.min(ymin, y);
+            ymax = Math.max(ymax, y);
+        }}
+        if (!Number.isFinite(xmin) || !Number.isFinite(ymin)) {{
+            return Array.from({{ length: Math.min(n, Math.max(3, maxCells)) }}, (_, i) => i);
+        }}
+        const cx = (xmin + xmax) / 2 + (xmax - xmin) * offset;
+        const cy = (ymin + ymax) / 2 + (ymax - ymin) * offset;
+        for (let i = 0; i < n; i++) {{
+            const x = Number(section.x?.[i]);
+            const y = Number(section.y?.[i]);
+            if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+            points.push({{ idx: i, d: (x - cx) * (x - cx) + (y - cy) * (y - cy) }});
+        }}
+        points.sort((a, b) => a.d - b.d);
+        return points.slice(0, Math.min(points.length, Math.max(3, maxCells))).map(point => point.idx);
+    }}
+
+    function getTutorialRandomAreaSelection(section, options = {{}}) {{
+        if (!section) return {{ indices: [], polygon: [] }};
+        ensureSectionXY(section);
+        const n = Number(section.x?.length || section.n_cells || 0);
+        if (!(n > 0)) return {{ indices: [], polygon: [] }};
+        const points = [];
+        let xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity;
+        for (let i = 0; i < n; i++) {{
+            const x = Number(section.x?.[i]);
+            const y = Number(section.y?.[i]);
+            if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+            xmin = Math.min(xmin, x);
+            xmax = Math.max(xmax, x);
+            ymin = Math.min(ymin, y);
+            ymax = Math.max(ymax, y);
+            points.push({{ idx: i, x, y }});
+        }}
+        if (!points.length) return {{ indices: [], polygon: [] }};
+        const spanX = Math.max(xmax - xmin, 1e-6);
+        const spanY = Math.max(ymax - ymin, 1e-6);
+        const baseFraction = Number.isFinite(options.areaFraction)
+            ? Math.max(0.002, Math.min(0.2, Number(options.areaFraction)))
+            : 0.018;
+        const attempts = Math.max(1, Number(options.attempts) || 20);
+        const minCells = Math.max(1, Math.min(points.length, Number(options.minCells) || 1));
+        let bestArea = null;
+        const pickArea = (seed, fraction) => {{
+            const halfW = spanX * fraction * (0.75 + Math.random() * 0.5);
+            const halfH = spanY * fraction * (0.75 + Math.random() * 0.5);
+            const minX = seed.x - halfW;
+            const maxX = seed.x + halfW;
+            const minY = seed.y - halfH;
+            const maxY = seed.y + halfH;
+            const indices = points
+                .filter(point => point.x >= minX && point.x <= maxX && point.y >= minY && point.y <= maxY)
+                .map(point => point.idx);
+            return {{
+                indices,
+                polygon: [
+                    {{ x: minX, y: minY }},
+                    {{ x: maxX, y: minY }},
+                    {{ x: maxX, y: maxY }},
+                    {{ x: minX, y: maxY }},
+                ],
+            }};
+        }};
+        for (let attempt = 0; attempt < attempts; attempt++) {{
+            const seed = points[Math.floor(Math.random() * points.length)];
+            const fraction = baseFraction * (1 + attempt * 0.18);
+            const area = pickArea(seed, fraction);
+            if (!bestArea || area.indices.length > bestArea.indices.length) bestArea = area;
+            if (area.indices.length >= minCells) return area;
+        }}
+        if (bestArea && bestArea.indices.length > 0) return bestArea;
+        const seed = points[Math.floor(Math.random() * points.length)];
+        return seed ? pickArea(seed, baseFraction) : {{ indices: [], polygon: [] }};
+    }}
+
+    function getTutorialUmapPolygon(section, indices) {{
+        if (!section || !Array.isArray(indices) || !indices.length) return [];
+        ensureSectionUMAP(section);
+        const points = [];
+        indices.forEach((idx) => {{
+            const point = getSectionUMAPPoint(section, idx);
+            if (point && Number.isFinite(point.x) && Number.isFinite(point.y)) points.push(point);
+        }});
+        const hull = computeConvexHull(points);
+        if (hull.length >= 3) return hull;
+        return buildPaddedPolygonFromBounds(getBoundsFromPoints(points), {{ x: points.map(p => p.x), y: points.map(p => p.y) }});
+    }}
+
+    function getTutorialRandomUmapAreaSelection(options = {{}}) {{
+        const sections = (typeof getFilteredSections === 'function' ? getFilteredSections() : DATA.sections || [])
+            .filter(section => section);
+        const points = [];
+        let xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity;
+        sections.forEach(section => {{
+            ensureSectionUMAP(section);
+            const n = Math.min(
+                Number(section.umap_x?.length || 0),
+                Number(section.umap_y?.length || 0),
+                Number(section.n_cells || section.umap_x?.length || 0),
+            );
+            for (let i = 0; i < n; i++) {{
+                const point = getSectionUMAPPoint(section, i);
+                if (!point) continue;
+                xmin = Math.min(xmin, point.x);
+                xmax = Math.max(xmax, point.x);
+                ymin = Math.min(ymin, point.y);
+                ymax = Math.max(ymax, point.y);
+                points.push({{ section, idx: i, x: point.x, y: point.y }});
+            }}
+        }});
+        if (!points.length || !Number.isFinite(xmin) || !Number.isFinite(ymin)) {{
+            return {{ cells: new Set(), polygon: [] }};
+        }}
+        const spanX = Math.max(xmax - xmin, 1e-6);
+        const spanY = Math.max(ymax - ymin, 1e-6);
+        const baseFraction = Number.isFinite(options.areaFraction)
+            ? Math.max(0.004, Math.min(0.12, Number(options.areaFraction)))
+            : 0.024;
+        const attempts = Math.max(1, Number(options.attempts) || 28);
+        const minCells = Math.max(1, Math.min(points.length, Number(options.minCells) || 8));
+        let bestArea = null;
+        const pickArea = (seed, fraction) => {{
+            const halfW = spanX * fraction * (0.8 + Math.random() * 0.35);
+            const halfH = spanY * fraction * (0.8 + Math.random() * 0.35);
+            const minX = seed.x - halfW;
+            const maxX = seed.x + halfW;
+            const minY = seed.y - halfH;
+            const maxY = seed.y + halfH;
+            const selected = points.filter(point => (
+                point.x >= minX && point.x <= maxX && point.y >= minY && point.y <= maxY
+            ));
+            return {{
+                cells: new Set(selected.map(point => `${{point.section.id}}:${{point.idx}}`)),
+                polygon: [
+                    {{ x: minX, y: minY }},
+                    {{ x: maxX, y: minY }},
+                    {{ x: maxX, y: maxY }},
+                    {{ x: minX, y: maxY }},
+                ],
+            }};
+        }};
+        for (let attempt = 0; attempt < attempts; attempt++) {{
+            const seed = points[Math.floor(Math.random() * points.length)];
+            const area = pickArea(seed, baseFraction * (1 + attempt * 0.12));
+            if (!bestArea || area.cells.size > bestArea.cells.size) bestArea = area;
+            if (area.cells.size >= minCells) return area;
+        }}
+        return bestArea || {{ cells: new Set(), polygon: [] }};
+    }}
+
+    function setTutorialUmapAreaSelection(options = {{}}) {{
+        const area = getTutorialRandomUmapAreaSelection(options);
+        if (!area.cells.size || area.polygon.length < 3) {{
+            return setTutorialSelection({{ source: 'umap', maxCells: options.maxCells || 24, offset: options.offset || -0.18 }});
+        }}
+        selectedCells = area.cells;
+        markPrimarySelectionChanged?.();
+        clearRegionBSelection?.();
+        selectedAnnotationId = null;
+        selectedLassoPath = area.polygon;
+        selectedCellsFromGridLasso = false;
+        selectedGridLassoSectionId = null;
+        selectedGridLassoPath = [];
+        selectedCellsFromModalLasso = false;
+        selectedModalLassoSectionId = null;
+        selectedModalLassoPath = [];
+        selectedCellsFromAnnotation = false;
+        selectedCellsFromQuery = false;
+        lassoModeB = false;
+        lassoSelectionActive = false;
+        umapPanActive = true;
+        refreshTutorialSelectionState();
+        return selectedCells.size > 0;
+    }}
+
+    function refreshTutorialSelectionState() {{
+        selectionSummaryExpanded = false;
+        selectionSectionSummaryExpanded = false;
+        hideModalGeneDiscoveryPanel?.();
+        openInsightsMode?.('selection');
+        updateUMAPCursor?.();
+        renderUMAP?.();
+        renderAllSections?.();
+        if (modalSection) renderModalSection?.();
+        updateSelectionInfo?.();
+    }}
+
+    function setTutorialSelection(options = {{}}) {{
+        const section = options.section || getTutorialVisibleSection();
+        if (!section) return false;
+        const randomArea = options.randomArea ? getTutorialRandomAreaSelection(section, options) : null;
+        const indices = options.indices || (
+            randomArea
+                ? randomArea.indices
+                : getTutorialSelectionIndices(section, options.maxCells || 80, options.offset || 0)
+        );
+        if (!indices.length) return false;
+        const cells = new Set(indices.map(idx => `${{section.id}}:${{idx}}`));
+        const source = options.source || 'grid';
+        const polygon = randomArea?.polygon?.length ? randomArea.polygon : buildAnnotationPolygonFromSelectedCells(section, indices);
+        if (options.regionB) {{
+            selectedCellsB = cells;
+            selectionWelchRevision += 1;
+            selectionWelchCache.clear();
+            selectionWelchRunRequested = false;
+            selectionWelchButtonHidden = false;
+            selectedAnnotationBId = null;
+            selectedLassoPathB = source === 'umap' ? getTutorialUmapPolygon(section, indices) : [];
+            selectedCellsBFromGridLasso = source === 'grid';
+            selectedGridLassoSectionIdB = source === 'grid' ? section.id : null;
+            selectedGridLassoPathB = source === 'grid' ? polygon : [];
+            selectedCellsBFromModalLasso = source === 'modal';
+            selectedModalLassoSectionIdB = source === 'modal' ? section.id : null;
+            selectedModalLassoPathB = source === 'modal' ? polygon : [];
+            lassoModeB = true;
+            lassoSelectionActive = false;
+            umapPanActive = true;
+            setUMAPCompareHintVisible?.(false);
+            refreshTutorialSelectionState();
+            return true;
+        }}
+        selectedCells = cells;
+        markPrimarySelectionChanged?.();
+        clearRegionBSelection?.();
+        selectedAnnotationId = null;
+        selectedLassoPath = source === 'umap' ? getTutorialUmapPolygon(section, indices) : [];
+        selectedCellsFromGridLasso = source === 'grid';
+        selectedGridLassoSectionId = source === 'grid' ? section.id : null;
+        selectedGridLassoPath = source === 'grid' ? polygon : [];
+        selectedCellsFromModalLasso = source === 'modal';
+        selectedModalLassoSectionId = source === 'modal' ? section.id : null;
+        selectedModalLassoPath = source === 'modal' ? polygon : [];
+        selectedCellsFromAnnotation = false;
+        selectedCellsFromQuery = source === 'query';
+        lassoModeB = false;
+        lassoSelectionActive = false;
+        umapPanActive = true;
+        refreshTutorialSelectionState();
+        return selectedCells.size > 0;
+    }}
+
+    function ensureTutorialSelection(source = 'grid') {{
+        if (selectedCells.size > 0) return true;
+        return setTutorialSelection({{ source }});
+    }}
+
+    function ensureTutorialRegionB() {{
+        ensureTutorialSelection('grid');
+        if (selectedCellsB.size > 0) return true;
+        const sectionId = Array.from(selectedCells)[0]?.split(':')[0];
+        const section = sectionById.get(sectionId) || getTutorialVisibleSection();
+        return setTutorialSelection({{ section, regionB: true, source: 'grid', offset: 0.22 }});
+    }}
+
+    function clearTutorialRegionB() {{
+        ensureTutorialRegionB();
+        tutorialRegionBClearStepStarted = true;
+        clearRegionBSelection?.();
+        lassoModeB = false;
+        lassoSelectionActive = false;
+        updateSelectionInfo?.();
+        updateUMAPCompareButtonState?.();
+        renderAllSections?.();
+        if (umapVisible) renderUMAP?.();
+        if (modalSection) renderModalSection?.();
+    }}
+
+    function ensureTutorialQuerySelection() {{
+        selectionQueryExpanded = true;
+        renderUMAPSelectionQueryPanel?.();
+        const examples = typeof getSelectionQueryExamplePresets === 'function'
+            ? getSelectionQueryExamplePresets()
+            : [];
+        const geneExample = examples.find(query => String(query || '').toLowerCase().includes('gene('));
+        if (!geneExample) {{
+            selectionQueryText = selectionQueryText || `${{currentAnnotation}} is not empty`;
+            selectionQueryStatus = 'Tutorial query selected cells automatically.';
+            selectionQueryStatusKind = 'success';
+            setTutorialSelection({{ source: 'query', maxCells: 60, offset: -0.18 }});
+            selectedCellsFromQuery = selectedCells.size > 0;
+            syncSelectionQueryUi?.();
+            updateSelectionInfo?.();
+            return;
+        }}
+        const exampleButton = Array.from(document.querySelectorAll('[data-selection-query-example]'))
+            .find(btn => String(btn.getAttribute('data-selection-query-example') || '') === geneExample);
+        if (exampleButton && typeof exampleButton.click === 'function') {{
+            exampleButton.click();
+        }} else {{
+            selectionQueryText = geneExample;
+            syncSelectionQueryUi?.();
+        }}
+        if (typeof runSelectionQuery === 'function') {{
+            runSelectionQuery('replace')
+                .then(() => {{
+                    updateTutorialStepGate?.();
+                    scheduleTutorialReposition?.(120);
+                }})
+                .catch(error => console.warn('Tutorial query selection failed', error));
+        }}
+    }}
+
+    function ensureTutorialModalSelection() {{
+        ensureTutorialModalOpen();
+        const section = modalSection || getTutorialVisibleSection();
+        return setTutorialSelection({{ section, source: 'modal', maxCells: 80, offset: -0.1 }});
+    }}
+
+    function ensureTutorialAnnotationCreated(selectRow = false) {{
+        if (!selectedCells.size) ensureTutorialSelection('grid');
+        if (!annotationAlreadyCreatedForCurrentSelection?.()) {{
+            createModalAnnotationFromSelection?.();
+        }}
+        if (selectRow) tutorialAnnotationRowSelected = true;
+        renderModalAnnotationPanel?.();
+        updateSelectionCreateAnnotationButtonState?.();
+        updateSelectionInfo?.();
+    }}
+
+    function ensureTutorialModuleDraft() {{
+        if (typeof openInsightsMode === 'function') openInsightsMode('exploration');
+        if (typeof setInsightsMode === 'function') setInsightsMode('module');
+        if (!geneModuleDraftGenes.length) {{
+            const genes = (typeof getGeneInputFeatureList === 'function' ? getGeneInputFeatureList() : getFeatureDatalistValuesForModality(CURRENT_MODALITY))
+                .map(gene => resolveCanonicalGeneName(gene) || gene)
+                .filter(Boolean);
+            geneModuleDraftGenes = [...new Set(genes)].slice(0, 2);
+        }}
+        renderGeneModulePanel?.();
+        updateTutorialStepGate?.();
+    }}
+
+    function ensureTutorialModuleCreated() {{
+        ensureTutorialModuleDraft();
+        if (geneModuleDraftGenes.length) {{
+            const module = createGeneModule?.('', geneModuleDraftGenes.slice());
+            if (module) {{
+                geneModuleDraftGenes = [];
+                refreshAfterGeneModuleChange?.();
+                renderGeneModulePanel?.();
+            }}
+        }}
+        tutorialModuleCreateClicked = true;
+        updateTutorialStepGate?.();
+    }}
+
+    function ensureTutorialModalityTouched() {{
+        safeTutorialClick('#default-source-gene');
+        const select = document.getElementById('modality-select');
+        const options = Array.from(select?.options || []).map(option => option.value).filter(Boolean);
+        if (select && options.length > 1) {{
+            const original = select.value;
+            const next = options.find(value => value !== original);
+            if (next) {{
+                select.value = next;
+                select.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                select.value = original;
+                select.dispatchEvent(new Event('change', {{ bubbles: true }}));
+            }}
+        }}
+    }}
+
+    function ensureTutorialTrendCategorySelected() {{
+        openTutorialInsightsPanel('overview', 'summary');
+        renderCellTypeTrend?.();
+        const select = document.getElementById('celltype-select');
+        const option = Array.from(select?.options || []).find(item => item.value);
+        if (select && option) {{
+            select.value = option.value;
+            select.dispatchEvent(new Event('change', {{ bubbles: true }}));
+        }}
+    }}
+
+    function ensureTutorialMenuTaskVisible(title) {{
+        const map = {{
+            'Open Overview > Summary': ['overview', 'summary', null],
+            'Open Overview > Sections': ['overview', 'sections', null],
+            'Open Genes > Markers': ['genes', 'de-genes', null],
+            'Open Genes > Spatial': ['genes', 'spatial', null],
+            'Open Genes > Distribution > Per cell': ['genes', 'distribution', 'distribution'],
+            'Open Genes > Distribution > Per sample': ['genes', 'means', 'distribution'],
+            'Open Compare > Per cell > Selections': ['compare', 'selection', 'quick'],
+            'Open Compare > Per cell > Regions': ['compare', 'regions', 'quick'],
+            'Open Compare > Per cell > Annotations': ['compare', 'groups', 'quick'],
+            'Open Compare > Per sample > Simple design': ['compare', 'cell-de', 'precise'],
+            'Open Compare > Relationships': ['compare', 'river', null],
+            'Open Neighbors > Enrichment': ['neighbors', 'enrichment', null],
+            'Open Neighbors > Interactions': ['neighbors', 'interactions', null],
+            'Open Neighbors > Dispersion': ['neighbors', 'dispersion', null],
+        }};
+        const spec = map[title];
+        if (!spec) return false;
+        openTutorialVisualizationLeafMenu(spec[0], spec[1], spec[2]);
+        return true;
+    }}
+
+    function ensureTutorialTaskState(step) {{
+        const title = String(step?.title || '');
+        if (!step?.task) return;
+        if (title === 'Welcome the KaroSpace') {{
+            if (typeof closeModal === 'function') closeModal();
+        }} else if (title === 'Annotation selector') {{
+            const select = document.getElementById('color-select');
+            const next = Array.from(select?.options || []).find(option => option.value && option.value !== select.value);
+            if (next) setTutorialSelectValue('#color-select', next.value);
+        }} else if (title === 'UMAP selection') {{
+            ensureTutorialUMAPOpen?.();
+            setTutorialUmapAreaSelection({{ areaFraction: 0.045, minCells: 18, attempts: 32, maxCells: 40 }});
+        }} else if (title === 'Create region from UMAP selection') {{
+            if (!selectedCells.size) setTutorialUmapAreaSelection({{ areaFraction: 0.045, minCells: 18, attempts: 32, maxCells: 40 }});
+            ensureTutorialAnnotationCreated(false);
+        }} else if (title === 'Select cells for Selection') {{
+            setTutorialSelection({{ source: 'grid', maxCells: 80 }});
+        }} else if (title === 'Lasso selection mode') {{
+            setTutorialSelection({{ source: 'grid', maxCells: 36, offset: -0.26 }});
+        }} else if (title === 'Selection Find More') {{
+            ensureTutorialSelection('grid');
+            tutorialSelectionFindMoreClicked = true;
+            updateSelectionInfo?.();
+        }} else if (title === 'Selection gene markers') {{
+            ensureTutorialSelection('grid');
+            tutorialSelectionMarkersClicked = true;
+            openTutorialInsightsPanel('compare', 'selection');
+            updateSelectionInfo?.();
+        }} else if (title === 'Compare two selections') {{
+            ensureTutorialRegionB();
+        }} else if (title === 'Clear Region B selection') {{
+            clearTutorialRegionB();
+        }} else if (title === 'Create region from selection') {{
+            ensureTutorialSelection('grid');
+            ensureTutorialAnnotationCreated(true);
+            if (typeof setInsightsMode === 'function') setInsightsMode('annotate');
+        }} else if (title === 'Deselect selected cells') {{
+            clearSelection?.();
+        }} else if (title === 'Find cells by query') {{
+            const panel = document.getElementById('umap-selection-query-panel');
+            if (!panel?.classList.contains('visible')) safeTutorialClick('#umap-query-toggle');
+            ensureTutorialQuerySelection();
+        }} else if (title === 'Open a section modal') {{
+            ensureTutorialModalOpen();
+        }} else if (title === 'Select cells for Region') {{
+            ensureTutorialModalSelection();
+            if (typeof setInsightsMode === 'function') setInsightsMode('annotate');
+        }} else if (title === 'Create first Region') {{
+            if (!selectedCells.size) ensureTutorialModalSelection();
+            ensureTutorialAnnotationCreated(false);
+            if (typeof setInsightsMode === 'function') setInsightsMode('annotate');
+        }} else if (title === 'Module gene picker') {{
+            ensureTutorialModuleDraft();
+        }} else if (title === 'Create module') {{
+            ensureTutorialModuleCreated();
+        }} else if (title === 'Modality selector') {{
+            ensureTutorialModalityTouched();
+        }} else if (title === 'Overview Summary per-annotation trend') {{
+            ensureTutorialTrendCategorySelected();
+        }} else if (ensureTutorialMenuTaskVisible(title)) {{
+            // Menu-opening task prepared above; keep the original menu target visible.
+        }} else if (step.requiresInsightsGeneSelected) {{
+            ensureTutorialInsightsGeneSelected();
+        }} else if (title === 'Compare Simple design controls') {{
+            ensureTutorialPseudobulkDEAnnotation();
+            renderPseudobulkDE?.();
+        }}
+    }}
+
+    function applyTutorialTaskPreparers(steps) {{
+        return steps.map((step) => {{
+            if (!step?.task) return step;
+            return {{
+                ...step,
+                tutorialTaskAction: () => ensureTutorialTaskState(step)
+            }};
+        }});
+    }}
+
+    function clearTutorialTaskEffects() {{
+        if (tutorialTaskHighlightTimer) {{
+            window.clearTimeout(tutorialTaskHighlightTimer);
+            tutorialTaskHighlightTimer = null;
+        }}
+        if (tutorialTaskHighlightStopTimer) {{
+            window.clearTimeout(tutorialTaskHighlightStopTimer);
+            tutorialTaskHighlightStopTimer = null;
+        }}
+        if (tutorialTaskRunTimer) {{
+            window.clearTimeout(tutorialTaskRunTimer);
+            tutorialTaskRunTimer = null;
+        }}
+        if (tutorialNextEnableTimer) {{
+            window.clearTimeout(tutorialNextEnableTimer);
+            tutorialNextEnableTimer = null;
+        }}
+        tutorialNextDisabledStep = null;
+        document.querySelector('#tutorial-body .tutorial-task')?.classList.remove('tutorial-task-shine', 'is-loading');
+    }}
+
+    function setTutorialTaskLoading(isLoading) {{
+        const task = document.querySelector('#tutorial-body .tutorial-task');
+        if (!task) return;
+        task.classList.toggle('is-loading', !!isLoading);
+    }}
+
+    function scheduleTutorialTaskEffects(step, renderToken) {{
+        clearTutorialTaskEffects();
+        const scheduledStep = step;
+        const scheduledIndex = tutorialStepIndex;
+        const token = renderToken;
+        const isCurrent = () => (
+            tutorialActive
+            && tutorialRenderToken === token
+            && tutorialStepIndex === scheduledIndex
+            && tutorialSteps[tutorialStepIndex] === scheduledStep
+        );
+        const configuredNextDelayMs = Number(step?.disableNextForMs);
+        const nextDelayMs = Number.isFinite(configuredNextDelayMs)
+            ? configuredNextDelayMs
+            : (step?.task ? TUTORIAL_TASK_NEXT_DISABLE_MS : 0);
+        if (Number.isFinite(nextDelayMs) && nextDelayMs > 0) {{
+            tutorialNextDisabledStep = scheduledStep;
+            updateTutorialStepGate?.();
+            tutorialNextEnableTimer = window.setTimeout(() => {{
+                tutorialNextEnableTimer = null;
+                if (!isCurrent()) return;
+                tutorialNextDisabledStep = null;
+                setTutorialTaskLoading(false);
+                updateTutorialStepGate?.();
+            }}, nextDelayMs);
+        }}
+        if (!step?.task) return;
+        tutorialTaskHighlightTimer = window.setTimeout(() => {{
+            tutorialTaskHighlightTimer = null;
+            if (!isCurrent()) return;
+            document.querySelector('#tutorial-body .tutorial-task')?.classList.add('tutorial-task-shine');
+        }}, 3000);
+        tutorialTaskRunTimer = window.setTimeout(() => {{
+            tutorialTaskRunTimer = null;
+            if (!isCurrent()) return;
+            try {{
+                scheduledStep.tutorialTaskAction?.();
+                updateTutorialStepGate?.();
+                scheduleTutorialReposition?.(120);
+            }} catch (error) {{
+                console.warn('Tutorial task action failed', error);
+            }}
+        }}, 4000);
+        tutorialTaskHighlightStopTimer = window.setTimeout(() => {{
+            tutorialTaskHighlightStopTimer = null;
+            if (!isCurrent()) return;
+            document.querySelector('#tutorial-body .tutorial-task')?.classList.remove('tutorial-task-shine');
+        }}, 5000);
+    }}
+
+    tutorialSteps.splice(0, tutorialSteps.length, ...applyTutorialTaskPreparers(buildDetailedTutorialSteps()));
 
     function getTutorialStorageKey(suffix) {{
         const base = String(TUTORIAL_CONFIG.storage_key || 'karospace:tutorial:v1');
@@ -9736,6 +10242,194 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }} catch (error) {{
             // localStorage can be unavailable for some file/browser privacy modes.
         }}
+    }}
+
+    function resetTutorialViewerStateForChapter(chapter) {{
+        try {{
+            document.getElementById('shortcuts-overlay')?.classList.remove('active');
+            document.getElementById('info-popover')?.classList.remove('active');
+            document.getElementById('app-help-popover')?.classList.remove('active');
+            document.querySelectorAll('.toolbar-popover.open').forEach((panel) => {{
+                panel.classList.remove('open');
+                panel.setAttribute('aria-hidden', 'true');
+            }});
+
+            if (typeof closeModal === 'function') closeModal();
+            if (DATA.has_umap && umapVisible && typeof toggleUMAP === 'function') toggleUMAP();
+
+            selectedCells.clear();
+            clearRegionBSelection?.();
+            lassoModeB = false;
+            lassoSelectionActive = false;
+            umapPanActive = true;
+            modalLassoSelectionActive = false;
+            isDrawingModalLasso = false;
+            modalLassoPath = [];
+            isDrawingLasso = false;
+            lassoPath = [];
+            isDrawingGridLasso = false;
+            gridLassoPath = [];
+            gridLassoSectionId = null;
+            selectedLassoPath = [];
+            selectedCellsFromGridLasso = false;
+            selectedGridLassoSectionId = null;
+            selectedGridLassoPath = [];
+            selectedCellsFromModalLasso = false;
+            selectedModalLassoSectionId = null;
+            selectedModalLassoPath = [];
+            selectedCellsFromAnnotation = false;
+            selectedCellsFromQuery = false;
+            selectedAnnotationId = null;
+            annotationCreatedForSelectionRevision = null;
+            selectionSummaryExpanded = false;
+            selectionSectionSummaryExpanded = false;
+            selectionSummaryMinimized = false;
+            selectionQueryExpanded = false;
+            selectionQueryText = '';
+            selectionQueryStatus = '';
+            selectionQueryStatusKind = 'muted';
+            tutorialRegionBClearStepStarted = false;
+            tutorialSelectionFindMoreClicked = false;
+            tutorialSelectionMarkersClicked = false;
+            tutorialModuleCreateClicked = false;
+            tutorialAnnotationRowSelected = false;
+            tutorialSplitExpressionGenePair = null;
+
+            modalAnnotations = [];
+            collapsedModalAnnotationGroupIds.clear();
+            modalNextAnnotationId = 1;
+            invalidateAnnotationDEState?.(true);
+            annotationDeSourceId = null;
+            annotationDeReferenceId = null;
+            annotationDeQuickRunning = false;
+            annotationDeQuickRunToken += 1;
+            annotationDeQuickResult = null;
+            annotationDeQuickResultKey = '';
+            annotationDeComparisonSummaryHtml = '';
+            annotationDeComparisonSummaryKey = '';
+            annotationDeFullRunToken += 1;
+            annotationDeFullRun = null;
+
+            geneModuleDraftGenes = [];
+            geneModules = [];
+            refreshAfterGeneModuleChange?.();
+            populateGeneInputDatalist?.();
+
+            hiddenCategories.clear();
+            linkedSpotlightEnabled = false;
+            spotlightPinnedCategory = null;
+            spotlightHoverCategory = null;
+            neighborNetworkFocusCategories = null;
+            hoveredNeighborFocus = null;
+            selectedNeighborFocus = null;
+            hoverNeighbors = null;
+            neighborHoverEnabled = false;
+            showGraph = false;
+            setModalHeOptionsVisible?.(false);
+
+            Object.values(activeFilters || {{}}).forEach((set) => {{
+                if (set && typeof set.clear === 'function') set.clear();
+            }});
+            hiddenSections.clear();
+            document.querySelectorAll('.filter-chip').forEach((chip) => {{
+                chip.classList.remove('active');
+                chip.classList.remove('inactive');
+            }});
+            const filterResetBtn = document.getElementById('filter-reset-btn');
+            if (filterResetBtn) filterResetBtn.disabled = true;
+            updateHiddenSectionsUI?.();
+
+            overviewBlendEnabled = false;
+            overviewBlendMix = 0.5;
+            overviewBlendSpec = {{
+                a: {{ kind: 'cell', color: null, category: null, gene: '' }},
+                b: {{ kind: 'cell', color: null, category: null, gene: '' }},
+            }};
+            overviewBlendGeneScaleOverrides = {{ a: null, b: null }};
+            safeTutorialClick('#overview-mode-default');
+
+            if (CURRENT_MODALITY !== DEFAULT_MODALITY_NAME && typeof setActiveModality === 'function') {{
+                setActiveModality(DEFAULT_MODALITY_NAME).catch(error => console.warn('Tutorial modality reset failed', error));
+            }}
+
+            currentGene = null;
+            const geneInput = document.getElementById('gene-input');
+            if (geneInput) geneInput.value = '';
+            setGeneDiscoveryOpen?.(false);
+            geneDiscoveryResults = [];
+            geneDiscoveryActiveIndex = -1;
+            if (currentAnnotation !== DATA.initial_annotation) {{
+                setViewerColorColumn?.(DATA.initial_annotation);
+            }} else {{
+                const colorSelect = document.getElementById('color-select');
+                if (colorSelect) colorSelect.value = currentAnnotation || DATA.initial_annotation || '';
+            }}
+            explorationColorCol = DATA.initial_annotation;
+            celltypeTrendTarget = null;
+
+            document.getElementById('visual-default-controls')?.classList.add('color-mode');
+            document.getElementById('visual-default-controls')?.classList.remove('gene-mode');
+            document.getElementById('default-source-color')?.classList.add('active');
+            document.getElementById('default-source-gene')?.classList.remove('active');
+            document.getElementById('grid-side-toolbar')?.classList.remove('visual-open', 'gene-open', 'neighbor-open', 'he-open');
+            document.getElementById('visual-params-toggle')?.setAttribute('aria-expanded', 'false');
+            document.getElementById('gene-params-toggle')?.setAttribute('aria-expanded', 'false');
+
+            insightsTopLevelTab = 'overview';
+            insightsOverviewTab = 'summary';
+            insightsGenesTab = 'de-genes';
+            insightsCompareTab = 'groups';
+            insightsNeighborsTab = 'enrichment';
+            insightsTreeOpen = false;
+            insightsTreeOpenBranch = null;
+            insightsTreeOpenCompareBranch = null;
+            insightsTreeOpenGenesBranch = null;
+            insightsTreeSelectedLeaf = null;
+            insightsMode = 'exploration';
+            pseudobulkDeGroupby = null;
+            pseudobulkDeSourceCategory = null;
+            pseudobulkDeReferenceCategory = null;
+            pseudobulkDeResultMode = 'raw';
+            groupDeSourceSpecValue = '';
+            groupDeSourceValue = null;
+            groupDeReferenceValue = null;
+            groupDeRestrictSpecValue = '';
+            groupDeRestrictValue = null;
+            groupDeScope = 'all';
+            groupDeQuickRunning = false;
+            groupDeQuickRunToken += 1;
+            groupDeQuickResult = null;
+            groupDeQuickResultKey = '';
+            groupDeFullRunToken += 1;
+            groupDeFullRun = null;
+
+            const colorPanel = document.getElementById('color-panel');
+            const colorToggle = document.getElementById('color-toggle');
+            colorPanel?.classList.add('collapsed');
+            colorPanel?.classList.remove('annotation-panel-open');
+            colorToggle?.classList.remove('active');
+
+            updateExpressionScaleUI?.();
+            updateGeneParamsButtonState?.();
+            updateUMAPCursor?.();
+            updateUMAPLassoButtonState?.();
+            updateUMAPCompareButtonState?.();
+            updateSelectionInfo?.();
+            renderModalAnnotationPanel?.();
+            renderLegend?.('legend');
+            renderLegend?.('modal-legend');
+            applyMetadataFilters?.();
+            renderActiveInsightsPanel?.();
+        }} catch (error) {{
+            console.warn('Tutorial chapter reset failed', chapter, error);
+        }}
+    }}
+
+    function resetTutorialViewerStateIfChapterChanged(step) {{
+        const chapter = String(step?.chapter || 'Tutorial');
+        if (tutorialCurrentChapter === chapter) return;
+        tutorialCurrentChapter = chapter;
+        resetTutorialViewerStateForChapter(chapter);
     }}
 
     function safeTutorialClick(selector) {{
@@ -10143,13 +10837,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return null;
     }}
 
+    function getTutorialSpotlightElementRect(el, step) {{
+        return el.getBoundingClientRect();
+    }}
+
     function positionTutorialCard(target, step = null) {{
         const overlay = document.getElementById('tutorial-overlay');
         const spotlight = document.getElementById('tutorial-spotlight');
         const card = document.getElementById('tutorial-card');
         clearTutorialExtraSpotlights();
         if (!overlay || !spotlight || !card || !target) return;
-        const rect = target.getBoundingClientRect();
+        const rect = getTutorialSpotlightElementRect(target, step);
         const positionEl = step?.positionTarget ? document.querySelector(step.positionTarget) : null;
         const positionRect = positionEl ? positionEl.getBoundingClientRect() : rect;
         const margin = 12;
@@ -10175,7 +10873,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (step?.combineTargets) {{
             const targets = getTutorialVisibleTargetElements(step);
             const rects = targets.map(el => {{
-                const targetRect = el.getBoundingClientRect();
+                const targetRect = getTutorialSpotlightElementRect(el, step);
                 return {{
                     left: Math.max(8, targetRect.left - spotlightPadding),
                     top: Math.max(8, targetRect.top - spotlightPadding),
@@ -10242,6 +10940,27 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 sum + rectIntersectionArea(cardCandidateRect, targetRect)
             ), 0);
         }};
+        const avoidRects = (Array.isArray(step?.avoidTarget) ? step.avoidTarget : [step?.avoidTarget])
+            .flatMap(selector => selector ? Array.from(document.querySelectorAll(selector)) : [])
+            .filter(isTutorialElementVisible)
+            .map(el => {{
+                const avoidRect = el.getBoundingClientRect();
+                return {{
+                    left: avoidRect.left,
+                    top: avoidRect.top,
+                    right: avoidRect.right,
+                    bottom: avoidRect.bottom,
+                }};
+            }});
+        const avoidOverlapArea = (candidate) => {{
+            const cardCandidateRect = cardRectForPosition(candidate);
+            return avoidRects.reduce((sum, avoidRect) => (
+                sum + rectIntersectionArea(cardCandidateRect, avoidRect)
+            ), 0);
+        }};
+        const tutorialCardPlacementScore = (candidate) => (
+            highlightedOverlapArea(candidate) + avoidOverlapArea(candidate) * 4
+        );
         const candidateForPlacement = (placement) => {{
             if (placement === 'below') return {{ left: positionRect.left, top: positionRect.bottom + margin }};
             if (placement === 'above') return {{ left: positionRect.left, top: positionRect.top - cardH - margin }};
@@ -10264,19 +10983,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             {{ left: (window.innerWidth - cardW) / 2, top: window.innerHeight - cardH - margin }},
         ]);
         let bestPosition = null;
-        let bestOverlap = Number.POSITIVE_INFINITY;
+        let bestScore = Number.POSITIVE_INFINITY;
         const placementCandidates = placements.map(placement => candidateForPlacement(placement));
         for (const rawCandidate of [...placementCandidates, ...viewportCandidates()]) {{
             const candidate = clampCardPosition(rawCandidate);
-            const overlap = highlightedOverlapArea(candidate);
-            if (overlap <= 0) {{
+            const score = tutorialCardPlacementScore(candidate);
+            if (score <= 0) {{
                 bestPosition = candidate;
-                bestOverlap = 0;
+                bestScore = 0;
                 break;
             }}
-            if (overlap < bestOverlap) {{
+            if (score < bestScore) {{
                 bestPosition = candidate;
-                bestOverlap = overlap;
+                bestScore = score;
             }}
         }}
         let left = bestPosition ? bestPosition.left : margin;
@@ -10288,9 +11007,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 clampCardPosition({{ left: margin, top: positionRect.top - cardH - margin }}),
             ];
             const mobileBest = mobileCandidates.reduce((best, candidate) => (
-                highlightedOverlapArea(candidate) < highlightedOverlapArea(best) ? candidate : best
+                tutorialCardPlacementScore(candidate) < tutorialCardPlacementScore(best) ? candidate : best
             ), mobileCandidates[0]);
-            if (highlightedOverlapArea(mobileBest) <= highlightedOverlapArea(currentPosition)) {{
+            if (tutorialCardPlacementScore(mobileBest) <= tutorialCardPlacementScore(currentPosition)) {{
                 left = mobileBest.left;
                 top = mobileBest.top;
             }}
@@ -10365,6 +11084,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function tutorialStepGateSatisfied(step) {{
         if (!step) return true;
+        if (step.storyMode) return true;
         const insightsLeafTarget = getTutorialInsightsLeafTarget(step);
         if (insightsLeafTarget) {{
             return insightsTreeSelectedLeaf?.topLevel === insightsLeafTarget.topLevel
@@ -10386,19 +11106,26 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return true;
     }}
 
+    function tutorialStepNextDelayActive(step) {{
+        return !!(step && tutorialNextDisabledStep && tutorialNextDisabledStep === step);
+    }}
+
     function updateTutorialStepGate() {{
         if (!tutorialActive) return;
         const next = document.getElementById('tutorial-next');
         if (!next) return;
         const step = tutorialSteps[tutorialStepIndex];
-        const blocked = !tutorialStepGateSatisfied(step);
+        const delayBlocked = tutorialStepNextDelayActive(step);
+        const blocked = delayBlocked || !tutorialStepGateSatisfied(step);
         if (tutorialAutoAdvanceTimer) {{
             window.clearTimeout(tutorialAutoAdvanceTimer);
             tutorialAutoAdvanceTimer = null;
         }}
-        next.disabled = false;
+        next.disabled = delayBlocked;
         next.setAttribute('aria-disabled', blocked ? 'true' : 'false');
-        if (blocked && step?.requiresSelection) next.title = 'Draw a cell selection to continue';
+        setTutorialTaskLoading(delayBlocked);
+        if (delayBlocked) next.title = 'Wait a moment before continuing';
+        else if (blocked && step?.requiresSelection) next.title = 'Draw a cell selection to continue';
         else if (blocked && step?.requiresRegionB) next.title = 'Select Region B to continue';
         else if (blocked && step?.requiresRegionBCleared) next.title = 'Click the blue cross to clear Region B';
         else if (blocked && step?.requiresAnnotationCreated) next.title = 'Create an annotation from the selection to continue';
@@ -10413,7 +11140,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         else if (blocked && step?.requiresInsightsGeneSelected) next.title = 'Enter or select a gene to continue';
         else if (blocked && getTutorialInsightsLeafTarget(step)) next.title = 'Click the highlighted menu option to continue';
         else next.removeAttribute('title');
-        if (!blocked && step?.autoNextWhenGateSatisfied) {{
+        if (!blocked && step?.autoNextWhenGateSatisfied && !step?.storyMode) {{
             const stepAtSchedule = step;
             const indexAtSchedule = tutorialStepIndex;
             tutorialAutoAdvanceTimer = window.setTimeout(() => {{
@@ -10430,6 +11157,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!tutorialActive || typeof predicate !== 'function') return;
         const stepAtSchedule = tutorialSteps[tutorialStepIndex];
         const indexAtSchedule = tutorialStepIndex;
+        if (stepAtSchedule?.storyMode) return;
         if (!predicate(stepAtSchedule) || !tutorialStepGateSatisfied(stepAtSchedule)) return;
         window.setTimeout(() => {{
             if (!tutorialActive) return;
@@ -10451,7 +11179,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}, 120);
     }}
 
-    function renderTutorialStep(target, step, displayIndex) {{
+    function renderTutorialStep(target, step, displayIndex, renderToken = tutorialRenderToken) {{
         const overlay = document.getElementById('tutorial-overlay');
         const title = document.getElementById('tutorial-title');
         const body = document.getElementById('tutorial-body');
@@ -10498,13 +11226,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             chapterSelect.value = chapter.chapter;
         }}
         body.innerHTML = (step.body || []).map(text => '<p>' + escapeHtml(text) + '</p>').join('')
-            + (step.task ? '<div class="tutorial-task">' + escapeHtml(step.task) + '</div>' : '');
+            + (step.task
+                ? '<div class="tutorial-task" aria-live="polite"><span class="tutorial-task-text">' + escapeHtml(step.task)
+                    + '</span></div>'
+                : '');
         ensureFormFieldNames(overlay);
         prev.disabled = displayIndex <= 0;
-        next.textContent = displayIndex >= total - 1 ? 'Finish' : 'Next';
+        next.textContent = step.nextLabel || (displayIndex >= total - 1 ? 'Finish' : 'Next');
         next.setAttribute('aria-disabled', 'false');
         updateTutorialStepGate();
         positionTutorialCard(target, step);
+        scheduleTutorialTaskEffects(step, renderToken);
     }}
 
     function getAvailableTutorialSteps() {{
@@ -10525,6 +11257,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function showTutorialStep(index, direction = 1, attempts = 0, scopeChapter = null, renderToken = null) {{
         if (!tutorialActive) return;
         const activeRenderToken = renderToken == null ? ++tutorialRenderToken : renderToken;
+        clearTutorialTaskEffects();
         const attemptLimit = scopeChapter
             ? tutorialSteps.filter(step => (step.chapter || 'Tutorial') === scopeChapter).length
             : tutorialSteps.length;
@@ -10547,6 +11280,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             showTutorialStep(nextIndex, direction, attempts + 1, scopeChapter, activeRenderToken);
             return;
         }}
+        resetTutorialViewerStateIfChapterChanged(step);
         try {{
             prepareTutorialStep(step);
             step.action?.();
@@ -10573,7 +11307,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             window.setTimeout(() => {{
                 if (!tutorialActive || activeRenderToken !== tutorialRenderToken) return;
                 tutorialStepIndex = index;
-                renderTutorialStep(target, step, getTutorialDisplayIndex(index));
+                renderTutorialStep(target, step, getTutorialDisplayIndex(index), activeRenderToken);
             }}, scrollDelay);
         }}, Number.isFinite(step.prepareDelay) ? step.prepareDelay : 80);
     }}
@@ -10612,10 +11346,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             document.getElementById('app-help-popover')?.classList.remove('active');
             tutorialActive = true;
             tutorialStepIndex = 0;
+            tutorialCurrentChapter = null;
             showTutorialStep(0, 1);
         }} else {{
             tutorialActive = false;
             tutorialRenderToken++;
+            tutorialCurrentChapter = null;
+            clearTutorialTaskEffects();
             if (tutorialAutoAdvanceTimer) {{
                 window.clearTimeout(tutorialAutoAdvanceTimer);
                 tutorialAutoAdvanceTimer = null;
@@ -10633,6 +11370,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         document.getElementById('tutorial-close')?.addEventListener('click', () => setTutorialOpen(false, false));
         document.getElementById('tutorial-prev')?.addEventListener('click', () => stepTutorial(-1));
         document.getElementById('tutorial-next')?.addEventListener('click', () => {{
+            if (tutorialStepNextDelayActive(tutorialSteps[tutorialStepIndex])) return;
             if (!tutorialStepGateSatisfied(tutorialSteps[tutorialStepIndex])) return;
             const available = getAvailableTutorialSteps();
             const step = tutorialSteps[tutorialStepIndex];
@@ -10654,6 +11392,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
         }});
         document.getElementById('tutorial-chapter-select')?.addEventListener('change', (event) => {{
+            tutorialCurrentChapter = null;
             jumpTutorialToChapter(String(event.target.value || ''));
         }});
         document.addEventListener('click', () => {{
@@ -10669,6 +11408,25 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             if (isEditableKeyboardTarget(event.target)) return;
 
             const key = event.key;
+            if (tutorialActive) {{
+                if (key === 'Escape') {{
+                    event.preventDefault();
+                    setTutorialOpen(false, false);
+                    return;
+                }}
+                if (key === 'Enter' || key === 'ArrowRight' || key === 'PageDown') {{
+                    event.preventDefault();
+                    document.getElementById('tutorial-next')?.click();
+                    return;
+                }}
+                if (key === 'ArrowLeft' || key === 'PageUp') {{
+                    event.preventDefault();
+                    document.getElementById('tutorial-prev')?.click();
+                    return;
+                }}
+                event.preventDefault();
+                return;
+            }}
             const isSpaceKey = event.code === 'Space' || key === ' ' || key === 'Spacebar';
 
             if (isSpaceKey) {{
@@ -20599,9 +21357,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     // Clear selection
     function clearSelection() {{
-        const advanceDeselectTutorialIndex = (
-            tutorialActive && tutorialSteps[tutorialStepIndex]?.title === 'Deselect selected cells'
-        ) ? tutorialStepIndex : null;
         selectedCells.clear();
         clearRegionBSelection();
         lassoModeB = false;
@@ -20636,14 +21391,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         renderUMAP();
         renderAllSections();
         if (modalSection) renderModalSection();
-        if (advanceDeselectTutorialIndex !== null) {{
-            window.setTimeout(() => {{
-                if (!tutorialActive) return;
-                if (tutorialStepIndex !== advanceDeselectTutorialIndex) return;
-                if (selectedCells.size > 0 || selectedCellsB.size > 0) return;
-                stepTutorial(1);
-            }}, 0);
-        }}
     }}
 
     function clampUMAPPanelSize(size) {{
@@ -23244,7 +23991,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     </div>` : ''}}
                     <div class="annotation-de-action-buttons">
                         <button class="legend-btn icon-only" id="annotation-de-swap" type="button" title="Swap Region A and Region B" aria-label="Swap Region A and Region B">
-                            <svg class="lucide lucide-arrow-left-right" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentAnnotation" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3 4 7l4 4"></path><path d="M4 7h16"></path><path d="m16 21 4-4-4-4"></path><path d="M20 17H4"></path></svg>
+                            <svg class="lucide lucide-arrow-left-right" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3 4 7l4 4"></path><path d="M4 7h16"></path><path d="m16 21 4-4-4-4"></path><path d="M20 17H4"></path></svg>
                         </button>
                         ${{runButtonHtml}}
                     </div>
@@ -24059,7 +24806,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                             </div>
                             <div style="display: flex; justify-content: flex-end; gap: 6px;">
                                 <button class="legend-btn icon-only" id="river-swap" type="button" title="Swap river plot direction" aria-label="Swap river plot direction">
-                                    <svg class="lucide lucide-arrow-left-right" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentAnnotation" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3 4 7l4 4"></path><path d="M4 7h16"></path><path d="m16 21 4-4-4-4"></path><path d="M20 17H4"></path></svg>
+                                    <svg class="lucide lucide-arrow-left-right" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3 4 7l4 4"></path><path d="M4 7h16"></path><path d="m16 21 4-4-4-4"></path><path d="M20 17H4"></path></svg>
                                 </button>
                                 <button class="icon-btn" id="river-export" type="button" title="Export river correspondence CSV" aria-label="Export river correspondence CSV">${{LEGEND_EXPORT_ICON}}</button>
                             </div>
@@ -25135,10 +25882,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const mode = getGeneSubtabView(subtab);
         return `
             <button class="legend-btn icon-only ${{mode === 'list' ? 'active' : ''}}" data-gene-subtab-view="list" type="button" title="Show list" aria-label="Show list" aria-pressed="${{mode === 'list'}}">
-                <svg class="lucide lucide-list-sort-descending" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentAnnotation" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 12H3"></path><path d="M3 5h18"></path><path d="M9 19H3"></path></svg>
+                <svg class="lucide lucide-list-sort-descending" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 12H3"></path><path d="M3 5h18"></path><path d="M9 19H3"></path></svg>
             </button>
             <button class="legend-btn icon-only ${{mode === 'graph' ? 'active' : ''}}" data-gene-subtab-view="graph" type="button" title="Show graph" aria-label="Show graph" aria-pressed="${{mode === 'graph'}}">
-                <svg class="lucide lucide-chart-candlestick" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentAnnotation" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5v4"></path><rect x="7" y="9" width="4" height="6" rx="1"></rect><path d="M9 15v2"></path><path d="M17 3v2"></path><rect x="15" y="5" width="4" height="8" rx="1"></rect><path d="M17 13v3"></path><path d="M3 3v16a2 2 0 0 0 2 2h16"></path></svg>
+                <svg class="lucide lucide-chart-candlestick" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5v4"></path><rect x="7" y="9" width="4" height="6" rx="1"></rect><path d="M9 15v2"></path><path d="M17 3v2"></path><rect x="15" y="5" width="4" height="8" rx="1"></rect><path d="M17 13v3"></path><path d="M3 3v16a2 2 0 0 0 2 2h16"></path></svg>
             </button>
         `;
     }}
@@ -27435,10 +28182,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return `
             <div class="gene-subtab-view-toggle" role="group" aria-label="${{escapeHtml(method.toUpperCase())}} pathway view">
                 <button type="button" class="legend-btn icon-only${{plotActive ? ' active' : ''}}" data-pathway-view-mode="plot" title="Show plot" aria-label="Show plot" aria-pressed="${{plotActive}}">
-                    <svg class="lucide lucide-chart-candlestick" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentAnnotation" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5v4"></path><rect x="7" y="9" width="4" height="6" rx="1"></rect><path d="M9 15v2"></path><path d="M17 3v2"></path><rect x="15" y="5" width="4" height="8" rx="1"></rect><path d="M17 13v3"></path><path d="M3 3v16a2 2 0 0 0 2 2h16"></path></svg>
+                    <svg class="lucide lucide-chart-candlestick" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5v4"></path><rect x="7" y="9" width="4" height="6" rx="1"></rect><path d="M9 15v2"></path><path d="M17 3v2"></path><rect x="15" y="5" width="4" height="8" rx="1"></rect><path d="M17 13v3"></path><path d="M3 3v16a2 2 0 0 0 2 2h16"></path></svg>
                 </button>
                 <button type="button" class="legend-btn icon-only${{!plotActive ? ' active' : ''}}" data-pathway-view-mode="table" title="Show raw table" aria-label="Show raw table" aria-pressed="${{!plotActive}}">
-                    <svg class="lucide lucide-list-sort-descending" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentAnnotation" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 12H3"></path><path d="M3 5h18"></path><path d="M9 19H3"></path></svg>
+                    <svg class="lucide lucide-list-sort-descending" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 12H3"></path><path d="M3 5h18"></path><path d="M9 19H3"></path></svg>
                 </button>
             </div>
         `;
@@ -28078,7 +28825,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 </div>
                 <div class="annotation-de-action-row">
                     <div class="annotation-de-action-buttons">
-                        <button class="legend-btn icon-only" id="pseudobulk-de-swap" type="button" title="Swap Annotation A and Annotation B" aria-label="Swap Annotation A and Annotation B"><svg class="lucide lucide-arrow-left-right" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentAnnotation" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3 4 7l4 4"></path><path d="M4 7h16"></path><path d="m16 21 4-4-4-4"></path><path d="M20 17H4"></path></svg></button>
+                        <button class="legend-btn icon-only" id="pseudobulk-de-swap" type="button" title="Swap Annotation A and Annotation B" aria-label="Swap Annotation A and Annotation B"><svg class="lucide lucide-arrow-left-right" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3 4 7l4 4"></path><path d="M4 7h16"></path><path d="m16 21 4-4-4-4"></path><path d="M20 17H4"></path></svg></button>
                     </div>
                 </div>
             </div>
@@ -29219,7 +29966,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 </div>
                 <div class="annotation-de-action-row">
                     ${{hasCompletedCalculation ? `<div class="selection-summary-welch-controls"><div class="selection-summary-welch-control-row"><label>Top N per direction</label><input id="group-de-topn" type="number" min="1" max="20" step="1" value="${{groupDeTopN}}"></div><div class="selection-summary-welch-control-row"><label>Min expressed %</label><input id="group-de-min-pct" type="range" min="0" max="100" step="1" value="${{groupDeMinPct}}"><output id="group-de-min-pct-value">${{groupDeMinPct}}%</output></div></div>` : ''}}
-                    <div class="annotation-de-action-buttons"><button class="legend-btn icon-only" id="group-de-swap" type="button" title="Swap Annotation A and Annotation B" aria-label="Swap Annotation A and Annotation B"><svg class="lucide lucide-arrow-left-right" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentAnnotation" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3 4 7l4 4"></path><path d="M4 7h16"></path><path d="m16 21 4-4-4-4"></path><path d="M20 17H4"></path></svg></button>${{runButtonHtml}}</div>
+                    <div class="annotation-de-action-buttons"><button class="legend-btn icon-only" id="group-de-swap" type="button" title="Swap Annotation A and Annotation B" aria-label="Swap Annotation A and Annotation B"><svg class="lucide lucide-arrow-left-right" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3 4 7l4 4"></path><path d="M4 7h16"></path><path d="m16 21 4-4-4-4"></path><path d="M20 17H4"></path></svg></button>${{runButtonHtml}}</div>
                 </div>
             </div>`;
         let html = downsampleWarningHtml + controlsHtml;
@@ -33393,8 +34140,8 @@ def export_to_html(
     viewer_info_html : str, optional
         HTML string shown in the Info tab of the Insights panel.
     tutorial : bool
-        In development. Embed the guided HTML tutorial and show an in-page
-        control to start it.
+        In development. Embed the static Story Mode HTML tutorial and show an
+        in-page control to start it.
     cell_annotations : list, optional
         Additional cell obs columns to include for annotation switching.
     features : list, optional
@@ -33724,7 +34471,7 @@ def export_to_html(
         f"neighbor stats columns={', '.join(neighbor_stats_annotations or []) or 'none'}."
     )
     if bool(tutorial):
-        log_detail("Embedding guided tutorial; output adds the graduation-cap tutorial launcher.")
+        log_detail("Embedding Story Mode tutorial; output adds the graduation-cap tutorial launcher.")
     if feature_storage == "sidecar":
         log_detail("Feature storage=sidecar; no feature vectors will be embedded in the HTML.")
 
@@ -34125,17 +34872,17 @@ def export_to_html(
     if bool(tutorial):
         tutorial_trigger_html = (
             '<button class="icon-btn" id="tutorial-trigger" type="button" '
-            'title="Start guided tutorial" aria-label="Start guided tutorial" '
-            'data-help="Start the guided walkthrough of the main KaroSpace viewer functions.">'
+            'title="Start Story Mode tutorial" aria-label="Start Story Mode tutorial" '
+            'data-help="Start the static Story Mode walkthrough of the main KaroSpace viewer functions.">'
             '<svg class="lucide lucide-graduation-cap" viewBox="0 0 24 24" aria-hidden="true" '
-            'fill="none" stroke="currentAnnotation" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+            'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
             '<path d="M21.42 10.922a1 1 0 0 0-.019-1.838L12.83 5.18a2 2 0 0 0-1.66 0L2.6 9.08a1 1 0 0 0 0 1.832l8.57 3.908a2 2 0 0 0 1.66 0z"></path>'
             '<path d="M22 10v6"></path>'
             '<path d="M6 12.5V16a6 3 0 0 0 12 0v-3.5"></path>'
             '</svg>'
             '</button>'
             '<div class="tutorial-start-info">'
-            '← Click to start the <strong>Tutorial</strong>'
+            '← Click to start <strong>Tutorial</strong>'
             '</div>'
         )
 

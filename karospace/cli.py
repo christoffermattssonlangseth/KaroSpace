@@ -233,7 +233,7 @@ def _run_export_cli(argv=None):
         "--tutorial",
         action="store_true",
         help=(
-            "(in development) Embed the interactive guided tutorial and show "
+            "(in development) Embed the static Story Mode tutorial and show "
             "an in-page control to start it."
         ),
     )

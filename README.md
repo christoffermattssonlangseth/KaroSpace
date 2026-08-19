@@ -277,7 +277,7 @@ karospace your_data.h5ad \
 | `--outlineby` | Metadata column used to paint panel outlines; use `None` to disable | None |
 | `--viewer-info-html` | HTML string shown in the viewer Info tab | default info |
 | `--viewer-info-html-file` | Path to an HTML fragment shown in the viewer Info tab | empty |
-| `--tutorial` | (in development) Embed the detailed guided HTML tutorial; users start it from the graduation-cap control and are asked to click, tweak, search, and inspect controls | off |
+| `--tutorial` | (in development) Embed the static Story Mode HTML tutorial; users start it from the graduation-cap control and move through prepared viewer states with Next/Back | off |
 | `--feature-encoding` | Gene vector encoding (`auto`, `dense`, `sparse`) | `auto` |
 | `--feature-value-encoding` | Sidecar/package gene value encoding for binary shards (`uint16`, `uint8`) | `uint16` |
 | `--feature-storage` | Feature storage mode: `embedded` stores requested/top DE expression vectors in the HTML; `sidecar` stores all gene expression vectors outside the HTML | `embedded` |
