@@ -1884,17 +1884,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             color: var(--bar-control-active-text);
             box-shadow: 0 1px 4px rgba(0, 0, 0, 0.14);
         }}
-        .visual-color-controls,
+        .visual-annotation-controls,
         .visual-gene-controls {{
             display: inline-flex;
             align-items: center;
             gap: 10px;
             flex-wrap: wrap;
         }}
-        .visual-default-controls.color-mode .visual-gene-controls {{
+        .visual-default-controls.annotation-mode .visual-gene-controls {{
             display: none;
         }}
-        .visual-default-controls.gene-mode .visual-color-controls {{
+        .visual-default-controls.gene-mode .visual-annotation-controls {{
             display: none;
         }}
         .visual-params-bar.split-mode .visual-default-controls {{
@@ -1908,7 +1908,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         .visual-nav-actions .umap-toggle,
         .visual-nav-actions .legend-toggle,
-        .visual-nav-actions .color-toggle {{
+        .visual-nav-actions .insights-toggle {{
             display: inline-flex;
             align-items: center;
             gap: 6px;
@@ -1919,14 +1919,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         .visual-nav-actions .umap-toggle:hover,
         .visual-nav-actions .legend-toggle:hover,
-        .visual-nav-actions .color-toggle:hover {{
+        .visual-nav-actions .insights-toggle:hover {{
             background: var(--bar-control-hover-bg);
             border-color: var(--bar-control-border);
             color: var(--bar-text);
         }}
         .visual-nav-actions .umap-toggle.active,
         .visual-nav-actions .legend-toggle.active,
-        .visual-nav-actions .color-toggle.active {{
+        .visual-nav-actions .insights-toggle.active {{
             background: var(--bar-control-active-bg);
             border-color: var(--bar-control-active-bg);
             color: var(--bar-control-active-text);
@@ -2731,7 +2731,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         .legend-resizer.hidden {{ display: none; }}
         body.legend-resizing {{ cursor: col-resize; user-select: none; }}
-        .color-panel {{
+        .insights-panel {{
             width: 452px;
             flex-shrink: 0;
             padding: 12px;
@@ -2746,13 +2746,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             max-height: calc(100vh - var(--sticky-stack-height));
             transition: background 0.3s, border-color 0.3s, width 0.3s, padding 0.3s;
         }}
-        .color-panel.collapsed {{
+        .insights-panel.collapsed {{
             width: 0;
             padding: 0;
             overflow: hidden;
             border-left: none;
         }}
-        .color-panel-header {{
+        .insights-panel-header {{
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -2760,7 +2760,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             padding-bottom: 0;
             border-bottom: 0;
         }}
-        .color-panel-title {{ font-size: 13px; font-weight: 600; }}
+        .insights-panel-title {{ font-size: 13px; font-weight: 600; }}
         .insights-mode-switch {{
             display: inline-flex;
             align-items: center;
@@ -2786,20 +2786,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             color: var(--accent-on-fill);
             box-shadow: 0 1px 4px rgba(0, 0, 0, 0.14);
         }}
-        .color-panel-mode {{
+        .insights-panel-mode {{
             display: none;
         }}
-        .color-panel-mode.active {{
+        .insights-panel-mode.active {{
             display: block;
         }}
-        .color-panel-section {{
+        .insights-panel-section {{
             margin-bottom: 10px;
             display: flex;
             flex-direction: column;
             gap: 6px;
         }}
-        .color-panel-section label {{ font-size: 10px; color: var(--muted-color); }}
-        .color-search {{
+        .insights-panel-section label {{ font-size: 10px; color: var(--muted-color); }}
+        .insights-search {{
             padding: 6px 8px;
             border: 1px solid var(--border-color);
             border-radius: 4px;
@@ -2807,7 +2807,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             color: var(--text-color);
             font-size: 12px;
         }}
-        .color-tabs {{
+        .insights-tabs {{
             display: flex;
             gap: 6px;
             flex-wrap: wrap;
@@ -2922,19 +2922,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             min-height: 29px;
             font-weight: 500;
         }}
-        #insights-exploration-panel > .color-tab-content.active {{
+        #insights-exploration-panel > .insights-tab-content.active {{
             animation: insightsPanelReveal 180ms ease both;
         }}
-        #insights-exploration-panel .color-tab:hover {{
+        #insights-exploration-panel .insights-tab:hover {{
             transform: translateY(-1px);
         }}
-        #insights-exploration-panel .color-tab {{
+        #insights-exploration-panel .insights-tab {{
             transition: background 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
         }}
-        #insights-exploration-panel .color-tab.active {{
+        #insights-exploration-panel .insights-tab.active {{
             box-shadow: 0 2px 5px color-mix(in srgb, var(--accent-strong) 22%, transparent);
         }}
-        #insights-exploration-panel .insights-tree .color-tab:hover {{
+        #insights-exploration-panel .insights-tree .insights-tab:hover {{
             transform: none;
         }}
         @keyframes insightsPanelReveal {{
@@ -2951,7 +2951,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 transition-duration: 0.01ms !important;
             }}
         }}
-        .color-tab {{
+        .insights-tab {{
             min-width: 0;
             padding: 4px 6px;
             font-size: 10px;
@@ -2966,17 +2966,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             cursor: pointer;
             transition: background 0.2s, border-color 0.2s, color 0.2s;
         }}
-        .color-tab.active {{
+        .insights-tab.active {{
             background: var(--accent-fill);
             color: var(--accent-on-fill);
             border-color: var(--accent-border);
         }}
-        .color-tab-content {{
+        .insights-tab-content {{
             display: none;
             flex-direction: column;
             gap: 8px;
         }}
-        .color-tab-content.active {{
+        .insights-tab-content.active {{
             display: flex;
         }}
         .scale-controls {{
@@ -3443,7 +3443,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             overflow-y: auto;
             padding-right: 2px;
         }}
-        .color-aggregation.neighbor-stats-scrollable {{
+        .insights-aggregation.neighbor-stats-scrollable {{
             max-height: 60vh;
             overflow-y: auto;
             overflow-x: hidden;
@@ -3452,7 +3452,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         /* The container is a flex column; without this the cell-type blocks
            shrink to cram into max-height (and clip via their own overflow:hidden)
            instead of overflowing and scrolling. */
-        .color-aggregation.neighbor-stats-scrollable > .agg-group {{
+        .insights-aggregation.neighbor-stats-scrollable > .agg-group {{
             flex-shrink: 0;
         }}
         .neighbor-warning {{
@@ -3481,14 +3481,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             color: var(--accent-on-fill);
             border-color: var(--accent-border);
         }}
-        .color-aggregation {{
+        .insights-aggregation {{
             display: flex;
             flex-direction: column;
             gap: 8px;
             min-width: 0;
             font-size: 11px;
         }}
-        .color-aggregation.collapsed {{
+        .insights-aggregation.collapsed {{
             display: none;
         }}
         .marker-genes {{
@@ -3719,29 +3719,29 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             overflow-wrap: anywhere;
             word-break: break-word;
         }}
-        .annotation-de-action-row {{
+        .comparison-de-action-row {{
             display: flex;
             align-items: flex-start;
             justify-content: space-between;
             gap: 6px;
         }}
-        .annotation-de-action-buttons {{
+        .comparison-de-action-buttons {{
             display: flex;
             align-items: flex-start;
             gap: 6px;
             margin-left: auto;
         }}
-        .annotation-de-action-row .selection-summary-welch-controls {{
+        .comparison-de-action-row .selection-summary-welch-controls {{
             margin-top: 0;
         }}
-        .annotation-de-card-title {{ align-items: center; }}
-        .annotation-de-card-title-main {{
+        .comparison-de-card-title {{ align-items: center; }}
+        .comparison-de-card-title-main {{
             display: flex;
             align-items: center;
             gap: 6px;
             min-width: 0;
         }}
-        .annotation-de-title-stats {{
+        .comparison-de-title-stats {{
             display: inline-flex;
             align-items: center;
             gap: 6px;
@@ -3756,7 +3756,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             font-variant-numeric: tabular-nums;
             white-space: nowrap;
         }}
-        .annotation-de-region-chip {{
+        .comparison-de-metric-chip {{
             display: grid;
             grid-template-columns: auto 1fr;
             gap: 2px 7px;
@@ -3769,7 +3769,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             line-height: 1.2;
             font-variant-numeric: tabular-nums;
         }}
-        .annotation-de-region-chip strong {{ font-size: 10px; }}
+        .comparison-de-metric-chip strong {{ font-size: 10px; }}
         .group-volcano-toolbar {{
             display: flex;
             justify-content: flex-end;
@@ -6062,15 +6062,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .selection-query-status.working {{ color: var(--accent-text); }}
         .selection-query-status.success {{ color: var(--success-text); }}
         .selection-query-status.error {{ color: var(--danger-text); }}
-        .annot-comp-row {{ margin-bottom: 8px; }}
-        .annot-comp-header {{ display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; margin-bottom: 3px; }}
-        .annot-comp-dot {{ width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0; }}
-        .annot-comp-count {{ color: var(--muted-color); font-weight: normal; margin-left: auto; }}
-        .annot-comp-bar-track {{ display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--border-color); }}
-        .annot-comp-segment {{ height: 100%; }}
-        .annot-comp-legend {{ display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; font-size: 10px; }}
-        .annot-comp-legend-item {{ display: flex; align-items: center; gap: 3px; color: var(--text-color); }}
-        .annot-comp-legend-toggle {{
+        .composition-comparison-row {{ margin-bottom: 8px; }}
+        .composition-comparison-header {{ display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; margin-bottom: 3px; }}
+        .composition-comparison-dot {{ width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0; }}
+        .composition-comparison-count {{ color: var(--muted-color); font-weight: normal; margin-left: auto; }}
+        .composition-comparison-bar-track {{ display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--border-color); }}
+        .composition-comparison-segment {{ height: 100%; }}
+        .composition-comparison-legend {{ display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; font-size: 10px; }}
+        .composition-comparison-legend-item {{ display: flex; align-items: center; gap: 3px; color: var(--text-color); }}
+        .composition-comparison-legend-toggle {{
             display: inline-flex;
             margin-top: 4px;
             padding: 0;
@@ -6081,38 +6081,35 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             text-decoration: underline;
             cursor: pointer;
         }}
-        .annot-comp-legend-toggle:hover {{ color: var(--accent); }}
-        .annot-expr-row {{ display: flex; align-items: center; gap: 6px; margin: 2px 0; }}
-        .annot-expr-bars {{ flex: 1; display: flex; flex-direction: column; gap: 1px; }}
-        .annot-expr-bar {{ height: 4px; border-radius: 2px; min-width: 1px; }}
-        .annot-de-controls {{
+        .composition-comparison-legend-toggle:hover {{ color: var(--accent); }}
+        .region-de-controls {{
             display: flex;
             flex-direction: column;
             gap: 8px;
             margin-top: 10px;
         }}
-        .modal-annotation-section {{
+        .region-section {{
             display: none;
         }}
-        .modal-annotation-section.active {{
+        .region-section.active {{
             display: block;
         }}
-        .modal-annotation-section:not(.annotation-has-items) .modal-annotation-actions [data-requires-annotations] {{
+        .region-section:not(.region-has-items) .region-actions [data-requires-regions] {{
             display: none;
         }}
-        .modal-annotation-actions {{
+        .region-actions {{
             display: flex;
             flex-wrap: wrap;
             gap: 6px;
             margin: 8px 0 0;
         }}
-        .modal-annotation-list {{
+        .region-list {{
             display: flex;
             flex-direction: column;
             gap: 6px;
             padding-right: 2px;
         }}
-        .modal-annotation-empty {{
+        .region-empty {{
             font-size: 10px;
             color: var(--accent-text);
             line-height: 1.35;
@@ -6121,64 +6118,64 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             border-radius: 8px;
             background: var(--icon-hover-bg);
         }}
-        .modal-annotation-row {{
+        .region-row {{
             border: 1px solid var(--border-color);
             border-radius: 6px;
             padding: 6px;
             background: color-mix(in srgb, var(--panel-bg) 85%, transparent);
             overflow: hidden;
         }}
-        .modal-annotation-row[draggable="true"] {{
+        .region-row[draggable="true"] {{
             cursor: grab;
         }}
-        .modal-annotation-row[draggable="true"]:active {{
+        .region-row[draggable="true"]:active {{
             cursor: grabbing;
         }}
-        .modal-annotation-row.dragging {{
+        .region-row.dragging {{
             opacity: 0.48;
         }}
-        .modal-annotation-row.drag-over {{
+        .region-row.drag-over {{
             border-color: var(--border-color);
         }}
-        .modal-annotation-row.drag-before {{
+        .region-row.drag-before {{
             border-top-color: var(--border-color);
         }}
-        .modal-annotation-row.drag-after {{
+        .region-row.drag-after {{
             border-bottom-color: var(--border-color);
         }}
-        .modal-annotation-row.drag-inside {{
+        .region-row.drag-inside {{
             background: color-mix(in srgb, var(--panel-bg) 85%, transparent);
         }}
-        .modal-annotation-drop-placeholder {{
+        .region-drop-placeholder {{
             min-height: 36px;
             border: 1px dashed var(--accent-strong);
             border-radius: 6px;
             background: color-mix(in srgb, var(--accent-strong) 10%, transparent);
             pointer-events: none;
         }}
-        .modal-annotation-row.annotation-group > .modal-annotation-row-main .modal-annotation-label {{
+        .region-row.region-group > .region-row-main .region-label {{
             font-weight: 600;
         }}
-        .modal-annotation-row.annotation-child {{
+        .region-row.region-child {{
             margin-left: 18px;
             border-left: 2px solid color-mix(in srgb, var(--border-color) 70%, transparent);
         }}
-        .modal-annotation-group-wrap.annotation-child {{
+        .region-group-wrap.region-child {{
             margin-left: 18px;
         }}
-        .modal-annotation-row[data-annotation-depth="2"],
-        .modal-annotation-group-wrap[data-annotation-depth="2"] {{
+        .region-row[data-region-depth="2"],
+        .region-group-wrap[data-region-depth="2"] {{
             margin-left: 14px;
         }}
-        .modal-annotation-row[data-annotation-depth="3"],
-        .modal-annotation-group-wrap[data-annotation-depth="3"] {{
+        .region-row[data-region-depth="3"],
+        .region-group-wrap[data-region-depth="3"] {{
             margin-left: 10px;
         }}
-        .modal-annotation-row[data-annotation-depth="4"],
-        .modal-annotation-group-wrap[data-annotation-depth="4"] {{
+        .region-row[data-region-depth="4"],
+        .region-group-wrap[data-region-depth="4"] {{
             margin-left: 6px;
         }}
-        .modal-annotation-group-wrap {{
+        .region-group-wrap {{
             border: 1px dashed color-mix(in srgb, var(--border-color) 78%, transparent);
             border-radius: 7px;
             padding: 5px;
@@ -6186,14 +6183,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             flex-direction: column;
             gap: 5px;
         }}
-        .modal-annotation-group-wrap.drag-inside {{
+        .region-group-wrap.drag-inside {{
             border-color: var(--accent-border);
             background: color-mix(in srgb, var(--accent-strong) 8%, transparent);
         }}
-        .modal-annotation-group-wrap.drop-active > .modal-annotation-group-placeholder {{
+        .region-group-wrap.drop-active > .region-group-placeholder {{
             display: none;
         }}
-        .modal-annotation-group-placeholder {{
+        .region-group-placeholder {{
             margin-left: 24px;
             padding: 7px 9px;
             border: 1px dashed color-mix(in srgb, var(--border-color) 82%, transparent);
@@ -6203,13 +6200,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             line-height: 1.3;
             background: color-mix(in srgb, var(--input-bg) 70%, transparent);
         }}
-        .modal-annotation-row.annotation-selected {{
+        .region-row.region-selected {{
             border-color: var(--accent-border);
         }}
-        .modal-annotation-row.annotation-compared {{
+        .region-row.region-compared {{
             border-color: var(--compare-border);
         }}
-        .modal-annotation-row-main {{
+        .region-row-main {{
             display: grid;
             grid-template-columns: 24px minmax(0, 1fr) auto;
             gap: 6px;
@@ -6218,7 +6215,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             max-width: 100%;
             cursor: pointer;
         }}
-        .modal-annotation-drag-handle {{
+        .region-drag-handle {{
             width: 24px;
             height: 28px;
             border: 0;
@@ -6233,8 +6230,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             line-height: 1;
             user-select: none;
         }}
-        .modal-annotation-drag-handle:active {{ cursor: grabbing; }}
-        .modal-annotation-label {{
+        .region-drag-handle:active {{ cursor: grabbing; }}
+        .region-label {{
             width: 100%;
             min-width: 0;
             border: 1px solid var(--border-color);
@@ -6246,7 +6243,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             overflow: hidden;
             text-overflow: ellipsis;
         }}
-        .modal-annotation-count {{
+        .region-count {{
             grid-column: 2 / -1;
             justify-self: end;
             max-width: 100%;
@@ -6266,13 +6263,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             background-repeat: no-repeat;
             background-size: 100% 100%;
         }}
-        .modal-annotation-row-actions {{
+        .region-row-actions {{
             display: flex;
             justify-content: flex-end;
             gap: 4px;
             min-width: 0;
         }}
-        .modal-annotation-color {{
+        .region-color {{
             flex: 0 0 28px;
             width: 28px;
             height: 28px;
@@ -6282,7 +6279,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             background: var(--input-bg);
             cursor: pointer;
         }}
-        .modal-annotation-row-actions button {{
+        .region-row-actions button {{
             flex: 0 0 28px;
             width: 28px;
             height: 28px;
@@ -6298,37 +6295,37 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             justify-content: center;
             transition: background 0.3s, border-color 0.3s, color 0.3s;
         }}
-        .modal-annotation-row-actions button.annotation-compare {{
+        .region-row-actions button.region-compare {{
             flex-basis: 34px;
             width: 34px;
         }}
-        .modal-annotation-row-actions button:hover {{
+        .region-row-actions button:hover {{
             background: var(--icon-hover-bg);
             border-color: var(--accent-border);
             color: var(--accent-text);
         }}
-        .modal-annotation-row-actions button.active {{
+        .region-row-actions button.active {{
             background: var(--accent-fill);
             border-color: var(--accent-border);
             color: var(--accent-on-fill);
         }}
-        .modal-annotation-row-actions button:disabled {{
+        .region-row-actions button:disabled {{
             opacity: 0.45;
             cursor: default;
             pointer-events: none;
         }}
-        .modal-annotation-row-actions button.annotation-compare {{
+        .region-row-actions button.region-compare {{
             color: var(--compare-text);
         }}
-        .modal-annotation-row-actions button.annotation-compare:hover {{
+        .region-row-actions button.region-compare:hover {{
             background: var(--icon-blue-hover-bg);
             border-color: var(--compare-border);
             color: var(--compare-text);
         }}
-        .modal-annotation-row-actions button.annotation-group-toggle {{
+        .region-row-actions button.region-group-toggle {{
             color: var(--muted-color);
         }}
-        .modal-annotation-row-actions svg {{
+        .region-row-actions svg {{
             width: 14px;
             height: 14px;
             stroke: currentColor;
@@ -6337,7 +6334,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             stroke-linecap: round;
             stroke-linejoin: round;
         }}
-        .modal-annotation-drag-handle svg {{
+        .region-drag-handle svg {{
             width: 14px;
             height: 14px;
             stroke: currentColor;
@@ -6549,7 +6546,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             align-items: center;
             z-index: 4;
         }}
-        .visual-spatial-tools {{
+        .selection-tools {{
             display: flex;
             flex-direction: column;
             gap: 6px;
@@ -6558,7 +6555,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             padding-top: 6px;
             border-top: 1px solid color-mix(in srgb, var(--border-color) 70%, transparent);
         }}
-        .umap-btn {{
+        .viewer-tool-btn {{
             padding: 5px 10px;
             border: 1px solid var(--border-color);
             border-radius: 4px;
@@ -6568,41 +6565,41 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             font-size: 11px;
             transition: background 0.3s, border-color 0.3s, color 0.3s;
         }}
-        .umap-btn:hover {{ background: var(--hover-bg); }}
-        .visual-spatial-tools .umap-btn {{
+        .viewer-tool-btn:hover {{ background: var(--hover-bg); }}
+        .selection-tools .viewer-tool-btn {{
             border-color: transparent;
         }}
-        .umap-btn.icon-only {{
+        .viewer-tool-btn.icon-only {{
             color: var(--accent-text);
         }}
-        .umap-btn.icon-only:hover {{
+        .viewer-tool-btn.icon-only:hover {{
             background: var(--icon-hover-bg);
             border-color: var(--accent-border);
             color: var(--accent-text);
         }}
-        .visual-spatial-tools .umap-compare-btn {{
+        .selection-tools .selection-compare-btn {{
             color: var(--compare-text);
         }}
-        .visual-spatial-tools .umap-compare-btn:hover {{
+        .selection-tools .selection-compare-btn:hover {{
             background: var(--icon-blue-hover-bg);
             border-color: var(--compare-border);
             color: var(--compare-text);
         }}
-        .visual-spatial-tools .umap-compare-btn.active {{
+        .selection-tools .selection-compare-btn.active {{
             background: var(--compare-fill);
             border-color: var(--compare-fill);
             color: var(--compare-on-fill);
         }}
-        .visual-spatial-tools .umap-compare-btn:disabled,
-        .visual-spatial-tools .umap-compare-btn:disabled:hover {{
+        .selection-tools .selection-compare-btn:disabled,
+        .selection-tools .selection-compare-btn:disabled:hover {{
             color: var(--compare-text);
         }}
-        .umap-btn.icon-only:disabled {{
+        .viewer-tool-btn.icon-only:disabled {{
             opacity: 0.45;
             cursor: not-allowed;
             color: var(--muted-color);
         }}
-        .umap-btn.icon-only:disabled:hover {{
+        .viewer-tool-btn.icon-only:disabled:hover {{
             background: var(--input-bg);
             border-color: transparent;
             color: var(--muted-color);
@@ -6612,16 +6609,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         #umap-params-toggle.active {{
             border-color: transparent;
         }}
-        .umap-btn.active {{
+        .viewer-tool-btn.active {{
             background: var(--accent-fill);
             color: var(--accent-on-fill);
             border-color: var(--accent-border);
         }}
-        .umap-btn:disabled {{
+        .viewer-tool-btn:disabled {{
             opacity: 0.45;
             cursor: not-allowed;
         }}
-        .umap-btn.icon-only {{
+        .viewer-tool-btn.icon-only {{
             width: 30px;
             height: 30px;
             padding: 0;
@@ -6629,12 +6626,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             align-items: center;
             justify-content: center;
         }}
-        .umap-btn.icon-only svg {{
+        .viewer-tool-btn.icon-only svg {{
             width: 16px;
             height: 16px;
             stroke: currentColor;
         }}
-        .umap-tool-wrap {{
+        .tool-popover-wrap {{
             position: relative;
             display: inline-flex;
             align-items: center;
@@ -6657,7 +6654,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .umap-params-panel.visible {{
             display: flex;
         }}
-        .umap-selection-query-panel {{
+        .selection-query-panel {{
             position: absolute;
             left: 0;
             bottom: calc(100% + 8px);
@@ -6672,13 +6669,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             display: none;
             z-index: 5;
         }}
-        .umap-selection-query-panel.visible {{
+        .selection-query-panel.visible {{
             display: block;
         }}
-        .visual-spatial-tools .umap-tool-wrap {{
+        .selection-tools .tool-popover-wrap {{
             position: relative;
         }}
-        .visual-spatial-tools .umap-selection-query-panel {{
+        .selection-tools .selection-query-panel {{
             left: calc(100% + 8px);
             top: 0;
             bottom: auto;
@@ -6699,7 +6696,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             color: var(--text-color);
             font-variant-numeric: tabular-nums;
         }}
-        .umap-selection-info {{
+        .selection-info {{
             display: none;
             align-items: center;
             gap: 7px;
@@ -6712,10 +6709,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             white-space: nowrap;
             font-weight: 600;
         }}
-        .umap-selection-info.visible {{
+        .selection-info.visible {{
             display: inline-flex;
         }}
-        .umap-selection-clear {{
+        .selection-clear {{
             width: 18px;
             height: 18px;
             padding: 0;
@@ -6728,11 +6725,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             align-items: center;
             justify-content: center;
         }}
-        .umap-selection-clear:hover {{
+        .selection-clear:hover {{
             background: transparent;
             color: var(--danger-text);
         }}
-        .umap-selection-clear svg {{
+        .selection-clear svg {{
             width: 12px;
             height: 12px;
             stroke: currentColor;
@@ -6742,7 +6739,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             stroke-linejoin: round;
             pointer-events: none;
         }}
-        .umap-selection-summary {{
+        .insights-selection-summary {{
             position: relative;
             margin: 0;
             max-width: none;
@@ -6769,7 +6766,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             opacity: 0.5;
             cursor: not-allowed;
         }}
-        .color-toggle {{
+        .insights-toggle {{
             background: var(--input-bg);
             border: 1px solid var(--border-color);
             border-radius: 4px;
@@ -6778,8 +6775,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             font-size: 12px;
             transition: background 0.3s, border-color 0.3s;
         }}
-        .color-toggle:hover {{ background: var(--hover-bg); }}
-        .color-toggle.active {{
+        .insights-toggle:hover {{ background: var(--hover-bg); }}
+        .insights-toggle.active {{
             background: var(--accent-fill);
             color: var(--accent-on-fill);
             border-color: var(--accent-border);
@@ -6989,7 +6986,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                             <div class="button-help-item"><div class="button-help-icons" aria-label="Save and load"><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"></path><path d="m17 8-5-5-5 5"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path></svg></span></div><div class="button-help-text">Saves the current viewer state to JSON or restores a previously saved state.</div></div>
                             <div class="button-help-item"><div class="button-help-icons" aria-label="Export and download"><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"></path><path d="M14 2v4a2 2 0 0 0 2 2h4"></path><path d="M12 18v-6"></path><path d="m9 15 3 3 3-3"></path></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path></svg></span></div><div class="button-help-text">Downloads the available table, plot, palette, annotations, session, or data bundle for that panel.</div></div>
                             <div class="button-help-item"><div class="button-help-icons" aria-label="Visual and gene settings"><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.2 14.8a2 2 0 0 1 2 2"></path><circle cx="18.5" cy="8.5" r="3.5"></circle><circle cx="7.5" cy="16.5" r="5.5"></circle><circle cx="7.5" cy="4.5" r="2.5"></circle></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><line x1="21" x2="14" y1="4" y2="4"></line><line x1="10" x2="3" y1="4" y2="4"></line><line x1="21" x2="12" y1="12" y2="12"></line><line x1="8" x2="3" y1="12" y2="12"></line><line x1="21" x2="16" y1="20" y2="20"></line><line x1="12" x2="3" y1="20" y2="20"></line><line x1="14" x2="14" y1="2" y2="6"></line><line x1="8" x2="8" y1="10" y2="14"></line><line x1="16" x2="16" y1="18" y2="22"></line></svg></span></div><div class="button-help-text">Opens visual parameters, UMAP appearance, or gene-expression display controls.</div></div>
-                            <div class="button-help-item"><div class="button-help-icons" aria-label="UMAP cell tools"><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 11V6a2 2 0 0 0-4 0"></path><path d="M14 10V4a2 2 0 0 0-4 0v6"></path><path d="M10 10.5V6a2 2 0 0 0-4 0v8"></path><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.9-6.5-2.8L2 16a2.3 2.3 0 0 1 3.2-3.3L7 14"></path></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 22a5 5 0 0 1-2-4"></path><path d="M3.3 14A6.8 6.8 0 0 1 2 10c0-4.4 4.5-8 10-8s10 3.6 10 8-4.5 8-10 8a12 12 0 0 1-5-1"></path><path d="M5 18a2 2 0 1 0 4 0 2 2 0 0 0-4 0"></path></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"></path><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"></path><path d="M7 21h10"></path><path d="M12 3v18"></path><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"></path></svg></span></div><div class="button-help-text">Switches UMAP interaction between panning, lasso selection, and selected-cell comparison.</div></div>
+                            <div class="button-help-item"><div class="button-help-icons" aria-label="Cell selection tools"><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 11V6a2 2 0 0 0-4 0"></path><path d="M14 10V4a2 2 0 0 0-4 0v6"></path><path d="M10 10.5V6a2 2 0 0 0-4 0v8"></path><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.9-6.5-2.8L2 16a2.3 2.3 0 0 1 3.2-3.3L7 14"></path></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 22a5 5 0 0 1-2-4"></path><path d="M3.3 14A6.8 6.8 0 0 1 2 10c0-4.4 4.5-8 10-8s10 3.6 10 8-4.5 8-10 8a12 12 0 0 1-5-1"></path><path d="M5 18a2 2 0 1 0 4 0 2 2 0 0 0-4 0"></path></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"></path><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"></path><path d="M7 21h10"></path><path d="M12 3v18"></path><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"></path></svg></span></div><div class="button-help-text">Switches cell-selection interaction between moving, lasso selection, and selected-cell comparison.</div></div>
                             <div class="button-help-item"><div class="button-help-icons" aria-label="Query and search"><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="22" x2="18" y1="12" y2="12"></line><line x1="6" x2="2" y1="12" y2="12"></line><line x1="12" x2="12" y1="6" y2="2"></line><line x1="12" x2="12" y1="22" y2="18"></line></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg></span></div><div class="button-help-text">Finds cells, genes, markers, or annotations depending on the active panel.</div></div>
                             <div class="button-help-item"><div class="button-help-icons" aria-label="Swap"><span class="button-help-icon"><svg class="lucide lucide-arrow-left-right" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3 4 7l4 4"></path><path d="M4 7h16"></path><path d="m16 21 4-4-4-4"></path><path d="M20 17H4"></path></svg></span></div><div class="button-help-text">Swaps the A and B sides of a comparison or changes comparison direction.</div></div>
                             <div class="button-help-item"><div class="button-help-icons" aria-label="Visibility and spotlight"><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"></path><circle cx="12" cy="12" r="3"></circle></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"></path><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"></path><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"></path><path d="m2 2 20 20"></path></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6"></path><path d="M10 22h4"></path><path d="M12 2v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="M2 12h2"></path><path d="m19.07 4.93-1.41 1.41"></path><path d="M20 12h2"></path><path d="M15 14a5 5 0 1 0-6 0l1 4h4z"></path></svg></span></div><div class="button-help-text">Shows, hides, or spotlights categories and overlay elements in legends and panels.</div></div>
@@ -7032,7 +7029,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         </div>
                     </div>
                 </div>
-                <button class="icon-btn" id="save-session-btn" type="button" title="Save current viewer state (rotations, annotations, color/gene, hidden categories, spotlight, samples view) to a JSON file" aria-label="Save session">
+                <button class="icon-btn" id="save-session-btn" type="button" title="Save current viewer state (rotations, annotation or gene view, hidden categories, spotlight, samples view) to a JSON file" aria-label="Save session">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path></svg>
                 </button>
                 <button class="icon-btn" id="load-session-btn" type="button" title="Load a previously saved session JSON file" aria-label="Load session">
@@ -7066,15 +7063,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             <button class="visual-mode-btn active" id="overview-mode-default" type="button" data-overview-mode="default">Default</button>
             <button class="visual-mode-btn" id="overview-mode-split" type="button" data-overview-mode="split">Split</button>
         </div>
-        <div class="visual-default-controls color-mode" id="visual-default-controls">
+        <div class="visual-default-controls annotation-mode" id="visual-default-controls">
             <div class="visual-source-switch" id="visual-source-switch" role="group" aria-label="Default view source">
-                <button class="visual-source-btn active" id="default-source-color" type="button" data-default-source="color">Annotation</button>
+                <button class="visual-source-btn active" id="default-source-annotation" type="button" data-default-source="annotation">Annotation</button>
                 <button class="visual-source-btn" id="default-source-gene" type="button" data-default-source="gene">Gene</button>
             </div>
-            <div class="visual-color-controls" id="visual-color-controls">
+            <div class="visual-annotation-controls" id="visual-annotation-controls">
                 <div class="control-group">
-                    <label class="sr-only" for="color-select">Annotation</label>
-                    <select id="color-select"></select>
+                    <label class="sr-only" for="annotation-select">Annotation</label>
+                    <select id="annotation-select"></select>
                 </div>
             </div>
             <div class="visual-gene-controls" id="visual-gene-controls">
@@ -7104,7 +7101,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             <div class="overview-blend-row" id="overview-blend-row-a">
                 <span class="overview-blend-side">A</span>
                 <select id="overview-blend-a-kind"></select>
-                <select id="overview-blend-a-color"></select>
+                <select id="overview-blend-a-annotation"></select>
                 <select id="overview-blend-a-category"></select>
                 <input type="text" id="overview-blend-a-gene" list="overview-blend-a-gene-list" placeholder="Gene symbol" style="display:none;">
                 <datalist id="overview-blend-a-gene-list"></datalist>
@@ -7112,7 +7109,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             <div class="overview-blend-row" id="overview-blend-row-b">
                 <span class="overview-blend-side">B</span>
                 <select id="overview-blend-b-kind"></select>
-                <select id="overview-blend-b-color"></select>
+                <select id="overview-blend-b-annotation"></select>
                 <select id="overview-blend-b-category"></select>
                 <input type="text" id="overview-blend-b-gene" list="overview-blend-b-gene-list" placeholder="Gene symbol" style="display:none;">
                 <datalist id="overview-blend-b-gene-list"></datalist>
@@ -7124,9 +7121,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             </div>
         </div>
         <div class="visual-nav-actions">
-            <div class="umap-selection-info" id="umap-selection-info" style="display: none;">
-                <span id="umap-selection-info-text">No cells selected</span>
-                <button class="umap-selection-clear" id="umap-selection-clear" type="button" title="Clear selected cells" aria-label="Clear selected cells">
+            <div class="selection-info" id="selection-info" style="display: none;">
+                <span id="selection-info-text">No cells selected</span>
+                <button class="selection-clear" id="selection-clear" type="button" title="Clear selected cells" aria-label="Clear selected cells">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
                 </button>
             </div>
@@ -7136,7 +7133,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             <button class="legend-toggle active" id="legend-toggle" title="Toggle legend panel" data-help="Show or hide the legend panel with annotation keys, category toggles, and spotlight controls.">
                 Legend
             </button>
-            <button class="color-toggle" id="color-toggle" title="Toggle insights panel" data-help="Insights opens Overview, Genes, Compare, and Neighbors views for the current dataset and selection state.">
+            <button class="insights-toggle" id="insights-toggle" title="Toggle Insights panel" data-help="Insights opens Overview, Genes, Compare, and Neighbors views for the current dataset and selection state.">
                 Insights
             </button>
         </div>
@@ -7168,24 +7165,24 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                             </div>
                         </div>
                     </div>
-                    <div class="visual-spatial-tools" id="visual-spatial-tools">
-                        <button class="umap-btn icon-only active" id="umap-pan-btn" title="Move around cells" aria-label="Move around cells">
+                    <div class="selection-tools" id="selection-tools">
+                        <button class="viewer-tool-btn icon-only active" id="selection-pan-btn" title="Move sections or pan embedding" aria-label="Move sections or pan embedding">
                             <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 11V6a2 2 0 0 0-4 0"></path><path d="M14 10V4a2 2 0 0 0-4 0v6"></path><path d="M10 10.5V6a2 2 0 0 0-4 0v8"></path><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.9-6.5-2.8L2 16a2.3 2.3 0 0 1 3.2-3.3L7 14"></path></svg>
                         </button>
-                        <button class="umap-btn icon-only" id="umap-lasso-btn" title="Select cells" aria-label="Select cells">
+                        <button class="viewer-tool-btn icon-only" id="selection-lasso-btn" title="Select cells" aria-label="Select cells">
                             <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 22a5 5 0 0 1-2-4"></path><path d="M3.3 14A6.8 6.8 0 0 1 2 10c0-4.4 4.5-8 10-8s10 3.6 10 8-4.5 8-10 8a12 12 0 0 1-5-1"></path><path d="M5 18a2 2 0 1 0 4 0 2 2 0 0 0-4 0"></path></svg>
                         </button>
-                        <button class="umap-btn icon-only umap-compare-btn" id="umap-compare-btn" type="button" title="Compare with another cell selection" aria-label="Compare with another cell selection">
+                        <button class="viewer-tool-btn icon-only selection-compare-btn" id="selection-compare-btn" type="button" title="Compare with another cell selection" aria-label="Compare with another cell selection">
                             <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"></path><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"></path><path d="M7 21h10"></path><path d="M12 3v18"></path><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"></path></svg>
                         </button>
-                        <button class="umap-btn icon-only" id="selection-create-annotation-btn" type="button" title="Create region from this lasso selection" aria-label="Create region from this lasso selection" hidden>
+                        <button class="viewer-tool-btn icon-only" id="selection-create-region-btn" type="button" title="Create region from this lasso selection" aria-label="Create region from this lasso selection" hidden>
                             <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>
                         </button>
-                        <div class="umap-tool-wrap" id="umap-query-wrap">
-                            <button class="umap-btn icon-only" id="umap-query-toggle" type="button" title="Find cells by query" aria-label="Find cells by query">
+                        <div class="tool-popover-wrap" id="selection-query-wrap">
+                            <button class="viewer-tool-btn icon-only" id="selection-query-toggle" type="button" title="Find cells by query" aria-label="Find cells by query">
                                 <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="22" x2="18" y1="12" y2="12"></line><line x1="6" x2="2" y1="12" y2="12"></line><line x1="12" x2="12" y1="6" y2="2"></line><line x1="12" x2="12" y1="22" y2="18"></line></svg>
                             </button>
-                            <div class="umap-selection-query-panel" id="umap-selection-query-panel"></div>
+                            <div class="selection-query-panel" id="selection-query-panel"></div>
                         </div>
                     </div>
                     <button class="focused-modal-tool-toggle hidden" id="focused-modal-neighbor-toggle" type="button" title="Neighbor hops" aria-label="Neighbor hops">
@@ -7311,8 +7308,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             <div class="umap-panel dock-top-right" id="umap-panel">
                 <div class="umap-header">
                     <div class="umap-header-tools">
-                        <div class="umap-tool-wrap" id="umap-params-wrap">
-                            <button class="umap-btn icon-only" id="umap-params-toggle" type="button" title="UMAP visual parameters" aria-label="UMAP visual parameters">
+                        <div class="tool-popover-wrap" id="umap-params-wrap">
+                            <button class="viewer-tool-btn icon-only" id="umap-params-toggle" type="button" title="UMAP visual parameters" aria-label="UMAP visual parameters">
                                 <svg viewBox="0 0 24 24" aria-hidden="true" data-icon="bubbles" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7.2 14.8a2 2 0 0 1 2 2"></path><circle cx="18.5" cy="8.5" r="3.5"></circle><circle cx="7.5" cy="16.5" r="5.5"></circle><circle cx="7.5" cy="4.5" r="2.5"></circle></svg>
                             </button>
                             <div class="umap-params-panel" id="umap-params-panel">
@@ -7330,9 +7327,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         </div>
                     </div>
                     <div class="umap-header-actions">
-                        <button class="umap-btn" id="umap-dock-btn" title="Cycle panel corner">TR</button>
-                        <button class="umap-btn" id="umap-panel-smaller" title="Smaller panel">−</button>
-                        <button class="umap-btn" id="umap-panel-larger" title="Larger panel">+</button>
+                        <button class="viewer-tool-btn" id="umap-dock-btn" title="Cycle panel corner">TR</button>
+                        <button class="viewer-tool-btn" id="umap-panel-smaller" title="Smaller panel">−</button>
+                        <button class="viewer-tool-btn" id="umap-panel-larger" title="Larger panel">+</button>
                     </div>
                 </div>
                 <div class="umap-canvas-container" id="umap-canvas-container">
@@ -7340,7 +7337,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 </div>
             </div>
         </div>
-        <div class="color-panel collapsed" id="color-panel"></div>
+        <div class="insights-panel collapsed" id="insights-panel"></div>
         <div class="legend-resizer" id="legend-resizer" title="Drag to resize the legend"></div>
         <div class="legend-container" id="legend"></div>
     </div>
@@ -7608,8 +7605,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     DATA.features_meta = DATA.features_meta || {{}};
     DATA.feature_encodings = DATA.feature_encodings || {{}};
     DATA.feature_value_encodings = DATA.feature_value_encodings || {{}};
-    DATA.pseudobulk_de = DATA.pseudobulk_de || DATA.pseudobulk_de || {{}};
-    delete DATA.pseudobulk_de;
+    DATA.pseudobulk_de = DATA.pseudobulk_de || DATA.pseudobulk_de_json || {{}};
+    delete DATA.pseudobulk_de_json;
     const TUTORIAL_CONFIG = DATA.tutorial && typeof DATA.tutorial === 'object' ? DATA.tutorial : {{ enabled: false }};
     const PALETTE = {palette_json};
     const METADATA_LABELS = {metadata_labels_json};
@@ -8532,7 +8529,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let umapCellOpacity = 1.0;
     let umapPanelDock = 'top-right';
     let umapPanelSize = 320;
-    let umapPanActive = true;
+    let selectionPanActive = true;
     const UMAP_PANEL_DOCKS = ['top-right', 'bottom-right', 'bottom-left', 'top-left'];
     const UMAP_PANEL_SIZE_STEP = 24;
     const UMAP_PANEL_MIN_SIZE = 220;
@@ -8575,10 +8572,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let selectedModalLassoSectionIdB = null;
     let selectedModalLassoPath = [];
     let selectedModalLassoPathB = [];
-    let umapCompareHintTimeout = null;
-    const UMAP_LASSO_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 22a5 5 0 0 1-2-4"></path><path d="M3.3 14A6.8 6.8 0 0 1 2 10c0-4.4 4.5-8 10-8s10 3.6 10 8-4.5 8-10 8a12 12 0 0 1-5-1"></path><path d="M5 18a2 2 0 1 0 4 0 2 2 0 0 0-4 0"></path></svg>';
-    const UMAP_CLEAR_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>';
-    const UMAP_COMPARE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"></path><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"></path><path d="M7 21h10"></path><path d="M12 3v18"></path><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"></path></svg>';
+    let selectionCompareHintTimeout = null;
+    const SELECTION_LASSO_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 22a5 5 0 0 1-2-4"></path><path d="M3.3 14A6.8 6.8 0 0 1 2 10c0-4.4 4.5-8 10-8s10 3.6 10 8-4.5 8-10 8a12 12 0 0 1-5-1"></path><path d="M5 18a2 2 0 1 0 4 0 2 2 0 0 0-4 0"></path></svg>';
+    const SELECTION_CLEAR_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>';
+    const SELECTION_COMPARE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"></path><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"></path><path d="M7 21h10"></path><path d="M12 3v18"></path><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"></path></svg>';
     let selectionSummaryColor = DATA.initial_annotation;
     let selectionSummaryExpanded = false;
     let selectionSectionSummaryExpanded = false;
@@ -9026,12 +9023,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function toggleInsightsPanel() {{
-        const colorToggle = document.getElementById('color-toggle');
-        const colorPanel = document.getElementById('color-panel');
-        if (!colorToggle || !colorPanel) return;
-        colorPanel.classList.toggle('collapsed');
-        colorToggle.classList.toggle('active');
-        if (!colorPanel.classList.contains('collapsed')) {{
+        const insightsToggle = document.getElementById('insights-toggle');
+        const insightsPanel = document.getElementById('insights-panel');
+        if (!insightsToggle || !insightsPanel) return;
+        insightsPanel.classList.toggle('collapsed');
+        insightsToggle.classList.toggle('active');
+        if (!insightsPanel.classList.contains('collapsed')) {{
             renderActiveInsightsPanel();
         }}
         requestAnimationFrame(() => {{
@@ -9041,12 +9038,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function openInsightsMode(mode) {{
-        const colorToggle = document.getElementById('color-toggle');
-        const colorPanel = document.getElementById('color-panel');
-        colorPanel?.classList.remove('collapsed');
-        colorToggle?.classList.add('active');
+        const insightsToggle = document.getElementById('insights-toggle');
+        const insightsPanel = document.getElementById('insights-panel');
+        insightsPanel?.classList.remove('collapsed');
+        insightsToggle?.classList.add('active');
         setInsightsMode(mode);
         scheduleUMAPPanelPositionUpdate();
+        if (tutorialActive && tutorialSteps[tutorialStepIndex]?.title === 'UMAP selection') {{
+            const refreshUMAPSelectionSpotlight = () => {{
+                if (!tutorialActive || tutorialSteps[tutorialStepIndex]?.title !== 'UMAP selection') return;
+                updateUMAPPanelPosition?.();
+                if (umapVisible) renderUMAP?.();
+                scheduleTutorialReposition?.();
+            }};
+            window.requestAnimationFrame(refreshUMAPSelectionSpotlight);
+            window.setTimeout(refreshUMAPSelectionSpotlight, 80);
+            window.setTimeout(refreshUMAPSelectionSpotlight, 360);
+        }}
     }}
 
     function navigateModalSection(step) {{
@@ -9127,7 +9135,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function buildDetailedTutorialSteps() {{
         const step = (title, target, body, extra = {{}}) => ({{ storyMode: true, title, target, body, ...extra }});
         const tryIt = 'Next';
-        const hasRegionRows = () => !!document.querySelector('.modal-annotation-row');
+        const hasRegionRows = () => !!document.querySelector('.region-row');
         const hasPathwayPanel = () => !!document.querySelector('[data-pathway-annotation-select], .cluster-PA-result, .cluster-pa-result');
         const ensureLegendOpen = () => {{
             const legend = document.getElementById('legend');
@@ -9189,7 +9197,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'Default mode can show either a cell annotation layer or a gene expression layer.',
                 'The Annotation and Gene buttons decide which controls are visible.'
             ], {{ nextLabel: tryIt }}),
-            step('Annotation selector', ['#visual-color-controls', '#color-select'], [
+            step('Annotation selector', ['#visual-annotation-controls', '#annotation-select'], [
                 'The annotation selector chooses which cell-level annotation colors every section.',
                 'This is the main starting point for browsing annotations, clusters, or other categorical cell labels.'
             ], {{ nextLabel: tryIt }}),
@@ -9235,24 +9243,24 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'The UMAP panel can be docked to different corners and resized.',
                 'This lets you keep it pinned while browsing the section grid.'
             ], {{ condition: () => !!DATA.has_umap, action: () => {{ if (DATA.has_umap && !umapVisible && typeof toggleUMAP === 'function') toggleUMAP(); }}, nextLabel: tryIt }}),
-            step('UMAP selection', ['#umap-lasso-btn', '#umap-canvas'], [
+            step('UMAP selection', ['#selection-lasso-btn', '#umap-canvas'], [
                 'Cells selection via the lasso tool is also enabled directly in the UMAP.'
-            ], {{ condition: () => !!DATA.has_umap, action: () => {{ if (DATA.has_umap && !umapVisible && typeof toggleUMAP === 'function') toggleUMAP(); }}, task: 'Create a selection on the UMAP with the lasso tool', requiresSelection: true, combineTargets: true, autoNextWhenGateSatisfied: true, nextLabel: tryIt }}),
-            step('Create region from UMAP selection', ['#selection-create-annotation-btn', '#visual-spatial-tools'], [
+            ], {{ condition: () => !!DATA.has_umap, action: () => {{ if (DATA.has_umap && !umapVisible && typeof toggleUMAP === 'function') toggleUMAP(); }}, task: 'Create a selection on the UMAP with the lasso tool', requiresSelection: true, combineTargets: true, targetAfterGateSatisfied: '#insights-panel', autoNextWhenGateSatisfied: true, autoNextDelay: 900, nextLabel: tryIt }}),
+            step('Create region from UMAP selection', ['#selection-create-region-btn', '#selection-tools'], [
                 'Selected UMAP cells can be saved as a cell-set region.',
                 'Unlike a polygon region, this stores the selected cells directly rather than a polygon tied to one section.'
-            ], {{ condition: () => !!DATA.has_umap, task: 'Create a cell-set region from the selected UMAP cells by clicking the region button.', requiresAnnotationCreated: true, nextLabel: tryIt }}),
-            step('Insights panel overview', ['#color-toggle', '#color-panel'], [
+            ], {{ condition: () => !!DATA.has_umap, task: 'Create a cell-set region from the selected UMAP cells by clicking the region button.', requiresAnnotationCreated: true, targetAfterGateSatisfied: '#insights-panel', nextLabel: tryIt }}),
+            step('Insights panel overview', ['#insights-toggle', '#insights-panel'], [
                 'Insights is the right-side workspace for selected cells, regions, gene modules, and built-in analysis panels.'
             ], {{ action: () => {{ if (typeof closeModal === 'function') closeModal(); if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); }}, nextLabel: tryIt }}),
             step('Insights Selection mode', ['#insights-mode-selection', '#insights-selection-panel'], [
                 'Selection contains the compact summary for cells selected by lasso, UMAP lasso, or query.',
                 'It shows selected-cell composition and expression context before you open the full comparison tools.'
             ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('selection'); updateSelectionInfo?.(); }}, nextLabel: tryIt }}),
-            step('Insights Region mode', ['#insights-annotate-toggle', '#modal-annotation-section'], [
+            step('Insights Region mode', ['#insights-mode-region', '#region-section'], [
                 'Region stores manual spatial annotations created from selections.',
                 'Use it to organize, group, compare, export, or reuse drawn regions.'
-            ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); if (typeof setInsightsMode === 'function') setInsightsMode('annotate'); }}, nextLabel: tryIt }}),
+            ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); if (typeof setInsightsMode === 'function') setInsightsMode('region'); }}, nextLabel: tryIt }}),
             step('Insights Module mode', ['#insights-mode-module', '#insights-module-panel'], [
                 'The module area combines gene expression to visualize associated genes or pathways.',
                 'Use it for signatures, custom marker lists, or repeated gene-set review.'
@@ -9261,20 +9269,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'Exploration is the main navigation mode for built-in summaries.',
                 'It contains overview, gene, compare, pathway, neighborhood, and export-oriented analysis panels.'
             ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); }}, nextLabel: tryIt }}),
-            step('Select cells for Selection', ['#umap-lasso-btn', '#grid'], [
-                'Selection needs active cells before it can summarize them.'
-            ], {{ condition: () => selectedCells.size === 0 || tutorialSteps[tutorialStepIndex]?.title === 'Select cells for Selection', action: () => {{ if (typeof closeModal === 'function') closeModal(); if (typeof openInsightsMode === 'function') openInsightsMode('selection'); updateSelectionInfo?.(); updateUMAPLassoButtonState?.(); }}, task: 'Select cells with the lasso tool on one visible section to continue.', requiresSelection: true, combineTargets: true, nextStepTitle: 'Insights Selection', nextLabel: tryIt }}),
-            step('Insights Selection', ['#insights-selection-panel.color-panel-mode'], [
+            step('Insights Selection', ['#insights-selection-panel.insights-panel-mode'], [
                 'Selection summarizes the active cells selection by section and main annotation.'
-            ], {{ action: () => {{ if (typeof closeModal === 'function') closeModal(); if (typeof openInsightsMode === 'function') openInsightsMode('selection'); updateSelectionInfo?.(); }}, nextLabel: tryIt }}),
+            ], {{ action: () => {{ if (typeof closeModal === 'function') closeModal(); setTutorialFirstGridRandomSelection({{ areaFraction: 0.03, minCells: 8, maxCells: 80, attempts: 28 }}); if (typeof openInsightsMode === 'function') openInsightsMode('selection'); updateSelectionInfo?.(); }}, nextLabel: tryIt }}),
             step('Selection Find More', ['[data-selection-find-more]', '#insights-selection-panel'], [
                 'Use the Find More button to explore gene markers of your selection.'
-            ], {{ action: () => {{ tutorialSelectionFindMoreClicked = false; if (typeof closeModal === 'function') closeModal(); if (typeof openInsightsMode === 'function') openInsightsMode('selection'); updateSelectionInfo?.(); }}, task: 'Click Find More to open the full selection comparison view.', requiresSelectionFindMoreClicked: true, nextLabel: tryIt }}),
+            ], {{ action: () => {{ tutorialSelectionFindMoreClicked = false; if (typeof closeModal === 'function') closeModal(); if (typeof openInsightsMode === 'function') openInsightsMode('selection'); updateSelectionInfo?.(); }}, nextLabel: tryIt }}),
             step('Selection gene markers', ['#compare-selection-panel .selection-summary-title-row'], [
                 'This analysis is done in the Exploration panel.',
                 'Compare > Per cell > Selections is the detailed workspace for marker genes of the active selection.',
                 'The search icon starts the marker-gene calculation for the selected cells.'
-            ], {{ action: () => {{ tutorialSelectionMarkersClicked = false; selectionWelchButtonHidden = false; selectionWelchRunRequested = false; selectionWelchRunning = false; openTutorialInsightsPanel('compare', 'selection'); updateSelectionInfo?.(); }}, task: 'Click the search icon to calculate marker genes for the selected cells.', requiresSelectionMarkersClicked: true, nextLabel: tryIt }}),
+            ], {{ action: () => {{ tutorialSelectionMarkersClicked = false; selectionWelchButtonHidden = false; selectionWelchRunRequested = false; selectionWelchRunning = false; openTutorialInsightsPanel('compare', 'selection'); updateSelectionInfo?.(); }}, onNext: () => safeTutorialClick('[data-find-welch-markers]'), nextLabel: tryIt }}),
             step('Selection composition comparison', ['#compare-selection-panel .selection-comparison-composition', '#compare-selection-panel .selection-summary-row', '#compare-selection-panel'], [
                 'The composition result summarizes which main annotations are present in the selected cells.',
                 'When Region B exists, the panel shows Region A versus Region B.'
@@ -9284,50 +9289,50 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'The gene-expression area compares expression in the selected cells against the current reference.',
                 'Bars show mean expression and percent expressed for each displayed gene.'
             ], {{ action: () => {{ openTutorialInsightsPanel('compare', 'selection'); updateSelectionInfo?.(); }}, nextLabel: tryIt }}),
-            step('Pan mode', '#umap-pan-btn', [
+            step('Pan mode', '#selection-pan-btn', [
                 'Pan mode is the default interaction mode for moving around the spatial view, and navigate without selecting cells.',
                 'It is useful to swap section panels in the central grid.'
             ], {{ nextLabel: tryIt }}),
-            step('Lasso selection mode', ['#umap-lasso-btn', '#grid .section-panel:not(.filtered-out):nth-of-type(1)'], [
+            step('Lasso selection mode', ['#selection-lasso-btn', 'tutorial-first-grid-section'], [
                 'Lasso mode lets you draw around cells directly on the spatial panels to select cells.'
             ], {{ action: () => {{
                 if (typeof closeModal === 'function') closeModal();
                 if (typeof clearSelection === 'function') clearSelection();
                 if (typeof openInsightsMode === 'function') openInsightsMode('selection');
                 lassoSelectionActive = false;
-                umapPanActive = true;
+                selectionPanActive = true;
                 lassoModeB = false;
-                updateUMAPCursor?.();
-                updateUMAPLassoButtonState?.();
+                updateSelectionCursor?.();
+                updateSelectionLassoButtonState?.();
                 updateSelectionInfo?.();
-            }}, task: 'Select the lasso tool and draw a small selection on one visible section to continue.', requiresSelection: true, combineTargets: true, nextLabel: tryIt }}),
-            step('Compare two selections', ['#umap-compare-btn', '#grid .section-panel:not(.filtered-out):nth-of-type(1)'], [
+            }}, task: 'Select the lasso tool and draw a small selection on one visible section to continue.', requiresSelection: true, combineTargets: true, targetAfterGateSatisfied: ['#selection-lasso-btn', 'tutorial-first-grid-section', '#insights-panel'], nextLabel: tryIt }}),
+            step('Compare two selections', ['#selection-compare-btn', 'tutorial-first-grid-section'], [
                 'The compare button starts a Region A / Region B selection workflow.',
                 'Use it to compare two manually selected spatial cell sets before committing to annotations.'
             ], {{ action: () => {{
                 clearRegionBSelection?.();
                 lassoModeB = false;
                 lassoSelectionActive = false;
-                umapPanActive = true;
-                updateUMAPCursor?.();
-                updateUMAPLassoButtonState?.();
-                updateUMAPCompareButtonState?.();
+                selectionPanActive = true;
+                updateSelectionCursor?.();
+                updateSelectionLassoButtonState?.();
+                updateSelectionCompareButtonState?.();
                 updateSelectionInfo?.();
-            }}, task: 'Click the compare button, then draw Region B to continue.', requiresRegionB: true, combineTargets: true, nextLabel: tryIt }}),
-            step('Clear Region B selection', ['#umap-compare-btn', '#visual-spatial-tools'], [
+            }}, task: 'Click the compare button, then draw Region B to continue.', requiresRegionB: true, combineTargets: true, targetAfterGateSatisfied: ['#selection-compare-btn', 'tutorial-first-grid-section', '#insights-panel'], nextLabel: tryIt }}),
+            step('Clear Region B selection', ['#selection-compare-btn', 'tutorial-first-grid-section', '#insights-panel'], [
                 'When Regions are selected, the compare buttons change to a cross to deselect the cells.'
-            ], {{ action: () => {{ tutorialRegionBClearStepStarted = selectedCellsB.size > 0; updateUMAPCompareButtonState?.(); }}, task: 'Click the cross to deselect Region B and return to a single active selection.', requiresRegionBCleared: true, positionTarget: '#visual-spatial-tools', placement: 'above', avoidTarget: '#grid .section-panel:not(.filtered-out):nth-of-type(1)', nextLabel: tryIt }}),
-            step('Create region from selection', ['#selection-create-annotation-btn', '#visual-spatial-tools'], [
+            ], {{ action: () => {{ tutorialRegionBClearStepStarted = selectedCellsB.size > 0; updateSelectionCompareButtonState?.(); }}, task: 'Click the cross to deselect Region B and return to a single active selection.', requiresRegionBCleared: true, combineTargets: true, nextLabel: tryIt }}),
+            step('Create region from selection', ['#selection-create-region-btn', 'tutorial-first-grid-section', '#insights-panel'], [
                 'When cells are selected, you can create a region annotation from them.',
                 'Regions are user-defined spatial cell sets stored in the viewer session.'
-            ], {{ action: () => {{ tutorialAnnotationRowSelected = false; if (typeof setInsightsMode === 'function') setInsightsMode('annotate'); updateSelectionCreateAnnotationButtonState?.(); }}, task: 'If you have a selection, create a small test annotation, by clicking the button, then select it from the Region list.', requiresSelectedAnnotationRow: true, positionTarget: '#visual-spatial-tools', placement: 'above', avoidTarget: '#grid .section-panel:not(.filtered-out):nth-of-type(1)', nextLabel: tryIt }}),
-            step('Deselect selected cells', ['#umap-lasso-btn', '#umap-selection-info'], [
+            ], {{ action: () => {{ tutorialAnnotationRowSelected = false; if (typeof setInsightsMode === 'function') setInsightsMode('region'); updateSelectionCreateRegionButtonState?.(); }}, task: 'If you have a selection, create a small test region by clicking the button, then select it from the Region list.', requiresSelectedAnnotationRow: true, combineTargets: true, nextLabel: tryIt }}),
+            step('Deselect selected cells', ['#selection-lasso-btn', '#selection-info', 'tutorial-first-grid-section'], [
                 'Selected cells can be cleared from either the lasso button when it is shown as a cross or from the selection chip.',
                 'Both controls clear the active selected-cell set.'
-            ], {{ action: () => {{ updateSelectionInfo?.(); updateUMAPLassoButtonState?.(); }}, task: 'Deselect the cells by clicking the cross-format lasso button or the red cross in the selection chip.', requiresNoSelection: true, combineTargets: true, scroll: false, nextLabel: tryIt }}),
-            step('Find cells by query', ['#umap-selection-query-panel', '#umap-query-toggle'], [
+            ], {{ action: () => {{ updateSelectionInfo?.(); updateSelectionLassoButtonState?.(); }}, task: 'Deselect the cells by clicking the cross-format lasso button or the red cross in the selection chip.', requiresNoSelection: true, combineTargets: true, targetAfterGateSatisfied: ['#selection-lasso-btn', 'tutorial-first-grid-section'], scroll: false, nextLabel: tryIt }}),
+            step('Find cells by query', ['#selection-query-panel', '#selection-query-toggle', '#insights-panel'], [
                 'The query tool finds cells using annotation values, genes, or section metadata.'
-            ], {{ action: () => {{ const panel = document.getElementById('umap-selection-query-panel'); if (!panel?.classList.contains('visible')) safeTutorialClick('#umap-query-toggle'); }}, task: 'Select cells by searching a simple query.', requiresQuerySelection: true, nextLabel: tryIt }}),
+            ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('selection'); updateSelectionInfo?.(); keepTutorialSelectionQueryPanelOpen(); }}, onNext: () => closeSelectionQueryPanel(), task: 'Select cells by searching a simple query.', requiresQuerySelection: true, combineTargets: true, scroll: false, nextLabel: tryIt }}),
             step('Switch to Gene source', ['#default-source-gene', '#visual-gene-controls'], [
                 'Gene source changes the grid from categorical annotation colors to gene or feature expression.'
             ], {{ action: () => safeTutorialClick('#default-source-gene'), nextLabel: tryIt }}),
@@ -9362,32 +9367,26 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             step('Modal H&E overlay controls', ['#focused-he-panel', '#focused-modal-he-toggle'], [
                 'The image button opens H&E or an image to overlay. The parameter controls adjust how the overlay is drawn on top of cells.'
             ], {{ action: () => {{ if (!modalSection && Array.isArray(DATA.sections) && DATA.sections.length && typeof openModal === 'function') openModal(DATA.sections[0].id); const toolbar = document.getElementById('grid-side-toolbar'); toolbar?.classList.remove('visual-open', 'gene-open', 'neighbor-open'); resetFocusedModalTools?.('he'); setModalHeOptionsVisible(true); updateModalToolbarState?.(); refreshFocusedModalToolPanels?.(); }}, prepareDelay: 220, nextLabel: tryIt }}),
-            step('Select cells for Region', ['#umap-lasso-btn', '#grid'], [
-                'Region needs a selected cell set before a new region annotation can be created.'
-            ], {{ condition: () => modalAnnotations.length === 0 && selectedCells.size === 0, action: () => {{ if (!modalSection && Array.isArray(DATA.sections) && DATA.sections.length && typeof openModal === 'function') openModal(DATA.sections[0].id); if (typeof setInsightsMode === 'function') setInsightsMode('annotate'); updateSelectionInfo?.(); updateUMAPLassoButtonState?.(); }}, task: 'Select cells with the lasso tool on the modal section to continue.', requiresSelection: true, combineTargets: true, autoNextWhenGateSatisfied: true, nextLabel: tryIt }}),
-            step('Create first Region', ['#selection-create-annotation-btn', '#visual-spatial-tools'], [
-                'The region button saves the active selected cells as a Region.'
-            ], {{ condition: () => modalAnnotations.length === 0 && selectedCells.size > 0, action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('annotate'); updateSelectionCreateAnnotationButtonState?.(); }}, task: 'Click the polygon region button to save the selected region.', requiresAnnotationCreated: true, nextLabel: tryIt }}),
-            step('Insights Region', ['#modal-annotation-list', '.modal-annotation-row'], [
+            step('Insights Region', ['#region-list', '.region-row'], [
                 'Each region represents a saved spatial region or cells group.',
                 'Click a region row to select its cells. Click a group row to select the union of cells from its nested regions.',
                 'Rows can also be recolored, grouped, exported, or deleted.'
-            ], {{ action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('annotate'); }}, nextLabel: tryIt }}),
-            step('Create region groups', ['#modal-annotations-create-group', '#modal-annotation-section'], [
+            ], {{ action: () => {{ prepareTutorialFirstGridRegion(); if (typeof setInsightsMode === 'function') setInsightsMode('region'); }}, nextLabel: tryIt }}),
+            step('Create region groups', ['#regions-create-group', '#region-section'], [
                 'Region groups help organize multiple regions into a hierarchy.'
-            ], {{ action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('annotate'); }}, nextLabel: tryIt }}),
-            step('Export regions', ['#modal-annotations-export', '#modal-annotation-section'], [
+            ], {{ action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('region'); }}, nextLabel: tryIt }}),
+            step('Export regions', ['#regions-export', '#region-section'], [
                 'Region export downloads your user-created regions as JSON.'
-            ], {{ action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('annotate'); }}, nextLabel: tryIt }}),
-            step('Import regions', ['#modal-annotations-import', '#modal-annotation-section'], [
+            ], {{ action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('region'); }}, nextLabel: tryIt }}),
+            step('Import regions', ['#regions-import', '#region-section'], [
                 'Region import uploads a regions JSON file and restores saved regions in the viewer.'
-            ], {{ action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('annotate'); }}, nextLabel: tryIt }}),
+            ], {{ action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('region'); }}, nextLabel: tryIt }}),
             step('Module gene picker', ['#gene-module-gene-picker', '#gene-module-draft-genes', '#insights-module-panel'], [
                 'The gene picker dropdown shows which genes will be saved into the next module.'
             ], {{ action: () => {{ if (typeof closeModal === 'function') closeModal(); if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); if (typeof setInsightsMode === 'function') setInsightsMode('module'); }}, task: 'Use the gene picker to add genes into the module list.', requiresModuleDraftGene: true, nextLabel: tryIt }}),
             step('Create module', ['#gene-module-create', '#insights-module-panel'], [
                 'Each gene in the module will get a scaled expression and the average expression will be calculated.'
-            ], {{ action: () => {{ tutorialModuleCreateClicked = false; if (typeof setInsightsMode === 'function') setInsightsMode('module'); }}, task: 'Click on the sum button', requiresModuleCreateClicked: true, nextLabel: tryIt }}),
+            ], {{ action: () => {{ tutorialModuleCreateClicked = false; if (typeof setInsightsMode === 'function') setInsightsMode('module'); }}, task: 'Click on the sum button', requiresModuleCreateClicked: true, positionTarget: '#insights-panel', placement: 'left', nextLabel: tryIt }}),
             step('Load module score', ['[data-gene-module-load]', '#insights-module-panel'], [
                 'The load button activates a module score in the spatial viewer.',
                 'Module scores are computed from the selected module genes and displayed like an expression layer.'
@@ -9395,7 +9394,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             step('Module import export', ['#gene-module-upload', '#gene-module-download'], [
                 'Import and export buttons move module definitions as JSON files.'
             ], {{ action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('module'); }}, combineTargets: true, nextLabel: tryIt }}),
-            step('Exploration annotation selector', ['#exploration-color-select', '#exploration-color-label'], [
+            step('Exploration annotation selector', ['#exploration-annotation-select', '#exploration-annotation-label'], [
                 'In Exploration, this selector chooses which annotation the panel summarize.',
                 'It is independent from the main grid selector.'
             ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); }}, nextLabel: tryIt }}),
@@ -9410,7 +9409,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'Open Visualization, then Overview, then Summary to inspect annotation composition across section metadata.',
                 'All calculation in this section is done on cells embedded in the HTML file.'
             ], {{ action: () => openTutorialVisualizationLeafMenu('overview', 'summary'), task: 'Click Summary in the Overview options.', nextLabel: tryIt }}),
-            step('Overview Summary aggregation', ['#color-tab-overview-content', '#color-aggregation'], [
+            step('Overview Summary aggregation', ['#insights-tab-overview-content', '#overview-aggregation'], [
                 'Overview Summary aggregates cells across section metadata.',
                 'Use it to check whether categories differ by sample, condition, region, or other section-level metadata.'
             ], {{ action: () => openTutorialInsightsPanel('overview', 'summary'), nextLabel: tryIt }}),
@@ -9483,7 +9482,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             step('Open Compare > Per cell > Regions', '[data-insights-tree-leaf="regions"][data-insights-tree-parent="compare"]', [
                 'Open Visualization, then Compare, then Per cell, then Regions to compare saved Regions.'
             ], {{ action: () => openTutorialVisualizationLeafMenu('compare', 'regions', 'quick'), task: 'Click Regions in Compare > Per cell.', nextLabel: tryIt }}),
-            step('Compare Regions panel', ['#annotation-comparison', '#compare-tab-regions-content'], [
+            step('Compare Regions panel', ['#region-comparison', '#compare-tab-regions-content'], [
                 'Region comparison uses user-created Regions.',
                 'Previously described in this tutorial in the Region section.',
                 'Clicking on the search icon display a region comparison similar to the selection comparison.'
@@ -9491,7 +9490,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             step('Open Compare > Per cell > Annotations', '[data-insights-tree-leaf="groups"][data-insights-tree-parent="compare"]', [
                 'Open Visualization, then Compare, then Per cell, then Annotations to compare annotation values.'
             ], {{ action: () => openTutorialVisualizationLeafMenu('compare', 'groups', 'quick'), task: 'Click Annotations in Compare > Per cell.', nextLabel: tryIt }}),
-            step('Compare Annotations panel', '#compare-tab-groups-content .color-panel-section', [
+            step('Compare Cell Annotations panel', '#compare-tab-groups-content .insights-panel-section', [
                 'Annotation comparison is a per-cell comparison between categories in the selected annotation.',
                 'Clicking on the search icon display an annotation comparison similar to the selection comparison.'
             ], {{ action: () => {{ invalidateGroupDEState?.(false); openTutorialInsightsPanel('compare', 'groups'); }}, nextLabel: tryIt }}),
@@ -9572,7 +9571,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             rawSteps.splice(insertBeforeUmapIndex, 0, ...selectionSteps);
         }}
         const modalStartIndex = rawSteps.findIndex(item => item.title === 'Open a section modal');
-        const modalEndIndex = rawSteps.findIndex(item => item.title === 'Select cells for Region');
+        const modalEndIndex = rawSteps.findIndex(item => item.title === 'Insights Region');
         const insertBeforeUmapIndexForModal = rawSteps.findIndex(item => item.title === 'UMAP toggle');
         if (modalStartIndex >= 0 && modalEndIndex > modalStartIndex && insertBeforeUmapIndexForModal >= 0 && modalStartIndex > insertBeforeUmapIndexForModal) {{
             const modalSteps = rawSteps.splice(modalStartIndex, modalEndIndex - modalStartIndex);
@@ -9587,7 +9586,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const insertBeforeUmapIndex = rawSteps.findIndex(item => item.title === 'UMAP toggle');
             rawSteps.splice(insertBeforeUmapIndex, 0, ...legendSteps);
         }}
-        const regionStartIndex = rawSteps.findIndex(item => item.title === 'Select cells for Region');
+        const regionStartIndex = rawSteps.findIndex(item => item.title === 'Insights Region');
         const regionEndIndex = rawSteps.findIndex(item => item.title === 'Module gene picker') >= 0
             ? rawSteps.findIndex(item => item.title === 'Module gene picker')
             : rawSteps.findIndex(item => item.title === 'Exploration annotation selector');
@@ -9615,10 +9614,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ['Pan mode', 'Spatial Selection'],
             ['UMAP toggle', 'UMAP'],
             ['Insights panel overview', 'Insights'],
-            ['Select cells for Selection', 'Selection'],
+            ['Insights Selection', 'Selection'],
             ['Legend panel toggle', 'Legend'],
             ['Open a section modal', 'Modal View'],
-            ['Select cells for Region', 'Region'],
+            ['Insights Region', 'Region'],
             ['Module gene picker', 'Module'],
             ['Exploration annotation selector', 'Exploration'],
             ['Open Overview > Summary', 'Exploration > Overview'],
@@ -9627,10 +9626,41 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ['Open Neighbors > Enrichment', 'Exploration > Neighbors'],
             ['Finish the tutorial', 'Finish']
         ]);
+        const chaptersAfterModuleWithoutTasks = new Set([
+            'Exploration',
+            'Exploration > Overview',
+            'Exploration > Genes',
+            'Exploration > Compare',
+            'Exploration > Neighbors',
+            'Finish',
+        ]);
         let currentChapter = 'Introduction';
         return rawSteps.map((tutorialStep) => {{
             if (chapterStarts.has(tutorialStep.title)) currentChapter = chapterStarts.get(tutorialStep.title);
-            const chapteredStep = {{ ...tutorialStep, chapter: currentChapter }};
+            let chapteredStep = {{ ...tutorialStep, chapter: currentChapter }};
+            if (chaptersAfterModuleWithoutTasks.has(currentChapter)) {{
+                const {{
+                    task,
+                    requiresSelection,
+                    requiresRegionB,
+                    requiresRegionBCleared,
+                    requiresAnnotationCreated,
+                    requiresSelectedAnnotationRow,
+                    requiresNoSelection,
+                    requiresQuerySelection,
+                    requiresModalOpen,
+                    requiresSelectionFindMoreClicked,
+                    requiresSelectionMarkersClicked,
+                    requiresModuleDraftGene,
+                    requiresModuleCreateClicked,
+                    requiresInsightsGeneSelected,
+                    autoNextWhenGateSatisfied,
+                    autoNextDelay,
+                    targetAfterGateSatisfied,
+                    ...storyStep
+                }} = chapteredStep;
+                chapteredStep = storyStep;
+            }}
             if (currentChapter === 'Insights') {{
                 const existingAvoidTargets = Array.isArray(chapteredStep.avoidTarget)
                     ? chapteredStep.avoidTarget
@@ -9638,7 +9668,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 return {{
                     ...chapteredStep,
                     placement: chapteredStep.placement || 'left',
-                    avoidTarget: [...existingAvoidTargets, '#color-panel'],
+                    avoidTarget: [...existingAvoidTargets, '#insights-panel'],
+                }};
+            }}
+            if (currentChapter === 'Spatial Selection') {{
+                return {{
+                    ...chapteredStep,
+                    positionTarget: 'tutorial-first-grid-section',
+                    placement: 'right',
                 }};
             }}
             return chapteredStep;
@@ -9652,6 +9689,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             if (section && Number(section.x?.length || section.n_cells || 0) > 0) return section;
         }}
         return (DATA.sections || []).find(section => Number(section?.x?.length || section?.n_cells || 0) > 0) || null;
+    }}
+
+    function getTutorialFirstGridSection() {{
+        const panel = getTutorialFirstGridSectionElement?.();
+        const section = sectionById.get(panel?.dataset.sectionId || '');
+        if (section && Number(section.x?.length || section.n_cells || 0) > 0) return section;
+        return getTutorialVisibleSection();
     }}
 
     function getTutorialSelectionIndices(section, maxCells = 80, offset = 0) {{
@@ -9838,7 +9882,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         selectedCellsFromQuery = false;
         lassoModeB = false;
         lassoSelectionActive = false;
-        umapPanActive = true;
+        selectionPanActive = true;
         refreshTutorialSelectionState();
         return selectedCells.size > 0;
     }}
@@ -9848,7 +9892,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         selectionSectionSummaryExpanded = false;
         hideModalGeneDiscoveryPanel?.();
         openInsightsMode?.('selection');
-        updateUMAPCursor?.();
+        updateSelectionCursor?.();
         renderUMAP?.();
         renderAllSections?.();
         if (modalSection) renderModalSection?.();
@@ -9884,8 +9928,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             selectedModalLassoPathB = source === 'modal' ? polygon : [];
             lassoModeB = true;
             lassoSelectionActive = false;
-            umapPanActive = true;
-            setUMAPCompareHintVisible?.(false);
+            selectionPanActive = true;
+            setSelectionCompareHintVisible?.(false);
             refreshTutorialSelectionState();
             return true;
         }}
@@ -9904,9 +9948,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         selectedCellsFromQuery = source === 'query';
         lassoModeB = false;
         lassoSelectionActive = false;
-        umapPanActive = true;
+        selectionPanActive = true;
         refreshTutorialSelectionState();
         return selectedCells.size > 0;
+    }}
+
+    function setTutorialFirstGridRandomSelection(options = {{}}) {{
+        const section = getTutorialFirstGridSection();
+        if (!section) return false;
+        return setTutorialSelection({{
+            source: 'grid',
+            randomArea: true,
+            ...options,
+            section,
+        }});
     }}
 
     function ensureTutorialSelection(source = 'grid') {{
@@ -9929,7 +9984,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         lassoModeB = false;
         lassoSelectionActive = false;
         updateSelectionInfo?.();
-        updateUMAPCompareButtonState?.();
+        updateSelectionCompareButtonState?.();
         renderAllSections?.();
         if (umapVisible) renderUMAP?.();
         if (modalSection) renderModalSection?.();
@@ -9937,7 +9992,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function ensureTutorialQuerySelection() {{
         selectionQueryExpanded = true;
-        renderUMAPSelectionQueryPanel?.();
+        renderSelectionQueryPanel?.();
         const examples = typeof getSelectionQueryExamplePresets === 'function'
             ? getSelectionQueryExamplePresets()
             : [];
@@ -9983,8 +10038,22 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         if (selectRow) tutorialAnnotationRowSelected = true;
         renderModalAnnotationPanel?.();
-        updateSelectionCreateAnnotationButtonState?.();
+        updateSelectionCreateRegionButtonState?.();
         updateSelectionInfo?.();
+        updateTutorialStepGate?.();
+        scheduleTutorialReposition?.();
+    }}
+
+    function prepareTutorialFirstGridRegion() {{
+        closeModal?.();
+        if (!selectedCells.size) {{
+            setTutorialFirstGridRandomSelection({{ areaFraction: 0.035, minCells: 10, maxCells: 80, attempts: 32 }});
+        }}
+        ensureTutorialAnnotationCreated(true);
+        openInsightsMode?.('exploration');
+        setInsightsMode?.('region');
+        updateTutorialStepGate?.();
+        scheduleTutorialReposition?.();
     }}
 
     function ensureTutorialModuleDraft() {{
@@ -10070,17 +10139,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (title === 'Welcome the KaroSpace') {{
             if (typeof closeModal === 'function') closeModal();
         }} else if (title === 'Annotation selector') {{
-            const select = document.getElementById('color-select');
+            const select = document.getElementById('annotation-select');
             const next = Array.from(select?.options || []).find(option => option.value && option.value !== select.value);
-            if (next) setTutorialSelectValue('#color-select', next.value);
+            if (next) setTutorialSelectValue('#annotation-select', next.value);
         }} else if (title === 'UMAP selection') {{
             ensureTutorialUMAPOpen?.();
             setTutorialUmapAreaSelection({{ areaFraction: 0.045, minCells: 18, attempts: 32, maxCells: 40 }});
         }} else if (title === 'Create region from UMAP selection') {{
             if (!selectedCells.size) setTutorialUmapAreaSelection({{ areaFraction: 0.045, minCells: 18, attempts: 32, maxCells: 40 }});
             ensureTutorialAnnotationCreated(false);
-        }} else if (title === 'Select cells for Selection') {{
-            setTutorialSelection({{ source: 'grid', maxCells: 80 }});
         }} else if (title === 'Lasso selection mode') {{
             setTutorialSelection({{ source: 'grid', maxCells: 36, offset: -0.26 }});
         }} else if (title === 'Selection Find More') {{
@@ -10099,22 +10166,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }} else if (title === 'Create region from selection') {{
             ensureTutorialSelection('grid');
             ensureTutorialAnnotationCreated(true);
-            if (typeof setInsightsMode === 'function') setInsightsMode('annotate');
+            if (typeof setInsightsMode === 'function') setInsightsMode('region');
         }} else if (title === 'Deselect selected cells') {{
             clearSelection?.();
         }} else if (title === 'Find cells by query') {{
-            const panel = document.getElementById('umap-selection-query-panel');
-            if (!panel?.classList.contains('visible')) safeTutorialClick('#umap-query-toggle');
+            const panel = document.getElementById('selection-query-panel');
+            if (!panel?.classList.contains('visible')) safeTutorialClick('#selection-query-toggle');
             ensureTutorialQuerySelection();
         }} else if (title === 'Open a section modal') {{
             ensureTutorialModalOpen();
-        }} else if (title === 'Select cells for Region') {{
-            ensureTutorialModalSelection();
-            if (typeof setInsightsMode === 'function') setInsightsMode('annotate');
-        }} else if (title === 'Create first Region') {{
-            if (!selectedCells.size) ensureTutorialModalSelection();
-            ensureTutorialAnnotationCreated(false);
-            if (typeof setInsightsMode === 'function') setInsightsMode('annotate');
         }} else if (title === 'Module gene picker') {{
             ensureTutorialModuleDraft();
         }} else if (title === 'Create module') {{
@@ -10261,7 +10321,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             clearRegionBSelection?.();
             lassoModeB = false;
             lassoSelectionActive = false;
-            umapPanActive = true;
+            selectionPanActive = true;
             modalLassoSelectionActive = false;
             isDrawingModalLasso = false;
             modalLassoPath = [];
@@ -10361,15 +10421,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             if (currentAnnotation !== DATA.initial_annotation) {{
                 setViewerColorColumn?.(DATA.initial_annotation);
             }} else {{
-                const colorSelect = document.getElementById('color-select');
-                if (colorSelect) colorSelect.value = currentAnnotation || DATA.initial_annotation || '';
+                const annotationSelect = document.getElementById('annotation-select');
+                if (annotationSelect) annotationSelect.value = currentAnnotation || DATA.initial_annotation || '';
             }}
             explorationColorCol = DATA.initial_annotation;
             celltypeTrendTarget = null;
 
-            document.getElementById('visual-default-controls')?.classList.add('color-mode');
+            document.getElementById('visual-default-controls')?.classList.add('annotation-mode');
             document.getElementById('visual-default-controls')?.classList.remove('gene-mode');
-            document.getElementById('default-source-color')?.classList.add('active');
+            document.getElementById('default-source-annotation')?.classList.add('active');
             document.getElementById('default-source-gene')?.classList.remove('active');
             document.getElementById('grid-side-toolbar')?.classList.remove('visual-open', 'gene-open', 'neighbor-open', 'he-open');
             document.getElementById('visual-params-toggle')?.setAttribute('aria-expanded', 'false');
@@ -10403,17 +10463,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             groupDeFullRunToken += 1;
             groupDeFullRun = null;
 
-            const colorPanel = document.getElementById('color-panel');
-            const colorToggle = document.getElementById('color-toggle');
-            colorPanel?.classList.add('collapsed');
-            colorPanel?.classList.remove('annotation-panel-open');
-            colorToggle?.classList.remove('active');
+            const insightsPanel = document.getElementById('insights-panel');
+            const insightsToggle = document.getElementById('insights-toggle');
+            insightsPanel?.classList.add('collapsed');
+            insightsPanel?.classList.remove('region-panel-open');
+            insightsToggle?.classList.remove('active');
 
             updateExpressionScaleUI?.();
             updateGeneParamsButtonState?.();
-            updateUMAPCursor?.();
-            updateUMAPLassoButtonState?.();
-            updateUMAPCompareButtonState?.();
+            updateSelectionCursor?.();
+            updateSelectionLassoButtonState?.();
+            updateSelectionCompareButtonState?.();
             updateSelectionInfo?.();
             renderModalAnnotationPanel?.();
             renderLegend?.('legend');
@@ -10437,6 +10497,26 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (el && typeof el.click === 'function') el.click();
     }}
 
+    function isTutorialFindCellsByQueryStep() {{
+        return tutorialActive && tutorialSteps[tutorialStepIndex]?.title === 'Find cells by query';
+    }}
+
+    function keepTutorialSelectionQueryPanelOpen() {{
+        const queryPanel = document.getElementById('selection-query-panel');
+        const queryToggle = document.getElementById('selection-query-toggle');
+        if (!queryPanel) return;
+        if (!queryPanel.classList.contains('visible')) {{
+            renderSelectionQueryPanel?.();
+            queryPanel.classList.add('visible');
+        }}
+        queryToggle?.classList.add('active');
+    }}
+
+    function closeSelectionQueryPanel() {{
+        document.getElementById('selection-query-panel')?.classList.remove('visible');
+        document.getElementById('selection-query-toggle')?.classList.remove('active');
+    }}
+
     function setTutorialSelectValue(selector, value) {{
         const select = document.querySelector(selector);
         if (!select || value == null) return false;
@@ -10447,12 +10527,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return true;
     }}
 
-    function ensureTutorialDefaultMode(source = 'color') {{
+    function ensureTutorialDefaultMode(source = 'annotation') {{
         if (typeof closeModal === 'function') closeModal();
         if (document.getElementById('overview-mode-split')?.classList.contains('active')) {{
             safeTutorialClick('#overview-mode-default');
         }}
-        safeTutorialClick(source === 'gene' ? '#default-source-gene' : '#default-source-color');
+        safeTutorialClick(source === 'gene' ? '#default-source-gene' : '#default-source-annotation');
     }}
 
     function ensureTutorialSplitMode(withGeneSide = false) {{
@@ -10595,9 +10675,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         currentGene = null;
         invalidateGeneDensityCaches?.();
         hiddenCategories?.clear?.();
-        document.getElementById('visual-default-controls')?.classList.remove('color-mode');
+        document.getElementById('visual-default-controls')?.classList.remove('annotation-mode');
         document.getElementById('visual-default-controls')?.classList.add('gene-mode');
-        document.getElementById('default-source-color')?.classList.remove('active');
+        document.getElementById('default-source-annotation')?.classList.remove('active');
         document.getElementById('default-source-gene')?.classList.add('active');
         updateExpressionScaleUI?.();
         renderLegend?.('legend');
@@ -10642,15 +10722,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         ensureTutorialUMAPOpen();
         const paramsPanel = document.getElementById('umap-params-panel');
         const paramsToggle = document.getElementById('umap-params-toggle');
-        const queryPanel = document.getElementById('umap-selection-query-panel');
-        const queryToggle = document.getElementById('umap-query-toggle');
+        const queryPanel = document.getElementById('selection-query-panel');
+        const queryToggle = document.getElementById('selection-query-toggle');
         if (panel === 'params') {{
             paramsPanel?.classList.add('visible');
             paramsToggle?.classList.add('active');
             queryPanel?.classList.remove('visible');
             queryToggle?.classList.remove('active');
         }} else if (panel === 'query') {{
-            if (typeof renderUMAPSelectionQueryPanel === 'function') renderUMAPSelectionQueryPanel();
+            if (typeof renderSelectionQueryPanel === 'function') renderSelectionQueryPanel();
             queryPanel?.classList.add('visible');
             queryToggle?.classList.add('active');
             paramsPanel?.classList.remove('visible');
@@ -10677,18 +10757,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 if (isSplitGeneScaleStep) prepareTutorialGeneExpressionScaleStep();
                 else if (title.startsWith('Split expression')) ensureTutorialGeneParametersOpen();
             }} else {{
-                ensureTutorialDefaultMode(title.includes('Gene') ? 'gene' : 'color');
+                ensureTutorialDefaultMode(title.includes('Gene') ? 'gene' : 'annotation');
             }}
         }}
 
         if (chapter === 'Legend') {{
             if (typeof closeModal === 'function') closeModal();
             if (typeof clearSelection === 'function') clearSelection();
-            const colorPanel = document.getElementById('color-panel');
-            const colorToggle = document.getElementById('color-toggle');
-            colorPanel?.classList.add('collapsed');
-            colorToggle?.classList.remove('active');
-            ensureTutorialDefaultMode('color');
+            const insightsPanel = document.getElementById('insights-panel');
+            const insightsToggle = document.getElementById('insights-toggle');
+            insightsPanel?.classList.add('collapsed');
+            insightsToggle?.classList.remove('active');
+            ensureTutorialDefaultMode('annotation');
             const legend = document.getElementById('legend');
             if (legend?.classList.contains('collapsed')) toggleLegendPanel?.();
             if (typeof renderLegend === 'function') renderLegend('legend');
@@ -10699,7 +10779,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
 
         if (chapter === 'Spatial Selection') {{
-            ensureTutorialDefaultMode('color');
+            ensureTutorialDefaultMode('annotation');
         }}
 
         if (chapter === 'Gene Expression' && !isSplitStep) {{
@@ -10724,7 +10804,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         if (chapter === 'Region') {{
             ensureTutorialModalOpen();
-            if (typeof setInsightsMode === 'function') setInsightsMode('annotate');
+            if (typeof setInsightsMode === 'function') setInsightsMode('region');
         }}
     }}
 
@@ -10760,7 +10840,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!section_key) return false;
         explorationColorCol = section_key;
         pseudobulkDeGroupby = section_key;
-        const select = document.getElementById('exploration-color-select');
+        const select = document.getElementById('exploration-annotation-select');
         if (select && Array.from(select.options || []).some(option => option.value === section_key)) {{
             select.value = section_key;
         }}
@@ -10788,10 +10868,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return rect.width > 2 && rect.height > 2;
     }}
 
+    function getTutorialTargetSelectors(step) {{
+        const target = step?.targetAfterGateSatisfied && tutorialStepGateSatisfied(step)
+            ? step.targetAfterGateSatisfied
+            : step?.target;
+        return Array.isArray(target) ? target : [target];
+    }}
+
     function getTutorialVisibleTargetElements(step) {{
-        const selectors = Array.isArray(step?.target) ? step.target : [step?.target];
+        const selectors = getTutorialTargetSelectors(step);
         return selectors
-            .flatMap(selector => selector ? Array.from(document.querySelectorAll(selector)) : [])
+            .flatMap(selector => getTutorialElementsForSelector(selector))
             .filter(isTutorialElementVisible);
     }}
 
@@ -10803,8 +10890,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const key = field.getAttribute('data-selection-query-input')
                 || field.getAttribute('data-welch-top-n')
                 || field.getAttribute('data-welch-min-pct')
-                || field.getAttribute('data-annotation-label')
-                || field.getAttribute('data-annotation-color')
+                || field.getAttribute('data-region-label')
+                || field.getAttribute('data-region-color')
                 || field.getAttribute('data-category-label-idx')
                 || field.getAttribute('data-category-color')
                 || field.getAttribute('data-module-name-input')
@@ -10823,14 +10910,26 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         document.getElementById('tutorial-spotlight')?.classList.remove('tutorial-spotlight-multi');
     }}
 
+    function getTutorialFirstGridSectionElement() {{
+        return Array.from(document.querySelectorAll('#grid .section-panel'))
+            .find(isTutorialElementVisible) || null;
+    }}
+
+    function getTutorialElementsForSelector(selector) {{
+        if (!selector) return [];
+        if (selector === 'tutorial-first-grid-section') {{
+            return [getTutorialFirstGridSectionElement()].filter(Boolean);
+        }}
+        return Array.from(document.querySelectorAll(selector));
+    }}
+
     function findTutorialTarget(step) {{
         if (step?.combineTargets) {{
             return getTutorialVisibleTargetElements(step)[0] || null;
         }}
-        const selectors = Array.isArray(step.target) ? step.target : [step.target];
+        const selectors = getTutorialTargetSelectors(step);
         for (const selector of selectors) {{
-            if (!selector) continue;
-            const matches = Array.from(document.querySelectorAll(selector));
+            const matches = getTutorialElementsForSelector(selector);
             const visible = matches.find(isTutorialElementVisible);
             if (visible) return visible;
         }}
@@ -10848,7 +10947,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         clearTutorialExtraSpotlights();
         if (!overlay || !spotlight || !card || !target) return;
         const rect = getTutorialSpotlightElementRect(target, step);
-        const positionEl = step?.positionTarget ? document.querySelector(step.positionTarget) : null;
+        const positionEl = step?.positionTarget === 'tutorial-first-grid-section'
+            ? getTutorialFirstGridSectionElement()
+            : (step?.positionTarget ? document.querySelector(step.positionTarget) : null);
         const positionRect = positionEl ? positionEl.getBoundingClientRect() : rect;
         const margin = 12;
         const spotlightPadding = Number.isFinite(step?.spotlightPadding)
@@ -10913,7 +11014,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const cardH = cardRect.height || 220;
         const placementAnchor = positionEl || target;
         const effectivePlacement = step?.placement
-            || (placementAnchor?.closest?.('#color-panel, .color-panel-mode') ? 'left' : null);
+            || (placementAnchor?.closest?.('#insights-panel, .insights-panel-mode') ? 'left' : null);
         const clampCardPosition = (candidate) => {{
             let left = Number(candidate.left);
             let top = Number(candidate.top);
@@ -11231,7 +11332,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     + '</span></div>'
                 : '');
         ensureFormFieldNames(overlay);
-        prev.disabled = displayIndex <= 0;
+        const isFirstChapterStep = chapter.chapterIndex <= 0;
+        prev.hidden = isFirstChapterStep;
+        prev.disabled = isFirstChapterStep || displayIndex <= 0;
         next.textContent = step.nextLabel || (displayIndex >= total - 1 ? 'Finish' : 'Next');
         next.setAttribute('aria-disabled', 'false');
         updateTutorialStepGate();
@@ -14256,9 +14359,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             invalidateGeneDensityCaches();
             hiddenCategories.clear();
             if (geneInput) geneInput.value = '';
-            document.getElementById('visual-default-controls')?.classList.add('color-mode');
+            document.getElementById('visual-default-controls')?.classList.add('annotation-mode');
             document.getElementById('visual-default-controls')?.classList.remove('gene-mode');
-            document.getElementById('default-source-color')?.classList.add('active');
+            document.getElementById('default-source-annotation')?.classList.add('active');
             document.getElementById('default-source-gene')?.classList.remove('active');
             updateExpressionScaleUI();
             renderLegend('legend');
@@ -14304,9 +14407,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             return true;
         }});
         if (ok) {{
-            document.getElementById('visual-default-controls')?.classList.remove('color-mode');
+            document.getElementById('visual-default-controls')?.classList.remove('annotation-mode');
             document.getElementById('visual-default-controls')?.classList.add('gene-mode');
-            document.getElementById('default-source-color')?.classList.remove('active');
+            document.getElementById('default-source-annotation')?.classList.remove('active');
             document.getElementById('default-source-gene')?.classList.add('active');
             recordRecentGene(token);
             geneDiscoveryResults = [];
@@ -16999,29 +17102,29 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ];
             html += `<div class="selection-comparison-composition"><div class="selection-summary-title">Cell Composition — ${{labelA.toLowerCase()}} vs ${{labelB.toLowerCase()}}</div>`;
             regionRows.forEach((region) => {{
-                html += `<div class="annot-comp-row"><div class="annot-comp-header"><span class="annot-comp-dot" style="background:${{region.color}}"></span><span>${{region.label}}</span><span class="annot-comp-count">${{region.total.toLocaleString()}} cells</span></div>`;
+                html += `<div class="composition-comparison-row"><div class="composition-comparison-header"><span class="composition-comparison-dot" style="background:${{region.color}}"></span><span>${{region.label}}</span><span class="composition-comparison-count">${{region.total.toLocaleString()}} cells</span></div>`;
                 if (region.total > 0) {{
-                    html += '<div class="annot-comp-bar-track">';
+                    html += '<div class="composition-comparison-bar-track">';
                     typeList.forEach((type) => {{
                         const count = region.types.get(type) || 0;
                         const pct = Math.round(100 * count / region.total);
                         if (pct <= 0) return;
                         const color = getCategoryColorForValue(summaryA.typeColumn, type);
-                        html += `<div class="annot-comp-segment" title="${{escapeHtml(type)}}: ${{count.toLocaleString()}} (${{pct}}%)" style="width:${{pct}}%;background:${{color}}"></div>`;
+                        html += `<div class="composition-comparison-segment" title="${{escapeHtml(type)}}: ${{count.toLocaleString()}} (${{pct}}%)" style="width:${{pct}}%;background:${{color}}"></div>`;
                     }});
                     html += '</div>';
                 }}
                 html += '</div>';
             }});
             const visibleTypes = selectionComparisonLegendExpanded ? typeList : typeList.slice(0, 8);
-            html += '<div class="annot-comp-legend">';
+            html += '<div class="composition-comparison-legend">';
             visibleTypes.forEach((label) => {{
                 const legendColor = getCategoryColorForValue(summaryA.typeColumn, label);
-                html += `<span class="annot-comp-legend-item"><span class="annot-comp-dot" style="background:${{legendColor}}"></span>${{escapeHtml(label)}}</span>`;
+                html += `<span class="composition-comparison-legend-item"><span class="composition-comparison-dot" style="background:${{legendColor}}"></span>${{escapeHtml(label)}}</span>`;
             }});
             html += '</div>';
             if (typeList.length > 8) {{
-                html += `<button class="annot-comp-legend-item annot-comp-legend-toggle" type="button" data-selection-composition-legend-toggle>${{selectionComparisonLegendExpanded ? 'Show less' : `+${{typeList.length - 8}} more categories`}}</button>`;
+                html += `<button class="composition-comparison-legend-item composition-comparison-legend-toggle" type="button" data-selection-composition-legend-toggle>${{selectionComparisonLegendExpanded ? 'Show less' : `+${{typeList.length - 8}} more categories`}}</button>`;
             }}
             html += '</div>';
         }}
@@ -17052,8 +17155,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const volcanoToolbar = '<button class="icon-btn" type="button" data-selection-de-export-volcano title="Download volcano plot as SVG" aria-label="Download volcano plot as SVG"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path></svg></button>';
                 const cards = top.map((entry) => `
                     <div class="comparison-card">
-                        <div class="comparison-card-title annotation-de-card-title">
-                            <div class="annotation-de-card-title-main">
+                        <div class="comparison-card-title comparison-de-card-title">
+                            <div class="comparison-de-card-title-main">
                                 ${{renderGeneTokenButton(entry.gene, {{
                                     isActive: entry.gene === currentGene,
                                     showMeta: false,
@@ -17063,11 +17166,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                                     title: 'Search Google for this gene',
                                 }})}}
                             </div>
-                            <div class="annotation-de-title-stats" style="border-color:${{Number(entry.score || 0) >= 0 ? colorA : colorB}}"><span>log2FC ${{formatScaleNumber(entry.log2fc)}}</span><span>Score ${{formatScaleNumber(entry.score)}}</span></div>
+                            <div class="comparison-de-title-stats" style="border-color:${{Number(entry.score || 0) >= 0 ? colorA : colorB}}"><span>log2FC ${{formatScaleNumber(entry.log2fc)}}</span><span>Score ${{formatScaleNumber(entry.score)}}</span></div>
                         </div>
                         <div class="comparison-metric-grid">
-                            <span class="annotation-de-region-chip" style="background:${{getComparisonMetricChipBackground(colorA, Number(entry.score || 0) >= 0 ? colorA : colorB)}};color:${{textColorA}}"><span>% expr ${{compareAllCells ? 'selected' : 'A'}}</span><strong>${{Number(entry.pctA || 0).toFixed(1)}}%</strong><span>Mean ${{compareAllCells ? 'selected' : 'A'}}</span><strong>${{formatScaleNumber(entry.meanA)}}</strong></span>
-                            <span class="annotation-de-region-chip" style="background:${{getComparisonMetricChipBackground(colorB, Number(entry.score || 0) >= 0 ? colorA : colorB)}};color:${{textColorB}}"><span>% expr ${{compareAllCells ? 'all' : 'B'}}</span><strong>${{Number(entry.pctB || 0).toFixed(1)}}%</strong><span>Mean ${{compareAllCells ? 'all' : 'B'}}</span><strong>${{formatScaleNumber(entry.meanB)}}</strong></span>
+                            <span class="comparison-de-metric-chip" style="background:${{getComparisonMetricChipBackground(colorA, Number(entry.score || 0) >= 0 ? colorA : colorB)}};color:${{textColorA}}"><span>% expr ${{compareAllCells ? 'selected' : 'A'}}</span><strong>${{Number(entry.pctA || 0).toFixed(1)}}%</strong><span>Mean ${{compareAllCells ? 'selected' : 'A'}}</span><strong>${{formatScaleNumber(entry.meanA)}}</strong></span>
+                            <span class="comparison-de-metric-chip" style="background:${{getComparisonMetricChipBackground(colorB, Number(entry.score || 0) >= 0 ? colorA : colorB)}};color:${{textColorB}}"><span>% expr ${{compareAllCells ? 'all' : 'B'}}</span><strong>${{Number(entry.pctB || 0).toFixed(1)}}%</strong><span>Mean ${{compareAllCells ? 'all' : 'B'}}</span><strong>${{formatScaleNumber(entry.meanB)}}</strong></span>
                         </div>
                     </div>
                 `).join('');
@@ -17381,8 +17484,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             queryClose.addEventListener('click', (e) => {{
                 e.preventDefault();
                 e.stopPropagation();
-                const queryPanel = document.getElementById('umap-selection-query-panel');
-                const queryToggleBtn = document.getElementById('umap-query-toggle');
+                if (isTutorialFindCellsByQueryStep()) {{
+                    keepTutorialSelectionQueryPanelOpen();
+                    return;
+                }}
+                const queryPanel = document.getElementById('selection-query-panel');
+                const queryToggleBtn = document.getElementById('selection-query-toggle');
                 queryPanel?.classList.remove('visible');
                 queryToggleBtn?.classList.remove('active');
             }});
@@ -17751,12 +17858,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             selectedAnnotationBId = null;
             lassoModeB = true;
             lassoSelectionActive = true;
-            umapPanActive = false;
+            selectionPanActive = false;
             isDrawingLasso = false;
             lassoPath = [];
-            setUMAPCompareHintVisible(false);
-            updateUMAPCursor();
-            updateUMAPLassoButtonState();
+            setSelectionCompareHintVisible(false);
+            updateSelectionCursor();
+            updateSelectionLassoButtonState();
         }} else {{
             selectedCells = newCells;
             markPrimarySelectionChanged();
@@ -17781,7 +17888,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         renderAllSections();
         if (modalSection) renderModalSection();
         updateSelectionInfo();
-        clickTutorialNextWhenCurrentStep(step => step?.requiresSelection || step?.requiresRegionB);
+        const tutorialAdvanceDelay = tutorialActive && tutorialSteps[tutorialStepIndex]?.title === 'UMAP selection' ? 900 : 120;
+        clickTutorialNextWhenCurrentStep(step => step?.requiresSelection || step?.requiresRegionB, tutorialAdvanceDelay);
     }}
 
     function getGridLassoCanvas() {{
@@ -17852,8 +17960,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             selectedAnnotationBId = null;
             lassoModeB = true;
             lassoSelectionActive = true;
-            umapPanActive = false;
-            setUMAPCompareHintVisible(false);
+            selectionPanActive = false;
+            setSelectionCompareHintVisible(false);
         }} else {{
             selectedCells = newCells;
             markPrimarySelectionChanged();
@@ -17874,12 +17982,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         selectionSummaryExpanded = false;
         selectionSectionSummaryExpanded = false;
         openInsightsMode('selection');
-        updateUMAPCursor();
+        updateSelectionCursor();
         renderUMAP();
         renderAllSections();
         if (modalSection) renderModalSection();
         updateSelectionInfo();
-        clickTutorialNextWhenCurrentStep(step => step?.requiresSelection || step?.requiresRegionB);
+        scheduleTutorialReposition?.();
+        const tutorialAdvanceDelay = tutorialActive && ['Lasso selection mode', 'Compare two selections'].includes(tutorialSteps[tutorialStepIndex]?.title) ? 900 : 120;
+        clickTutorialNextWhenCurrentStep(step => step?.requiresSelection || step?.requiresRegionB, tutorialAdvanceDelay);
     }}
 
     function escapeHtml(text) {{
@@ -19379,10 +19489,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function getAnnotationDropPosition(row, event) {{
-        const target = row.querySelector?.(':scope > .modal-annotation-row-main') || row;
+        const target = row.querySelector?.(':scope > .region-row-main') || row;
         const rect = target.getBoundingClientRect();
         const y = event.clientY - rect.top;
-        const targetAnnotation = getModalAnnotationById(row.dataset.annotationId);
+        const targetAnnotation = getModalAnnotationById(row.dataset.regionId);
         if (!targetAnnotation?.isGroup) return y < rect.height * 0.5 ? 'before' : 'after';
         if (y < rect.height * 0.28) return 'before';
         if (y > rect.height * 0.72) return 'after';
@@ -19573,8 +19683,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         );
     }}
 
-    function updateSelectionCreateAnnotationButtonState() {{
-        const btn = document.getElementById('selection-create-annotation-btn');
+    function updateSelectionCreateRegionButtonState() {{
+        const btn = document.getElementById('selection-create-region-btn');
         if (!btn) return;
         const alreadyCreated = annotationAlreadyCreatedForCurrentSelection();
         const canCreateFromLasso = hasLassoDerivedAnnotationSelection() && canCreateAnnotationFromSelection();
@@ -19675,7 +19785,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (umapVisible) renderUMAP();
         if (modalSection) renderModalSection();
         if (insightsTopLevelTab === 'compare' && insightsCompareTab === 'regions') renderAnnotationComparison();
-        updateSelectionCreateAnnotationButtonState();
+        updateSelectionCreateRegionButtonState();
         return true;
     }}
 
@@ -19718,7 +19828,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             selectedCells.clear();
             clearRegionBSelection();
             lassoModeB = false;
-            setUMAPCompareHintVisible(false);
+            setSelectionCompareHintVisible(false);
             selectedCellsFromAnnotation = false;
             selectedAnnotationId = null;
             updateSelectionInfo();
@@ -19726,7 +19836,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (selectedAnnotationBId === target) {{
             clearRegionBSelection();
             lassoModeB = false;
-            setUMAPCompareHintVisible(false);
+            setSelectionCompareHintVisible(false);
             updateSelectionInfo();
         }}
         if (!removedSelectedAnnotation) refreshSelectionFromSelectedAnnotation();
@@ -19751,7 +19861,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             selectedCells.clear();
             clearRegionBSelection();
             lassoModeB = false;
-            setUMAPCompareHintVisible(false);
+            setSelectionCompareHintVisible(false);
             selectedCellsFromAnnotation = false;
             selectedAnnotationId = null;
             updateSelectionInfo();
@@ -19759,7 +19869,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!removedSelectedAnnotation && removedComparedAnnotation) {{
             clearRegionBSelection();
             lassoModeB = false;
-            setUMAPCompareHintVisible(false);
+            setSelectionCompareHintVisible(false);
             updateSelectionInfo();
         }}
         if (!removedSelectedAnnotation) refreshSelectionFromSelectedAnnotation();
@@ -19780,7 +19890,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             selectedCells.clear();
             clearRegionBSelection();
             lassoModeB = false;
-            setUMAPCompareHintVisible(false);
+            setSelectionCompareHintVisible(false);
             selectedCellsFromAnnotation = false;
             selectedAnnotationId = null;
             updateSelectionInfo();
@@ -19840,11 +19950,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         selectedAnnotationBId = annotation.id;
         lassoModeB = false;
         lassoSelectionActive = false;
-        umapPanActive = true;
-        setUMAPCompareHintVisible(false);
+        selectionPanActive = true;
+        setSelectionCompareHintVisible(false);
         syncModalLassoFromGlobal();
-        updateUMAPCursor();
-        updateUMAPLassoButtonState();
+        updateSelectionCursor();
+        updateSelectionLassoButtonState();
         selectionSummaryExpanded = false;
         selectionSectionSummaryExpanded = false;
         updateSelectionInfo();
@@ -20803,18 +20913,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function renderModalAnnotationPanel() {{
-        const listEl = document.getElementById('modal-annotation-list');
-        const sectionEl = document.getElementById('modal-annotation-section');
+        const listEl = document.getElementById('region-list');
+        const sectionEl = document.getElementById('region-section');
         if (!listEl) return;
         sanitizeAnnotationParents();
         const rootAnnotations = modalAnnotations.filter(annotation => normalizeAnnotationParentId(annotation.parentId) === null);
         if (!rootAnnotations.length) {{
-            if (sectionEl) sectionEl.classList.remove('annotation-has-items');
-            listEl.innerHTML = '<div class="modal-annotation-empty">Create regions from lasso selection in the Tools panel.</div>';
+            if (sectionEl) sectionEl.classList.remove('region-has-items');
+            listEl.innerHTML = '<div class="region-empty">Create regions from lasso selection in the Tools panel.</div>';
             layoutModalAnnotationPanel();
             return;
         }}
-        if (sectionEl) sectionEl.classList.add('annotation-has-items');
+        if (sectionEl) sectionEl.classList.add('region-has-items');
 
         const renderAnnotationRow = (annotation, depth = 0) => {{
             const id = Number(annotation?.id);
@@ -20828,37 +20938,37 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const isSelectedAnnotation = selectedCellsFromAnnotation && selectedAnnotationId === annotation.id;
             const isComparedAnnotation = selectedAnnotationBId === annotation.id;
             const rowClasses = [
-                'modal-annotation-row',
-                isSelectedAnnotation ? 'annotation-selected' : '',
-                isComparedAnnotation ? 'annotation-compared' : '',
-                annotation.isGroup ? 'annotation-group' : '',
-                depth > 0 ? 'annotation-child' : '',
+                'region-row',
+                isSelectedAnnotation ? 'region-selected' : '',
+                isComparedAnnotation ? 'region-compared' : '',
+                annotation.isGroup ? 'region-group' : '',
+                depth > 0 ? 'region-child' : '',
             ].filter(Boolean).join(' ');
             const isCollapsedGroup = annotation.isGroup && collapsedModalAnnotationGroupIds.has(id);
             const groupToggle = annotation.isGroup
-                ? `<button class="annotation-group-toggle" type="button" data-annotation-group-toggle="${{annotation.id}}" title="${{isCollapsedGroup ? 'Expand group' : 'Collapse group'}}" aria-label="${{isCollapsedGroup ? 'Expand group' : 'Collapse group'}}" aria-expanded="${{isCollapsedGroup ? 'false' : 'true'}}"${{children.length ? '' : ' disabled'}}>
+                ? `<button class="region-group-toggle" type="button" data-region-group-toggle="${{annotation.id}}" title="${{isCollapsedGroup ? 'Expand group' : 'Collapse group'}}" aria-label="${{isCollapsedGroup ? 'Expand group' : 'Collapse group'}}" aria-expanded="${{isCollapsedGroup ? 'false' : 'true'}}"${{children.length ? '' : ' disabled'}}>
                         <svg viewBox="0 0 24 24" aria-hidden="true">${{isCollapsedGroup ? '<path d="m9 18 6-6-6-6"></path>' : '<path d="m6 9 6 6 6-6"></path>'}}</svg>
                     </button>`
                 : '';
             const childTitle = children.length
-                ? `${{children.length.toLocaleString()}} nested annotation${{children.length === 1 ? '' : 's'}}`
-                : (annotation.isGroup ? 'Drop annotation rows on this group to add them' : 'Annotation row');
+                ? `${{children.length.toLocaleString()}} nested region${{children.length === 1 ? '' : 's'}}`
+                : (annotation.isGroup ? 'Drop region rows on this group to add them' : 'Region row');
             const selectTitle = annotation.isGroup
                 ? 'Select all cells in this group'
                 : 'Select cells in this region';
             return `
-                <div class="${{rowClasses}}" data-annotation-id="${{annotation.id}}" data-annotation-depth="${{depth}}" draggable="true">
-                    <div class="modal-annotation-row-main" data-annotation-select="${{annotation.id}}" role="button" tabindex="0" title="${{selectTitle}}" aria-label="${{selectTitle}}">
-                        <span class="modal-annotation-drag-handle" data-annotation-drag-handle title="Drag to reorder or nest" aria-label="Drag to reorder or nest"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5h.01"></path><path d="M15 5h.01"></path><path d="M9 12h.01"></path><path d="M15 12h.01"></path><path d="M9 19h.01"></path><path d="M15 19h.01"></path></svg></span>
-                        <input class="modal-annotation-label" type="text" name="modal_annotation_label_${{escapeHtml(annotation.id)}}" value="${{label}}" data-annotation-label="${{annotation.id}}"${{labelStyle}}>
-                        <div class="modal-annotation-row-actions">
-                            <input class="modal-annotation-color" type="color" name="modal_annotation_color_${{escapeHtml(annotation.id)}}" value="${{getAnnotationDisplayColor(annotation) || '#777777'}}" data-annotation-color="${{annotation.id}}" title="Change ${{annotation.isGroup ? 'group' : 'region'}} color" aria-label="Change ${{annotation.isGroup ? 'group' : 'region'}} color">
+                <div class="${{rowClasses}}" data-region-id="${{annotation.id}}" data-region-depth="${{depth}}" draggable="true">
+                    <div class="region-row-main" data-region-select="${{annotation.id}}" role="button" tabindex="0" title="${{selectTitle}}" aria-label="${{selectTitle}}">
+                        <span class="region-drag-handle" data-region-drag-handle title="Drag to reorder or nest" aria-label="Drag to reorder or nest"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5h.01"></path><path d="M15 5h.01"></path><path d="M9 12h.01"></path><path d="M15 12h.01"></path><path d="M9 19h.01"></path><path d="M15 19h.01"></path></svg></span>
+                        <input class="region-label" type="text" name="region_label_${{escapeHtml(annotation.id)}}" value="${{label}}" data-region-label="${{annotation.id}}"${{labelStyle}}>
+                        <div class="region-row-actions">
+                            <input class="region-color" type="color" name="region_color_${{escapeHtml(annotation.id)}}" value="${{getAnnotationDisplayColor(annotation) || '#777777'}}" data-region-color="${{annotation.id}}" title="Change ${{annotation.isGroup ? 'group' : 'region'}} color" aria-label="Change ${{annotation.isGroup ? 'group' : 'region'}} color">
                             ${{groupToggle}}
-                            <button type="button" data-annotation-delete="${{annotation.id}}" title="Delete annotation" aria-label="Delete annotation">
+                            <button type="button" data-region-delete="${{annotation.id}}" title="Delete region" aria-label="Delete region">
                                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>
                             </button>
                         </div>
-                        <span class="modal-annotation-count" style="${{countStyle}}" title="${{childTitle}}">${{count}} cells</span>
+                        <span class="region-count" style="${{countStyle}}" title="${{childTitle}}">${{count}} cells</span>
                     </div>
                 </div>
             `;
@@ -20882,14 +20992,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 ? ''
                 : children.length
                 ? children.map((child) => renderAnnotationNode(child, depth + 1, nextVisited)).join('')
-                : '<div class="modal-annotation-group-placeholder" data-annotation-group-placeholder>Drop annotations here</div>';
+                : '<div class="region-group-placeholder" data-region-group-placeholder>Drop regions here</div>';
             const wrapClasses = [
-                'modal-annotation-group-wrap',
-                isCollapsed ? 'annotation-group-collapsed' : '',
-                depth > 0 ? 'annotation-child' : '',
+                'region-group-wrap',
+                isCollapsed ? 'region-group-collapsed' : '',
+                depth > 0 ? 'region-child' : '',
             ].filter(Boolean).join(' ');
             return `
-                <div class="${{wrapClasses}}" data-annotation-group-id="${{group.id}}" data-annotation-depth="${{depth}}">
+                <div class="${{wrapClasses}}" data-region-group-id="${{group.id}}" data-region-depth="${{depth}}">
                     ${{renderAnnotationRow(group, 0)}}
                     ${{childHtml}}
                 </div>
@@ -20901,20 +21011,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         )).join('');
 
         const clearAnnotationDropIndicators = () => {{
-            listEl.querySelectorAll('.modal-annotation-row').forEach((candidate) => {{
+            listEl.querySelectorAll('.region-row').forEach((candidate) => {{
                 candidate.classList.remove('drag-over', 'drag-before', 'drag-after', 'drag-inside');
             }});
-            listEl.querySelectorAll('.modal-annotation-group-wrap').forEach((group) => {{
+            listEl.querySelectorAll('.region-group-wrap').forEach((group) => {{
                 group.classList.remove('drop-active', 'drag-inside');
             }});
-            listEl.querySelector('[data-annotation-drop-placeholder]')?.remove();
+            listEl.querySelector('[data-region-drop-placeholder]')?.remove();
         }};
         const getAnnotationDropPlaceholder = () => {{
-            let placeholder = listEl.querySelector('[data-annotation-drop-placeholder]');
+            let placeholder = listEl.querySelector('[data-region-drop-placeholder]');
             if (!placeholder) {{
                 placeholder = document.createElement('div');
-                placeholder.className = 'modal-annotation-drop-placeholder';
-                placeholder.dataset.annotationDropPlaceholder = '1';
+                placeholder.className = 'region-drop-placeholder';
+                placeholder.dataset.regionDropPlaceholder = '1';
             }}
             return placeholder;
         }};
@@ -20957,26 +21067,26 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             );
         }};
 
-        listEl.querySelectorAll('.modal-annotation-row[draggable="true"]').forEach((row) => {{
+        listEl.querySelectorAll('.region-row[draggable="true"]').forEach((row) => {{
             row.addEventListener('dragstart', (event) => {{
                 if (event.target?.closest?.('input, button, select, textarea, a, [contenteditable="true"]')) {{
                     event.preventDefault();
                     return;
                 }}
                 event.stopPropagation();
-                draggedModalAnnotationId = Number(row.dataset.annotationId);
+                draggedModalAnnotationId = Number(row.dataset.regionId);
                 row.classList.add('dragging');
                 event.dataTransfer.effectAllowed = 'move';
                 event.dataTransfer.setData('text/plain', String(draggedModalAnnotationId));
             }});
             row.addEventListener('dragend', () => {{
                 draggedModalAnnotationId = null;
-                listEl.querySelectorAll('.modal-annotation-row').forEach((candidate) => candidate.classList.remove('dragging'));
+                listEl.querySelectorAll('.region-row').forEach((candidate) => candidate.classList.remove('dragging'));
                 clearAnnotationDropIndicators();
             }});
             row.addEventListener('dragover', (event) => {{
                 if (!Number.isFinite(draggedModalAnnotationId)) return;
-                const targetId = Number(row.dataset.annotationId);
+                const targetId = Number(row.dataset.regionId);
                 if (!Number.isFinite(targetId) || targetId === draggedModalAnnotationId || isAnnotationDescendantOf(draggedModalAnnotationId, targetId)) return;
                 event.preventDefault();
                 event.stopPropagation();
@@ -20988,18 +21098,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 event.preventDefault();
                 event.stopPropagation();
                 clearAnnotationDropIndicators();
-                const targetId = Number(row.dataset.annotationId);
+                const targetId = Number(row.dataset.regionId);
                 const sourceId = Number(event.dataTransfer.getData('text/plain') || draggedModalAnnotationId);
                 const position = getAnnotationDropPosition(row, event);
                 moveModalAnnotation(sourceId, targetId, position);
             }});
         }});
 
-        listEl.querySelectorAll('.modal-annotation-group-wrap[data-annotation-group-id]').forEach((groupEl) => {{
+        listEl.querySelectorAll('.region-group-wrap[data-region-group-id]').forEach((groupEl) => {{
             groupEl.addEventListener('dragover', (event) => {{
                 if (!Number.isFinite(draggedModalAnnotationId)) return;
-                if (event.target?.closest?.('.modal-annotation-row')) return;
-                const targetId = Number(groupEl.dataset.annotationGroupId);
+                if (event.target?.closest?.('.region-row')) return;
+                const targetId = Number(groupEl.dataset.regionGroupId);
                 if (!Number.isFinite(targetId) || targetId === draggedModalAnnotationId || isAnnotationDescendantOf(draggedModalAnnotationId, targetId)) return;
                 event.preventDefault();
                 event.stopPropagation();
@@ -21011,11 +21121,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 clearAnnotationDropIndicators();
             }});
             groupEl.addEventListener('drop', (event) => {{
-                if (event.target?.closest?.('.modal-annotation-row')) return;
+                if (event.target?.closest?.('.region-row')) return;
                 event.preventDefault();
                 event.stopPropagation();
                 clearAnnotationDropIndicators();
-                const targetId = Number(groupEl.dataset.annotationGroupId);
+                const targetId = Number(groupEl.dataset.regionGroupId);
                 const sourceId = Number(event.dataTransfer.getData('text/plain') || draggedModalAnnotationId);
                 const position = getGroupWrapDropPosition(groupEl, event);
                 if (position === 'inside') {{
@@ -21030,14 +21140,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             listEl.dataset.rootDropBound = '1';
             listEl.addEventListener('dragover', (event) => {{
                 if (!Number.isFinite(draggedModalAnnotationId)) return;
-                if (event.target?.closest?.('.modal-annotation-row')) return;
+                if (event.target?.closest?.('.region-row')) return;
                 event.preventDefault();
                 event.dataTransfer.dropEffect = 'move';
                 clearAnnotationDropIndicators();
                 listEl.appendChild(getAnnotationDropPlaceholder());
             }});
             listEl.addEventListener('drop', (event) => {{
-                if (event.target?.closest?.('.modal-annotation-row')) return;
+                if (event.target?.closest?.('.region-row')) return;
                 event.preventDefault();
                 clearAnnotationDropIndicators();
                 const sourceId = Number(event.dataTransfer.getData('text/plain') || draggedModalAnnotationId);
@@ -21045,9 +21155,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }});
         }}
 
-        listEl.querySelectorAll('[data-annotation-label]').forEach((input) => {{
+        listEl.querySelectorAll('[data-region-label]').forEach((input) => {{
             input.addEventListener('change', () => {{
-                const annotation = getModalAnnotationById(input.dataset.annotationLabel);
+                const annotation = getModalAnnotationById(input.dataset.regionLabel);
                 if (!annotation) return;
                 const typed = String(input.value || '').trim();
                 annotation.label = typed
@@ -21057,9 +21167,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 if (modalSection) renderModalSection();
             }});
         }});
-        listEl.querySelectorAll('[data-annotation-select]').forEach((rowMain) => {{
+        listEl.querySelectorAll('[data-region-select]').forEach((rowMain) => {{
             const selectAnnotation = () => {{
-                const annotationId = Number(rowMain.dataset.annotationSelect);
+                const annotationId = Number(rowMain.dataset.regionSelect);
                 if (!Number.isFinite(annotationId)) return;
                 selectCellsFromAnnotation(annotationId);
                 if (tutorialActive && tutorialSteps[tutorialStepIndex]?.requiresSelectedAnnotationRow) {{
@@ -21068,7 +21178,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 }}
             }};
             rowMain.addEventListener('click', (event) => {{
-                if (event.target?.closest?.('input, button, select, textarea, a, [contenteditable="true"], [data-annotation-drag-handle]')) return;
+                if (event.target?.closest?.('input, button, select, textarea, a, [contenteditable="true"], [data-region-drag-handle]')) return;
                 selectAnnotation();
             }});
             rowMain.addEventListener('keydown', (event) => {{
@@ -21078,9 +21188,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 selectAnnotation();
             }});
         }});
-        listEl.querySelectorAll('[data-annotation-color]').forEach((input) => {{
+        listEl.querySelectorAll('[data-region-color]').forEach((input) => {{
             input.addEventListener('change', () => {{
-                const annotation = getModalAnnotationById(input.dataset.annotationColor);
+                const annotation = getModalAnnotationById(input.dataset.regionColor);
                 const color = normalizeHexColor(input.value);
                 if (!annotation || !color) return;
                 annotation.color = color;
@@ -21094,11 +21204,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 if (modalSection) renderModalSection();
             }});
         }});
-        listEl.querySelectorAll('[data-annotation-group-toggle]').forEach((btn) => {{
+        listEl.querySelectorAll('[data-region-group-toggle]').forEach((btn) => {{
             btn.addEventListener('click', (event) => {{
                 event.preventDefault();
                 event.stopPropagation();
-                const groupId = Number(btn.dataset.annotationGroupToggle);
+                const groupId = Number(btn.dataset.regionGroupToggle);
                 if (!Number.isFinite(groupId)) return;
                 if (collapsedModalAnnotationGroupIds.has(groupId)) {{
                     collapsedModalAnnotationGroupIds.delete(groupId);
@@ -21108,9 +21218,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 renderModalAnnotationPanel();
             }});
         }});
-        listEl.querySelectorAll('[data-annotation-delete]').forEach((btn) => {{
+        listEl.querySelectorAll('[data-region-delete]').forEach((btn) => {{
             btn.addEventListener('click', () => {{
-                removeModalAnnotation(btn.dataset.annotationDelete);
+                removeModalAnnotation(btn.dataset.regionDelete);
             }});
         }});
         layoutModalAnnotationPanel();
@@ -21171,8 +21281,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             selectedAnnotationBId = null;
             lassoModeB = true;
             lassoSelectionActive = true;
-            umapPanActive = false;
-            setUMAPCompareHintVisible(false);
+            selectionPanActive = false;
+            setSelectionCompareHintVisible(false);
         }} else {{
             selectedCells = newCells;
             markPrimarySelectionChanged();
@@ -21200,25 +21310,25 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         clickTutorialNextWhenCurrentStep(step => step?.requiresSelection || step?.requiresRegionB);
     }}
 
-    function updateUMAPLassoButtonState() {{
-        const btn = document.getElementById('umap-lasso-btn');
-        const panBtn = document.getElementById('umap-pan-btn');
+    function updateSelectionLassoButtonState() {{
+        const btn = document.getElementById('selection-lasso-btn');
+        const panBtn = document.getElementById('selection-pan-btn');
         updateGridPanelLassoCursor();
         if (!btn) return;
         const hasSelection = selectedCells.size > 0 || selectedCellsB.size > 0;
-        panBtn?.classList.toggle('active', umapPanActive && !lassoSelectionActive);
+        panBtn?.classList.toggle('active', selectionPanActive && !lassoSelectionActive);
         if (hasSelection) {{
-            btn.innerHTML = UMAP_CLEAR_ICON;
+            btn.innerHTML = SELECTION_CLEAR_ICON;
             btn.title = 'Clear selected cells';
             btn.setAttribute('aria-label', 'Clear selected cells');
             btn.classList.add('active');
         }} else {{
-            btn.innerHTML = UMAP_LASSO_ICON;
-            btn.title = lassoSelectionActive ? 'Selection tool active on UMAP and sections' : 'Draw to select cells on UMAP or sections';
+            btn.innerHTML = SELECTION_LASSO_ICON;
+            btn.title = lassoSelectionActive ? 'Selection tool active on embedding and sections' : 'Draw to select cells on the embedding or sections';
             btn.setAttribute('aria-label', btn.title);
             btn.classList.toggle('active', lassoSelectionActive);
         }}
-        updateUMAPCompareButtonState();
+        updateSelectionCompareButtonState();
     }}
 
     function syncModalLassoFromGlobal() {{
@@ -21236,13 +21346,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         renderModalSection();
     }}
 
-    function updateUMAPCompareButtonState() {{
-        const btn = document.getElementById('umap-compare-btn');
+    function updateSelectionCompareButtonState() {{
+        const btn = document.getElementById('selection-compare-btn');
         if (!btn) return;
         const hasRegionA = selectedCells.size > 0;
         const hasRegionB = selectedCellsB.size > 0;
         btn.disabled = !hasRegionA;
-        btn.innerHTML = hasRegionB ? UMAP_CLEAR_ICON : UMAP_COMPARE_ICON;
+        btn.innerHTML = hasRegionB ? SELECTION_CLEAR_ICON : SELECTION_COMPARE_ICON;
         btn.classList.toggle('active', hasRegionA && (lassoModeB || hasRegionB));
         btn.title = !hasRegionA
             ? 'Draw Region A first to compare selections'
@@ -21250,13 +21360,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         btn.setAttribute('aria-label', btn.title);
     }}
 
-    function toggleUMAPRegionBSelection() {{
+    function toggleSelectionRegionBSelection() {{
         if (selectedCells.size === 0) return;
         if (selectedCellsB.size > 0) {{
             clearRegionBSelection();
             lassoModeB = false;
             updateSelectionInfo();
-            updateUMAPCursor();
+            updateSelectionCursor();
             renderUMAP();
             renderAllSections();
             if (modalSection) renderModalSection();
@@ -21265,23 +21375,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         lassoModeB = true;
         lassoSelectionActive = true;
-        umapPanActive = false;
+        selectionPanActive = false;
         syncModalLassoFromGlobal();
-        updateUMAPCursor();
-        updateUMAPLassoButtonState();
+        updateSelectionCursor();
+        updateSelectionLassoButtonState();
         if (umapVisible) renderUMAP();
     }}
 
-    function setUMAPCompareHintVisible(visible) {{
-        if (umapCompareHintTimeout) {{
-            window.clearTimeout(umapCompareHintTimeout);
-            umapCompareHintTimeout = null;
+    function setSelectionCompareHintVisible(visible) {{
+        if (selectionCompareHintTimeout) {{
+            window.clearTimeout(selectionCompareHintTimeout);
+            selectionCompareHintTimeout = null;
         }}
     }}
 
-    function updateUMAPCursor() {{
+    function updateSelectionCursor() {{
         const canvas = document.getElementById('umap-canvas');
-        if (canvas) canvas.style.cursor = lassoSelectionActive ? 'crosshair' : (umapPanActive ? 'grab' : 'default');
+        if (canvas) canvas.style.cursor = lassoSelectionActive ? 'crosshair' : (selectionPanActive ? 'grab' : 'default');
         updateGridPanelLassoCursor();
     }}
 
@@ -21304,13 +21414,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ? 'No cells selected'
             : `${{selectedCells.size.toLocaleString()}} cells selected`;
 
-        const umapInfo = document.getElementById('umap-selection-info');
-        const umapInfoText = document.getElementById('umap-selection-info-text');
-        if (umapInfo) {{
+        const selectionInfo = document.getElementById('selection-info');
+        const selectionInfoText = document.getElementById('selection-info-text');
+        if (selectionInfo) {{
             const hasSelectionState = selectedCells.size > 0 || selectedCellsB.size > 0 || selectedCellsFromAnnotation || selectedCellsFromGridLasso || selectedCellsFromModalLasso || selectedLassoPath.length > 0 || selectedGridLassoPath.length > 0 || selectedModalLassoPath.length > 0;
-            if (umapInfoText) umapInfoText.textContent = countText;
-            umapInfo.classList.toggle('visible', hasSelectionState);
-            umapInfo.style.display = hasSelectionState ? '' : 'none';
+            if (selectionInfoText) selectionInfoText.textContent = countText;
+            selectionInfo.classList.toggle('visible', hasSelectionState);
+            selectionInfo.style.display = hasSelectionState ? '' : 'none';
         }}
         updateTutorialStepGate?.();
         const summary = computeSelectionSummary();
@@ -21347,11 +21457,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 bindSelectionSummaryInteractions(compareSelectionSummary);
             }}
         }}
-        renderUMAPSelectionQueryPanel();
+        renderSelectionQueryPanel();
         updateUMAPSelectionSummaryPanelSize();
         updateModalToolbarState();
-        updateUMAPLassoButtonState();
-        updateSelectionCreateAnnotationButtonState();
+        updateSelectionLassoButtonState();
+        updateSelectionCreateRegionButtonState();
         ensureFormFieldNames(document);
     }}
 
@@ -21361,7 +21471,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         clearRegionBSelection();
         lassoModeB = false;
         lassoSelectionActive = false;
-        umapPanActive = true;
+        selectionPanActive = true;
         modalLassoSelectionActive = false;
         isDrawingModalLasso = false;
         modalLassoPath = [];
@@ -21387,10 +21497,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         hideModalGeneDiscoveryPanel();
         updateSelectionInfo();
         renderModalAnnotationPanel();
-        updateUMAPCursor();
+        updateSelectionCursor();
         renderUMAP();
         renderAllSections();
         if (modalSection) renderModalSection();
+        updateTutorialStepGate?.();
+        scheduleTutorialReposition?.();
     }}
 
     function clampUMAPPanelSize(size) {{
@@ -21483,8 +21595,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
     }}
 
-    function renderUMAPSelectionQueryPanel() {{
-        const panel = document.getElementById('umap-selection-query-panel');
+    function renderSelectionQueryPanel() {{
+        const panel = document.getElementById('selection-query-panel');
         if (!panel) return;
         panel.innerHTML = renderSelectionQueryPanelHtml({{ forceExpanded: true, showToggle: false, showClose: true }});
         bindSelectionSummaryInteractions(panel);
@@ -21580,68 +21692,78 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         document.getElementById('umap-panel-larger')?.addEventListener('click', () => {{
             adjustUMAPPanelSize(UMAP_PANEL_SIZE_STEP);
         }});
-        document.getElementById('umap-pan-btn')?.addEventListener('click', () => {{
-            if (umapPanActive && !lassoSelectionActive) {{
-                umapPanActive = false;
+        document.getElementById('selection-pan-btn')?.addEventListener('click', () => {{
+            if (selectionPanActive && !lassoSelectionActive) {{
+                selectionPanActive = false;
                 lassoSelectionActive = true;
             }} else {{
-                umapPanActive = true;
+                selectionPanActive = true;
                 lassoSelectionActive = false;
             }}
             syncModalLassoFromGlobal();
-            updateUMAPCursor();
-            updateUMAPLassoButtonState();
+            updateSelectionCursor();
+            updateSelectionLassoButtonState();
         }});
 
         // Lasso button: select when idle, clear when a selection exists.
-        document.getElementById('umap-lasso-btn').addEventListener('click', () => {{
+        document.getElementById('selection-lasso-btn').addEventListener('click', () => {{
             if (selectedCells.size > 0 || selectedCellsB.size > 0) {{
                 clearSelection();
                 return;
             }}
             lassoSelectionActive = !lassoSelectionActive;
-            if (lassoSelectionActive) umapPanActive = false;
-            else umapPanActive = true;
+            if (lassoSelectionActive) selectionPanActive = false;
+            else selectionPanActive = true;
             syncModalLassoFromGlobal();
-            updateUMAPCursor();
-            updateUMAPLassoButtonState();
+            updateSelectionCursor();
+            updateSelectionLassoButtonState();
         }});
 
-        document.getElementById('umap-compare-btn')?.addEventListener('click', (event) => {{
+        document.getElementById('selection-compare-btn')?.addEventListener('click', (event) => {{
             event.preventDefault();
             event.stopPropagation();
-            toggleUMAPRegionBSelection();
+            toggleSelectionRegionBSelection();
         }});
 
-        document.getElementById('selection-create-annotation-btn')?.addEventListener('click', (event) => {{
+        document.getElementById('selection-create-region-btn')?.addEventListener('click', (event) => {{
             event.preventDefault();
             event.stopPropagation();
             if (createModalAnnotationFromSelection()) {{
-                updateSelectionCreateAnnotationButtonState();
+                updateSelectionCreateRegionButtonState();
+                updateTutorialStepGate?.();
+                scheduleTutorialReposition?.();
             }}
         }});
 
         const umapParamsToggle = document.getElementById('umap-params-toggle');
         const umapParamsPanel = document.getElementById('umap-params-panel');
-        const umapQueryToggle = document.getElementById('umap-query-toggle');
-        const umapQueryPanel = document.getElementById('umap-selection-query-panel');
-        umapQueryToggle?.addEventListener('click', (event) => {{
+        const selectionQueryToggle = document.getElementById('selection-query-toggle');
+        const selectionQueryPanel = document.getElementById('selection-query-panel');
+        selectionQueryToggle?.addEventListener('click', (event) => {{
             event.stopPropagation();
-            const open = !umapQueryPanel?.classList.contains('visible');
+            const open = !selectionQueryPanel?.classList.contains('visible');
+            if (!open && isTutorialFindCellsByQueryStep()) {{
+                keepTutorialSelectionQueryPanelOpen();
+                return;
+            }}
             if (open) {{
-                renderUMAPSelectionQueryPanel();
+                renderSelectionQueryPanel();
                 umapParamsPanel?.classList.remove('visible');
                 umapParamsToggle?.classList.remove('active');
             }}
-            umapQueryPanel?.classList.toggle('visible', open);
-            umapQueryToggle.classList.toggle('active', open);
+            selectionQueryPanel?.classList.toggle('visible', open);
+            selectionQueryToggle.classList.toggle('active', open);
         }});
         umapParamsToggle?.addEventListener('click', (event) => {{
             event.stopPropagation();
             const open = !umapParamsPanel?.classList.contains('visible');
             if (open) {{
-                umapQueryPanel?.classList.remove('visible');
-                umapQueryToggle?.classList.remove('active');
+                if (isTutorialFindCellsByQueryStep()) {{
+                    keepTutorialSelectionQueryPanelOpen();
+                }} else {{
+                    selectionQueryPanel?.classList.remove('visible');
+                    selectionQueryToggle?.classList.remove('active');
+                }}
             }}
             umapParamsPanel?.classList.toggle('visible', open);
             umapParamsToggle.classList.toggle('active', open);
@@ -21653,10 +21775,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             umapParamsToggle?.classList.remove('active');
         }});
         document.addEventListener('mousedown', (event) => {{
-            const wrap = document.getElementById('umap-query-wrap');
+            const wrap = document.getElementById('selection-query-wrap');
             if (!wrap || wrap.contains(event.target)) return;
-            umapQueryPanel?.classList.remove('visible');
-            umapQueryToggle?.classList.remove('active');
+            if (isTutorialFindCellsByQueryStep()) {{
+                keepTutorialSelectionQueryPanelOpen();
+                return;
+            }}
+            selectionQueryPanel?.classList.remove('visible');
+            selectionQueryToggle?.classList.remove('active');
         }});
         // UMAP spot size slider
         document.getElementById('umap-spot-size').addEventListener('input', (e) => {{
@@ -21683,7 +21809,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 // Start lasso drawing
                 isDrawingLasso = true;
                 lassoPath = [{{ x, y }}];
-            }} else if (umapPanActive) {{
+            }} else if (selectionPanActive) {{
                 // Start panning
                 isUmapDragging = true;
                 umapDragStartX = e.clientX;
@@ -21717,7 +21843,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
             if (isUmapDragging) {{
                 isUmapDragging = false;
-                updateUMAPCursor();
+                updateSelectionCursor();
             }}
         }});
 
@@ -21755,7 +21881,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             renderUMAP();
         }});
 
-        updateUMAPCursor();
+        updateSelectionCursor();
     }}
 
     // Rendering
@@ -23797,8 +23923,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const hasSelectedLeaf = !!insightsTreeSelectedLeaf;
         INSIGHTS_TOP_LEVEL_TABS.forEach((topLevel) => {{
             const topLevelSelected = hasSelectedLeaf && insightsTreeSelectedLeaf.topLevel === topLevel;
-            document.getElementById(`color-tab-${{topLevel}}`)?.classList.toggle('active', topLevelSelected);
-            document.getElementById(`color-tab-${{topLevel}}-content`)?.classList.toggle('active', topLevelSelected);
+            document.getElementById(`insights-tab-${{topLevel}}`)?.classList.toggle('active', topLevelSelected);
+            document.getElementById(`insights-tab-${{topLevel}}-content`)?.classList.toggle('active', topLevelSelected);
             (INSIGHTS_SUBTABS[topLevel] || []).forEach((subtab) => {{
                 const isActive = topLevelSelected && insightsTreeSelectedLeaf.subtab === subtab;
                 document.getElementById(`${{topLevel}}-tab-${{subtab}}`)?.classList.toggle('active', isActive);
@@ -23808,24 +23934,24 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function syncInsightsModeClasses() {{
-        const mode = ['selection', 'annotate', 'module', 'exploration'].includes(insightsMode) ? insightsMode : 'exploration';
+        const mode = ['selection', 'region', 'module', 'exploration'].includes(insightsMode) ? insightsMode : 'exploration';
         document.querySelectorAll('[data-insights-mode]').forEach((btn) => {{
             btn.classList.toggle('active', btn.getAttribute('data-insights-mode') === mode);
-            if (btn.id === 'insights-annotate-toggle') btn.setAttribute('aria-expanded', mode === 'annotate' ? 'true' : 'false');
+            if (btn.id === 'insights-mode-region') btn.setAttribute('aria-expanded', mode === 'region' ? 'true' : 'false');
         }});
         document.getElementById('insights-selection-panel')?.classList.toggle('active', mode === 'selection');
-        document.getElementById('modal-annotation-section')?.classList.toggle('active', mode === 'annotate');
+        document.getElementById('region-section')?.classList.toggle('active', mode === 'region');
         document.getElementById('insights-module-panel')?.classList.toggle('active', mode === 'module');
         document.getElementById('insights-exploration-panel')?.classList.toggle('active', mode === 'exploration');
-        document.getElementById('color-panel')?.classList.toggle('annotation-panel-open', mode === 'annotate');
+        document.getElementById('insights-panel')?.classList.toggle('region-panel-open', mode === 'region');
     }}
 
     function setInsightsMode(mode) {{
-        insightsMode = ['selection', 'annotate', 'module', 'exploration'].includes(mode) ? mode : 'exploration';
+        insightsMode = ['selection', 'region', 'module', 'exploration'].includes(mode) ? mode : 'exploration';
         syncInsightsModeClasses();
         if (insightsMode === 'selection') {{
             updateSelectionInfo();
-        }} else if (insightsMode === 'annotate') {{
+        }} else if (insightsMode === 'region') {{
             renderModalAnnotationPanel();
         }} else if (insightsMode === 'module') {{
             renderGeneModulePanel();
@@ -23841,7 +23967,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             updateSelectionInfo();
             return;
         }}
-        if (insightsMode === 'annotate') {{
+        if (insightsMode === 'region') {{
             renderModalAnnotationPanel();
             return;
         }}
@@ -23855,7 +23981,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             if (insightsOverviewTab === 'sections') {{
                 renderSamplesInsights();
             }} else {{
-                renderColorAggregation();
+                renderOverviewAggregation();
                 renderCellTypeTrend();
             }}
             return;
@@ -23925,10 +24051,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function renderAnnotationRegionDESection(annotations) {{
         const {{ annotations: availableAnnotations, source, reference }} = syncAnnotationDEState(annotations);
-        let html = '<div class="annot-de-controls">';
+        let html = '<div class="region-de-controls">';
 
         if (availableAnnotations.length < 2) {{
-            html += '<div class="agg-group-meta">Draw at least two annotations to compare region-level DE.</div>';
+            html += '<div class="agg-group-meta">Draw at least two regions to compare region-level DE.</div>';
             html += '</div>';
             return html;
         }}
@@ -23961,7 +24087,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const runButtonHtml = annotationDeQuickRunning
             ? '<div class="selection-query-icon-btn selection-summary-find-markers loading" role="status" aria-label="Finding region markers"><span class="selection-summary-find-markers-spinner"></span></div>'
             : (!hasCompletedCalculation
-                ? '<button class="selection-query-icon-btn" id="annotation-de-run" type="button" title="Find region markers" aria-label="Find region markers"><svg viewBox="0 0 24 24" aria-hidden="true" data-icon="search"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg></button>'
+                ? '<button class="selection-query-icon-btn" id="region-de-run" type="button" title="Find region markers" aria-label="Find region markers"><svg viewBox="0 0 24 24" aria-hidden="true" data-icon="search"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg></button>'
                 : '');
 
         html += `
@@ -23970,27 +24096,27 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 <div class="pseudobulk-de-select-row comparison-pair-select-row">
                     <div>
                         <label>Region A</label>
-                        <select id="annotation-de-source"${{sourceSelectStyle}}>${{options}}</select>
+                        <select id="region-de-source"${{sourceSelectStyle}}>${{options}}</select>
                     </div>
                     <div>
                         <label>Region B</label>
-                        <select id="annotation-de-reference"${{referenceSelectStyle}}>${{options}}</select>
+                        <select id="region-de-reference"${{referenceSelectStyle}}>${{options}}</select>
                     </div>
                 </div>
-                <div class="annotation-de-action-row">
+                <div class="comparison-de-action-row">
                     ${{hasCompletedCalculation ? `<div class="selection-summary-welch-controls">
                         <div class="selection-summary-welch-control-row">
                             <label>Top N per direction</label>
-                            <input id="annotation-de-topn" type="number" min="1" max="20" step="1" value="${{Math.max(1, Math.min(20, Number(annotationDeTopN) || ANNOTATION_DE_TOP_N))}}" aria-label="Number of top positive and negative genes selected by Welch test">
+                            <input id="region-de-topn" type="number" min="1" max="20" step="1" value="${{Math.max(1, Math.min(20, Number(annotationDeTopN) || ANNOTATION_DE_TOP_N))}}" aria-label="Number of top positive and negative genes selected by Welch test">
                         </div>
                         <div class="selection-summary-welch-control-row">
                             <label>Min expressed %</label>
-                            <input id="annotation-de-min-pct" type="range" min="0" max="100" step="1" value="${{Math.max(0, Math.min(100, Number(annotationDeMinPct) || 0))}}" aria-label="Minimum percentage of expressing cells in at least one region">
-                            <output id="annotation-de-min-pct-value">${{Math.max(0, Math.min(100, Number(annotationDeMinPct) || 0))}}%</output>
+                            <input id="region-de-min-pct" type="range" min="0" max="100" step="1" value="${{Math.max(0, Math.min(100, Number(annotationDeMinPct) || 0))}}" aria-label="Minimum percentage of expressing cells in at least one region">
+                            <output id="region-de-min-pct-value">${{Math.max(0, Math.min(100, Number(annotationDeMinPct) || 0))}}%</output>
                         </div>
                     </div>` : ''}}
-                    <div class="annotation-de-action-buttons">
-                        <button class="legend-btn icon-only" id="annotation-de-swap" type="button" title="Swap Region A and Region B" aria-label="Swap Region A and Region B">
+                    <div class="comparison-de-action-buttons">
+                        <button class="legend-btn icon-only" id="region-de-swap" type="button" title="Swap Region A and Region B" aria-label="Swap Region A and Region B">
                             <svg class="lucide lucide-arrow-left-right" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3 4 7l4 4"></path><path d="M4 7h16"></path><path d="m16 21 4-4-4-4"></path><path d="M20 17H4"></path></svg>
                         </button>
                         ${{runButtonHtml}}
@@ -24017,8 +24143,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             return selectWelchTopResults(result.results || [], topN, annotationDeMinPct, 1).map((entry) => {{
                 return `
                     <div class="comparison-card">
-                        <div class="comparison-card-title annotation-de-card-title">
-                            <div class="annotation-de-card-title-main">
+                        <div class="comparison-card-title comparison-de-card-title">
+                            <div class="comparison-de-card-title-main">
                                 ${{renderGeneTokenButton(entry.gene, {{
                                     isActive: entry.gene === currentGene,
                                     showMeta: false,
@@ -24028,11 +24154,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                                     title: 'Search Google for this gene',
                                 }})}}
                             </div>
-                            <div class="annotation-de-title-stats" style="border-color:${{Number(entry.score || 0) >= 0 ? colorA : colorB}}"><span>log2FC ${{formatScaleNumber(entry.log2fc)}}</span><span>Score ${{formatScaleNumber(entry.score)}}</span></div>
+                            <div class="comparison-de-title-stats" style="border-color:${{Number(entry.score || 0) >= 0 ? colorA : colorB}}"><span>log2FC ${{formatScaleNumber(entry.log2fc)}}</span><span>Score ${{formatScaleNumber(entry.score)}}</span></div>
                         </div>
                         <div class="comparison-metric-grid">
-                            <span class="annotation-de-region-chip" style="background:${{getComparisonMetricChipBackground(colorA, Number(entry.score || 0) >= 0 ? colorA : colorB)}};color:${{textColorA}}"><span>% expr A</span><strong>${{formatPseudobulkDEPct(entry.pctA)}}</strong><span>Mean A</span><strong>${{formatScaleNumber(entry.meanA)}}</strong></span>
-                            <span class="annotation-de-region-chip" style="background:${{getComparisonMetricChipBackground(colorB, Number(entry.score || 0) >= 0 ? colorA : colorB)}};color:${{textColorB}}"><span>% expr B</span><strong>${{formatPseudobulkDEPct(entry.pctB)}}</strong><span>Mean B</span><strong>${{formatScaleNumber(entry.meanB)}}</strong></span>
+                            <span class="comparison-de-metric-chip" style="background:${{getComparisonMetricChipBackground(colorA, Number(entry.score || 0) >= 0 ? colorA : colorB)}};color:${{textColorA}}"><span>% expr A</span><strong>${{formatPseudobulkDEPct(entry.pctA)}}</strong><span>Mean A</span><strong>${{formatScaleNumber(entry.meanA)}}</strong></span>
+                            <span class="comparison-de-metric-chip" style="background:${{getComparisonMetricChipBackground(colorB, Number(entry.score || 0) >= 0 ? colorA : colorB)}};color:${{textColorB}}"><span>% expr B</span><strong>${{formatPseudobulkDEPct(entry.pctB)}}</strong><span>Mean B</span><strong>${{formatScaleNumber(entry.meanB)}}</strong></span>
                         </div>
                     </div>
                 `;
@@ -24045,7 +24171,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ? selectWelchTopResults(fullCached.results || [], annotationDeTopN, annotationDeMinPct, 1)
             : [];
         const volcanoExportButtonHtml = exportState
-            ? '<button class="icon-btn" id="annotation-de-export-volcano" type="button" title="Download volcano plot as SVG" aria-label="Download volcano plot as SVG"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path></svg></button>'
+            ? '<button class="icon-btn" id="region-de-export-volcano" type="button" title="Download volcano plot as SVG" aria-label="Download volcano plot as SVG"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path></svg></button>'
             : '';
         const quickSummaryHtml = (deResult.available && displayedQuickResults.length)
             ? `
@@ -24083,7 +24209,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             : '';
         let resultHtml = '';
         if (!source || !reference) {{
-            resultHtml = '<div class="agg-group-meta">Choose two different annotations to compare.</div>';
+            resultHtml = '<div class="agg-group-meta">Choose two different regions to compare.</div>';
         }} else if (fullRun?.running) {{
             const totalShards = Number(fullRun.totalShards || 0);
             const completedShards = Number(fullRun.completedShards || 0);
@@ -24101,14 +24227,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     · ${{completedShards.toLocaleString()}} / ${{totalShards.toLocaleString()}} shards
                 </div>
                 <div style="display:flex; justify-content:flex-end;">
-                    <button class="legend-btn" id="annotation-de-cancel" type="button">Cancel Full DE</button>
+                    <button class="legend-btn" id="region-de-cancel" type="button">Cancel Full DE</button>
                 </div>
             `;
         }} else if (fullRun?.error) {{
             resultHtml = `
                 <div class="agg-group-meta">Full sidecar DE failed: ${{escapeHtml(fullRun.error)}}</div>
                 <div style="display:flex; justify-content:flex-end;">
-                    <button class="legend-btn" id="annotation-de-run-full" type="button">Retry Full Region DE</button>
+                    <button class="legend-btn" id="region-de-run-full" type="button">Retry Full Region DE</button>
                 </div>
             `;
             if (cachedSummaryHtml) {{
@@ -24120,11 +24246,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
         }} else if (fullCached?.available) {{
             resultHtml = cachedSummaryHtml;
-            resultHtml += '<div style="display:flex; justify-content:flex-end;"><button class="legend-btn" id="annotation-de-refresh-full" type="button">Refresh Full DE</button></div>';
+            resultHtml += '<div style="display:flex; justify-content:flex-end;"><button class="legend-btn" id="region-de-refresh-full" type="button">Refresh Full DE</button></div>';
         }} else if (!hasQuickResult) {{
             resultHtml = '';
         }} else if (!deResult.available && deResult.reason === 'empty_group') {{
-            resultHtml = '<div class="agg-group-meta">One of the selected annotations has no cells.</div>';
+            resultHtml = '<div class="agg-group-meta">One of the selected regions has no cells.</div>';
         }} else if (!deResult.available && deResult.reason === 'too_few_cells') {{
             resultHtml = '<div class="agg-group-meta">Each selected region or group needs at least two cells.</div>';
         }} else if (!deResult.available && deResult.reason === 'no_loaded_features' && sidecarAvailable) {{
@@ -24134,19 +24260,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     Differential expression runs across ${{totalGenes !== '0' ? `all ${{totalGenes}} genes` : 'all genes'}} from the feature sidecar.
                 </div>
                 <div style="display:flex; justify-content:flex-end;">
-                    <button class="legend-btn" id="annotation-de-run-full" type="button">Compute Region DE across all genes</button>
+                    <button class="legend-btn" id="region-de-run-full" type="button">Compute Region DE across all genes</button>
                 </div>
             `;
         }} else if (!deResult.available && deResult.reason === 'no_loaded_features') {{
             resultHtml = '<div class="agg-group-meta">No genes are currently loaded for region DE. Load genes in the Genes tab or click pseudobulk DE genes first.</div>';
         }} else if (!deResult.available) {{
-            resultHtml = '<div class="agg-group-meta">Choose two different annotations to compare.</div>';
+            resultHtml = '<div class="agg-group-meta">Choose two different regions to compare.</div>';
         }} else if (!displayedQuickResults.length) {{
             if (sidecarAvailable && Number(deResult.loadedGeneCount || 0) < Number(deResult.totalGeneCount || 0)) {{
                 resultHtml = `
                     <div class="agg-group-meta">No enriched genes were found among the currently loaded genes.</div>
                     <div style="display:flex; justify-content:flex-end;">
-                        <button class="legend-btn" id="annotation-de-run-full" type="button">Run Full Region DE</button>
+                        <button class="legend-btn" id="region-de-run-full" type="button">Run Full Region DE</button>
                     </div>
                 `;
             }} else {{
@@ -24155,25 +24281,25 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }} else {{
             resultHtml = quickSummaryHtml;
             if (sidecarAvailable && Number(deResult.loadedGeneCount || 0) < Number(deResult.totalGeneCount || 0)) {{
-                resultHtml += '<div style="display:flex; justify-content:flex-end;"><button class="legend-btn" id="annotation-de-run-full" type="button">Run Full Region DE</button></div>';
+                resultHtml += '<div style="display:flex; justify-content:flex-end;"><button class="legend-btn" id="region-de-run-full" type="button">Run Full Region DE</button></div>';
             }}
         }}
 
         if (exportState) {{
             resultHtml += `
                 <div style="display:flex; justify-content:flex-end; gap:6px; margin-top:6px;">
-                    <button class="icon-btn" id="annotation-de-export-csv" type="button" title="Download all region DE genes as CSV" aria-label="Download all region DE genes as CSV"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path></svg></button>
+                    <button class="icon-btn" id="region-de-export-csv" type="button" title="Download all region DE genes as CSV" aria-label="Download all region DE genes as CSV"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path></svg></button>
                 </div>
             `;
         }}
 
-        html += `<div id="annotation-de-results">${{resultHtml}}</div>`;
+        html += `<div id="region-de-results">${{resultHtml}}</div>`;
         html += '</div>';
         return html;
     }}
 
     function renderAnnotationComparison() {{
-        const container = document.getElementById('annotation-comparison');
+        const container = document.getElementById('region-comparison');
         if (!container) return;
         const downsampleWarningHtml = getOverviewDownsampleWarningHtml();
 
@@ -24222,16 +24348,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     const total = summary.total;
                     const typeMap = new Map(summary.types);
 
-                    summaryHtml += `<div class="annot-comp-row">`;
-                    summaryHtml += `<div class="annot-comp-header"><span class="annot-comp-dot" style="background:${{color}}"></span><span>${{label}}</span><span class="annot-comp-count">${{total.toLocaleString()}} cells</span></div>`;
+                    summaryHtml += `<div class="composition-comparison-row">`;
+                    summaryHtml += `<div class="composition-comparison-header"><span class="composition-comparison-dot" style="background:${{color}}"></span><span>${{label}}</span><span class="composition-comparison-count">${{total.toLocaleString()}} cells</span></div>`;
                     if (total > 0) {{
-                        summaryHtml += `<div class="annot-comp-bar-track">`;
+                        summaryHtml += `<div class="composition-comparison-bar-track">`;
                         typeList.forEach((type) => {{
                             const cnt = typeMap.get(type) || 0;
                             const pct = Math.round(100 * cnt / total);
                             if (pct <= 0) return;
                             const bgColor = getCategoryColorForValue(typeColumn, type);
-                            summaryHtml += `<div class="annot-comp-segment" title="${{escapeHtml(type)}}: ${{cnt}} (${{pct}}%)" style="width:${{pct}}%;background:${{bgColor}}"></div>`;
+                            summaryHtml += `<div class="composition-comparison-segment" title="${{escapeHtml(type)}}: ${{cnt}} (${{pct}}%)" style="width:${{pct}}%;background:${{bgColor}}"></div>`;
                         }});
                         summaryHtml += `</div>`;
                     }}
@@ -24241,14 +24367,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 // Legend
                 if (typeList.length) {{
                     const visibleTypes = annotationCompositionLegendExpanded ? typeList : typeList.slice(0, 8);
-                    summaryHtml += `<div class="annot-comp-legend">`;
+                    summaryHtml += `<div class="composition-comparison-legend">`;
                     visibleTypes.forEach((type) => {{
                         const typeColor = getCategoryColorForValue(typeColumn, type);
-                        summaryHtml += `<span class="annot-comp-legend-item"><span class="annot-comp-dot" style="background:${{typeColor}}"></span>${{escapeHtml(type)}}</span>`;
+                        summaryHtml += `<span class="composition-comparison-legend-item"><span class="composition-comparison-dot" style="background:${{typeColor}}"></span>${{escapeHtml(type)}}</span>`;
                     }});
                     summaryHtml += `</div>`;
                     if (typeList.length > 8) {{
-                        summaryHtml += `<button class="annot-comp-legend-item annot-comp-legend-toggle" type="button" data-annotation-composition-legend-toggle>${{annotationCompositionLegendExpanded ? 'Show less' : `+${{typeList.length - 8}} more categories`}}</button>`;
+                        summaryHtml += `<button class="composition-comparison-legend-item composition-comparison-legend-toggle" type="button" data-region-composition-legend-toggle>${{annotationCompositionLegendExpanded ? 'Show less' : `+${{typeList.length - 8}} more categories`}}</button>`;
                     }}
                 }}
             }}
@@ -24292,14 +24418,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         container.innerHTML = html || '<div class="agg-group-meta">No data available.</div>';
         // Keep the controls and expression summaries together, then place the
         // detailed DE report after those summaries.
-        const deResults = container.querySelector('#annotation-de-results');
+        const deResults = container.querySelector('#region-de-results');
         if (deResults) container.appendChild(deResults);
-        const sourceSelect = container.querySelector('#annotation-de-source');
-        const referenceSelect = container.querySelector('#annotation-de-reference');
-        const topNInput = container.querySelector('#annotation-de-topn');
-        const minPctInput = container.querySelector('#annotation-de-min-pct');
-        const minPctOutput = container.querySelector('#annotation-de-min-pct-value');
-        const swapBtn = container.querySelector('#annotation-de-swap');
+        const sourceSelect = container.querySelector('#region-de-source');
+        const referenceSelect = container.querySelector('#region-de-reference');
+        const topNInput = container.querySelector('#region-de-topn');
+        const minPctInput = container.querySelector('#region-de-min-pct');
+        const minPctOutput = container.querySelector('#region-de-min-pct-value');
+        const swapBtn = container.querySelector('#region-de-swap');
         if (sourceSelect) {{
             sourceSelect.value = annotationDeSourceId ? String(annotationDeSourceId) : '';
             sourceSelect.addEventListener('change', () => {{
@@ -24352,7 +24478,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 renderAnnotationComparison();
             }});
         }}
-        const runQuickBtn = container.querySelector('#annotation-de-run');
+        const runQuickBtn = container.querySelector('#region-de-run');
         if (runQuickBtn && source && reference) {{
             runQuickBtn.addEventListener('click', () => {{
                 if (annotationDeQuickRunning) return;
@@ -24368,32 +24494,32 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 }}, 30);
             }});
         }}
-        const runFullBtn = container.querySelector('#annotation-de-run-full');
+        const runFullBtn = container.querySelector('#region-de-run-full');
         if (runFullBtn && source && reference) {{
             runFullBtn.addEventListener('click', () => {{
                 runFullRegionAnnotationDE(source, reference);
             }});
         }}
-        const refreshFullBtn = container.querySelector('#annotation-de-refresh-full');
+        const refreshFullBtn = container.querySelector('#region-de-refresh-full');
         if (refreshFullBtn && source && reference) {{
             refreshFullBtn.addEventListener('click', () => {{
                 runFullRegionAnnotationDE(source, reference);
             }});
         }}
-        const cancelBtn = container.querySelector('#annotation-de-cancel');
+        const cancelBtn = container.querySelector('#region-de-cancel');
         if (cancelBtn) {{
             cancelBtn.addEventListener('click', () => {{
                 cancelAnnotationFullDERun();
                 renderAnnotationComparison();
             }});
         }}
-        const exportVolcanoBtn = container.querySelector('#annotation-de-export-volcano');
+        const exportVolcanoBtn = container.querySelector('#region-de-export-volcano');
         if (exportVolcanoBtn && source && reference) {{
             exportVolcanoBtn.addEventListener('click', () => {{
                 downloadAnnotationDEVolcanoSvg(container, source, reference);
             }});
         }}
-        const exportCsvBtn = container.querySelector('#annotation-de-export-csv');
+        const exportCsvBtn = container.querySelector('#region-de-export-csv');
         if (exportCsvBtn && source && reference) {{
             exportCsvBtn.addEventListener('click', () => {{
                 const quickResult = annotationDeQuickResultKey === getAnnotationDEQuickResultKey(source, reference)
@@ -24403,7 +24529,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 exportAnnotationDECsv(source, reference, exportState);
             }});
         }}
-        const compositionLegendToggle = container.querySelector('[data-annotation-composition-legend-toggle]');
+        const compositionLegendToggle = container.querySelector('[data-region-composition-legend-toggle]');
         if (compositionLegendToggle) {{
             compositionLegendToggle.addEventListener('click', () => {{
                 annotationCompositionLegendExpanded = !annotationCompositionLegendExpanded;
@@ -24469,7 +24595,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             : '';
 
         panel.innerHTML = `
-            <div class="color-panel-section" style="display:block">
+            <div class="insights-panel-section" style="display:block">
                 <div class="gene-module-section-header">
                     <label>Gene Modules</label>${{renderCalcInfoButton('module')}}
                 </div>
@@ -24484,7 +24610,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     </div>
                 </div>
             </div>
-            <div class="color-panel-section" style="display:block">
+            <div class="insights-panel-section" style="display:block">
                 ${{moduleListHtml ? '<label>Modules</label>' : ''}}
                 <div>${{moduleListHtml}}</div>
                 <div class="gene-module-form-actions" style="margin-top: 7px;">
@@ -24597,110 +24723,110 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         bindGeneActivateButtons(panel, renderGeneModulePanel);
     }}
 
-    function buildColorPanel() {{
-        const panel = document.getElementById('color-panel');
+    function buildInsightsPanel() {{
+        const panel = document.getElementById('insights-panel');
         if (!panel) return;
         const hasSectionMetadata = getExplorationColorOptions().metadata.length > 0;
 
         const sectionMetadataOptions = renderSectionMetadataOptions('', true);
 
         panel.innerHTML = `
-            <div class="color-panel-header">
+            <div class="insights-panel-header">
                 <div class="insights-mode-switch" role="group" aria-label="Insights mode">
                     <button class="insights-mode-btn" id="insights-mode-selection" data-insights-mode="selection" type="button">Selection</button>
-                    <button class="insights-mode-btn" id="insights-annotate-toggle" data-insights-mode="annotate" type="button" aria-expanded="false" aria-controls="modal-annotation-section">Region</button>
+                    <button class="insights-mode-btn" id="insights-mode-region" data-insights-mode="region" type="button" aria-expanded="false" aria-controls="region-section">Region</button>
                     <button class="insights-mode-btn" id="insights-mode-module" data-insights-mode="module" type="button">Module</button>
                     <button class="insights-mode-btn" id="insights-mode-exploration" data-insights-mode="exploration" type="button">Exploration</button>
                 </div>
             </div>
-            <div class="modal-annotation-section" id="modal-annotation-section">
-                <div class="modal-annotation-list" id="modal-annotation-list">
-                    <div class="modal-annotation-empty">Create regions from lasso selection in the Tools panel.</div>
+            <div class="region-section" id="region-section">
+                <div class="region-list" id="region-list">
+                    <div class="region-empty">Create regions from lasso selection in the Tools panel.</div>
                 </div>
-                <div class="modal-annotation-actions selection-query-actions">
-                    <button class="selection-summary-compare-btn icon-only" id="modal-annotations-create-group" type="button" title="Create region group" aria-label="Create region group">
+                <div class="region-actions selection-query-actions">
+                    <button class="selection-summary-compare-btn icon-only" id="regions-create-group" type="button" title="Create region group" aria-label="Create region group">
                         <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="7"></circle><circle cx="15" cy="15" r="7"></circle></svg>
                     </button>
-                    <button class="selection-summary-compare-btn icon-only" id="modal-annotations-import" type="button" title="Import regions JSON" aria-label="Import regions JSON">
+                    <button class="selection-summary-compare-btn icon-only" id="regions-import" type="button" title="Import regions JSON" aria-label="Import regions JSON">
                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 8 5-5 5 5"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path></svg>
                     </button>
-                    <button class="selection-summary-compare-btn icon-only" id="modal-annotations-export" type="button" title="Export regions JSON" aria-label="Export regions JSON" data-requires-annotations>
+                    <button class="selection-summary-compare-btn icon-only" id="regions-export" type="button" title="Export regions JSON" aria-label="Export regions JSON" data-requires-regions>
                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path></svg>
                     </button>
-                    <button class="selection-summary-compare-btn icon-only" id="modal-annotations-clear-all" type="button" title="Delete all regions" aria-label="Delete all regions" data-requires-annotations>
+                    <button class="selection-summary-compare-btn icon-only" id="regions-clear-all" type="button" title="Delete all regions" aria-label="Delete all regions" data-requires-regions>
                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>
                     </button>
-                    <input type="file" id="modal-annotations-import-input" accept="application/json,.json" style="display:none">
+                    <input type="file" id="regions-import-input" accept="application/json,.json" style="display:none">
                 </div>
             </div>
-            <div class="color-panel-mode selection-summary umap-selection-summary" id="insights-selection-panel"></div>
-            <div class="color-panel-mode" id="insights-module-panel"></div>
-            <div class="color-panel-mode" id="insights-exploration-panel">
-                <div class="color-panel-section">
-                    <label id="exploration-color-label">Annotation</label>
-                    <select id="exploration-color-select"></select>
+            <div class="insights-panel-mode selection-summary insights-selection-summary" id="insights-selection-panel"></div>
+            <div class="insights-panel-mode" id="insights-module-panel"></div>
+            <div class="insights-panel-mode" id="insights-exploration-panel">
+                <div class="insights-panel-section">
+                    <label id="exploration-annotation-label">Annotation</label>
+                    <select id="exploration-annotation-select"></select>
                 </div>
-                <div class="color-panel-section">
+                <div class="insights-panel-section">
                     <label id="visualization-menu-label">Select</label>
                     <div class="insights-tree" data-insights-tree aria-labelledby="visualization-menu-label">
-                        <button class="color-tab insights-tree-root" type="button" data-insights-tree-root aria-expanded="false"><span data-insights-tree-root-label>Visualization</span></button>
+                        <button class="insights-tab insights-tree-root" type="button" data-insights-tree-root aria-expanded="false"><span data-insights-tree-root-label>Visualization</span></button>
                         <div class="insights-tree-panel">
                             <div class="insights-tree-panel-content">
                                 <div class="insights-tree-node" data-insights-tree-node="overview">
-                                    <button class="color-tab insights-tree-trigger has-children" type="button" data-insights-tree-branch="overview" aria-expanded="false"><span data-insights-tree-label>Overview</span></button>
+                                    <button class="insights-tab insights-tree-trigger has-children" type="button" data-insights-tree-branch="overview" aria-expanded="false"><span data-insights-tree-label>Overview</span></button>
                                     <div class="insights-tree-children"><div class="insights-tree-children-content">
-                                        <button class="color-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="summary" data-insights-tree-parent="overview">Summary</button>
-                                        <button class="color-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="sections" data-insights-tree-parent="overview">Sections</button>
+                                        <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="summary" data-insights-tree-parent="overview">Summary</button>
+                                        <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="sections" data-insights-tree-parent="overview">Sections</button>
                                     </div></div>
                                 </div>
                                 <div class="insights-tree-node" data-insights-tree-node="genes">
-                                    <button class="color-tab insights-tree-trigger has-children" type="button" data-insights-tree-branch="genes" aria-expanded="false"><span data-insights-tree-label>Genes</span></button>
+                                    <button class="insights-tab insights-tree-trigger has-children" type="button" data-insights-tree-branch="genes" aria-expanded="false"><span data-insights-tree-label>Genes</span></button>
                                     <div class="insights-tree-children"><div class="insights-tree-children-content">
                                         <div class="insights-tree-node" data-insights-tree-genes-node="distribution">
-                                            <button class="color-tab insights-tree-trigger has-children" type="button" data-insights-tree-genes-branch="distribution" aria-expanded="false">Distribution</button>
+                                            <button class="insights-tab insights-tree-trigger has-children" type="button" data-insights-tree-genes-branch="distribution" aria-expanded="false">Distribution</button>
                                             <div class="insights-tree-children"><div class="insights-tree-children-content">
-                                                <button class="color-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="distribution" data-insights-tree-parent="genes">Per cell</button>
-                                                <button class="color-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="means" data-insights-tree-parent="genes">Per sample</button>
+                                                <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="distribution" data-insights-tree-parent="genes">Per cell</button>
+                                                <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="means" data-insights-tree-parent="genes">Per sample</button>
                                             </div></div>
                                         </div>
-                                        <button class="color-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="de-genes" data-insights-tree-parent="genes" data-insights-tree-genes-direct-leaf>Markers</button>
-                                        <button class="color-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="spatial" data-insights-tree-parent="genes" data-insights-tree-genes-direct-leaf>Spatial</button>
+                                        <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="de-genes" data-insights-tree-parent="genes" data-insights-tree-genes-direct-leaf>Markers</button>
+                                        <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="spatial" data-insights-tree-parent="genes" data-insights-tree-genes-direct-leaf>Spatial</button>
                                     </div></div>
                                 </div>
                                 <div class="insights-tree-node" data-insights-tree-node="compare">
-                                    <button class="color-tab insights-tree-trigger has-children" type="button" data-insights-tree-branch="compare" aria-expanded="false"><span data-insights-tree-label>Compare</span></button>
+                                    <button class="insights-tab insights-tree-trigger has-children" type="button" data-insights-tree-branch="compare" aria-expanded="false"><span data-insights-tree-label>Compare</span></button>
                                     <div class="insights-tree-children"><div class="insights-tree-children-content">
                                         <div class="insights-tree-node" data-insights-tree-compare-node="quick">
-                                            <button class="color-tab insights-tree-trigger has-children" type="button" data-insights-tree-compare-branch="quick" aria-expanded="false">Per cell</button>
+                                            <button class="insights-tab insights-tree-trigger has-children" type="button" data-insights-tree-compare-branch="quick" aria-expanded="false">Per cell</button>
                                             <div class="insights-tree-children"><div class="insights-tree-children-content">
-                                                <button class="color-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="selection" data-insights-tree-parent="compare">Selections</button>
-                                                <button class="color-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="regions" data-insights-tree-parent="compare">Regions</button>
-                                                <button class="color-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="groups" data-insights-tree-parent="compare">Annotations</button>
+                                                <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="selection" data-insights-tree-parent="compare">Selections</button>
+                                                <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="regions" data-insights-tree-parent="compare">Regions</button>
+                                                <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="groups" data-insights-tree-parent="compare">Annotations</button>
                                             </div></div>
                                         </div>
                                         <div class="insights-tree-node" data-insights-tree-compare-node="precise">
-                                            <button class="color-tab insights-tree-trigger has-children" type="button" data-insights-tree-compare-branch="precise" aria-expanded="false">Per sample</button>
+                                            <button class="insights-tab insights-tree-trigger has-children" type="button" data-insights-tree-compare-branch="precise" aria-expanded="false">Per sample</button>
                                             <div class="insights-tree-children"><div class="insights-tree-children-content">
-                                                <button class="color-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="cell-de" data-insights-tree-parent="compare">Simple design</button>
-                                                <button class="color-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="complex-contrast" data-insights-tree-parent="compare">Complex design</button>
+                                                <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="cell-de" data-insights-tree-parent="compare">Simple design</button>
+                                                <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="complex-contrast" data-insights-tree-parent="compare">Complex design</button>
                                             </div></div>
                                         </div>
-                                        <button class="color-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="river" data-insights-tree-parent="compare">Relationships</button>
+                                        <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="river" data-insights-tree-parent="compare">Relationships</button>
                                     </div></div>
                                 </div>
                                 <div class="insights-tree-node" data-insights-tree-node="neighbors">
-                                    <button class="color-tab insights-tree-trigger has-children" type="button" data-insights-tree-branch="neighbors" aria-expanded="false"><span data-insights-tree-label>Neighbors</span></button>
+                                    <button class="insights-tab insights-tree-trigger has-children" type="button" data-insights-tree-branch="neighbors" aria-expanded="false"><span data-insights-tree-label>Neighbors</span></button>
                                     <div class="insights-tree-children"><div class="insights-tree-children-content">
-                                        <button class="color-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="enrichment" data-insights-tree-parent="neighbors">Enrichment</button>
-                                        <button class="color-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="interactions" data-insights-tree-parent="neighbors">Interactions</button>
-                                        <button class="color-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="dispersion" data-insights-tree-parent="neighbors">Dispersion</button>
+                                        <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="enrichment" data-insights-tree-parent="neighbors">Enrichment</button>
+                                        <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="interactions" data-insights-tree-parent="neighbors">Interactions</button>
+                                        <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="dispersion" data-insights-tree-parent="neighbors">Dispersion</button>
                                     </div></div>
                                 </div>
                             </div>
                         </div>
                     </div>
-                    <div class="color-tab-content active" id="color-tab-overview-content">
-                        <div class="color-tab-content active" id="overview-tab-summary-content">
+                    <div class="insights-tab-content active" id="insights-tab-overview-content">
+                        <div class="insights-tab-content active" id="overview-tab-summary-content">
                             <div style="display:grid; grid-template-columns:minmax(0,1fr) auto; gap:6px; align-items:end;">
                                 <div>
                                     <label>Aggregate By</label>
@@ -24712,28 +24838,28 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                             </div>
                             ${{getOverviewDownsampleWarningHtml()}}
                             <div style="display: flex; justify-content: flex-end;">
-                                <button class="legend-btn" id="color-aggregation-toggle" type="button">Collapse Stats</button>
+                                <button class="legend-btn" id="overview-aggregation-toggle" type="button">Collapse Stats</button>
                             </div>
-                            <div class="color-aggregation" id="color-aggregation">
+                            <div class="insights-aggregation" id="overview-aggregation">
                             ${{hasSectionMetadata ? '' : '<div class="agg-group-meta">No section metadata available for aggregation.</div>'}}
                             </div>
                             <div id="celltype-select-row">
                                 <label>Per Annotation</label>
                                 <select id="celltype-select"></select>
                             </div>
-                            <div class="color-aggregation" id="celltype-trend">
+                            <div class="insights-aggregation" id="celltype-trend">
                             </div>
                         </div>
-                        <div class="color-tab-content" id="overview-tab-sections-content">
-                            <div class="color-aggregation" id="samples-panel">
+                        <div class="insights-tab-content" id="overview-tab-sections-content">
+                            <div class="insights-aggregation" id="samples-panel">
                                 <div class="agg-group-meta">Open Sections to view per-section composition as stacked bars or a heatmap.</div>
                             </div>
                         </div>
                 </div>
-                <div class="color-tab-content" id="color-tab-genes-content">
+                <div class="insights-tab-content" id="insights-tab-genes-content">
                     <div id="genes-details-warnings"></div>
                     <div id="genes-details-content">
-                    <div class="color-panel-section" id="genes-search-section">
+                    <div class="insights-panel-section" id="genes-search-section">
                         <label for="marker-gene-search">Search</label>
                         <div class="marker-gene-search-wrap">
                             <select class="marker-search" id="marker-gene-search" aria-label="Search pseudobulk genes">
@@ -24742,7 +24868,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                             <button class="marker-gene-clear-btn" id="marker-gene-search-clear" type="button" title="Clear selected gene" aria-label="Clear selected gene">&times;</button>
                         </div>
                     </div>
-                    <div class="color-tab-content active" id="genes-tab-de-genes-content">
+                    <div class="insights-tab-content active" id="genes-tab-de-genes-content">
                         <div class="samples-view-toggle gene-subtab-view-toggle" data-gene-subtab-toggle="de-genes"></div>
                         <div class="gene-subtab-action-row" id="marker-genes-action-row">
                             <button class="selection-summary-compare-btn icon-only" type="button" id="marker-genes-export-btn" title="Download pseudobulk DE genes CSV" aria-label="Download pseudobulk DE genes CSV">${{LEGEND_EXPORT_ICON}}</button>
@@ -24750,12 +24876,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         </div>
                         <div class="marker-genes" id="marker-genes"></div>
                     </div>
-                    <div class="color-tab-content" id="genes-tab-spatial-content">
+                    <div class="insights-tab-content" id="genes-tab-spatial-content">
                         <div class="samples-view-toggle gene-subtab-view-toggle" data-gene-subtab-toggle="spatial"></div>
                         <div class="gene-subtab-action-row">${{renderCalcInfoButton('spatial_moran')}}</div>
                         <div class="marker-genes" id="spatially-variable-genes"></div>
                     </div>
-                    <div class="color-tab-content" id="genes-tab-distribution-content">
+                    <div class="insights-tab-content" id="genes-tab-distribution-content">
                         <div class="samples-view-toggle gene-subtab-view-toggle" data-gene-subtab-toggle="distribution"></div>
                         <div class="gene-subtab-action-row" id="gene-distribution-action-row">
                             <button class="selection-summary-compare-btn icon-only" type="button" id="gene-distribution-export-svg" title="Download distribution graph SVG" aria-label="Download distribution graph SVG">${{LEGEND_EXPORT_ICON}}</button>
@@ -24763,7 +24889,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         </div>
                         <div class="gene-distribution-panel" id="gene-distribution-panel"></div>
                     </div>
-                    <div class="color-tab-content" id="genes-tab-means-content">
+                    <div class="insights-tab-content" id="genes-tab-means-content">
                         <div class="samples-view-toggle gene-subtab-view-toggle" data-gene-subtab-toggle="means"></div>
                         <div class="gene-subtab-action-row" id="gene-means-action-row">
                             <button class="selection-summary-compare-btn icon-only" type="button" id="gene-means-export-svg" title="Download means graph SVG" aria-label="Download means graph SVG">${{LEGEND_EXPORT_ICON}}</button>
@@ -24773,30 +24899,30 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     </div>
                     </div>
                 </div>
-                <div class="color-tab-content" id="color-tab-compare-content">
-                    <div class="color-tab-content active" id="compare-tab-groups-content">
+                <div class="insights-tab-content" id="insights-tab-compare-content">
+                    <div class="insights-tab-content active" id="compare-tab-groups-content">
                         <div class="agg-group-meta" id="group-de-summary">Compare samples, metadata groups, or annotations.</div>
-                        <div class="color-aggregation" id="group-de-panel">
+                        <div class="insights-aggregation" id="group-de-panel">
                             <div class="agg-group-meta">Configure two samples, metadata groups, or annotation categories for exploratory group DE.</div>
                         </div>
                     </div>
-                    <div class="color-tab-content" id="compare-tab-regions-content">
-                        <div class="color-aggregation" id="annotation-comparison">
-                            <div class="agg-group-meta">Open a section, draw annotations, then use Regions to compare those cell sets.</div>
+                    <div class="insights-tab-content" id="compare-tab-regions-content">
+                        <div class="insights-aggregation" id="region-comparison">
+                            <div class="agg-group-meta">Open a section, draw regions, then use Regions to compare those cell sets.</div>
                         </div>
                     </div>
-                    <div class="color-tab-content" id="compare-tab-selection-content">
-                        <div class="color-aggregation" id="compare-selection-panel"></div>
+                    <div class="insights-tab-content" id="compare-tab-selection-content">
+                        <div class="insights-aggregation" id="compare-selection-panel"></div>
                     </div>
-                    <div class="color-tab-content" id="compare-tab-cell-de-content">
-                        <div class="color-aggregation" id="pseudobulk-de-results">
+                    <div class="insights-tab-content" id="compare-tab-cell-de-content">
+                        <div class="insights-aggregation" id="pseudobulk-de-results">
                             <div class="agg-group-meta">Choose two categories to compare.</div>
                         </div>
                     </div>
-                    <div class="color-tab-content" id="compare-tab-complex-contrast-content">
-                        <div class="color-aggregation" id="complex-pseudobulk-design"></div>
+                    <div class="insights-tab-content" id="compare-tab-complex-contrast-content">
+                        <div class="insights-aggregation" id="complex-pseudobulk-design"></div>
                     </div>
-                    <div class="color-tab-content" id="compare-tab-river-content">
+                    <div class="insights-tab-content" id="compare-tab-river-content">
                         <div class="pseudobulk-de-controls">
                             <div class="pseudobulk-de-select-row">
                                 <div>
@@ -24816,9 +24942,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         <div class="river-plot" id="river-plot"></div>
                     </div>
                 </div>
-                <div class="color-tab-content" id="color-tab-neighbors-content">
+                <div class="insights-tab-content" id="insights-tab-neighbors-content">
                     <div id="neighbors-stats-warning" style="display:none"></div>
-                    <div class="color-tab-content active" id="neighbors-tab-enrichment-content">
+                    <div class="insights-tab-content active" id="neighbors-tab-enrichment-content">
                         <div class="neighbor-view-controls">
                             <div class="neighbor-view-buttons">
                                 <button class="legend-btn active" data-neighbor-view="table" type="button">Table</button>
@@ -24829,25 +24955,25 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         <div style="display: flex; justify-content: flex-end; gap: 6px;">
                             <button class="legend-btn" id="neighbor-focus-reset" type="button" style="display:none">Reset highlight</button>
                         </div>
-                        <div class="color-aggregation" id="neighbor-stats">
+                        <div class="insights-aggregation" id="neighbor-stats">
                             <div class="neighbor-view-note">Select a categorical annotation to view neighbor stats.</div>
                         </div>
                     </div>
-                    <div class="color-tab-content" id="neighbors-tab-interactions-content">
+                    <div class="insights-tab-content" id="neighbors-tab-interactions-content">
                         <div>
                             <label>Interaction Source</label>
                             <select id="interaction-source"></select>
                         </div>
                         <div>
                             <label>Target Filter</label>
-                            <input class="color-search" id="interaction-search" type="text" placeholder="Filter target categories...">
+                            <input class="insights-search" id="interaction-search" type="text" placeholder="Filter target categories...">
                         </div>
-                        <div class="color-aggregation" id="interaction-browser">
+                        <div class="insights-aggregation" id="interaction-browser">
                             <div class="agg-group-meta">Select a source category to browse interactions.</div>
                         </div>
                     </div>
-                    <div class="color-tab-content" id="neighbors-tab-dispersion-content">
-                        <div class="color-aggregation" id="dispersion-panel">
+                    <div class="insights-tab-content" id="neighbors-tab-dispersion-content">
+                        <div class="insights-aggregation" id="dispersion-panel">
                             <div class="agg-group-meta">Select a categorical annotation to view spatial dispersion.</div>
                         </div>
                     </div>
@@ -24858,7 +24984,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         panel.querySelectorAll('[data-insights-mode]').forEach((btn) => {{
             btn.addEventListener('click', () => {{
                 const mode = btn.getAttribute('data-insights-mode') || 'exploration';
-                if (mode === 'annotate' && insightsMode === 'annotate') {{
+                if (mode === 'region' && insightsMode === 'region') {{
                     setInsightsMode('selection');
                     return;
                 }}
@@ -24867,8 +24993,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }});
         syncInsightsModeClasses();
 
-        const explorationColorSelect = document.getElementById('exploration-color-select');
-        if (explorationColorSelect) {{
+        const explorationAnnotationSelect = document.getElementById('exploration-annotation-select');
+        if (explorationAnnotationSelect) {{
             const explorationOptions = getExplorationColorOptions();
             const validExplorationValues = explorationOptions.metadata.concat(explorationOptions.annotations).map((entry) => entry.value);
             if (!explorationColorCol || !validExplorationValues.includes(getExplorationColorOptionValue(explorationColorCol))) {{
@@ -24876,7 +25002,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     ? currentAnnotation
                     : (explorationOptions.annotations[0]?.value || explorationOptions.metadata[0]?.value || '');
             }}
-            explorationColorSelect.innerHTML = '';
+            explorationAnnotationSelect.innerHTML = '';
             [['Section metadata', explorationOptions.metadata], ['Cell annotations', explorationOptions.annotations]].forEach(([group, entries]) => {{
                 if (!entries.length) return;
                 const optgroup = document.createElement('optgroup');
@@ -24887,16 +25013,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     option.textContent = entry.label;
                     optgroup.appendChild(option);
                 }});
-                explorationColorSelect.appendChild(optgroup);
+                explorationAnnotationSelect.appendChild(optgroup);
             }});
-            explorationColorSelect.value = getExplorationColorOptionValue(explorationColorCol);
-            const explorationLabel = document.getElementById('exploration-color-label');
+            explorationAnnotationSelect.value = getExplorationColorOptionValue(explorationColorCol);
+            const explorationLabel = document.getElementById('exploration-annotation-label');
             if (explorationLabel) explorationLabel.textContent = String(explorationColorCol).startsWith(SECTION_METADATA_COLOR_PREFIX) ? 'Section metadata' : 'Annotation';
-            explorationColorSelect.addEventListener('change', () => {{
-                const nextColor = explorationColorSelect.value;
-                if (!nextColor || !validExplorationValues.includes(nextColor)) return;
-                explorationColorCol = nextColor;
-                if (explorationLabel) explorationLabel.textContent = nextColor.startsWith(SECTION_METADATA_COLOR_PREFIX) ? 'Section metadata' : 'Annotation';
+            explorationAnnotationSelect.addEventListener('change', () => {{
+                const nextExplorationValue = explorationAnnotationSelect.value;
+                if (!nextExplorationValue || !validExplorationValues.includes(nextExplorationValue)) return;
+                explorationColorCol = nextExplorationValue;
+                if (explorationLabel) explorationLabel.textContent = nextExplorationValue.startsWith(SECTION_METADATA_COLOR_PREFIX) ? 'Section metadata' : 'Annotation';
                 celltypeTrendTarget = null;
                 // Region and Selection composition use the active exploration
                 // annotation, so a change discards their derived results.
@@ -24913,7 +25039,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 neighborNetworkFocusCategories = null;
                 updateNeighborFocusResetButton();
                 renderGenesDetailsWarnings();
-                renderColorAggregation();
+                renderOverviewAggregation();
                 renderCellTypeTrend();
                 renderNeighborStats();
                 renderActiveInsightsPanel();
@@ -24922,12 +25048,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         const groupBy = document.getElementById('annotation-section-key');
         groupBy.addEventListener('change', () => {{
-            renderColorAggregation();
+            renderOverviewAggregation();
             renderCellTypeTrend();
         }});
 
-        const aggregationToggle = document.getElementById('color-aggregation-toggle');
-        const aggregationContainer = document.getElementById('color-aggregation');
+        const aggregationToggle = document.getElementById('overview-aggregation-toggle');
+        const aggregationContainer = document.getElementById('overview-aggregation');
         aggregationToggle.addEventListener('click', () => {{
             const isCollapsed = aggregationContainer.classList.toggle('collapsed');
             aggregationToggle.textContent = isCollapsed ? 'Show stats' : 'Collapse stats';
@@ -25254,8 +25380,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         modalTypeSelectEnabled = false;
         hoveredNeighborFocus = null;
         selectedNeighborFocus = null;
-        const colorSelect = document.getElementById('color-select');
-        if (colorSelect) colorSelect.value = col;
+        const annotationSelect = document.getElementById('annotation-select');
+        if (annotationSelect) annotationSelect.value = col;
         const geneInput = document.getElementById('gene-input');
         if (geneInput) geneInput.value = '';
         (DATA.sections || []).forEach(s => {{ if (s && s._colorCache) s._colorCache = {{}}; }});
@@ -25722,8 +25848,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
     }}
 
-    function renderColorAggregation() {{
-        const container = document.getElementById('color-aggregation');
+    function renderOverviewAggregation() {{
+        const container = document.getElementById('overview-aggregation');
         const groupBy = document.getElementById('annotation-section-key');
         if (!container || !groupBy) return;
         const groupKey = groupBy.value;
@@ -25851,7 +25977,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 if (!key) return;
                 if (expandedAggGroups.has(key)) expandedAggGroups.delete(key);
                 else expandedAggGroups.add(key);
-                renderColorAggregation();
+                renderOverviewAggregation();
             }});
         }});
 
@@ -25865,7 +25991,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 spotlightHoverCategory = null;
                 updateAllLegendSpotlightClasses();
                 rerenderForSpotlightChange();
-                renderColorAggregation();
+                renderOverviewAggregation();
             }});
         }});
     }}
@@ -28823,8 +28949,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <div><label>Annotation A</label><select id="pseudobulk-de-source" style="border-color:${{sourceColor}}">${{sourceOptions}}</select></div>
                     <div><label>Annotation B</label><select id="pseudobulk-de-reference" style="border-color:${{referenceColor}}">${{referenceOptions}}</select></div>
                 </div>
-                <div class="annotation-de-action-row">
-                    <div class="annotation-de-action-buttons">
+                <div class="comparison-de-action-row">
+                    <div class="comparison-de-action-buttons">
                         <button class="legend-btn icon-only" id="pseudobulk-de-swap" type="button" title="Swap Annotation A and Annotation B" aria-label="Swap Annotation A and Annotation B"><svg class="lucide lucide-arrow-left-right" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3 4 7l4 4"></path><path d="M4 7h16"></path><path d="m16 21 4-4-4-4"></path><path d="M20 17H4"></path></svg></button>
                     </div>
                 </div>
@@ -29951,7 +30077,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             : (!hasCompletedCalculation ? '<button class="selection-query-icon-btn" id="group-de-run" type="button" title="Find annotation markers" aria-label="Find annotation markers"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg></button>' : '');
         const controlsHtml = `
             <div class="selection-summary-title">Gene expression — annotation A vs annotation B${{renderCalcInfoButton('group_de')}}</div>
-            <div class="pseudobulk-de-controls color-panel-section">
+            <div class="pseudobulk-de-controls insights-panel-section">
                 <div class="pseudobulk-de-select-row comparison-pair-select-row">
                     <div><label>Annotation A</label><select id="group-de-source-value" style="border-color:${{colorA}}">${{renderValues(groupValues, groupDeSourceValue)}}</select></div>
                     <div><label>Annotation B</label><select id="group-de-reference-value" style="border-color:${{colorB}}">${{renderValues(groupValues, groupDeReferenceValue)}}</select></div>
@@ -29964,9 +30090,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <label>Restrict value</label>
                     <select id="group-de-restrict-value"${{restrictSpec ? '' : ' disabled'}}>${{renderRestrictionValues}}</select>
                 </div>
-                <div class="annotation-de-action-row">
+                <div class="comparison-de-action-row">
                     ${{hasCompletedCalculation ? `<div class="selection-summary-welch-controls"><div class="selection-summary-welch-control-row"><label>Top N per direction</label><input id="group-de-topn" type="number" min="1" max="20" step="1" value="${{groupDeTopN}}"></div><div class="selection-summary-welch-control-row"><label>Min expressed %</label><input id="group-de-min-pct" type="range" min="0" max="100" step="1" value="${{groupDeMinPct}}"><output id="group-de-min-pct-value">${{groupDeMinPct}}%</output></div></div>` : ''}}
-                    <div class="annotation-de-action-buttons"><button class="legend-btn icon-only" id="group-de-swap" type="button" title="Swap Annotation A and Annotation B" aria-label="Swap Annotation A and Annotation B"><svg class="lucide lucide-arrow-left-right" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3 4 7l4 4"></path><path d="M4 7h16"></path><path d="m16 21 4-4-4-4"></path><path d="M20 17H4"></path></svg></button>${{runButtonHtml}}</div>
+                    <div class="comparison-de-action-buttons"><button class="legend-btn icon-only" id="group-de-swap" type="button" title="Swap Annotation A and Annotation B" aria-label="Swap Annotation A and Annotation B"><svg class="lucide lucide-arrow-left-right" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3 4 7l4 4"></path><path d="M4 7h16"></path><path d="m16 21 4-4-4-4"></path><path d="M20 17H4"></path></svg></button>${{runButtonHtml}}</div>
                 </div>
             </div>`;
         let html = downsampleWarningHtml + controlsHtml;
@@ -29974,7 +30100,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const displayed = result?.available ? selectWelchTopResults(result.results || [], groupDeTopN, groupDeMinPct, 1) : [];
         const renderCards = () => displayed.map((entry) => {{
             const sideColor = Number(entry.score || 0) >= 0 ? colorA : colorB;
-            return `<div class="comparison-card"><div class="comparison-card-title annotation-de-card-title"><div class="annotation-de-card-title-main">${{renderGeneTokenButton(entry.gene, {{ isActive: entry.gene === currentGene, showMeta: false, title: 'Load annotation DE gene into the viewer' }})}}${{renderGeneGoogleSearchButton(entry.gene, {{ title: 'Search Google for this gene' }})}}</div><div class="annotation-de-title-stats" style="border-color:${{sideColor}}"><span>log2FC ${{formatScaleNumber(entry.log2fc)}}</span><span>Score ${{formatScaleNumber(entry.score)}}</span></div></div><div class="comparison-metric-grid"><span class="annotation-de-region-chip" style="background:${{getComparisonMetricChipBackground(colorA, sideColor)}};color:${{getTextColorForBackground(colorA)}}"><span>% expr A</span><strong>${{formatPseudobulkDEPct(entry.pctA)}}</strong><span>Mean A</span><strong>${{formatScaleNumber(entry.meanA)}}</strong></span><span class="annotation-de-region-chip" style="background:${{getComparisonMetricChipBackground(colorB, sideColor)}};color:${{getTextColorForBackground(colorB)}}"><span>% expr B</span><strong>${{formatPseudobulkDEPct(entry.pctB)}}</strong><span>Mean B</span><strong>${{formatScaleNumber(entry.meanB)}}</strong></span></div></div>`;
+            return `<div class="comparison-card"><div class="comparison-card-title comparison-de-card-title"><div class="comparison-de-card-title-main">${{renderGeneTokenButton(entry.gene, {{ isActive: entry.gene === currentGene, showMeta: false, title: 'Load annotation DE gene into the viewer' }})}}${{renderGeneGoogleSearchButton(entry.gene, {{ title: 'Search Google for this gene' }})}}</div><div class="comparison-de-title-stats" style="border-color:${{sideColor}}"><span>log2FC ${{formatScaleNumber(entry.log2fc)}}</span><span>Score ${{formatScaleNumber(entry.score)}}</span></div></div><div class="comparison-metric-grid"><span class="comparison-de-metric-chip" style="background:${{getComparisonMetricChipBackground(colorA, sideColor)}};color:${{getTextColorForBackground(colorA)}}"><span>% expr A</span><strong>${{formatPseudobulkDEPct(entry.pctA)}}</strong><span>Mean A</span><strong>${{formatScaleNumber(entry.meanA)}}</strong></span><span class="comparison-de-metric-chip" style="background:${{getComparisonMetricChipBackground(colorB, sideColor)}};color:${{getTextColorForBackground(colorB)}}"><span>% expr B</span><strong>${{formatPseudobulkDEPct(entry.pctB)}}</strong><span>Mean B</span><strong>${{formatScaleNumber(entry.meanB)}}</strong></span></div></div>`;
         }}).join('');
         if (groupDeQuickRunning) {{
             html += '<div id="group-de-results"></div>';
@@ -29994,7 +30120,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     html += '<div class="selection-summary-title">Cell Composition by Annotation</div>';
                     [groupDeSourceValue, groupDeReferenceValue].forEach((value, index) => {{
                         const summary = summaries[index]; const typeMap = new Map(summary.types); const color = index === 0 ? colorA : colorB;
-                        html += `<div class="annot-comp-row"><div class="annot-comp-header"><span class="annot-comp-dot" style="background:${{color}}"></span><span>${{escapeHtml(formatCategoryLabel(sourceSpec.column, value))}}</span><span class="annot-comp-count">${{summary.total.toLocaleString()}} cells</span></div><div class="annot-comp-bar-track">${{types.map((type) => {{ const count = typeMap.get(type) || 0; const pct = summary.total ? 100 * count / summary.total : 0; return pct ? `<div class="annot-comp-segment" style="width:${{pct}}%;background:${{getCategoryColorForValue(typeColumn, type)}}" title="${{escapeHtml(type)}}: ${{count}}"></div>` : ''; }}).join('')}}</div></div>`;
+                        html += `<div class="composition-comparison-row"><div class="composition-comparison-header"><span class="composition-comparison-dot" style="background:${{color}}"></span><span>${{escapeHtml(formatCategoryLabel(sourceSpec.column, value))}}</span><span class="composition-comparison-count">${{summary.total.toLocaleString()}} cells</span></div><div class="composition-comparison-bar-track">${{types.map((type) => {{ const count = typeMap.get(type) || 0; const pct = summary.total ? 100 * count / summary.total : 0; return pct ? `<div class="composition-comparison-segment" style="width:${{pct}}%;background:${{getCategoryColorForValue(typeColumn, type)}}" title="${{escapeHtml(type)}}: ${{count}}"></div>` : ''; }}).join('')}}</div></div>`;
                     }});
                 }}
             }}
@@ -32687,14 +32813,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         document.getElementById('modal').classList.remove('active');
         unmountModalFromGrid();
         lassoSelectionActive = false;
-        umapPanActive = true;
+        selectionPanActive = true;
         isDrawingLasso = false;
         lassoPath = [];
         isDrawingGridLasso = false;
         gridLassoPath = [];
         gridLassoSectionId = null;
         if (lassoModeB && selectedCellsB.size === 0) lassoModeB = false;
-        setUMAPCompareHintVisible(false);
+        setSelectionCompareHintVisible(false);
         modalLassoSelectionActive = false;
         isDrawingModalLasso = false;
         modalLassoPath = [];
@@ -32706,8 +32832,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         updateSectionRotationIndicators();
         renderModalAnnotationPanel();
         hideTooltip();
-        updateUMAPCursor();
-        updateUMAPLassoButtonState();
+        updateSelectionCursor();
+        updateSelectionLassoButtonState();
         renderAllSections();
         updateTutorialStepGate?.();
     }}
@@ -32716,23 +32842,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function setModalAnnotationPanelOpen(open) {{
-        const section = document.getElementById('modal-annotation-section');
-        const insightsBtn = document.getElementById('insights-annotate-toggle');
+        const section = document.getElementById('region-section');
+        const insightsBtn = document.getElementById('insights-mode-region');
         if (!section) {{
-            if (open) insightsMode = 'annotate';
+            if (open) insightsMode = 'region';
             return;
         }}
-        if (open) insightsMode = 'annotate';
-        else if (insightsMode === 'annotate') insightsMode = 'selection';
+        if (open) insightsMode = 'region';
+        else if (insightsMode === 'region') insightsMode = 'selection';
         section.classList.toggle('active', !!open);
         insightsBtn?.classList.toggle('active', !!open);
         insightsBtn?.setAttribute('aria-expanded', open ? 'true' : 'false');
         syncInsightsModeClasses();
         if (open) {{
-            const colorPanel = document.getElementById('color-panel');
-            const colorToggle = document.getElementById('color-toggle');
-            colorPanel?.classList.remove('collapsed');
-            colorToggle?.classList.add('active');
+            const insightsPanel = document.getElementById('insights-panel');
+            const insightsToggle = document.getElementById('insights-toggle');
+            insightsPanel?.classList.remove('collapsed');
+            insightsToggle?.classList.add('active');
             layoutModalAnnotationPanel(true);
         }}
     }}
@@ -32941,17 +33067,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     // Controls
     function initControls() {{
-        document.getElementById('umap-selection-clear')?.addEventListener('click', (event) => {{
+        document.getElementById('selection-clear')?.addEventListener('click', (event) => {{
             event.preventDefault();
             event.stopPropagation();
             clearSelection();
         }});
 
-        const colorSelect = document.getElementById('color-select');
-        if (colorSelect) colorSelect.innerHTML = renderGroupedAnnotationOptions(currentAnnotation);
+        const annotationSelect = document.getElementById('annotation-select');
+        if (annotationSelect) annotationSelect.innerHTML = renderGroupedAnnotationOptions(currentAnnotation);
 
         const isInsightsVisible = () => {{
-            const panel = document.getElementById('color-panel');
+            const panel = document.getElementById('insights-panel');
             return panel && !panel.classList.contains('collapsed');
         }};
 
@@ -32960,7 +33086,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             renderActiveInsightsPanel();
         }};
 
-        colorSelect.addEventListener('change', (e) => {{
+        annotationSelect.addEventListener('change', (e) => {{
             setViewerColorColumn(e.target.value);
         }});
 
@@ -33056,13 +33182,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }});
 
         const visualDefaultControls = document.getElementById('visual-default-controls');
-        const defaultSourceColorBtn = document.getElementById('default-source-color');
+        const defaultSourceAnnotationBtn = document.getElementById('default-source-annotation');
         const defaultSourceGeneBtn = document.getElementById('default-source-gene');
         const setDefaultVisualSource = (source) => {{
             const mode = source === 'gene' ? 'gene' : 'color';
-            visualDefaultControls?.classList.toggle('color-mode', mode === 'color');
+            visualDefaultControls?.classList.toggle('annotation-mode', mode === 'color');
             visualDefaultControls?.classList.toggle('gene-mode', mode === 'gene');
-            defaultSourceColorBtn?.classList.toggle('active', mode === 'color');
+            defaultSourceAnnotationBtn?.classList.toggle('active', mode === 'color');
             defaultSourceGeneBtn?.classList.toggle('active', mode === 'gene');
         }};
         const applyDefaultVisualSource = async (source) => {{
@@ -33079,9 +33205,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             if (!requested) return;
             await activateViewerGene(requested, {{ showErrors: false }});
         }};
-        setDefaultVisualSource(currentGene ? 'gene' : 'color');
-        defaultSourceColorBtn?.addEventListener('click', () => {{
-            applyDefaultVisualSource('color').catch(error => console.warn(error));
+        setDefaultVisualSource(currentGene ? 'gene' : 'annotation');
+        defaultSourceAnnotationBtn?.addEventListener('click', () => {{
+            applyDefaultVisualSource('annotation').catch(error => console.warn(error));
         }});
         defaultSourceGeneBtn?.addEventListener('click', () => {{
             applyDefaultVisualSource('gene').catch(error => console.warn(error));
@@ -33254,13 +33380,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const ovBlendControls = {{
                 a: {{
                     kind: document.getElementById('overview-blend-a-kind'),
-                    color: document.getElementById('overview-blend-a-color'),
+                    color: document.getElementById('overview-blend-a-annotation'),
                     category: document.getElementById('overview-blend-a-category'),
                     gene: document.getElementById('overview-blend-a-gene'),
                 }},
                 b: {{
                     kind: document.getElementById('overview-blend-b-kind'),
-                    color: document.getElementById('overview-blend-b-color'),
+                    color: document.getElementById('overview-blend-b-annotation'),
                     category: document.getElementById('overview-blend-b-category'),
                     gene: document.getElementById('overview-blend-b-gene'),
                 }},
@@ -33540,9 +33666,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         // Insights panel toggle
         geneModules = loadGeneModules();
-        buildColorPanel();
-        const colorToggle = document.getElementById('color-toggle');
-        colorToggle.addEventListener('click', toggleInsightsPanel);
+        buildInsightsPanel();
+        const insightsToggle = document.getElementById('insights-toggle');
+        insightsToggle.addEventListener('click', toggleInsightsPanel);
 
         const infoTrigger = document.getElementById('info-trigger');
         const infoPopover = document.getElementById('info-popover');
@@ -33804,11 +33930,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const canvas = document.getElementById('modal-canvas');
         const modalGenePanel = document.getElementById('modal-gene-panel');
         const modalGenePanelCloseBtn = document.getElementById('modal-gene-panel-close');
-        const modalAnnotationCreateGroupBtn = document.getElementById('modal-annotations-create-group');
-        const modalAnnotationImportBtn = document.getElementById('modal-annotations-import');
-        const modalAnnotationImportInput = document.getElementById('modal-annotations-import-input');
-        const modalAnnotationExportBtn = document.getElementById('modal-annotations-export');
-        const modalAnnotationClearAllBtn = document.getElementById('modal-annotations-clear-all');
+        const regionCreateGroupBtn = document.getElementById('regions-create-group');
+        const regionImportBtn = document.getElementById('regions-import');
+        const regionImportInput = document.getElementById('regions-import-input');
+        const regionExportBtn = document.getElementById('regions-export');
+        const regionClearAllBtn = document.getElementById('regions-clear-all');
 
         updateModalCanvasCursor = () => {{
             if (!canvas) return;
@@ -33837,21 +33963,21 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         layoutModalAnnotationPanel();
         updateModalToolbarState();
 
-        modalAnnotationCreateGroupBtn?.addEventListener('click', () => {{
+        regionCreateGroupBtn?.addEventListener('click', () => {{
             createModalAnnotationGroup();
         }});
-        modalAnnotationImportBtn?.addEventListener('click', () => {{
-            modalAnnotationImportInput?.click();
+        regionImportBtn?.addEventListener('click', () => {{
+            regionImportInput?.click();
         }});
-        modalAnnotationImportInput?.addEventListener('change', () => {{
-            const file = modalAnnotationImportInput.files && modalAnnotationImportInput.files[0];
+        regionImportInput?.addEventListener('change', () => {{
+            const file = regionImportInput.files && regionImportInput.files[0];
             if (file) importModalAnnotationsFromFile(file);
-            modalAnnotationImportInput.value = '';
+            regionImportInput.value = '';
         }});
-        modalAnnotationExportBtn?.addEventListener('click', () => {{
+        regionExportBtn?.addEventListener('click', () => {{
             exportModalAnnotations();
         }});
-        modalAnnotationClearAllBtn?.addEventListener('click', () => {{
+        regionClearAllBtn?.addEventListener('click', () => {{
             clearAllModalAnnotations();
         }});
 
@@ -34133,7 +34259,7 @@ def export_to_html(
     downsample : int, optional
         Downsample cells per section (for large datasets)
     outline_by : str, optional
-        Metadata column used to color panel outlines (default: "course")
+        Metadata column used to color section panel outlines (default: "course")
     metadata_labels : mapping, optional
         Optional mapping of column keys to display labels used across the viewer
         UI without renaming the underlying obs/metadata columns.
