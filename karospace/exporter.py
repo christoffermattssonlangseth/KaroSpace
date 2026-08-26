@@ -6992,7 +6992,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                             <div class="button-help-item"><div class="button-help-icons" aria-label="Visibility and spotlight"><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"></path><circle cx="12" cy="12" r="3"></circle></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"></path><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"></path><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"></path><path d="m2 2 20 20"></path></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6"></path><path d="M10 22h4"></path><path d="M12 2v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="M2 12h2"></path><path d="m19.07 4.93-1.41 1.41"></path><path d="M20 12h2"></path><path d="M15 14a5 5 0 1 0-6 0l1 4h4z"></path></svg></span></div><div class="button-help-text">Shows, hides, or spotlights categories and overlay elements in legends and panels.</div></div>
                             <div class="button-help-item"><div class="button-help-icons" aria-label="Clear and delete"><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg></span></div><div class="button-help-text">Clears the current filter, selection, highlight, module, annotation, or panel-specific focus.</div></div>
                             <div class="button-help-item"><div class="button-help-icons" aria-label="Zoom and rotate"><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9"></path><path d="M21 3v6h-6"></path></svg></span></div><div class="button-help-text">Changes magnification, fits modal/network views, or rotates sections and overlays.</div></div>
-                            <div class="button-help-item"><div class="button-help-icons" aria-label="Neighbors and image overlay"><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.2 14.8a2 2 0 0 1 2 2"></path><circle cx="18.5" cy="8.5" r="3.5"></circle><circle cx="7.5" cy="16.5" r="5.5"></circle><circle cx="7.5" cy="4.5" r="2.5"></circle></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"></rect><circle cx="9" cy="9" r="2"></circle><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"></path></svg></span></div><div class="button-help-text">Toggles spatial neighbor graph tools or opens image overlay controls such as H&amp;E/DAPI.</div></div>
+                            <div class="button-help-item"><div class="button-help-icons" aria-label="Neighbors and image overlay"><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true" data-icon="waypoints"><circle cx="12" cy="4.5" r="2.5"></circle><circle cx="4.5" cy="12" r="2.5"></circle><circle cx="19.5" cy="12" r="2.5"></circle><circle cx="12" cy="19.5" r="2.5"></circle><path d="m10.2 6.3-3.9 3.9"></path><path d="m13.8 6.3 3.9 3.9"></path><path d="M7 12h10"></path><path d="m10.2 17.7-3.9-3.9"></path><path d="m13.8 17.7 3.9-3.9"></path></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"></rect><circle cx="9" cy="9" r="2"></circle><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"></path></svg></span></div><div class="button-help-text">Toggles spatial neighbor graph tools or opens image overlay controls such as H&amp;E/DAPI.</div></div>
                             <div class="button-help-item"><div class="button-help-icons" aria-label="Annotations"><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M16 8.9V7H8l4 5-4 5h8v-1.9"></path></svg></span></div><div class="button-help-text">Creates, groups, imports, exports, loads, or deletes user-created spatial annotations and gene modules.</div></div>
                             <div class="button-help-item"><div class="button-help-icons" aria-label="Plot and table modes"><span class="button-help-icon"><svg class="lucide lucide-chart-candlestick" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5v4"></path><rect x="7" y="9" width="4" height="6" rx="1"></rect><path d="M9 15v2"></path><path d="M17 3v2"></path><rect x="15" y="5" width="4" height="8" rx="1"></rect><path d="M17 13v3"></path><path d="M3 3v16a2 2 0 0 0 2 2h16"></path></svg></span><span class="button-help-icon"><svg class="lucide lucide-list-sort-descending" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 12H3"></path><path d="M3 5h18"></path><path d="M9 19H3"></path></svg></span></div><div class="button-help-text">Switches analysis sections between plot, graph, list, raw table, genes, samples, ORA, or GSEA views.</div></div>
                             <div class="button-help-item"><div class="button-help-icons" aria-label="Calculation info"><span class="button-help-icon button-help-calc">!</span></div><div class="button-help-text">Explains how the displayed metric, plot, or analysis section was generated.</div></div>
@@ -8062,7 +8062,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         ctx.restore();
     }}
 
-    // Outline color overrides (used for course by default)
+    // Outline color overrides for common course/stage labels.
     const OUTLINE_COLOR_OVERRIDES = {{
         'peak_I': 'rgba(228, 26, 28, 0.5)',
         'peak_II': 'rgba(55, 126, 184, 0.5)',
@@ -9044,17 +9044,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         insightsToggle?.classList.add('active');
         setInsightsMode(mode);
         scheduleUMAPPanelPositionUpdate();
-        if (tutorialActive && tutorialSteps[tutorialStepIndex]?.title === 'UMAP selection') {{
-            const refreshUMAPSelectionSpotlight = () => {{
-                if (!tutorialActive || tutorialSteps[tutorialStepIndex]?.title !== 'UMAP selection') return;
-                updateUMAPPanelPosition?.();
-                if (umapVisible) renderUMAP?.();
-                scheduleTutorialReposition?.();
-            }};
-            window.requestAnimationFrame(refreshUMAPSelectionSpotlight);
-            window.setTimeout(refreshUMAPSelectionSpotlight, 80);
-            window.setTimeout(refreshUMAPSelectionSpotlight, 360);
-        }}
     }}
 
     function navigateModalSection(step) {{
@@ -9123,6 +9112,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let tutorialSelectionMarkersClicked = false;
     let tutorialModuleCreateClicked = false;
     let tutorialAnnotationRowSelected = false;
+    let tutorialCompareChapterPrepared = false;
     let tutorialCurrentChapter = null;
     let tutorialTaskHighlightTimer = null;
     let tutorialTaskHighlightStopTimer = null;
@@ -9243,13 +9233,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'The UMAP panel can be docked to different corners and resized.',
                 'This lets you keep it pinned while browsing the section grid.'
             ], {{ condition: () => !!DATA.has_umap, action: () => {{ if (DATA.has_umap && !umapVisible && typeof toggleUMAP === 'function') toggleUMAP(); }}, nextLabel: tryIt }}),
-            step('UMAP selection', ['#selection-lasso-btn', '#umap-canvas'], [
-                'Cells selection via the lasso tool is also enabled directly in the UMAP.'
-            ], {{ condition: () => !!DATA.has_umap, action: () => {{ if (DATA.has_umap && !umapVisible && typeof toggleUMAP === 'function') toggleUMAP(); }}, task: 'Create a selection on the UMAP with the lasso tool', requiresSelection: true, combineTargets: true, targetAfterGateSatisfied: '#insights-panel', autoNextWhenGateSatisfied: true, autoNextDelay: 900, nextLabel: tryIt }}),
-            step('Create region from UMAP selection', ['#selection-create-region-btn', '#selection-tools'], [
-                'Selected UMAP cells can be saved as a cell-set region.',
-                'Unlike a polygon region, this stores the selected cells directly rather than a polygon tied to one section.'
-            ], {{ condition: () => !!DATA.has_umap, task: 'Create a cell-set region from the selected UMAP cells by clicking the region button.', requiresAnnotationCreated: true, targetAfterGateSatisfied: '#insights-panel', nextLabel: tryIt }}),
             step('Insights panel overview', ['#insights-toggle', '#insights-panel'], [
                 'Insights is the right-side workspace for selected cells, regions, gene modules, and built-in analysis panels.'
             ], {{ action: () => {{ if (typeof closeModal === 'function') closeModal(); if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); }}, nextLabel: tryIt }}),
@@ -9386,14 +9369,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ], {{ action: () => {{ if (typeof closeModal === 'function') closeModal(); if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); if (typeof setInsightsMode === 'function') setInsightsMode('module'); }}, task: 'Use the gene picker to add genes into the module list.', requiresModuleDraftGene: true, nextLabel: tryIt }}),
             step('Create module', ['#gene-module-create', '#insights-module-panel'], [
                 'Each gene in the module will get a scaled expression and the average expression will be calculated.'
-            ], {{ action: () => {{ tutorialModuleCreateClicked = false; if (typeof setInsightsMode === 'function') setInsightsMode('module'); }}, task: 'Click on the sum button', requiresModuleCreateClicked: true, positionTarget: '#insights-panel', placement: 'left', nextLabel: tryIt }}),
+            ], {{ action: () => {{ tutorialModuleCreateClicked = false; if (typeof setInsightsMode === 'function') setInsightsMode('module'); }}, task: 'Click on the sum button', requiresModuleCreateClicked: true, targetAfterGateSatisfied: ['#gene-module-create', '.gene-module-card'], combineTargetsAfterGateSatisfied: true, positionTarget: '#insights-panel', placement: 'left', nextLabel: tryIt }}),
             step('Load module score', ['[data-gene-module-load]', '#insights-module-panel'], [
                 'The load button activates a module score in the spatial viewer.',
                 'Module scores are computed from the selected module genes and displayed like an expression layer.'
             ], {{ action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('module'); }}, nextLabel: tryIt }}),
-            step('Module import export', ['#gene-module-upload', '#gene-module-download'], [
-                'Import and export buttons move module definitions as JSON files.'
-            ], {{ action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('module'); }}, combineTargets: true, nextLabel: tryIt }}),
+            step('Module export', '#gene-module-download', [
+                'Export downloads module definitions as a JSON file.'
+            ], {{ action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('module'); }}, nextLabel: tryIt }}),
+            step('Module import', '#gene-module-upload', [
+                'Import uploads a modules JSON file and restores saved module definitions.'
+            ], {{ action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('module'); }}, nextLabel: tryIt }}),
             step('Exploration annotation selector', ['#exploration-annotation-select', '#exploration-annotation-label'], [
                 'In Exploration, this selector chooses which annotation the panel summarize.',
                 'It is independent from the main grid selector.'
@@ -9409,14 +9395,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'Open Visualization, then Overview, then Summary to inspect annotation composition across section metadata.',
                 'All calculation in this section is done on cells embedded in the HTML file.'
             ], {{ action: () => openTutorialVisualizationLeafMenu('overview', 'summary'), task: 'Click Summary in the Overview options.', nextLabel: tryIt }}),
-            step('Overview Summary aggregation', ['#insights-tab-overview-content', '#overview-aggregation'], [
+            step('Overview Summary aggregation', '#overview-aggregation .agg-group', [
                 'Overview Summary aggregates cells across section metadata.',
                 'Use it to check whether categories differ by sample, condition, region, or other section-level metadata.'
             ], {{ action: () => openTutorialInsightsPanel('overview', 'summary'), nextLabel: tryIt }}),
+            step('Overview Aggregate By selector', ['#annotation-section-key-label', '#annotation-section-key'], [
+                'Aggregate By chooses how the Overview Summary groups cells.',
+                'Use section metadata or annotation columns to compare composition across samples, conditions, regions, or categories.'
+            ], {{ action: () => openTutorialInsightsPanel('overview', 'summary'), combineTargets: true, nextLabel: tryIt }}),
             step('Overview Summary per-annotation trend', ['#celltype-select-row', '#celltype-trend'], [
                 'The per-annotation selector focuses one category across section metadata.',
                 'This is useful for quick abundance trend checks.'
-            ], {{ action: () => openTutorialInsightsPanel('overview', 'summary'), task: 'Pick one category in Per Annotation and inspect its trend.', nextLabel: tryIt }}),
+            ], {{ condition: () => getExplorationColorOptions().metadata.length > 0, action: () => ensureTutorialTrendCategorySelected(), task: 'Pick one category in Per Annotation and inspect its trend.', scrollDelay: 720, nextLabel: tryIt }}),
             step('Open Overview > Sections', '[data-insights-tree-leaf="sections"][data-insights-tree-parent="overview"]', [
                 'Open Visualization, then Overview, then Sections to compare section-level composition.',
                 'All calculation in this section is done on cells embedded in the HTML file.'
@@ -9426,7 +9416,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ], {{ action: () => openTutorialInsightsPanel('overview', 'sections'), nextLabel: tryIt }}),
             step('Overview Sections view switch', '.samples-view-icon-toggle', [
                 'The section composition switch changes the same data between stacked bars and a heatmap.'
-            ], {{ action: () => openTutorialInsightsPanel('overview', 'sections'), nextLabel: tryIt }}),
+            ], {{ action: () => openTutorialInsightsPanel('overview', 'sections'), scrollDelay: 720, nextLabel: tryIt }}),
             step('Open Genes > Markers', '[data-insights-tree-leaf="de-genes"][data-insights-tree-parent="genes"]', [
                 'Open Visualization, then Genes, then Markers to inspect exported marker genes.'
             ], {{ action: () => openTutorialVisualizationLeafMenu('genes', 'de-genes'), task: 'Click Markers in the Genes options.', nextLabel: tryIt }}),
@@ -9436,7 +9426,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ], {{ action: () => openTutorialInsightsPanel('genes', 'de-genes'), nextLabel: tryIt }}),
             step('Genes Markers view switch', '[data-gene-subtab-toggle="de-genes"]', [
                 'The marker view switch changes between a compact gene list and a heatmap.'
-            ], {{ action: () => openTutorialInsightsPanel('genes', 'de-genes'), nextLabel: tryIt }}),
+            ], {{ action: () => openTutorialInsightsPanel('genes', 'de-genes'), scrollDelay: 720, nextLabel: tryIt }}),
             step('Open Genes > Spatial', '[data-insights-tree-leaf="spatial"][data-insights-tree-parent="genes"]', [
                 'Open Visualization, then Genes, then Spatial to inspect spatially variable genes.'
             ], {{ action: () => openTutorialVisualizationLeafMenu('genes', 'spatial'), task: 'Click Spatial in the Genes options.', nextLabel: tryIt }}),
@@ -9594,11 +9584,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ? 'Selection expression comparison'
             : (rawSteps.findIndex(item => item.title === 'Selection Find More') >= 0
                 ? 'Selection Find More'
-                : (rawSteps.findIndex(item => item.title === 'UMAP selection') >= 0
-                ? 'UMAP selection'
                 : (rawSteps.findIndex(item => item.title === 'UMAP panel position and size') >= 0
                     ? 'UMAP panel position and size'
-                    : 'UMAP toggle')));
+                    : 'UMAP toggle'));
         const currentUmapEndIndex = rawSteps.findIndex(item => item.title === umapRegionAnchorTitle);
         if (regionStartIndex >= 0 && regionEndIndex > regionStartIndex && currentUmapEndIndex >= 0 && regionStartIndex !== currentUmapEndIndex + 1) {{
             const regionSteps = rawSteps.splice(regionStartIndex, regionEndIndex - regionStartIndex);
@@ -9800,93 +9788,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return buildPaddedPolygonFromBounds(getBoundsFromPoints(points), {{ x: points.map(p => p.x), y: points.map(p => p.y) }});
     }}
 
-    function getTutorialRandomUmapAreaSelection(options = {{}}) {{
-        const sections = (typeof getFilteredSections === 'function' ? getFilteredSections() : DATA.sections || [])
-            .filter(section => section);
-        const points = [];
-        let xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity;
-        sections.forEach(section => {{
-            ensureSectionUMAP(section);
-            const n = Math.min(
-                Number(section.umap_x?.length || 0),
-                Number(section.umap_y?.length || 0),
-                Number(section.n_cells || section.umap_x?.length || 0),
-            );
-            for (let i = 0; i < n; i++) {{
-                const point = getSectionUMAPPoint(section, i);
-                if (!point) continue;
-                xmin = Math.min(xmin, point.x);
-                xmax = Math.max(xmax, point.x);
-                ymin = Math.min(ymin, point.y);
-                ymax = Math.max(ymax, point.y);
-                points.push({{ section, idx: i, x: point.x, y: point.y }});
-            }}
-        }});
-        if (!points.length || !Number.isFinite(xmin) || !Number.isFinite(ymin)) {{
-            return {{ cells: new Set(), polygon: [] }};
-        }}
-        const spanX = Math.max(xmax - xmin, 1e-6);
-        const spanY = Math.max(ymax - ymin, 1e-6);
-        const baseFraction = Number.isFinite(options.areaFraction)
-            ? Math.max(0.004, Math.min(0.12, Number(options.areaFraction)))
-            : 0.024;
-        const attempts = Math.max(1, Number(options.attempts) || 28);
-        const minCells = Math.max(1, Math.min(points.length, Number(options.minCells) || 8));
-        let bestArea = null;
-        const pickArea = (seed, fraction) => {{
-            const halfW = spanX * fraction * (0.8 + Math.random() * 0.35);
-            const halfH = spanY * fraction * (0.8 + Math.random() * 0.35);
-            const minX = seed.x - halfW;
-            const maxX = seed.x + halfW;
-            const minY = seed.y - halfH;
-            const maxY = seed.y + halfH;
-            const selected = points.filter(point => (
-                point.x >= minX && point.x <= maxX && point.y >= minY && point.y <= maxY
-            ));
-            return {{
-                cells: new Set(selected.map(point => `${{point.section.id}}:${{point.idx}}`)),
-                polygon: [
-                    {{ x: minX, y: minY }},
-                    {{ x: maxX, y: minY }},
-                    {{ x: maxX, y: maxY }},
-                    {{ x: minX, y: maxY }},
-                ],
-            }};
-        }};
-        for (let attempt = 0; attempt < attempts; attempt++) {{
-            const seed = points[Math.floor(Math.random() * points.length)];
-            const area = pickArea(seed, baseFraction * (1 + attempt * 0.12));
-            if (!bestArea || area.cells.size > bestArea.cells.size) bestArea = area;
-            if (area.cells.size >= minCells) return area;
-        }}
-        return bestArea || {{ cells: new Set(), polygon: [] }};
-    }}
-
-    function setTutorialUmapAreaSelection(options = {{}}) {{
-        const area = getTutorialRandomUmapAreaSelection(options);
-        if (!area.cells.size || area.polygon.length < 3) {{
-            return setTutorialSelection({{ source: 'umap', maxCells: options.maxCells || 24, offset: options.offset || -0.18 }});
-        }}
-        selectedCells = area.cells;
-        markPrimarySelectionChanged?.();
-        clearRegionBSelection?.();
-        selectedAnnotationId = null;
-        selectedLassoPath = area.polygon;
-        selectedCellsFromGridLasso = false;
-        selectedGridLassoSectionId = null;
-        selectedGridLassoPath = [];
-        selectedCellsFromModalLasso = false;
-        selectedModalLassoSectionId = null;
-        selectedModalLassoPath = [];
-        selectedCellsFromAnnotation = false;
-        selectedCellsFromQuery = false;
-        lassoModeB = false;
-        lassoSelectionActive = false;
-        selectionPanActive = true;
-        refreshTutorialSelectionState();
-        return selectedCells.size > 0;
-    }}
-
     function refreshTutorialSelectionState() {{
         selectionSummaryExpanded = false;
         selectionSectionSummaryExpanded = false;
@@ -9911,7 +9812,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!indices.length) return false;
         const cells = new Set(indices.map(idx => `${{section.id}}:${{idx}}`));
         const source = options.source || 'grid';
-        const polygon = randomArea?.polygon?.length ? randomArea.polygon : buildAnnotationPolygonFromSelectedCells(section, indices);
+        const polygon = options.polygon?.length
+            ? options.polygon
+            : (randomArea?.polygon?.length ? randomArea.polygon : buildAnnotationPolygonFromSelectedCells(section, indices));
         if (options.regionB) {{
             selectedCellsB = cells;
             selectionWelchRevision += 1;
@@ -9947,8 +9850,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         selectedCellsFromAnnotation = false;
         selectedCellsFromQuery = source === 'query';
         lassoModeB = false;
-        lassoSelectionActive = false;
-        selectionPanActive = true;
+        lassoSelectionActive = source === 'umap';
+        selectionPanActive = source !== 'umap';
         refreshTutorialSelectionState();
         return selectedCells.size > 0;
     }}
@@ -10044,6 +9947,79 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         scheduleTutorialReposition?.();
     }}
 
+    function createTutorialRandomRegion(section, options = {{}}, avoidCells = null) {{
+        if (!section) return null;
+        let bestArea = null;
+        let bestOverlap = Infinity;
+        const attempts = Math.max(1, Number(options.regionAttempts) || 8);
+        for (let attempt = 0; attempt < attempts; attempt++) {{
+            const area = getTutorialRandomAreaSelection(section, {{
+                areaFraction: 0.03,
+                minCells: 8,
+                maxCells: 70,
+                attempts: 28,
+                ...options,
+            }});
+            if (!area.indices?.length) continue;
+            const cells = new Set(area.indices.map(idx => `${{section.id}}:${{idx}}`));
+            const overlap = avoidCells
+                ? Array.from(cells).filter(key => avoidCells.has(key)).length
+                : 0;
+            if (overlap < bestOverlap) {{
+                bestArea = area;
+                bestOverlap = overlap;
+            }}
+            if (!avoidCells || overlap <= Math.max(1, Math.floor(cells.size * 0.25))) break;
+        }}
+        if (!bestArea?.indices?.length) return null;
+        const beforeIds = new Set(modalAnnotations.map(annotation => Number(annotation.id)));
+        const selected = setTutorialSelection({{
+            section,
+            source: 'grid',
+            indices: bestArea.indices,
+            polygon: bestArea.polygon,
+        }});
+        if (!selected) return null;
+        if (!createModalAnnotationFromSelection?.()) return null;
+        return modalAnnotations.find(annotation => (
+            !annotation.isGroup
+            && Number.isFinite(Number(annotation.id))
+            && !beforeIds.has(Number(annotation.id))
+        )) || null;
+    }}
+
+    function ensureTutorialCompareSelectionsAndRegions() {{
+        if (tutorialCompareChapterPrepared) return true;
+        const section = getTutorialFirstGridSection() || getTutorialVisibleSection();
+        if (!section) return false;
+        let regions = modalAnnotations.filter(annotation => !annotation.isGroup && Number.isFinite(Number(annotation.id)));
+        if (regions.length < 2) {{
+            const first = regions[0] || createTutorialRandomRegion(section, {{ areaFraction: 0.028, minCells: 8, maxCells: 65, regionAttempts: 10 }});
+            const avoidCells = first ? getAnnotationCellSet(first) : null;
+            const second = createTutorialRandomRegion(section, {{ areaFraction: 0.028, minCells: 8, maxCells: 65, regionAttempts: 12 }}, avoidCells);
+            regions = modalAnnotations.filter(annotation => !annotation.isGroup && Number.isFinite(Number(annotation.id)));
+            if (first && second) {{
+                annotationDeSourceId = Number(first.id);
+                annotationDeReferenceId = Number(second.id);
+            }}
+        }}
+        if (regions.length < 2) return false;
+        const regionA = regions[0];
+        const regionB = regions.find(annotation => Number(annotation.id) !== Number(regionA.id)) || regions[1];
+        selectCellsFromAnnotation?.(regionA.id);
+        selectCellsFromAnnotationAsRegionB?.(regionB.id);
+        annotationDeSourceId = Number(regionA.id);
+        annotationDeReferenceId = Number(regionB.id);
+        openInsightsMode?.('exploration');
+        renderModalAnnotationPanel?.();
+        updateSelectionInfo?.();
+        renderAllSections?.();
+        if (umapVisible) renderUMAP?.();
+        if (insightsTopLevelTab === 'compare' && insightsCompareTab === 'regions') renderAnnotationComparison?.();
+        tutorialCompareChapterPrepared = true;
+        return true;
+    }}
+
     function prepareTutorialFirstGridRegion() {{
         closeModal?.();
         if (!selectedCells.size) {{
@@ -10101,6 +10077,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function ensureTutorialTrendCategorySelected() {{
         openTutorialInsightsPanel('overview', 'summary');
+        const groupBy = document.getElementById('annotation-section-key');
+        const metadataOption = Array.from(groupBy?.options || [])
+            .find(option => String(option.value || '').startsWith(SECTION_METADATA_COLOR_PREFIX));
+        if (groupBy && metadataOption && groupBy.value !== metadataOption.value) {{
+            groupBy.value = metadataOption.value;
+            groupBy.dispatchEvent(new Event('change', {{ bubbles: true }}));
+        }}
+        renderOverviewAggregation?.();
         renderCellTypeTrend?.();
         const select = document.getElementById('celltype-select');
         const option = Array.from(select?.options || []).find(item => item.value);
@@ -10142,12 +10126,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const select = document.getElementById('annotation-select');
             const next = Array.from(select?.options || []).find(option => option.value && option.value !== select.value);
             if (next) setTutorialSelectValue('#annotation-select', next.value);
-        }} else if (title === 'UMAP selection') {{
-            ensureTutorialUMAPOpen?.();
-            setTutorialUmapAreaSelection({{ areaFraction: 0.045, minCells: 18, attempts: 32, maxCells: 40 }});
-        }} else if (title === 'Create region from UMAP selection') {{
-            if (!selectedCells.size) setTutorialUmapAreaSelection({{ areaFraction: 0.045, minCells: 18, attempts: 32, maxCells: 40 }});
-            ensureTutorialAnnotationCreated(false);
         }} else if (title === 'Lasso selection mode') {{
             setTutorialSelection({{ source: 'grid', maxCells: 36, offset: -0.26 }});
         }} else if (title === 'Selection Find More') {{
@@ -10353,6 +10331,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             tutorialSelectionMarkersClicked = false;
             tutorialModuleCreateClicked = false;
             tutorialAnnotationRowSelected = false;
+            tutorialCompareChapterPrepared = false;
             tutorialSplitExpressionGenePair = null;
 
             modalAnnotations = [];
@@ -10806,6 +10785,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ensureTutorialModalOpen();
             if (typeof setInsightsMode === 'function') setInsightsMode('region');
         }}
+
+        if (chapter === 'Exploration > Compare') {{
+            ensureTutorialCompareSelectionsAndRegions();
+        }}
     }}
 
     function tutorialHasPseudobulk() {{
@@ -10882,6 +10865,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             .filter(isTutorialElementVisible);
     }}
 
+    function shouldCombineTutorialTargets(step) {{
+        return !!(step?.combineTargets || (
+            step?.combineTargetsAfterGateSatisfied
+            && tutorialStepGateSatisfied(step)
+        ));
+    }}
+
     function ensureFormFieldNames(root = document) {{
         const scope = root && typeof root.querySelectorAll === 'function' ? root : document;
         scope.querySelectorAll('input, select, textarea').forEach((field, idx) => {{
@@ -10924,7 +10914,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function findTutorialTarget(step) {{
-        if (step?.combineTargets) {{
+        if (shouldCombineTutorialTargets(step)) {{
             return getTutorialVisibleTargetElements(step)[0] || null;
         }}
         const selectors = getTutorialTargetSelectors(step);
@@ -10971,7 +10961,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         spotlight.style.top = padded.top + 'px';
         spotlight.style.width = Math.max(24, padded.width) + 'px';
         spotlight.style.height = Math.max(24, padded.height) + 'px';
-        if (step?.combineTargets) {{
+        if (shouldCombineTutorialTargets(step)) {{
             const targets = getTutorialVisibleTargetElements(step);
             const rects = targets.map(el => {{
                 const targetRect = getTutorialSpotlightElementRect(el, step);
@@ -11252,6 +11242,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 stepTutorial(1);
             }}, Number.isFinite(step.autoNextDelay) ? step.autoNextDelay : 180);
         }}
+        if (step?.targetAfterGateSatisfied) scheduleTutorialReposition();
     }}
 
     function clickTutorialNextWhenCurrentStep(predicate, delay = 120) {{
@@ -17888,8 +17879,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         renderAllSections();
         if (modalSection) renderModalSection();
         updateSelectionInfo();
-        const tutorialAdvanceDelay = tutorialActive && tutorialSteps[tutorialStepIndex]?.title === 'UMAP selection' ? 900 : 120;
-        clickTutorialNextWhenCurrentStep(step => step?.requiresSelection || step?.requiresRegionB, tutorialAdvanceDelay);
+        clickTutorialNextWhenCurrentStep(step => step?.requiresSelection || step?.requiresRegionB);
     }}
 
     function getGridLassoCanvas() {{
@@ -24614,8 +24604,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 ${{moduleListHtml ? '<label>Modules</label>' : ''}}
                 <div>${{moduleListHtml}}</div>
                 <div class="gene-module-form-actions" style="margin-top: 7px;">
-                    <button class="legend-btn icon-only" id="gene-module-upload" type="button" title="Upload modules JSON" aria-label="Upload modules JSON">${{LEGEND_IMPORT_ICON}}</button>
                     <button class="legend-btn icon-only" id="gene-module-download" type="button" title="Download modules JSON" aria-label="Download modules JSON"${{geneModules.length ? '' : ' disabled'}}>${{LEGEND_EXPORT_ICON}}</button>
+                    <button class="legend-btn icon-only" id="gene-module-upload" type="button" title="Upload modules JSON" aria-label="Upload modules JSON">${{LEGEND_IMPORT_ICON}}</button>
                     <input type="file" id="gene-module-upload-input" accept="application/json,.json" style="display:none">
                 </div>
             </div>
@@ -24747,11 +24737,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <button class="selection-summary-compare-btn icon-only" id="regions-create-group" type="button" title="Create region group" aria-label="Create region group">
                         <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="7"></circle><circle cx="15" cy="15" r="7"></circle></svg>
                     </button>
-                    <button class="selection-summary-compare-btn icon-only" id="regions-import" type="button" title="Import regions JSON" aria-label="Import regions JSON">
-                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 8 5-5 5 5"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path></svg>
-                    </button>
                     <button class="selection-summary-compare-btn icon-only" id="regions-export" type="button" title="Export regions JSON" aria-label="Export regions JSON" data-requires-regions>
                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path></svg>
+                    </button>
+                    <button class="selection-summary-compare-btn icon-only" id="regions-import" type="button" title="Import regions JSON" aria-label="Import regions JSON">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 8 5-5 5 5"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path></svg>
                     </button>
                     <button class="selection-summary-compare-btn icon-only" id="regions-clear-all" type="button" title="Delete all regions" aria-label="Delete all regions" data-requires-regions>
                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>
@@ -24829,7 +24819,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         <div class="insights-tab-content active" id="overview-tab-summary-content">
                             <div style="display:grid; grid-template-columns:minmax(0,1fr) auto; gap:6px; align-items:end;">
                                 <div>
-                                    <label>Aggregate By</label>
+                                    <label id="annotation-section-key-label" for="annotation-section-key">Aggregate By</label>
                                     <select id="annotation-section-key" ${{!hasSectionMetadata ? 'disabled' : ''}}>
                                         ${{sectionMetadataOptions}}
                                     </select>
@@ -34185,7 +34175,7 @@ def export_to_html(
     min_panel_size: int = 150,
     spot_size: Union[float, str, None] = "auto",
     downsample: Optional[int] = None,
-    outline_by: Optional[str] = "course",
+    outline_by: Optional[str] = None,
     metadata_labels: Optional[Mapping[str, str]] = None,
     viewer_info_html: Optional[str] = None,
     tutorial: bool = False,
@@ -34209,26 +34199,26 @@ def export_to_html(
     pseudobulk_min_pct_expressed: float = 0.0,
     pseudobulk_p_adjust_method: str = "fdr_bh",
     pseudobulk_padj_cutoff: float = 0.05,
-    pseudobulk_log2fc_cutoff: float = 0.5,
+    pseudobulk_log2fc_cutoff: float = 1,
     pseudobulk_deseq2_fit_type: str = "parametric",
     pseudobulk_n_cpus: int = 1,
-    pseudobulk_embed_top_n_per_comparison: int = 20,
+    pseudobulk_embed_top_n_per_comparison: int = 2,
     pathway_gmt: Optional[Union[str, Sequence[str]]] = None,
-    pathway_organism: str = "Human",
-    pathway_top_n: int = 20,
+    pathway_organism: str = "Mouse",
+    pathway_top_n: int = 10,
     pathway_min_overlap: int = 3,
     pathway_gsea_permutations: int = 100,
     neighbor_stats_annotations: Optional[List[str]] = None,
     neighbor_stats_permutations: Union[int, None] = None,
     neighbor_stats_seed: int = 0,
-    interaction_markers_top_targets: int = 8,
+    interaction_markers_top_targets: int = 5,
     interaction_markers_top_genes: int = 20,
     interaction_markers_min_cells: int = 30,
     interaction_markers_min_neighbors: int = 1,
     interaction_markers: Optional[str] = "auto",
     section_rotations: Optional[Mapping[str, Union[int, float]]] = None,
     deconvolutions: Optional[Dict[str, str]] = None,
-    gene_correlation_top_n: int = 10,
+    gene_correlation_top_n: int = 5,
     category_means_n_genes: int = 500,
     spatial_variable_genes_n: int = 200,
     scalebar_unit: str = "μm",
@@ -34259,7 +34249,7 @@ def export_to_html(
     downsample : int, optional
         Downsample cells per section (for large datasets)
     outline_by : str, optional
-        Metadata column used to color section panel outlines (default: "course")
+        Metadata column used to color section panel outlines. Defaults to None.
     metadata_labels : mapping, optional
         Optional mapping of column keys to display labels used across the viewer
         UI without renaming the underlying obs/metadata columns.
@@ -34292,7 +34282,7 @@ def export_to_html(
         Only used when feature_encoding="auto". Use sparse encoding when the
         fraction of zeros is >= this threshold (default: 0.8).
     gene_correlation_top_n : int
-        Number of top correlated genes to show per embedded gene (default 10). Set to 0 to disable.
+        Number of top correlated genes to show per embedded gene (default 5). Set to 0 to disable.
     category_means_n_genes : int
         Maximum embedded pseudobulk-DE genes to expose in category mean summaries
         (default 500). These means power the Genes -> Means tab and the lasso
@@ -34689,7 +34679,7 @@ def export_to_html(
             )
         else:
             log_detail(
-                f"Gene sets: default Reactome library for organism={str(pathway_organism or 'Human')}.",
+                f"Gene sets: default Reactome library for organism={str(pathway_organism or 'Mouse')}.",
                 level=2,
             )
         log_detail(
@@ -34723,7 +34713,7 @@ def export_to_html(
                 source_name = str(event.get("source") or "")
                 if source_name == "reactome":
                     log_detail(
-                        f"Loading Reactome pathway gene sets for organism={str(event.get('organism') or pathway_organism or 'Human')}.",
+                        f"Loading Reactome pathway gene sets for organism={str(event.get('organism') or pathway_organism or 'Mouse')}.",
                         level=2,
                     )
                 else:
@@ -34739,7 +34729,7 @@ def export_to_html(
                     log_detail(
                         f"Loaded {gene_set_count:,} pathway gene sets from "
                         f"{str(event.get('library') or 'Reactome')} "
-                        f"({str(event.get('organism') or pathway_organism or 'Human')}).",
+                        f"({str(event.get('organism') or pathway_organism or 'Mouse')}).",
                         level=2,
                     )
                 elif source_name == "gmt":
@@ -34798,7 +34788,7 @@ def export_to_html(
             top_n=int(pathway_top_n),
             min_overlap=int(pathway_min_overlap),
             gsea_permutations=int(pathway_gsea_permutations),
-            organism=str(pathway_organism or "Human"),
+            organism=str(pathway_organism or "Mouse"),
             n_cpus=1,
             progress_callback=_log_pathway_progress,
         )

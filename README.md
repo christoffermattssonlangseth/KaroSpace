@@ -156,10 +156,10 @@ export_to_html(
     pseudobulk_log2fc_cutoff=1,
     pseudobulk_deseq2_fit_type="parametric",
     pseudobulk_n_cpus=1,
-    pseudobulk_embed_top_n_per_comparison=20,
+    pseudobulk_embed_top_n_per_comparison=2,
     pathway_gmt=None,            # default Reactome via GSEApy; or "reactome.gmt"
     pathway_organism="Mouse",
-    pathway_top_n=20,
+    pathway_top_n=10,
     pathway_min_overlap=3,
     pathway_gsea_permutations=1000,
     interaction_markers="auto",  # Use None to disable contact-conditioned marker DE
@@ -241,9 +241,9 @@ karospace your_data.h5ad \
   --pseudobulk-log2fc-cutoff 1 \
   --pseudobulk-deseq2-fit-type parametric \
   --pseudobulk-n-cpus 1 \
-  --pseudobulk-embed-top-n-per-comparison 20 \
+  --pseudobulk-embed-top-n-per-comparison 2 \
   --pathway-organism Mouse \
-  --pathway-top-n 20 \
+  --pathway-top-n 10 \
   --pathway-min-overlap 3 \
   --pathway-gsea-permutations 1000 \
   --interaction-markers auto \
@@ -289,7 +289,7 @@ karospace your_data.h5ad \
 | `--neighbor-stats-annotations` | Obs columns for neighbor composition stats (`auto` or comma-separated) | `auto` |
 | `--neighbor-stats-seed` | Random seed for neighbor enrichment permutations | `0` |
 | `--interaction-markers` | Contact-conditioned pseudobulk marker mode (`auto`, `None`) | `auto` |
-| `--interaction-markers-top-targets` | Target categories evaluated per source for contact-conditioned markers | `8` |
+| `--interaction-markers-top-targets` | Target categories evaluated per source for contact-conditioned markers | `5` |
 | `--interaction-markers-top-genes` | Top DE genes kept per source-target interaction | `20` |
 | `--interaction-markers-min-cells` | Minimum cells per replicate contact+ and contact- pseudobulk sample | `30` |
 | `--interaction-markers-min-neighbors` | Minimum target neighbors to classify contact+ source cells | `1` |
@@ -298,6 +298,8 @@ karospace your_data.h5ad \
 | `--pseudobulk-replicate-annotation` | Obs annotation to use as the biological replicate for pseudobulk analyses; defaults to `--section-key` | `--section-key` |
 | `--pseudobulk-counts-layer` | Raw-count AnnData layer for pseudobulk aggregation; use `None` for `adata.X` | `counts` |
 | `--pseudobulk-simple-constrast-categories` | Categories to report in category-versus-category contrasts. With `--pseudobulk-additional-annotations`, use annotation-specific JSON wrapped in single quotes, such as `'{"cell_type":["Astrocyte","B cell"],"region":["Cortex"]}'`, or a nested list matching `[main-cell-annotation, additional...]` | empty |
+| `--pseudobulk-min-cell-counts` | Exclude cells with fewer than this many total raw counts before pseudobulk aggregation; use `0` to disable | `0` |
+| `--pseudobulk-min-gene-counts` | Exclude genes with fewer than this many total raw pseudobulk counts in the shared DESeq2 fit; use `0` to disable | `0` |
 | `--pseudobulk-min-cells-per-pseudobulk` | Minimum cells required in each replicate × annotation pseudobulk sample before it can enter the shared DESeq2 fit | `20` |
 | `--pseudobulk-min-replicates` | Minimum paired replicates required for each reported contrast | `2` |
 | `--pseudobulk-min-pct-expressed` | Minimum fraction of cells expressing a gene required in at least one compared group before `DeseqStats`; values >1 are interpreted as percentages | `0` |
@@ -306,14 +308,14 @@ karospace your_data.h5ad \
 | `--pseudobulk-log2fc-cutoff` | Absolute log2FC cutoff for volcano highlighting and DE table inclusion | `1` |
 | `--pseudobulk-deseq2-fit-type` | PyDESeq2 dispersion trend fit type; use `mean` to avoid parametric trend fallback warnings | `parametric` |
 | `--pseudobulk-n-cpus` | CPU workers for the shared DESeq2 fit and maximum parallel shared-fit contrasts | `1` |
-| `--pseudobulk-embed-top-n-per-comparison` | Significant DE genes to auto-embed per category/contact comparison in embedded mode; ignored by sidecar mode because all gene expression vectors are sidecar-loaded | `20` |
+| `--pseudobulk-embed-top-n-per-comparison` | Significant DE genes to auto-embed per category/contact comparison in embedded mode; ignored by sidecar mode because all gene expression vectors are sidecar-loaded | `2` |
 | `--pathway-gmt` | GMT pathway file(s) for ORA/GSEA after Simple design DE; omitted uses Reactome via GSEApy | Reactome |
 | `--pathway-organism` | Organism passed to GSEApy for default Reactome loading, e.g. `Human` or `Mouse` | `Mouse` |
-| `--pathway-top-n` | Maximum ORA/GSEA pathways stored per direction and comparison | `20` |
+| `--pathway-top-n` | Maximum ORA/GSEA pathways stored per direction and comparison | `10` |
 | `--pathway-min-overlap` | Minimum pathway/query gene overlap for ORA/GSEA reporting | `3` |
 | `--pathway-gsea-permutations` | Permutations for compact preranked GSEA p-values | `100` |
 | `--section-rotations` | Comma-separated `section_id:angle` pairs | empty |
-| `--gene-correlation-top-n` | Correlated genes shown per embedded gene in discovery panel | `10` |
+| `--gene-correlation-top-n` | Correlated genes shown per embedded gene in discovery panel | `5` |
 | `--category-means-n-genes` | Maximum embedded pseudobulk-DE genes used for category mean summaries; use `0` to disable | `500` |
 | `--spatial-variable-genes-n` | Top variable genes scored with Moran's I; use `0` to disable | `200` |
 | `--deconvolutions` | JSON object mapping deconvolution labels to obs/obsm keys | empty |
@@ -362,7 +364,7 @@ a different target key.
 
 Use `section_metadata=[...]` / `--section-metadata ...` for section-level obs columns that should appear in the visual params bar and filter chips. Use `section_metadata_extra=[...]` / `--section-metadata-extra ...` for section-level metadata that should be stored in the viewer payload but not shown as filter chips.
 
-- `course` — Experimental phase (e.g., `"naive"`, `"peak_I"`); sections are outlined by this column when present
+- `course` — Experimental phase (e.g., `"naive"`, `"peak_I"`); sections are outlined by this column when `outlineby="course"` / `--outlineby course` is used
 - `region`, `condition`, `timepoint` — Typical section metadata shown as filter chips
 
 Use `cell_annotations=[...]` / `--cell-annotations ...` for additional cell-level annotation columns that should be available in annotation dropdowns and comparison panels.

@@ -205,10 +205,10 @@ def _run_export_cli(argv=None):
         "--outlineby",
         dest="outline_by",
         type=str,
-        default="course",
+        default=None,
         help=(
             "Metadata column used to paint panel outlines. Use 'None' to disable outlines. "
-            "When the column is embedded as metadata/annotation, outlines reuse that palette. (default: course)"
+            "When the column is embedded as metadata/annotation, outlines reuse that palette. (default: None)"
         )
     )
     viewer_args.add_argument(
@@ -383,10 +383,10 @@ def _run_export_cli(argv=None):
     pseudobulk_args.add_argument(
         "--pseudobulk-embed-top-n-per-comparison",
         type=int,
-        default=20,
+        default=2,
         help=(
             "Maximum significant DE genes to auto-embed per category/contact comparison in embedded mode. "
-            "Ignored by --feature-storage sidecar, where all gene expression vectors are written to the sidecar. (default: 20)"
+            "Ignored by --feature-storage sidecar, where all gene expression vectors are written to the sidecar. (default: 2)"
         ),
     )
     pseudobulk_args.add_argument(
@@ -416,8 +416,8 @@ def _run_export_cli(argv=None):
     pseudobulk_args.add_argument(
         "--pseudobulk-log2fc-cutoff",
         type=float,
-        default=0.5,
-        help="Absolute log2FC cutoff for volcano highlighting and DE table inclusion. (default: 0.5)"
+        default=1,
+        help="Absolute log2FC cutoff for volcano highlighting and DE table inclusion. (default: 1)"
     )
     pseudobulk_args.add_argument(
         "--pseudobulk-deseq2-fit-type",
@@ -437,14 +437,14 @@ def _run_export_cli(argv=None):
     pseudobulk_args.add_argument(
         "--pathway-organism",
         type=str,
-        default="Human",
-        help="Organism passed to GSEApy for default Reactome loading, e.g. Human or Mouse. (default: Human)",
+        default="Mouse",
+        help="Organism passed to GSEApy for default Reactome loading, e.g. Human or Mouse. (default: Mouse)",
     )
     pseudobulk_args.add_argument(
         "--pathway-top-n",
         type=int,
-        default=20,
-        help="Maximum ORA/GSEA pathways stored per direction and comparison. (default: 20)",
+        default=10,
+        help="Maximum ORA/GSEA pathways stored per direction and comparison. (default: 10)",
     )
     pseudobulk_args.add_argument(
         "--pathway-min-overlap",
@@ -476,8 +476,8 @@ def _run_export_cli(argv=None):
     neighborhood_args.add_argument(
         "--interaction-markers-top-targets",
         type=int,
-        default=8,
-        help="Number of target categories to evaluate per source for contact-conditioned markers. (default: 8)"
+        default=5,
+        help="Number of target categories to evaluate per source for contact-conditioned markers. (default: 5)"
     )
     neighborhood_args.add_argument(
         "--interaction-markers-top-genes",
@@ -506,8 +506,8 @@ def _run_export_cli(argv=None):
     gene_args.add_argument(
         "--gene-correlation-top-n",
         type=int,
-        default=10,
-        help="Number of top correlated genes to show per embedded gene in the discovery panel. Use 0 to disable. (default: 10)"
+        default=5,
+        help="Number of top correlated genes to show per embedded gene in the discovery panel. Use 0 to disable. (default: 5)"
     )
     gene_args.add_argument(
         "--category-means-n-genes",
@@ -677,7 +677,7 @@ def _run_export_cli(argv=None):
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(2)
     pathway_gmt = _parse_csv(args.pathway_gmt) or None
-    pathway_organism = str(args.pathway_organism or "Human").strip() or "Human"
+    pathway_organism = str(args.pathway_organism or "Mouse").strip() or "Mouse"
     cell_annotations = _parse_csv(args.cell_annotations)
     features = _parse_csv(args.features)
     section_order = _parse_csv(args.section_order)
