@@ -161,7 +161,7 @@ export_to_html(
     pathway_organism="Mouse",
     pathway_top_n=10,
     pathway_min_overlap=3,
-    pathway_gsea_permutations=1000,
+    pathway_gsea_permutations=100,
     interaction_markers="auto",  # Use None to disable contact-conditioned marker DE
     section_rotations={
         "sample_a": 37.5,
@@ -245,7 +245,7 @@ karospace your_data.h5ad \
   --pathway-organism Mouse \
   --pathway-top-n 10 \
   --pathway-min-overlap 3 \
-  --pathway-gsea-permutations 1000 \
+  --pathway-gsea-permutations 100 \
   --interaction-markers auto \
   --section-rotations sample_a:37.5,sample_b:-90
 ```
