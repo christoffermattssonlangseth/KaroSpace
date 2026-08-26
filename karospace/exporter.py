@@ -34220,7 +34220,7 @@ def export_to_html(
     deconvolutions: Optional[Dict[str, str]] = None,
     gene_correlation_top_n: int = 5,
     category_means_n_genes: int = 500,
-    spatial_variable_genes_n: int = 200,
+    spatial_variable_genes_n: int = 20,
     scalebar_unit: str = "μm",
     modalities: Optional[List[str]] = None,
     section_images: Optional[Dict[str, str]] = None,
@@ -34289,7 +34289,7 @@ def export_to_html(
         selection summary. Set to 0 to disable.
     spatial_variable_genes_n : int
         Number of top variable genes to score with Moran's I spatial autocorrelation
-        (default 200). Requires a spatial weight matrix in adata.obsp. Set to 0 to disable.
+        (default 20). Requires a spatial weight matrix in adata.obsp. Set to 0 to disable.
     pseudobulk : str, optional
         Category pseudobulk DE mode. Use "auto" to analyze the main cells annotation and
         pseudobulk_additional_annotations, or None/"None" to disable.

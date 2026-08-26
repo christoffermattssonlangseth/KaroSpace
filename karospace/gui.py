@@ -288,7 +288,7 @@ class KaroSpaceExportGUI:
         self.spot_size = tk.StringVar(value="auto")
         self.downsample = tk.StringVar(value="")
         self.gene_correlation_top_n = tk.StringVar(value="5")
-        self.spatial_variable_genes_n = tk.StringVar(value="200")
+        self.spatial_variable_genes_n = tk.StringVar(value="20")
         self.feature_encoding = tk.StringVar(value="auto")
         self.feature_storage = tk.StringVar(value="embedded")
         self.feature_manifest_path = tk.StringVar(value="")

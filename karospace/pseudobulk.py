@@ -273,6 +273,17 @@ def _json_float(value: float, digits: int = 6) -> Optional[float]:
     return float(round(val, digits))
 
 
+def _json_compact_float(value: float, significant_digits: int = 6) -> Optional[float]:
+    try:
+        val = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(val):
+        return None
+    digits = max(1, int(significant_digits))
+    return float(f"{val:.{digits}g}")
+
+
 @contextmanager
 def _suppress_numpy_slogdet_warnings():
     """Mute expected singular-design warnings emitted inside PyDESeq2 stats."""
@@ -1076,7 +1087,7 @@ def _empty_result(
         "reason": reason,
         "method": "pseudobulk-deseq2",
         "genes": [],
-        "logfoldchanges": [],
+        "log2foldchanges": [],
         "pvals": [],
         "pvals_adj": [],
         "scores": [],
@@ -1112,7 +1123,6 @@ def _empty_interaction_result(
         "reason": reason,
         "method": "pseudobulk-deseq2-contact",
         "genes": [],
-        "logfoldchanges": [],
         "log2foldchanges": [],
         "pvals": [],
         "pvals_adj": [],
@@ -1124,11 +1134,11 @@ def _empty_interaction_result(
         "n_non_contact": int(n_non_contact),
         "min_cells_required": int(min_cells),
         "min_replicates_required": int(min_replicates),
-        "pct_contact": float(pct_contact),
-        "mean_target_neighbors_contact": float(mean_target_neighbors_contact),
-        "mean_target_neighbors_non_contact": float(mean_target_neighbors_non_contact),
-        "target_edge_count": float(target_edge_count),
-        "target_zscore": target_zscore,
+        "pct_contact": _json_compact_float(pct_contact, 6),
+        "mean_target_neighbors_contact": _json_compact_float(mean_target_neighbors_contact, 6),
+        "mean_target_neighbors_non_contact": _json_compact_float(mean_target_neighbors_non_contact, 6),
+        "target_edge_count": _json_compact_float(target_edge_count, 6),
+        "target_zscore": _json_compact_float(target_zscore, 6),
     }
     if details:
         result["details"] = details
@@ -1196,7 +1206,6 @@ def _format_result(
             "available": True,
             "genes": [],
             "log2foldchanges": [],
-            "logfoldchanges": [],
             "pvals": [],
             "pvals_adj": [],
             "scores": [],
@@ -1228,24 +1237,16 @@ def _format_result(
     pct_source = [work["_pct_source"].iloc[i] for i in range(len(work))]
     pct_reference = [work["_pct_reference"].iloc[i] for i in range(len(work))]
 
-    def _finite_or_none(value):
-        try:
-            val = float(value)
-        except (TypeError, ValueError):
-            return None
-        return val if np.isfinite(val) else None
-
     result = {
         "available": True,
         "genes": work["_gene"].astype(str).tolist(),
-        "log2foldchanges": [_finite_or_none(v) for v in work["log2FoldChange"]],
-        "logfoldchanges": [_finite_or_none(v) for v in work["log2FoldChange"]],
-        "pvals": [_finite_or_none(v) for v in work["pvalue"]],
-        "pvals_adj": [_finite_or_none(v) for v in work["padj"]],
-        "scores": [_finite_or_none(v) for v in work["stat"]],
-        "pct_source": pct_source,
-        "pct_reference": pct_reference,
-        "base_mean": [_finite_or_none(v) for v in work["baseMean"]],
+        "log2foldchanges": [_json_compact_float(v, 6) for v in work["log2FoldChange"]],
+        "pvals": [_json_compact_float(v, 6) for v in work["pvalue"]],
+        "pvals_adj": [_json_compact_float(v, 6) for v in work["padj"]],
+        "scores": [_json_compact_float(v, 6) for v in work["stat"]],
+        "pct_source": [_json_compact_float(v, 5) for v in pct_source],
+        "pct_reference": [_json_compact_float(v, 5) for v in pct_reference],
+        "base_mean": [_json_compact_float(v, 6) for v in work["baseMean"]],
         **base_payload,
     }
     return result
@@ -1279,7 +1280,6 @@ def _truncate_gene_result(result: Dict[str, Any], top_n: int) -> Dict[str, Any]:
     fields = [
         "genes",
         "log2foldchanges",
-        "logfoldchanges",
         "pvals",
         "pvals_adj",
         "scores",
@@ -1287,6 +1287,7 @@ def _truncate_gene_result(result: Dict[str, Any], top_n: int) -> Dict[str, Any]:
         "pct_reference",
         "base_mean",
     ]
+    result.pop("logfoldchanges", None)
     for field in fields:
         if isinstance(result.get(field), list):
             result[field] = result[field][:n]
@@ -1314,15 +1315,15 @@ def _interaction_meta(
     target_zscore: Optional[float],
 ) -> Dict[str, Any]:
     return {
-        "pct_contact": float((100.0 * n_contact) / max(1, n_contact + n_non_contact)),
-        "mean_target_neighbors_contact": float(
-            np.mean(target_neighbor_counts[pos_mask]) if n_contact > 0 else 0.0
+        "pct_contact": _json_compact_float((100.0 * n_contact) / max(1, n_contact + n_non_contact), 6),
+        "mean_target_neighbors_contact": _json_compact_float(
+            np.mean(target_neighbor_counts[pos_mask]) if n_contact > 0 else 0.0, 6
         ),
-        "mean_target_neighbors_non_contact": float(
-            np.mean(target_neighbor_counts[neg_mask]) if n_non_contact > 0 else 0.0
+        "mean_target_neighbors_non_contact": _json_compact_float(
+            np.mean(target_neighbor_counts[neg_mask]) if n_non_contact > 0 else 0.0, 6
         ),
-        "target_edge_count": float(edge_count),
-        "target_zscore": target_zscore,
+        "target_edge_count": _json_compact_float(edge_count, 6),
+        "target_zscore": _json_compact_float(target_zscore, 6),
     }
 
 

@@ -988,6 +988,41 @@ def _strip_category_pseudobulk_sample_diagnostics(payload: Any) -> Any:
     return cleaned
 
 
+def _compact_json_float(value: Any, significant_digits: int = 6) -> Optional[float]:
+    try:
+        val = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(val):
+        return None
+    digits = max(1, int(significant_digits))
+    return float(f"{val:.{digits}g}")
+
+
+def _drop_legacy_logfoldchanges(payload: Any) -> Any:
+    """Remove legacy logfoldchanges keys and compact floats before viewer serialization."""
+    if not isinstance(payload, dict):
+        return payload
+
+    def _walk(node: Any) -> Any:
+        if isinstance(node, dict):
+            if "logfoldchanges" in node:
+                if "log2foldchanges" not in node:
+                    node["log2foldchanges"] = node.get("logfoldchanges")
+                node.pop("logfoldchanges", None)
+            for key, value in list(node.items()):
+                node[key] = _walk(value)
+            return node
+        elif isinstance(node, list):
+            return [_walk(item) for item in node]
+        if isinstance(node, (float, np.floating)):
+            return _compact_json_float(node, 6)
+        return node
+
+    _walk(payload)
+    return payload
+
+
 @dataclass
 class SectionData:
     """Data for a single tissue section."""
@@ -2811,6 +2846,8 @@ class SpatialDataset:
             float(pseudobulk_padj_cutoff),
             float(pseudobulk_log2fc_cutoff),
         )
+        pseudobulk_de = _drop_legacy_logfoldchanges(pseudobulk_de)
+        interaction_markers = _drop_legacy_logfoldchanges(interaction_markers)
 
         feature_data = self._collect_feature_data(export_genes)
         feature_encodings = self._resolve_feature_encodings(feature_data, feature_encoding, feature_sparse_zero_threshold)

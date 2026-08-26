@@ -317,7 +317,7 @@ karospace your_data.h5ad \
 | `--section-rotations` | Comma-separated `section_id:angle` pairs | empty |
 | `--gene-correlation-top-n` | Correlated genes shown per embedded gene in discovery panel | `5` |
 | `--category-means-n-genes` | Maximum embedded pseudobulk-DE genes used for category mean summaries; use `0` to disable | `500` |
-| `--spatial-variable-genes-n` | Top variable genes scored with Moran's I; use `0` to disable | `200` |
+| `--spatial-variable-genes-n` | Top variable genes scored with Moran's I; use `0` to disable | `20` |
 | `--deconvolutions` | JSON object mapping deconvolution labels to obs/obsm keys | empty |
 | `--section-images` | JSON object mapping section IDs to image paths/specs | empty |
 | `--section-images-max-px` | Maximum image dimension when embedding section images | `4096` |

@@ -518,8 +518,8 @@ def _run_export_cli(argv=None):
     gene_args.add_argument(
         "--spatial-variable-genes-n",
         type=int,
-        default=200,
-        help="Number of top variable genes to score with Moran's I spatial autocorrelation. Requires spatial graph in obsp. Use 0 to disable. (default: 200)"
+        default=20,
+        help="Number of top variable genes to score with Moran's I spatial autocorrelation. Requires spatial graph in obsp. Use 0 to disable. (default: 20)"
     )
     viewer_args.add_argument(
         "--scalebar-unit",
