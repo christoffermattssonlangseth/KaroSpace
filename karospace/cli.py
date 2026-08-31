@@ -90,6 +90,13 @@ def _run_export_cli(argv=None):
         default="",
         help="Comma-separated features to preload for expression visualization. In embedded mode, significant DE genes are embedded automatically up to the configured cap."
     )
+    gene_args.add_argument(
+        "--features-list",
+        type=str,
+        default=None,
+        dest="features_list",
+        help="Path to a text file with one feature/gene per line. Values are combined with --features and deduplicated."
+    )
     dataset_args.add_argument(
         "--section-key",
         type=str,
@@ -680,6 +687,11 @@ def _run_export_cli(argv=None):
     pathway_organism = str(args.pathway_organism or "Mouse").strip() or "Mouse"
     cell_annotations = _parse_csv(args.cell_annotations)
     features = _parse_csv(args.features)
+    if args.features_list:
+        features_list_path = Path(args.features_list).expanduser()
+        if not features_list_path.is_file():
+            print(f"Error: --features-list file not found: {args.features_list}", file=sys.stderr)
+            sys.exit(2)
     section_order = _parse_csv(args.section_order)
     section_metadata = _parse_csv(args.section_metadata)
     section_metadata_extra = _parse_csv(args.section_metadata_extra)
@@ -758,6 +770,7 @@ def _run_export_cli(argv=None):
         main_cell_annotation=args.main_cell_annotation,
         cell_annotations=cell_annotations,
         features=features,
+        features_list=args.features_list,
         title=args.title,
         modalities=modalities_arg,
         min_panel_size=args.min_panel_size,

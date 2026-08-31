@@ -140,6 +140,7 @@ export_to_html(
         "Cd8a",
         "Gfap",
     ],
+    features_list=None,             # Optional text file with one gene per line
     feature_encoding="auto",        # "auto" | "dense" | "sparse"
     feature_storage="embedded",     # "embedded" | "sidecar"
     feature_manifest_path=None,          # Optional manifest path; defaults to viewer.features.json
@@ -226,6 +227,7 @@ karospace your_data.h5ad \
   --downsample 30000 \
   --cell-annotations leiden, niche \
   --features Cd4,Cd8a,Gfap \
+  --features-list genes.txt \
   --feature-encoding auto \
   --feature-storage embedded \
   --feature-sparse-zero-threshold 0.8 \
@@ -259,6 +261,7 @@ karospace your_data.h5ad \
 | `--main-cell-annotation` | Main cell-annotation column shown first in the viewer | `leiden` |
 | `--cell-annotations` | Comma-separated extra cell obs annotation columns to embed as selectable cell annotations | empty |
 | `--features` | Comma-separated features or genes to preload; significant pseudobulk DE genes are embedded automatically up to the per-comparison cap | empty |
+| `--features-list` | Text file with one feature/gene per line; combined with `--features` and deduplicated | empty |
 | `--section-metadata` | Comma-separated obs columns to use as section metadata shown in the visual params bar/filter chips | loader defaults |
 | `--section-metadata-extra` | Comma-separated obs columns to store as section metadata without visual params bar/filter chips | empty |
 | `--metadata-value-order` | JSON object mapping metadata columns to ordered value lists | empty |
@@ -443,6 +446,7 @@ export_to_html(
     output_path="viewer.html",
     main_cell_annotation="cell_type",
     features=["Cd4", "Cd8a", "Gfap"],
+    features_list="genes.txt",
     feature_storage="sidecar",
     feature_manifest_path="viewer.features.json"
 )

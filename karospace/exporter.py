@@ -29,6 +29,30 @@ from .console import log_detail, log_step, log_warning
 from .data_loader import SpatialDataset
 
 
+def _read_features_list_file(features_list: Optional[Union[str, Path]]) -> List[str]:
+    if not features_list:
+        return []
+    path = Path(features_list).expanduser()
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        raise ValueError(f"could not read features_list file {path}: {exc}") from exc
+    return [line.strip() for line in lines if line.strip()]
+
+
+def _normalize_requested_feature_names(
+    features: Optional[Union[str, Sequence[str]]],
+    features_list: Optional[Union[str, Path]] = None,
+) -> List[str]:
+    if features is None:
+        explicit_features: List[str] = []
+    elif isinstance(features, str):
+        explicit_features = [item.strip() for item in features.split(",") if item.strip()]
+    else:
+        explicit_features = [str(item).strip() for item in features if str(item).strip()]
+    return list(dict.fromkeys([*explicit_features, *_read_features_list_file(features_list)]))
+
+
 def _read_image_for_embed(path: Path, max_px: int):
     """
     Return a PIL Image at or below max_px on the long edge.
@@ -34459,6 +34483,7 @@ def export_to_html(
     tutorial: bool = False,
     cell_annotations: Optional[List[str]] = None,
     features: Optional[List[str]] = None,
+    features_list: Optional[Union[str, Path]] = None,
     feature_encoding: str = "auto",
     feature_value_encoding: str = "uint16",
     feature_storage: str = "embedded",
@@ -34540,6 +34565,9 @@ def export_to_html(
         Additional cell obs columns to include for annotation switching.
     features : list, optional
         Feature names to include for expression visualization
+    features_list : str or Path, optional
+        Text file containing one feature/gene name per line. Values are
+        appended to `features`, then deduplicated while preserving order.
     feature_encoding : str
         "dense", "sparse", or "auto" (default). "auto" uses sparse encoding for
         zero-inflated genes to reduce HTML size.
@@ -34714,7 +34742,12 @@ def export_to_html(
         raise ValueError("feature_value_encoding must be one of: 'uint16', 'uint8'")
     resolved_section_rotations = _resolve_section_rotations(dataset, section_rotations)
 
-    requested_features = list(dict.fromkeys([feature for feature in (features or []) if feature in dataset.adata.var_names]))
+    requested_feature_names = _normalize_requested_feature_names(features, features_list)
+    requested_features = [
+        feature
+        for feature in requested_feature_names
+        if feature in dataset.adata.var_names
+    ]
     embedded_features = [] if feature_storage == "sidecar" else list(requested_features)
     effective_pseudobulk_embed_top_n_per_comparison = (
         0 if feature_storage == "sidecar" else int(pseudobulk_embed_top_n_per_comparison)
