@@ -406,7 +406,7 @@ def _run_export_cli(argv=None):
         "--pseudobulk-min-pct-expressed",
         type=float,
         default=0.0,
-        help="Minimum fraction of cells expressing a gene in at least one compared group before DeseqStats. Values >1 are interpreted as percentages. (default: 0)"
+        help="Minimum fraction of cells expressing a gene in at least one compared group before reporting DE results. Values >1 are interpreted as percentages. (default: 0)"
     )
     pseudobulk_args.add_argument(
         "--pseudobulk-p-adjust-method",

@@ -8245,13 +8245,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }},
         de_genes: {{
             title: 'Pseudobulk DE genes',
-            body: 'Differential expression uses one shared fit model across replicate and annotation, while statistical tests are calculated category-versus-category. Genes not expressed in a minimal percentage of cells in at least one category are removed prior statistical testings. Model and statistical tests are calculated using DESeq2 and multiple testing correction is applied using your method of choice. The table values report log2 fold-change, p-values, adjusted p-values, DESeq2 score and rank, base_mean, and percent expressed. Gene markers are ordered by adjusted pvalue then log2FC.',
-            formula: 'fit model: ~ replicate + annotation; pre-test gene filter: max(% expressed in A, % expressed in B) >= min_pct; statistical test: DESeq2 category A vs category B; padj: p-value adjusted with the selected correction method; marker order: padj ascending, then log2FC'
+            body: 'Differential expression uses one shared fit model across replicate and annotation, while statistical tests are calculated category-versus-category. Genes not expressed in a minimal percentage of cells in at least one category are removed from reported DE results. Model and statistical tests are calculated using DESeq2 and multiple testing correction is applied to the retained result genes using your method of choice. The table values report log2 fold-change, p-values, adjusted p-values, DESeq2 score and rank, base_mean, and percent expressed. Gene markers are ordered by adjusted pvalue then log2FC.',
+            formula: 'fit model: ~ replicate + annotation; reported gene filter: max(% expressed in A, % expressed in B) >= min_pct; statistical test: DESeq2 category A vs category B; padj: retained p-values adjusted with the selected correction method; marker order: padj ascending, then log2FC'
         }},
         pseudobulk_simple_de_section: {{
             title: 'Pseudobulk differential analysis',
-            body: 'This section is based on the selected Simple design category-vs-category pseudobulk DESeq2 contrast. Cells are grouped by biological replicate and annotation, raw counts are summed into pseudobulk samples, and a shared DESeq2 model is fit for the annotation. The selected Annotation A and Annotation B are then extracted as a pairwise contrast. Genes shown as DE pass the minimum percent-expressed prefilter before DeseqStats, then pass the adjusted p-value and absolute log2FC thresholds.',
-            formula: 'model = ~ replicate + annotation; retained genes: max(% expressing cells in A, B) >= min_pct before DeseqStats; DE genes: padj < padj_cutoff and |log2FC| >= log2fc_cutoff'
+            body: 'This section is based on the selected Simple design category-vs-category pseudobulk DESeq2 contrast. Cells are grouped by biological replicate and annotation, raw counts are summed into pseudobulk samples, and a shared DESeq2 model is fit for the annotation. The selected Annotation A and Annotation B are then extracted as a pairwise contrast. Genes shown as DE pass the minimum percent-expressed result filter, then pass the adjusted p-value and absolute log2FC thresholds.',
+            formula: 'model = ~ replicate + annotation; retained genes: max(% expressing cells in A, B) >= min_pct after DESeq2 statistics; DE genes: padj < padj_cutoff and |log2FC| >= log2fc_cutoff'
         }},
         pseudobulk_simple_de_table: {{
             title: 'Differential expression table',
@@ -34630,7 +34630,7 @@ def export_to_html(
         Pseudobulk DE always requires at least two replicates.
     pseudobulk_min_pct_expressed : float
         Minimum fraction of cells expressing a gene required in at least one
-        compared group before DeseqStats is run. Values > 1 are interpreted as
+        compared group before DE results are reported. Values > 1 are interpreted as
         percentages.
     pseudobulk_p_adjust_method : str
         Multiple-testing correction method: "fdr_bh", "bonferroni", "holm", or "none".

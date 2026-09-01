@@ -305,7 +305,7 @@ karospace your_data.h5ad \
 | `--pseudobulk-min-gene-counts` | Exclude genes with fewer than this many total raw pseudobulk counts in the shared DESeq2 fit; use `0` to disable | `0` |
 | `--pseudobulk-min-cells-per-pseudobulk` | Minimum cells required in each replicate × annotation pseudobulk sample before it can enter the shared DESeq2 fit | `20` |
 | `--pseudobulk-min-replicates` | Minimum paired replicates required for each reported contrast | `2` |
-| `--pseudobulk-min-pct-expressed` | Minimum fraction of cells expressing a gene required in at least one compared group before `DeseqStats`; values >1 are interpreted as percentages | `0` |
+| `--pseudobulk-min-pct-expressed` | Minimum fraction of cells expressing a gene required in at least one compared group before DE results are reported; values >1 are interpreted as percentages | `0` |
 | `--pseudobulk-p-adjust-method` | Multiple-testing correction method (`fdr_bh`, `bonferroni`, `holm`, `none`) | `fdr_bh` |
 | `--pseudobulk-padj-cutoff` | Adjusted p-value threshold for DE calls and plot coloring; DE genes must pass `padj < cutoff` | `0.05` |
 | `--pseudobulk-log2fc-cutoff` | Absolute log2FC cutoff for volcano highlighting and DE table inclusion | `1` |
@@ -399,7 +399,7 @@ If the export is downsampled, the visible graph overlay and neighbor-hover contr
 
 ### Optional pseudobulk category selection
 
-Pseudobulk category DE is precomputed automatically for the initial `main cells annotation` column unless `pseudobulk=None` / `--pseudobulk None` is used, and shown in `Insights → Compare → Per sample → Simple design`. KaroSpace aggregates raw counts by replicate and annotation, keeps replicate × annotation pseudobulk samples with at least `pseudobulk_min_cells_per_pseudobulk` / `--pseudobulk-min-cells-per-pseudobulk` cells, fits one shared `~ replicate + annotation` DESeq2 model per annotation column, then extracts category-versus-category contrasts. It also extracts a balanced-rest contrast for every category: the category minus the equally weighted mean of all other retained annotation categories. Genes that do not reach `pseudobulk_min_pct_expressed` / `--pseudobulk-min-pct-expressed` in at least one compared group are removed before `DeseqStats`, so they do not enter the contrast-level multiple-testing correction. Pairwise PCA/distance diagnostics are generated automatically for selected category pairs.
+Pseudobulk category DE is precomputed automatically for the initial `main cells annotation` column unless `pseudobulk=None` / `--pseudobulk None` is used, and shown in `Insights → Compare → Per sample → Simple design`. KaroSpace aggregates raw counts by replicate and annotation, keeps replicate × annotation pseudobulk samples with at least `pseudobulk_min_cells_per_pseudobulk` / `--pseudobulk-min-cells-per-pseudobulk` cells, fits one shared `~ replicate + annotation` DESeq2 model per annotation column, then extracts category-versus-category contrasts. It also extracts a balanced-rest contrast for every category: the category minus the equally weighted mean of all other retained annotation categories. Genes that do not reach `pseudobulk_min_pct_expressed` / `--pseudobulk-min-pct-expressed` in at least one compared group are removed from reported DE results, so they do not enter the contrast-level multiple-testing correction applied by KaroSpace. Pairwise PCA/distance diagnostics are generated automatically for selected category pairs.
 
 When selecting specific pairwise categories from the command line, wrap listed values in single quotes:
 

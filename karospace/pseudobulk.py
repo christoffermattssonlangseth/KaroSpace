@@ -148,79 +148,21 @@ def _expression_prefilter_gene_names(
     return keep
 
 
-def _subset_deseq2_dataset(dds: Any, gene_names: Optional[Sequence[str]]) -> Optional[Any]:
-    """Subset a fitted PyDESeq2 dataset to contrast-testable genes."""
+def _filter_deseq2_result_genes(
+    results_df: pd.DataFrame,
+    gene_names: Optional[Sequence[str]],
+) -> pd.DataFrame:
+    """Filter a PyDESeq2 result table to contrast-testable genes."""
     if gene_names is None:
-        return dds
+        return results_df
     requested = [str(gene) for gene in gene_names]
     if not requested:
-        return None
-    try:
-        dds_genes = [str(gene) for gene in dds.var_names]
-    except Exception:
-        return dds
-    available = set(dds_genes)
-    retained = [gene for gene in requested if gene in available]
-    if not retained:
-        return None
-    try:
-        subset = dds[:, retained].copy()
-    except Exception:
-        keep = np.asarray([gene in set(retained) for gene in dds_genes], dtype=bool)
-        subset = dds[:, keep].copy()
-
-    # AnnData slicing may return a plain AnnData object instead of preserving the
-    # DeseqDataSet subclass. DeseqStats needs the fitted dataset methods and
-    # runtime attributes, so restore them on the gene subset.
-    try:
-        if subset.__class__ is not dds.__class__:
-            subset.__class__ = dds.__class__
-    except Exception:
-        pass
-
-    for attr in (
-        "refit_cooks",
-        "low_memory",
-        "formulaic_contrasts",
-        "inference",
-        "quiet",
-        "fit_type",
-        "min_replicates",
-        "min_disp",
-        "max_disp",
-        "beta_tol",
-        "min_mu",
-        "max_iter",
-        "n_cpus",
-        "design_factors",
-        "ref_level",
-        "control_genes",
-    ):
-        if hasattr(dds, attr):
-            try:
-                setattr(subset, attr, getattr(dds, attr))
-            except Exception:
-                continue
-
-    try:
-        if "non_zero" in subset.var:
-            non_zero = subset.var["non_zero"].to_numpy(dtype=bool)
-        else:
-            non_zero = np.ones(int(subset.n_vars), dtype=bool)
-        subset.non_zero_idx = np.arange(int(subset.n_vars))[non_zero]
-        subset.non_zero_genes = subset.var_names[non_zero]
-    except Exception:
-        pass
-
-    try:
-        original_new_zeroes = getattr(dds, "new_all_zeroes_genes", pd.Index([]))
-        subset_var_names = {str(gene) for gene in subset.var_names}
-        subset.new_all_zeroes_genes = pd.Index(
-            [str(gene) for gene in original_new_zeroes if str(gene) in subset_var_names]
-        )
-    except Exception:
-        subset.new_all_zeroes_genes = pd.Index([])
-    return subset
+        return results_df.iloc[0:0].copy()
+    requested_set = set(requested)
+    keep = [str(gene) in requested_set for gene in results_df.index]
+    if not any(keep):
+        return results_df.iloc[0:0].copy()
+    return results_df.loc[keep].copy()
 
 
 def _adjust_pvalues(pvalues: np.ndarray, method: str = "fdr_bh") -> np.ndarray:
@@ -477,56 +419,6 @@ def _compute_category_gene_means_from_aggregate(
     }
 
 
-def _log2fc_from_pseudobulk_means(
-    counts: np.ndarray,
-    metadata: pd.DataFrame,
-    source: str,
-    reference: str,
-) -> np.ndarray:
-    """Compute source/reference log2FC from replicate-level aggregate per-cell means."""
-    dense = np.asarray(counts, dtype=float)
-    dense[~np.isfinite(dense)] = 0
-    dense[dense < 0] = 0
-    groups = metadata["_pb_group"].astype(str).to_numpy()
-    if "n_cells" in metadata.columns:
-        n_cells = metadata["n_cells"].to_numpy(dtype=float)
-        n_cells[~np.isfinite(n_cells)] = 0
-        n_cells[n_cells < 0] = 0
-    else:
-        n_cells = np.ones(dense.shape[0], dtype=float)
-
-    source_mask = groups == str(source)
-    reference_mask = groups == str(reference)
-    n_vars = int(dense.shape[1])
-    valid_rows = n_cells > 0
-    per_sample_means = np.zeros_like(dense, dtype=float)
-    if dense.size:
-        np.divide(
-            dense,
-            n_cells[:, None],
-            out=per_sample_means,
-            where=valid_rows[:, None],
-        )
-    source_rows = source_mask & valid_rows
-    reference_rows = reference_mask & valid_rows
-    source_mean = (
-        per_sample_means[source_rows].mean(axis=0)
-        if source_rows.any()
-        else np.zeros(n_vars, dtype=float)
-    )
-    reference_mean = (
-        per_sample_means[reference_rows].mean(axis=0)
-        if reference_rows.any()
-        else np.zeros(n_vars, dtype=float)
-    )
-    tiny = np.nextafter(0.0, 1.0)
-    log2fc = np.log2(np.maximum(source_mean, 0.0) + tiny) - np.log2(
-        np.maximum(reference_mean, 0.0) + tiny
-    )
-    log2fc[~np.isfinite(log2fc)] = 0.0
-    return np.asarray(log2fc, dtype=float)
-
-
 def _fit_deseq2_pair(
     counts: np.ndarray,
     metadata: pd.DataFrame,
@@ -594,12 +486,7 @@ def _fit_deseq2_pair(
                 n_cpus=max(1, int(n_cpus)),
             )
         stat_res.summary()
-    result = stat_res.results_df.copy()
-    gene_names = [str(g) for g in metadata.attrs["gene_names"]]
-    mean_log2fc = _log2fc_from_pseudobulk_means(counts, metadata, source, reference)
-    if len(mean_log2fc) == len(gene_names):
-        result["log2FoldChange"] = pd.Series(mean_log2fc, index=gene_names).reindex(result.index)
-    return result
+    return stat_res.results_df.copy()
 
 
 def _fit_deseq2_shared_categories(
@@ -729,16 +616,32 @@ def _deseq2_shared_contrast(
             "pydeseq2 support or run `pip install pydeseq2`."
         ) from exc
     vector = np.asarray(contrast, dtype=float)
-    stats_dds = _subset_deseq2_dataset(dds, gene_names)
-    if stats_dds is None:
-        return pd.DataFrame(columns=["log2FoldChange", "pvalue", "padj", "stat", "baseMean"])
+    selected_genes = None if gene_names is None else [str(gene) for gene in gene_names]
+    if selected_genes is not None and not selected_genes:
+        return pd.DataFrame(
+            columns=["log2FoldChange", "pvalue", "padj", "stat", "baseMean"]
+        )
     with _suppress_numpy_slogdet_warnings():
         try:
-            stats = DeseqStats(stats_dds, contrast=vector, quiet=True, n_cpus=max(1, int(n_cpus)))
+            stats = DeseqStats(
+                dds,
+                contrast=vector,
+                quiet=True,
+                n_cpus=max(1, int(n_cpus)),
+                independent_filter=False,
+            )
         except TypeError:
-            stats = DeseqStats(stats_dds, contrast=vector, n_cpus=max(1, int(n_cpus)))
+            try:
+                stats = DeseqStats(
+                    dds,
+                    contrast=vector,
+                    quiet=True,
+                    n_cpus=max(1, int(n_cpus)),
+                )
+            except TypeError:
+                stats = DeseqStats(dds, contrast=vector, n_cpus=max(1, int(n_cpus)))
         stats.summary()
-    return stats.results_df.copy()
+    return _filter_deseq2_result_genes(stats.results_df, selected_genes)
 
 
 def _reverse_deseq2_result(result: pd.DataFrame) -> pd.DataFrame:
@@ -1974,7 +1877,7 @@ def compute_pseudobulk_sample_metadata_de(
             prefilter_count = int(formatted.get("min_pct_prefilter_gene_count") or 0)
             log_detail(
                 f"Minimum % cells retained {retained_count} "
-                f"of {prefilter_count} fitted genes for DeseqStats",
+                f"of {prefilter_count} fitted genes for reported DE results",
                 level=4,
             )
         log_detail(
@@ -2621,7 +2524,7 @@ def _compute_pseudobulk_group_de_shared(
             prefilter_count = int(formatted.get("min_pct_prefilter_gene_count") or 0)
             log_detail(
                 f"Minimum % cells retained {retained_count} "
-                f"of {prefilter_count} fitted genes for DeseqStats",
+                f"of {prefilter_count} fitted genes for reported DE results",
                 level=4,
             )
         log_detail(

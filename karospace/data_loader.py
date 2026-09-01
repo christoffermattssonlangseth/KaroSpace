@@ -1774,7 +1774,7 @@ class SpatialDataset:
             Pseudobulk DE always requires at least two replicates.
         pseudobulk_min_pct_expressed : float
             Minimum fraction of cells expressing a gene required in at least one
-            compared group before DeseqStats is run. Values > 1 are interpreted
+            compared group before DE results are reported. Values > 1 are interpreted
             as percentages.
         pseudobulk_p_adjust_method : str
             Multiple-testing correction method for pseudobulk p-values.
