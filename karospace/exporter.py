@@ -261,6 +261,26 @@ def _get_karospace_version() -> str:
         return "unknown"
 
 
+def _jsonable_reproducibility_value(value: Any) -> Any:
+    """Normalize export arguments for compact JSON provenance metadata."""
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, float):
+        return value if np.isfinite(value) else None
+    if isinstance(value, (str, int, bool)) or value is None:
+        return value
+    if isinstance(value, Mapping):
+        return {
+            str(key): _jsonable_reproducibility_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple, set)):
+        return [_jsonable_reproducibility_value(item) for item in value]
+    return str(value)
+
+
 def _guess_package_media_type(path: Union[str, Path]) -> str:
     suffix = Path(path).suffix.lower()
     if suffix == ".html":
@@ -3105,6 +3125,47 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             width: min(520px, calc(100vw - 32px));
             max-height: min(70vh, 620px);
             overflow: auto;
+        }}
+        .export-repro-popover {{
+            width: min(680px, calc(100vw - 32px));
+            max-height: min(72vh, 680px);
+            overflow: auto;
+        }}
+        .export-repro-summary {{
+            color: var(--muted-color);
+            font-size: 12px;
+            line-height: 1.45;
+            margin-bottom: 8px;
+        }}
+        .export-repro-table {{
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11px;
+        }}
+        .export-repro-table th,
+        .export-repro-table td {{
+            padding: 5px 0;
+            border-top: 1px solid var(--border-color);
+            text-align: left;
+            vertical-align: top;
+        }}
+        .export-repro-table th {{
+            width: 42%;
+            padding-right: 10px;
+            color: var(--muted-color);
+            font-weight: 600;
+        }}
+        .export-repro-code {{
+            padding: 7px 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 5px;
+            background: var(--input-bg);
+            color: var(--text-color);
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            font-size: 10px;
+            line-height: 1.45;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
         }}
         .button-help-list {{
             display: grid;
@@ -6967,6 +7028,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             <div class="header-title-row">
                 <h1>{title}</h1>
                 <button class="info-trigger" id="info-trigger" type="button" title="Viewer info" aria-expanded="false" aria-controls="info-popover" data-help="Open viewer notes with dataset context, control tips, and usage guidance.">Info</button>
+                {reproducibility_button_html}
                 <button class="icon-btn" id="app-help-trigger" type="button" title="Button guide" aria-label="Button guide" aria-expanded="false" aria-controls="app-help-popover" data-help="Open a guide to the unique buttons and icon controls in this viewer.">
                     <svg class="lucide lucide-message-circle-question-mark" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"></path>
@@ -6999,6 +7061,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     </div>
                 </div>
             </div>
+            {reproducibility_popover_html}
             <div class="info-popover app-help-popover" id="app-help-popover" aria-hidden="true">
                 <div class="info-content">
                     <div class="info-block">
@@ -7009,6 +7072,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                             <div class="button-help-item"><div class="button-help-icons" aria-label="Screenshot"><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"></path><circle cx="12" cy="13" r="3.5"></circle></svg></span></div><div class="button-help-text">Opens screenshot options and downloads the current grid view as a PNG.</div></div>
                             <div class="button-help-item"><div class="button-help-icons" aria-label="Save and load"><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"></path><path d="m17 8-5-5-5 5"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path></svg></span></div><div class="button-help-text">Saves the current viewer state to JSON or restores a previously saved state.</div></div>
                             <div class="button-help-item"><div class="button-help-icons" aria-label="Export and download"><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"></path><path d="M14 2v4a2 2 0 0 0 2 2h4"></path><path d="M12 18v-6"></path><path d="m9 15 3 3 3-3"></path></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path></svg></span></div><div class="button-help-text">Downloads the available table, plot, palette, annotations, session, or data bundle for that panel.</div></div>
+                            {reproducibility_button_help_html}
                             <div class="button-help-item"><div class="button-help-icons" aria-label="Visual and gene settings"><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.2 14.8a2 2 0 0 1 2 2"></path><circle cx="18.5" cy="8.5" r="3.5"></circle><circle cx="7.5" cy="16.5" r="5.5"></circle><circle cx="7.5" cy="4.5" r="2.5"></circle></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><line x1="21" x2="14" y1="4" y2="4"></line><line x1="10" x2="3" y1="4" y2="4"></line><line x1="21" x2="12" y1="12" y2="12"></line><line x1="8" x2="3" y1="12" y2="12"></line><line x1="21" x2="16" y1="20" y2="20"></line><line x1="12" x2="3" y1="20" y2="20"></line><line x1="14" x2="14" y1="2" y2="6"></line><line x1="8" x2="8" y1="10" y2="14"></line><line x1="16" x2="16" y1="18" y2="22"></line></svg></span></div><div class="button-help-text">Opens visual parameters, UMAP appearance, or gene-expression display controls.</div></div>
                             <div class="button-help-item"><div class="button-help-icons" aria-label="Cell selection tools"><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 11V6a2 2 0 0 0-4 0"></path><path d="M14 10V4a2 2 0 0 0-4 0v6"></path><path d="M10 10.5V6a2 2 0 0 0-4 0v8"></path><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.9-6.5-2.8L2 16a2.3 2.3 0 0 1 3.2-3.3L7 14"></path></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 22a5 5 0 0 1-2-4"></path><path d="M3.3 14A6.8 6.8 0 0 1 2 10c0-4.4 4.5-8 10-8s10 3.6 10 8-4.5 8-10 8a12 12 0 0 1-5-1"></path><path d="M5 18a2 2 0 1 0 4 0 2 2 0 0 0-4 0"></path></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"></path><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"></path><path d="M7 21h10"></path><path d="M12 3v18"></path><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"></path></svg></span></div><div class="button-help-text">Switches cell-selection interaction between moving, lasso selection, and selected-cell comparison.</div></div>
                             <div class="button-help-item"><div class="button-help-icons" aria-label="Query and search"><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="22" x2="18" y1="12" y2="12"></line><line x1="6" x2="2" y1="12" y2="12"></line><line x1="12" x2="12" y1="6" y2="2"></line><line x1="12" x2="12" y1="22" y2="18"></line></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg></span></div><div class="button-help-text">Finds cells, genes, markers, or annotations depending on the active panel.</div></div>
@@ -8340,6 +8404,80 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return `<button class="calc-info-btn" type="button" data-calc-info="${{escapeHtml(key)}}" title="${{escapeHtml(label)}}" aria-label="${{escapeHtml(label)}}">!</button>`;
     }}
 
+    function formatReproducibilityValue(value) {{
+        if (value === null || value === undefined) return 'None';
+        if (Array.isArray(value)) {{
+            if (!value.length) return '[]';
+            if (value.every(item => item === null || ['string', 'number', 'boolean'].includes(typeof item))) {{
+                return value.map(item => String(item)).join(', ');
+            }}
+            return JSON.stringify(value, null, 2);
+        }}
+        if (typeof value === 'object') {{
+            const keys = Object.keys(value);
+            if (!keys.length) return '{{}}';
+            return JSON.stringify(value, null, 2);
+        }}
+        return String(value);
+    }}
+
+    function renderReproducibilityRows(entries) {{
+        if (!entries || typeof entries !== 'object') return '';
+        return Object.entries(entries).map(([key, value]) => {{
+            const rendered = formatReproducibilityValue(value);
+            const multiline = rendered.includes('\\n') || rendered.length > 90;
+            const valueHtml = multiline
+                ? `<pre class="export-repro-code">${{escapeHtml(rendered)}}</pre>`
+                : `<code>${{escapeHtml(rendered)}}</code>`;
+            return `<tr><th>${{escapeHtml(key)}}</th><td>${{valueHtml}}</td></tr>`;
+        }}).join('');
+    }}
+
+    function renderExportReproducibilityInfo() {{
+        const info = DATA.export_reproducibility;
+        if (!info) {{
+            return '<div class="info-content"><div class="info-block"><div class="info-title">Reproducibility</div><div class="info-text">This viewer was exported without embedded reproducibility metadata.</div></div></div>';
+        }}
+        const sections = [
+            ['Run', {{
+                generated_at_utc: info.generated_at_utc,
+                karospace_version: info.karospace_version,
+                api: info.api,
+                format: info.format,
+            }}],
+            ['Inputs', info.inputs],
+            ['Export arguments', info.arguments],
+            ['Resolved settings', info.resolved],
+        ];
+        const body = sections.map(([title, entries]) => {{
+            const rows = renderReproducibilityRows(entries);
+            if (!rows) return '';
+            return `<div class="info-block"><div class="info-title">${{escapeHtml(title)}}</div><table class="export-repro-table"><tbody>${{rows}}</tbody></table></div>`;
+        }}).join('');
+        return `<div class="info-content"><div class="info-block"><div class="info-title">Reproducibility</div><div class="export-repro-summary">Values captured at export time. Use these arguments, thresholds, inputs, and resolved settings to recreate the HTML viewer.</div></div>${{body}}</div>`;
+    }}
+
+    function renderLucideStaticIcons(root = document) {{
+        root.querySelectorAll('i[data-lucide="parentheses"]').forEach((node) => {{
+            const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            const existingClass = (node.getAttribute('class') || '').trim();
+            svg.setAttribute('class', `lucide lucide-parentheses${{existingClass ? ` ${{existingClass}}` : ''}}`);
+            svg.setAttribute('viewBox', '0 0 24 24');
+            svg.setAttribute('fill', 'none');
+            svg.setAttribute('stroke', 'currentColor');
+            svg.setAttribute('stroke-width', '2');
+            svg.setAttribute('stroke-linecap', 'round');
+            svg.setAttribute('stroke-linejoin', 'round');
+            svg.setAttribute('aria-hidden', node.getAttribute('aria-hidden') || 'true');
+            ['M8 21s-4-3-4-9 4 -9 4 -9', 'M16 3s4 3 4 9 -4 9 -4 9'].forEach((d) => {{
+                const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                path.setAttribute('d', d);
+                svg.appendChild(path);
+            }});
+            node.replaceWith(svg);
+        }});
+    }}
+
     // State
     let currentAnnotation = DATA.initial_annotation;
     let explorationColorCol = DATA.initial_annotation;
@@ -9181,6 +9319,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             step('Viewer info button', ['#info-trigger', '#info-popover'], [
                 'The Info button contains viewer notes, dataset context, and shortcut reminders.'
             ], {{ nextLabel: tryIt }}),
+            step('Reproducibility button', ['#export-repro-trigger', '#export-repro-popover'], [
+                'The parentheses button stores export provenance in the HTML file.',
+                'Use it to review the input and output paths, export arguments, thresholds, cutoffs, and resolved analysis settings used to generate this viewer.'
+            ], {{ condition: () => !!DATA.export_reproducibility && !!document.getElementById('export-repro-trigger'), action: () => openTutorialExportReproPopover(), combineTargets: true, spotlightPadding: 0, nextLabel: tryIt }}),
             step('Button guide', '#app-help-trigger', [
                 'The question-mark message icon opens a guide to the unique icon buttons used across the viewer.'
             ], {{ action: () => openTutorialAppHelpPopover(), spotlightPadding: 0, nextLabel: tryIt }}),
@@ -10349,6 +10491,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         try {{
             document.getElementById('shortcuts-overlay')?.classList.remove('active');
             document.getElementById('info-popover')?.classList.remove('active');
+            document.getElementById('export-repro-popover')?.classList.remove('active');
             document.getElementById('app-help-popover')?.classList.remove('active');
             document.querySelectorAll('.toolbar-popover.open').forEach((panel) => {{
                 panel.classList.remove('open');
@@ -10544,14 +10687,44 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const popover = document.getElementById('app-help-popover');
         const infoPopover = document.getElementById('info-popover');
         const infoTrigger = document.getElementById('info-trigger');
+        const exportReproPopover = document.getElementById('export-repro-popover');
+        const exportReproTrigger = document.getElementById('export-repro-trigger');
         infoPopover?.classList.remove('active');
         infoPopover?.setAttribute('aria-hidden', 'true');
         infoTrigger?.classList.remove('active');
         infoTrigger?.setAttribute('aria-expanded', 'false');
+        exportReproPopover?.classList.remove('active');
+        exportReproPopover?.setAttribute('aria-hidden', 'true');
+        exportReproTrigger?.classList.remove('active');
+        exportReproTrigger?.setAttribute('aria-expanded', 'false');
         popover?.classList.add('active');
         popover?.setAttribute('aria-hidden', 'false');
         trigger?.classList.add('active');
         trigger?.setAttribute('aria-expanded', 'true');
+    }}
+
+    function openTutorialExportReproPopover() {{
+        const trigger = document.getElementById('export-repro-trigger');
+        const popover = document.getElementById('export-repro-popover');
+        const content = document.getElementById('export-repro-content');
+        const infoPopover = document.getElementById('info-popover');
+        const infoTrigger = document.getElementById('info-trigger');
+        const appHelpPopover = document.getElementById('app-help-popover');
+        const appHelpTrigger = document.getElementById('app-help-trigger');
+        if (!trigger || !popover) return;
+        if (content) content.innerHTML = renderExportReproducibilityInfo();
+        infoPopover?.classList.remove('active');
+        infoPopover?.setAttribute('aria-hidden', 'true');
+        infoTrigger?.classList.remove('active');
+        infoTrigger?.setAttribute('aria-expanded', 'false');
+        appHelpPopover?.classList.remove('active');
+        appHelpPopover?.setAttribute('aria-hidden', 'true');
+        appHelpTrigger?.classList.remove('active');
+        appHelpTrigger?.setAttribute('aria-expanded', 'false');
+        popover.classList.add('active');
+        popover.setAttribute('aria-hidden', 'false');
+        trigger.classList.add('active');
+        trigger.setAttribute('aria-expanded', 'true');
     }}
 
     function isTutorialFindCellsByQueryStep() {{
@@ -11578,6 +11751,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (open) {{
             document.getElementById('shortcuts-overlay')?.classList.remove('active');
             document.getElementById('info-popover')?.classList.remove('active');
+            document.getElementById('export-repro-popover')?.classList.remove('active');
             document.getElementById('app-help-popover')?.classList.remove('active');
             tutorialActive = true;
             tutorialStepIndex = 0;
@@ -33964,6 +34138,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         const infoTrigger = document.getElementById('info-trigger');
         const infoPopover = document.getElementById('info-popover');
+        const exportReproTrigger = document.getElementById('export-repro-trigger');
+        const exportReproPopover = document.getElementById('export-repro-popover');
+        const exportReproContent = document.getElementById('export-repro-content');
         const appHelpTrigger = document.getElementById('app-help-trigger');
         const appHelpPopover = document.getElementById('app-help-popover');
         const closeHeaderInfoPopover = () => {{
@@ -33980,20 +34157,41 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             appHelpTrigger.classList.remove('active');
             appHelpTrigger.setAttribute('aria-expanded', 'false');
         }};
+        const closeExportReproPopover = () => {{
+            if (!exportReproPopover || !exportReproTrigger) return;
+            exportReproPopover.classList.remove('active');
+            exportReproPopover.setAttribute('aria-hidden', 'true');
+            exportReproTrigger.classList.remove('active');
+            exportReproTrigger.setAttribute('aria-expanded', 'false');
+        }};
         if (infoTrigger && infoPopover) {{
             infoTrigger.addEventListener('click', (event) => {{
                 event.stopPropagation();
                 closeAppHelpPopover();
+                closeExportReproPopover();
                 const isActive = infoPopover.classList.toggle('active');
                 infoTrigger.classList.toggle('active', isActive);
                 infoTrigger.setAttribute('aria-expanded', isActive ? 'true' : 'false');
                 infoPopover.setAttribute('aria-hidden', isActive ? 'false' : 'true');
             }});
         }}
+        if (exportReproTrigger && exportReproPopover && exportReproContent) {{
+            exportReproContent.innerHTML = renderExportReproducibilityInfo();
+            exportReproTrigger.addEventListener('click', (event) => {{
+                event.stopPropagation();
+                closeHeaderInfoPopover();
+                closeAppHelpPopover();
+                const isActive = exportReproPopover.classList.toggle('active');
+                exportReproTrigger.classList.toggle('active', isActive);
+                exportReproTrigger.setAttribute('aria-expanded', isActive ? 'true' : 'false');
+                exportReproPopover.setAttribute('aria-hidden', isActive ? 'false' : 'true');
+            }});
+        }}
         if (appHelpTrigger && appHelpPopover) {{
             appHelpTrigger.addEventListener('click', (event) => {{
                 event.stopPropagation();
                 closeHeaderInfoPopover();
+                closeExportReproPopover();
                 const isActive = appHelpPopover.classList.toggle('active');
                 appHelpTrigger.classList.toggle('active', isActive);
                 appHelpTrigger.setAttribute('aria-expanded', isActive ? 'true' : 'false');
@@ -34004,6 +34202,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             if (infoPopover?.classList.contains('active') && !infoPopover.contains(event.target) && event.target !== infoTrigger) {{
                 closeHeaderInfoPopover();
             }}
+            if (exportReproPopover?.classList.contains('active') && !exportReproPopover.contains(event.target) && event.target !== exportReproTrigger) {{
+                closeExportReproPopover();
+            }}
             if (appHelpPopover?.classList.contains('active') && !appHelpPopover.contains(event.target) && event.target !== appHelpTrigger) {{
                 closeAppHelpPopover();
             }}
@@ -34011,6 +34212,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         document.addEventListener('keydown', (event) => {{
             if (event.key !== 'Escape') return;
             closeHeaderInfoPopover();
+            closeExportReproPopover();
             closeAppHelpPopover();
         }});
 
@@ -34417,6 +34619,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         let initSucceeded = false;
         try {{
             hydratePackedSections();
+            renderLucideStaticIcons();
             initTheme();
             initGrid();
             initControls();
@@ -34528,6 +34731,8 @@ def export_to_html(
     modalities: Optional[List[str]] = None,
     section_images: Optional[Dict[str, str]] = None,
     section_images_max_px: int = 4096,
+    embed_reproducibility_info: bool = True,
+    source_input_path: Optional[str] = None,
 ) -> str:
     """
     Export spatial dataset to a standalone HTML file.
@@ -34649,11 +34854,12 @@ def export_to_html(
         expression vectors are written to the sidecar.
     pathway_gmt : str or list, optional
         GMT pathway file(s) used for ORA and preranked GSEA. When omitted,
-        KaroSpace attempts to load the default Reactome library through
-        GSEApy.
+        KaroSpace loads a bundled or cached default Reactome GMT when
+        available, then falls back to GSEApy/Enrichr. If default gene sets
+        are unavailable, pathway enrichment is skipped and export continues.
     pathway_organism : str
-        Organism name passed to GSEApy when loading the default Reactome
-        library. Common values include "Human" and "Mouse".
+        Organism name used when loading the default Reactome library. Common
+        values include "Human" and "Mouse".
     pathway_top_n : int
         Maximum enriched pathways stored per method/direction/comparison.
     pathway_min_overlap : int
@@ -34683,6 +34889,13 @@ def export_to_html(
     section_rotations : mapping, optional
         Optional mapping of section_id -> initial rotation angle in degrees.
         Angles are stored exactly (normalized modulo 360) for the interactive viewer.
+    embed_reproducibility_info : bool
+        Embed export arguments and resolved analysis settings in the HTML and
+        expose them through the header reproducibility button. Default: True.
+    source_input_path : str, optional
+        Input path to record in the reproducibility payload. This is populated
+        by the CLI; direct API callers can leave it unset or pass their source
+        path explicitly.
 
     Returns
     -------
@@ -34990,7 +35203,8 @@ def export_to_html(
             )
         else:
             log_detail(
-                f"Gene sets: default Reactome library for organism={str(pathway_organism or 'Mouse')}.",
+                f"Gene sets: default Reactome library for organism={str(pathway_organism or 'Mouse')} "
+                "(bundled/cache first; Enrichr fallback if needed).",
                 level=2,
             )
         log_detail(
@@ -35037,10 +35251,12 @@ def export_to_html(
                 source_name = str(event.get("source") or "")
                 gene_set_count = int(event.get("gene_set_count") or 0)
                 if source_name == "reactome":
+                    source_detail = str(event.get("source_detail") or "").strip()
+                    source_suffix = f" via {source_detail}" if source_detail else ""
                     log_detail(
                         f"Loaded {gene_set_count:,} pathway gene sets from "
                         f"{str(event.get('library') or 'Reactome')} "
-                        f"({str(event.get('organism') or pathway_organism or 'Mouse')}).",
+                        f"({str(event.get('organism') or pathway_organism or 'Mouse')}){source_suffix}.",
                         level=2,
                     )
                 elif source_name == "gmt":
@@ -35293,6 +35509,108 @@ def export_to_html(
             + f'">{_escape_html_attr(percent_label)}% downsampled</div>'
         )
 
+    final_output_path = package_output_path_obj if package_output_path_obj is not None else requested_output_path
+    if bool(embed_reproducibility_info):
+        data["export_reproducibility"] = _jsonable_reproducibility_value({
+            "format": "karospace-export-reproducibility-v1",
+            "generated_at_utc": _isoformat_utc_now(),
+            "karospace_version": _get_karospace_version(),
+            "api": "karospace.export_to_html",
+            "inputs": {
+                "input_path": source_input_path,
+                "output_path": str(final_output_path),
+                "package_mode": bool(package_mode),
+                "n_cells_input": int(dataset.adata.n_obs),
+                "n_genes_input": int(dataset.adata.n_vars),
+                "n_sections": int(data.get("n_sections") or 0),
+                "section_key": dataset.section_key,
+                "spatial_key": dataset.spatial_key,
+            },
+            "arguments": {
+                "main_cell_annotation": annotation,
+                "title": title,
+                "min_panel_size": int(min_panel_size),
+                "spot_size": spot_size,
+                "downsample": downsample,
+                "outline_by": outline_by,
+                "metadata_labels": resolved_metadata_labels,
+                "viewer_info_html": viewer_info_html,
+                "tutorial": bool(tutorial),
+                "cell_annotations": cell_annotations,
+                "features": requested_feature_names,
+                "features_list": str(features_list) if features_list else None,
+                "feature_encoding": feature_encoding,
+                "feature_value_encoding": feature_value_encoding,
+                "feature_storage": feature_storage,
+                "feature_manifest_path": str(feature_manifest_path) if feature_manifest_path else None,
+                "feature_sidecar_shard_size": int(feature_sidecar_shard_size),
+                "feature_sparse_zero_threshold": float(feature_sparse_zero_threshold),
+                "pseudobulk": pseudobulk,
+                "pseudobulk_additional_annotations": pseudobulk_additional_annotations,
+                "pseudobulk_replicate_annotation": pseudobulk_replicate_annotation,
+                "pseudobulk_simple_constrast_categories": pseudobulk_simple_constrast_categories,
+                "pseudobulk_counts_layer": pseudobulk_counts_layer,
+                "pseudobulk_min_cell_counts": int(pseudobulk_min_cell_counts),
+                "pseudobulk_min_gene_counts": int(pseudobulk_min_gene_counts),
+                "pseudobulk_min_cells_per_pseudobulk": int(pseudobulk_min_cells_per_pseudobulk),
+                "pseudobulk_min_replicates": int(pseudobulk_min_replicates),
+                "pseudobulk_min_pct_expressed": float(pseudobulk_min_pct_expressed),
+                "pseudobulk_p_adjust_method": correction_method,
+                "pseudobulk_padj_cutoff": float(pseudobulk_padj_cutoff),
+                "pseudobulk_log2fc_cutoff": float(pseudobulk_log2fc_cutoff),
+                "pseudobulk_deseq2_fit_type": fit_type,
+                "pseudobulk_n_cpus": int(pseudobulk_n_cpus),
+                "pseudobulk_embed_top_n_per_comparison": int(pseudobulk_embed_top_n_per_comparison),
+                "pathway_gmt": pathway_gmt,
+                "pathway_organism": pathway_organism,
+                "pathway_top_n": int(pathway_top_n),
+                "pathway_min_overlap": int(pathway_min_overlap),
+                "pathway_gsea_permutations": int(pathway_gsea_permutations),
+                "neighbor_stats_annotations": neighbor_stats_annotations,
+                "neighbor_stats_permutations": int(neighbor_stats_permutations),
+                "neighbor_stats_seed": int(neighbor_stats_seed),
+                "interaction_markers_top_targets": int(interaction_markers_top_targets),
+                "interaction_markers_top_genes": int(interaction_markers_top_genes),
+                "interaction_markers_min_cells": int(interaction_markers_min_cells),
+                "interaction_markers_min_neighbors": int(interaction_markers_min_neighbors),
+                "interaction_markers": interaction_markers,
+                "section_rotations": resolved_section_rotations,
+                "deconvolutions": deconvolutions,
+                "gene_correlation_top_n": int(gene_correlation_top_n),
+                "category_means_n_genes": int(category_means_n_genes),
+                "spatial_variable_genes_n": int(spatial_variable_genes_n),
+                "scalebar_unit": scalebar_unit,
+                "modalities": selected_modalities,
+                "section_images": section_images,
+                "section_images_max_px": int(section_images_max_px),
+            },
+            "resolved": {
+                "output_path": str(final_output_path),
+                "feature_manifest_url": feature_manifest_url,
+                "embedded_features": list(embedded_features),
+                "embedded_feature_count": len(embedded_features),
+                "available_feature_count": len(data.get("available_features") or []),
+                "available_annotations": list(data.get("available_annotations") or []),
+                "section_metadata": list(data.get("section_metadata") or []),
+                "section_metadata_extra": list(data.get("section_metadata_extra") or []),
+                "pseudobulk_enabled": bool(pseudobulk_enabled),
+                "pseudobulk_de_annotations": list(pseudobulk_de_annotations),
+                "pseudobulk_replicate_annotation": data.get("pseudobulk_replicate_annotation"),
+                "pseudobulk_settings": data.get("pseudobulk_settings"),
+                "pathway_settings": data.get("pathway_settings"),
+                "neighbor_stats_annotations": list(neighbor_stats_annotations or []),
+                "interaction_marker_annotations": list(interaction_marker_annotations),
+                "downsample": data.get("downsample"),
+                "spot_size": resolved_spot_size,
+                "spot_size_auto_resolved": bool(used_auto_spot_size),
+                "modal_spot_size": modal_spot_size,
+                "modalities": data.get("modalities"),
+                "default_modality": data.get("default_modality"),
+            },
+        })
+    else:
+        data.pop("export_reproducibility", None)
+
     data_json_safe, section_data_scripts = _serialize_embedded_viewer_data(data)
 
     tutorial_trigger_html = ""
@@ -35312,6 +35630,28 @@ def export_to_html(
             '← Click to start <strong>Tutorial</strong>'
             '</div>'
         )
+    reproducibility_button_html = ""
+    reproducibility_popover_html = ""
+    reproducibility_button_help_html = ""
+    if bool(embed_reproducibility_info):
+        reproducibility_button_html = (
+            '<button class="icon-btn" id="export-repro-trigger" type="button" '
+            'title="Export reproducibility settings" aria-label="Export reproducibility settings" '
+            'aria-expanded="false" aria-controls="export-repro-popover" '
+            'data-help="Open export arguments, thresholds, inputs, and resolved settings used to generate this viewer.">'
+            '<i data-lucide="parentheses" aria-hidden="true"></i>'
+            '</button>'
+        )
+        reproducibility_popover_html = (
+            '<div class="info-popover export-repro-popover" id="export-repro-popover" aria-hidden="true">'
+            '<div id="export-repro-content"></div>'
+            '</div>'
+        )
+        reproducibility_button_help_html = (
+            '<div class="button-help-item"><div class="button-help-icons" aria-label="Reproducibility">'
+            '<span class="button-help-icon"><i data-lucide="parentheses" aria-hidden="true"></i></span></div>'
+            '<div class="button-help-text">Shows the inputs, thresholds, cutoffs, and export arguments embedded for reproducibility.</div></div>'
+        )
 
     html = HTML_TEMPLATE.format(
         title=title,
@@ -35329,6 +35669,9 @@ def export_to_html(
         outline_by_json=json.dumps(outline_by),
         viewer_info_html_json=json.dumps(viewer_info_html),
         viewer_info_html=viewer_info_html_safe,
+        reproducibility_button_html=reproducibility_button_html,
+        reproducibility_popover_html=reproducibility_popover_html,
+        reproducibility_button_help_html=reproducibility_button_help_html,
         tutorial_trigger_html=tutorial_trigger_html,
         theme_icon=theme_icon,
         initial_theme=initial_theme,

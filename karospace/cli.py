@@ -244,6 +244,16 @@ def _run_export_cli(argv=None):
             "an in-page control to start it."
         ),
     )
+    viewer_args.add_argument(
+        "--no-reproducibility-info",
+        dest="embed_reproducibility_info",
+        action="store_false",
+        help=(
+            "Do not embed export arguments, thresholds, cutoffs, inputs, and "
+            "resolved settings in the HTML viewer."
+        ),
+    )
+    viewer_args.set_defaults(embed_reproducibility_info=True)
     gene_args.add_argument(
         "--feature-encoding",
         choices=["auto", "dense", "sparse"],
@@ -438,14 +448,15 @@ def _run_export_cli(argv=None):
         default="",
         help=(
             "Comma-separated GMT pathway files for ORA/GSEA after Simple design pseudobulk DE. "
-            "When omitted, KaroSpace uses the default Reactome library via GSEApy."
+            "When omitted, KaroSpace uses a cached/default Reactome GMT when available, "
+            "then falls back to GSEApy/Enrichr."
         ),
     )
     pseudobulk_args.add_argument(
         "--pathway-organism",
         type=str,
         default="Mouse",
-        help="Organism passed to GSEApy for default Reactome loading, e.g. Human or Mouse. (default: Mouse)",
+        help="Organism used for default Reactome loading, e.g. Human or Mouse. (default: Mouse)",
     )
     pseudobulk_args.add_argument(
         "--pathway-top-n",
@@ -780,6 +791,8 @@ def _run_export_cli(argv=None):
         metadata_labels=metadata_labels,
         viewer_info_html=viewer_info_html,
         tutorial=args.tutorial,
+        embed_reproducibility_info=args.embed_reproducibility_info,
+        source_input_path=args.input,
         feature_encoding=args.feature_encoding,
         feature_value_encoding=args.feature_value_encoding,
         feature_storage=args.feature_storage,

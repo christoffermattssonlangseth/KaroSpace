@@ -52,3 +52,6 @@ karospace-gui = "karospace.gui:main"
 
 [tool.setuptools.packages.find]
 include = ["karospace*"]
+
+[tool.setuptools.package-data]
+karospace = ["data/reactome/*.gmt"]

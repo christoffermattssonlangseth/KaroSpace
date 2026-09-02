@@ -32,6 +32,7 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 ## 4. Helpers
 
 - The Info button opens dataset notes, viewer context, and keyboard shortcut reminders.
+- The parentheses button opens export reproducibility metadata, including input and output paths, export arguments, thresholds, cutoffs, and resolved analysis settings when this metadata was embedded at export.
 - The message-circle-question-mark button opens the button guide.
 - The button guide explains icon-only controls using the actual icons shown in the viewer.
 
@@ -209,6 +210,7 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 ## 22. Sharing and Storage
 
 - Embedded HTML stores viewer data directly in the HTML file.
+- Export reproducibility metadata is embedded by default so a shared HTML file can describe the arguments and resolved settings used to generate it; disable with `embed_reproducibility_info=False` or `--no-reproducibility-info`.
 - Sidecar mode writes all gene expression vectors to a manifest and binary shard directory for lazy loading over HTTP(S).
 - `.karospace` packages wrap sidecar exports into one shareable ZIP-based package with a local or hosted loader.
 - Generated HTML is static; re-export is required to pick up new viewer code or new analytics.

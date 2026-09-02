@@ -158,12 +158,14 @@ export_to_html(
     pseudobulk_deseq2_fit_type="parametric",
     pseudobulk_n_cpus=1,
     pseudobulk_embed_top_n_per_comparison=2,
-    pathway_gmt=None,            # default Reactome via GSEApy; or "reactome.gmt"
+    pathway_gmt=None,            # default cached Reactome; or pass "reactome.gmt"
     pathway_organism="Mouse",
     pathway_top_n=10,
     pathway_min_overlap=3,
     pathway_gsea_permutations=100,
     interaction_markers="auto",  # Use None to disable contact-conditioned marker DE
+    embed_reproducibility_info=True,  # Embed export arguments/settings in the HTML header popover
+    source_input_path="your_data.h5ad",  # Optional provenance path shown in the reproducibility popover
     section_rotations={
         "sample_a": 37.5,
         "sample_b": -90,
@@ -281,6 +283,7 @@ karospace your_data.h5ad \
 | `--viewer-info-html` | HTML string shown in the viewer Info tab | default info |
 | `--viewer-info-html-file` | Path to an HTML fragment shown in the viewer Info tab | empty |
 | `--tutorial` | (in development) Embed the static Story Mode HTML tutorial; users start it from the graduation-cap control and move through prepared viewer states with Next/Back | off |
+| `--no-reproducibility-info` | Do not embed export arguments, thresholds, cutoffs, inputs, and resolved settings in the HTML reproducibility popover | off |
 | `--feature-encoding` | Gene vector encoding (`auto`, `dense`, `sparse`) | `auto` |
 | `--feature-value-encoding` | Sidecar/package gene value encoding for binary shards (`uint16`, `uint8`) | `uint16` |
 | `--feature-storage` | Feature storage mode: `embedded` stores requested/top DE expression vectors in the HTML; `sidecar` stores all gene expression vectors outside the HTML | `embedded` |
@@ -312,8 +315,8 @@ karospace your_data.h5ad \
 | `--pseudobulk-deseq2-fit-type` | PyDESeq2 dispersion trend fit type; use `mean` to avoid parametric trend fallback warnings | `parametric` |
 | `--pseudobulk-n-cpus` | CPU workers for the shared DESeq2 fit and maximum parallel shared-fit contrasts | `1` |
 | `--pseudobulk-embed-top-n-per-comparison` | Significant DE genes to auto-embed per category/contact comparison in embedded mode; ignored by sidecar mode because all gene expression vectors are sidecar-loaded | `2` |
-| `--pathway-gmt` | GMT pathway file(s) for ORA/GSEA after Simple design DE; omitted uses Reactome via GSEApy | Reactome |
-| `--pathway-organism` | Organism passed to GSEApy for default Reactome loading, e.g. `Human` or `Mouse` | `Mouse` |
+| `--pathway-gmt` | GMT pathway file(s) for ORA/GSEA after Simple design DE; omitted uses cached/default Reactome when available, then falls back to GSEApy/Enrichr | Reactome |
+| `--pathway-organism` | Organism used for default Reactome loading, e.g. `Human` or `Mouse` | `Mouse` |
 | `--pathway-top-n` | Maximum ORA/GSEA pathways stored per direction and comparison | `10` |
 | `--pathway-min-overlap` | Minimum pathway/query gene overlap for ORA/GSEA reporting | `3` |
 | `--pathway-gsea-permutations` | Permutations for compact preranked GSEA p-values | `100` |

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
 
@@ -12,6 +13,9 @@ from .pseudobulk import _adjust_pvalues, _json_float
 
 
 DEFAULT_REACTOME_LIBRARY = "Reactome_2022"
+DEFAULT_REACTOME_ORGANISM = "Mouse"
+REACTOME_GMT_ENV = "KAROSPACE_REACTOME_GMT"
+PATHWAY_CACHE_DIR_ENV = "KAROSPACE_PATHWAY_CACHE_DIR"
 
 
 def _clean_gene(value: Any) -> str:
@@ -58,13 +62,93 @@ def _parse_gmt_file(path: Union[str, Path]) -> Dict[str, List[str]]:
     return gene_sets
 
 
-def _load_reactome_from_gseapy(organism: str = "Human") -> Tuple[Dict[str, List[str]], str]:
+def _safe_path_token(value: str) -> str:
+    token = "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "_" for ch in str(value or ""))
+    return token.strip("._") or "default"
+
+
+def _reactome_cache_filename(organism: str, library: str = DEFAULT_REACTOME_LIBRARY) -> str:
+    return f"{_safe_path_token(library)}.{_safe_path_token(organism)}.gmt"
+
+
+def _pathway_cache_dir() -> Path:
+    configured = os.environ.get(PATHWAY_CACHE_DIR_ENV)
+    if configured:
+        return Path(configured).expanduser()
+    xdg_cache = os.environ.get("XDG_CACHE_HOME")
+    base = Path(xdg_cache).expanduser() if xdg_cache else Path.home() / ".cache"
+    return base / "karospace" / "pathways"
+
+
+def _bundled_reactome_dir() -> Path:
+    return Path(__file__).resolve().parent / "data" / "reactome"
+
+
+def _default_reactome_gmt_candidates(
+    organism: str,
+    library: str = DEFAULT_REACTOME_LIBRARY,
+) -> List[Tuple[str, Path]]:
+    candidates: List[Tuple[str, Path]] = []
+    env_path = os.environ.get(REACTOME_GMT_ENV)
+    if env_path:
+        candidates.append(("env", Path(env_path).expanduser()))
+    filename = _reactome_cache_filename(organism, library)
+    candidates.append(("bundled", _bundled_reactome_dir() / filename))
+    candidates.append(("cache", _pathway_cache_dir() / filename))
+    return candidates
+
+
+def _load_default_reactome_gmt(
+    organism: str,
+    library: str = DEFAULT_REACTOME_LIBRARY,
+) -> Optional[Tuple[Dict[str, List[str]], Dict[str, Any]]]:
+    for source_detail, path in _default_reactome_gmt_candidates(organism, library):
+        if not path.is_file():
+            continue
+        gene_sets = _parse_gmt_file(path)
+        if not gene_sets:
+            continue
+        return gene_sets, {
+            "source": "reactome",
+            "source_detail": source_detail,
+            "library": library,
+            "organism": organism,
+            "path": str(path),
+            "cached": source_detail in {"cache", "bundled", "env"},
+            "gene_set_count": len(gene_sets),
+        }
+    return None
+
+
+def _write_gmt_cache(
+    gene_sets: Mapping[str, Sequence[str]],
+    organism: str,
+    library: str,
+) -> Optional[Path]:
+    try:
+        cache_dir = _pathway_cache_dir()
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_path = cache_dir / _reactome_cache_filename(organism, library)
+        tmp_path = cache_path.with_suffix(cache_path.suffix + ".tmp")
+        with tmp_path.open("w", encoding="utf-8") as handle:
+            for term in sorted(gene_sets):
+                genes = _dedupe(gene_sets[term])
+                if not genes:
+                    continue
+                handle.write("\t".join([str(term), "Reactome pathway", *genes]) + "\n")
+        tmp_path.replace(cache_path)
+        return cache_path
+    except Exception:
+        return None
+
+
+def _load_reactome_from_gseapy(organism: str = DEFAULT_REACTOME_ORGANISM) -> Tuple[Dict[str, List[str]], Dict[str, Any]]:
     try:
         import gseapy as gp  # type: ignore
     except Exception as exc:  # pragma: no cover - depends on optional dependency
         raise RuntimeError(
-            "Reactome pathway enrichment requires gseapy when --pathway-gmt is not supplied. "
-            "Install dependencies or pass a local Reactome GMT with --pathway-gmt."
+            "No bundled or cached default Reactome GMT was found, and gseapy is unavailable. "
+            "Pass a local Reactome GMT with --pathway-gmt or pre-populate the KaroSpace pathway cache."
         ) from exc
 
     library_name = DEFAULT_REACTOME_LIBRARY
@@ -86,33 +170,47 @@ def _load_reactome_from_gseapy(organism: str = "Human") -> Tuple[Dict[str, List[
         library_name = DEFAULT_REACTOME_LIBRARY
 
     try:
-        raw_sets = gp.get_library(name=library_name, organism=organism)
-    except TypeError:
-        raw_sets = gp.get_library(library_name, organism=organism)
-    gene_sets = {
-        str(term): _dedupe(genes)
-        for term, genes in dict(raw_sets).items()
-        if _dedupe(genes)
-    }
+        try:
+            raw_sets = gp.get_library(name=library_name, organism=organism)
+        except TypeError:
+            raw_sets = gp.get_library(library_name, organism=organism)
+    except Exception as exc:
+        raise RuntimeError(
+            "Default Reactome gene sets were not found in the bundled/cache GMT paths "
+            "and could not be downloaded from Enrichr. Pass --pathway-gmt with a local "
+            f"GMT file, set {REACTOME_GMT_ENV}, or pre-populate {PATHWAY_CACHE_DIR_ENV}."
+        ) from exc
+    gene_sets: Dict[str, List[str]] = {}
+    for term, genes in dict(raw_sets).items():
+        cleaned = _dedupe(genes)
+        if cleaned:
+            gene_sets[str(term)] = cleaned
     if not gene_sets:
         raise RuntimeError(f"No genes were loaded from Reactome library '{library_name}'.")
-    return gene_sets, library_name
+    cache_path = _write_gmt_cache(gene_sets, organism, library_name)
+    return gene_sets, {
+        "source": "reactome",
+        "source_detail": "enrichr",
+        "library": library_name,
+        "organism": organism,
+        "cached": False,
+        "cache_path": str(cache_path) if cache_path is not None else None,
+        "gene_set_count": len(gene_sets),
+    }
 
 
 def load_pathway_gene_sets(
     pathway_gmt: Optional[Union[str, Sequence[str]]] = None,
     *,
-    organism: str = "Human",
+    organism: str = DEFAULT_REACTOME_ORGANISM,
 ) -> Tuple[Dict[str, List[str]], Dict[str, Any]]:
     """Load pathway gene sets from GMT files or the default Reactome library."""
+    organism = str(organism or DEFAULT_REACTOME_ORGANISM).strip() or DEFAULT_REACTOME_ORGANISM
     if pathway_gmt is None or pathway_gmt == "":
-        gene_sets, source_name = _load_reactome_from_gseapy(organism=organism)
-        return gene_sets, {
-            "source": "reactome",
-            "library": source_name,
-            "organism": organism,
-            "gene_set_count": len(gene_sets),
-        }
+        cached = _load_default_reactome_gmt(organism=organism)
+        if cached is not None:
+            return cached
+        return _load_reactome_from_gseapy(organism=organism)
 
     paths = [pathway_gmt] if isinstance(pathway_gmt, str) else list(pathway_gmt)
     combined: Dict[str, List[str]] = {}
@@ -581,11 +679,12 @@ def add_pathway_enrichment_to_pseudobulk_de(
     max_pathway_size: int = 500,
     gsea_permutations: int = 100,
     seed: int = 0,
-    organism: str = "Human",
+    organism: str = DEFAULT_REACTOME_ORGANISM,
     n_cpus: int = 1,
     progress_callback: Optional[Callable[[Mapping[str, Any]], None]] = None,
 ) -> Dict[str, Any]:
     """Attach pathway enrichment summaries to every available pseudobulk DE result."""
+    organism = str(organism or DEFAULT_REACTOME_ORGANISM).strip() or DEFAULT_REACTOME_ORGANISM
     settings: Dict[str, Any] = {
         "available": False,
         "top_n": int(top_n),
@@ -630,6 +729,12 @@ def add_pathway_enrichment_to_pseudobulk_de(
     except Exception as exc:
         settings["reason"] = "pathway_gene_sets_unavailable"
         settings["error"] = str(exc)
+        if progress_callback is not None:
+            progress_callback({
+                "event": "gene_sets_failed",
+                "reason": settings["reason"],
+                "error": str(exc),
+            })
         return settings
     settings.update(source_info)
     settings["available"] = True
