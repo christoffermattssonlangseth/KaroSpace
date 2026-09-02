@@ -19298,6 +19298,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (source.indexOf('cell_welch') === 0) {{
             return '<span class="de-method-badge de-method-welch" title="Single-sample data (fewer than 2 biological replicates): per-cluster markers were computed with a Welch t-test, treating each cell as a replicate and testing each category vs the rest. This is a descriptive marker ranking, NOT a DESeq2 pseudobulk result — p-values are anti-conservative (pseudoreplication). Use for marker discovery, not formal inference.">Cluster markers &middot; Welch <span class="de-method-badge-note">(single-sample, descriptive)</span></span>';
         }}
+        if (source.indexOf('companion') === 0) {{
+            const isWilcoxon = source.indexOf('wilcoxon') !== -1;
+            const methodLabel = isWilcoxon ? 'Wilcoxon' : 't-test';
+            return '<span class="de-method-badge de-method-welch" title="Precomputed by KaroSpaceCompanion: per-cluster markers from a cell-level ' + methodLabel + ' (each cell treated as a replicate, category vs category). This is a descriptive marker ranking, NOT a DESeq2 pseudobulk result — use for marker discovery, not formal inference.">Cluster markers &middot; ' + methodLabel + ' <span class="de-method-badge-note">(cell-level, descriptive)</span></span>';
+        }}
         return '<span class="de-method-badge de-method-deseq2" title="Pseudobulk differential expression: cells summed into per-replicate pseudobulk samples and fit with DESeq2 (~ replicate + annotation), then evaluated as a category-vs-category contrast.">Pseudobulk DE &middot; DESeq2</span>';
     }}
 
