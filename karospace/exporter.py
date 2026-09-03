@@ -7719,9 +7719,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
         }});
     }}
-    DATA.features_meta = DATA.features_meta || {{}};
-    DATA.feature_encodings = DATA.feature_encodings || {{}};
-    DATA.feature_value_encodings = DATA.feature_value_encodings || {{}};
     DATA.pseudobulk_de = DATA.pseudobulk_de || DATA.pseudobulk_de_json || {{}};
     delete DATA.pseudobulk_de_json;
     const TUTORIAL_CONFIG = DATA.tutorial && typeof DATA.tutorial === 'object' ? DATA.tutorial : {{ enabled: false }};
@@ -7734,6 +7731,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     const FEATURES_BY_MODALITY = (DATA.features_by_modality && typeof DATA.features_by_modality === 'object')
         ? DATA.features_by_modality
         : {{}};
+    const FEATURE_STATE_BY_MODALITY = (DATA.feature_state_by_modality && typeof DATA.feature_state_by_modality === 'object')
+        ? DATA.feature_state_by_modality
+        : {{}};
     const DEFAULT_MODALITY_NAME = DATA.default_modality
         || (MODALITY_DESCRIPTORS.find(d => d && d.is_default)?.name)
         || (MODALITY_DESCRIPTORS[0]?.name)
@@ -7743,12 +7743,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function getActiveModalityDescriptor() {{
         return MODALITY_DESCRIPTORS.find(d => d && d.name === CURRENT_MODALITY) || null;
-    }}
-    function getLoadedFeaturesForModality(modality = CURRENT_MODALITY) {{
-        const meta = (modality === CURRENT_MODALITY || (modality === 'gene' && CURRENT_MODALITY === 'rna'))
-            ? DATA.features_meta
-            : (MODALITY_GENE_STATE[modality]?.features_meta);
-        return Object.keys(meta || {{}}).sort((a, b) => a.localeCompare(b));
     }}
     function uniqueSortedFeatures(features) {{
         const seen = new Set();
@@ -7761,21 +7755,75 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }});
         return result.sort((a, b) => a.localeCompare(b));
     }}
-    function getAvailableFeaturesForModality(modality = CURRENT_MODALITY) {{
+    function normalizeFeatureState(state) {{
+        const raw = state && typeof state === 'object' ? state : {{}};
+        return {{
+            features_meta: raw.features_meta && typeof raw.features_meta === 'object' ? raw.features_meta : {{}},
+            feature_encodings: raw.feature_encodings && typeof raw.feature_encodings === 'object' ? raw.feature_encodings : {{}},
+            feature_value_encodings: raw.feature_value_encodings && typeof raw.feature_value_encodings === 'object' ? raw.feature_value_encodings : {{}},
+            sections: raw.sections && typeof raw.sections === 'object' ? raw.sections : {{}},
+        }};
+    }}
+    function normalizeFeatureModalityName(modality = CURRENT_MODALITY) {{
+        const name = String(modality || CURRENT_MODALITY || DEFAULT_MODALITY_NAME || 'rna').trim();
+        return name || DEFAULT_MODALITY_NAME || 'rna';
+    }}
+    function getFeatureState(modality = CURRENT_MODALITY) {{
+        const name = normalizeFeatureModalityName(modality);
+        if (!FEATURE_STATE_BY_MODALITY[name]) {{
+            FEATURE_STATE_BY_MODALITY[name] = normalizeFeatureState(null);
+        }} else {{
+            FEATURE_STATE_BY_MODALITY[name] = normalizeFeatureState(FEATURE_STATE_BY_MODALITY[name]);
+        }}
+        return FEATURE_STATE_BY_MODALITY[name];
+    }}
+    function getFeatureSectionPayload(sectionOrId, modality = CURRENT_MODALITY) {{
+        const sectionId = typeof sectionOrId === 'string'
+            ? sectionOrId
+            : String(sectionOrId?.id || '');
+        const state = getFeatureState(modality);
+        const payload = sectionId ? (state.sections?.[sectionId] || {{}}) : {{}};
+        return {{
+            features: payload.features || payload.genes || {{}},
+            features_sparse: payload.features_sparse || payload.genes_sparse || {{}},
+        }};
+    }}
+    function setFeatureSectionPayload(sectionId, modality, payload) {{
+        const id = String(sectionId || '');
+        if (!id) return;
+        const state = getFeatureState(modality);
+        if (!state.sections || typeof state.sections !== 'object') state.sections = {{}};
+        state.sections[id] = {{
+            features: payload?.features || payload?.genes || {{}},
+            features_sparse: payload?.features_sparse || payload?.genes_sparse || {{}},
+        }};
+    }}
+    function getFeatureSectionList(modality = CURRENT_MODALITY) {{
+        return (DATA.sections || []).map((section) => {{
+            const payload = getFeatureSectionPayload(section, modality);
+            return Object.assign({{}}, section, {{
+                genes: payload.features,
+                genes_sparse: payload.features_sparse,
+            }});
+        }});
+    }}
+    function getLoadedFeaturesForModality(modality = CURRENT_MODALITY) {{
+        const state = getFeatureState(modality);
+        return Object.keys(state.features_meta || {{}}).sort((a, b) => a.localeCompare(b));
+    }}
+    function getFeatureCatalog(modality = CURRENT_MODALITY) {{
+        if (isModuleModality(modality)) return uniqueSortedFeatures(getGeneModuleDatalistValues());
         const modalityFeatures = FEATURES_BY_MODALITY?.[modality];
         if (Array.isArray(modalityFeatures) && modalityFeatures.length) {{
             return uniqueSortedFeatures(modalityFeatures);
         }}
-        if (modality === DEFAULT_MODALITY_NAME || modality === 'rna' || modality === 'gene') {{
-            const availableGenes = DATA.available_features || [];
-            if (Array.isArray(availableGenes) && availableGenes.length) {{
-                return uniqueSortedFeatures(availableGenes);
-            }}
-        }}
         return getLoadedFeaturesForModality(modality);
     }}
+    function getAvailableFeaturesForModality(modality = CURRENT_MODALITY) {{
+        return getFeatureCatalog(modality);
+    }}
     function getActiveFeatureList() {{
-        return getAvailableFeaturesForModality(CURRENT_MODALITY);
+        return getFeatureCatalog(CURRENT_MODALITY);
     }}
     function isModuleModality(modality) {{
         return String(modality || '').trim().toLowerCase() === MODULE_MODALITY_NAME;
@@ -7800,29 +7848,32 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         geneListEl.replaceChildren(fragment);
         refreshLoadedGeneFilterDropdowns();
     }}
-    function getEmbeddedGeneSet() {{
-        const embedded = Array.isArray(DATA.embedded_features) && DATA.embedded_features.length
-            ? DATA.embedded_features
-            : Object.keys(DATA.features_meta || {{}});
-        return new Set(embedded.map(gene => String(gene)));
+    function getEmbeddedFeatureSet(modality = CURRENT_MODALITY) {{
+        const embeddedByModality = DATA.embedded_features_by_modality && typeof DATA.embedded_features_by_modality === 'object'
+            ? DATA.embedded_features_by_modality
+            : {{}};
+        const embedded = Array.isArray(embeddedByModality[modality]) && embeddedByModality[modality].length
+            ? embeddedByModality[modality]
+            : getLoadedFeaturesForModality(modality);
+        return new Set(embedded.map(feature => String(feature)));
     }}
-    function isEmbeddedViewerGene(gene) {{
-        const raw = String(gene || '').trim();
+    function isEmbeddedViewerFeature(feature, modality = CURRENT_MODALITY) {{
+        const raw = String(feature || '').trim();
         if (!raw) return false;
-        const canonical = resolveCanonicalGeneName(raw);
-        const embedded = getEmbeddedGeneSet();
+        const canonical = resolveCanonicalFeatureName(raw, modality);
+        const embedded = getEmbeddedFeatureSet(modality);
         return embedded.has(raw) || (!!canonical && embedded.has(canonical));
     }}
-    function isSidecarViewerGene(gene) {{
+    function isSidecarViewerFeature(feature, modality = CURRENT_MODALITY) {{
         if (!DATA.feature_manifest_url) return false;
-        const raw = String(gene || '').trim();
+        const raw = String(feature || '').trim();
         if (!raw) return false;
-        const canonical = resolveCanonicalGeneName(raw);
-        const available = new Set((DATA.available_features || []).map(g => String(g)));
+        const canonical = resolveCanonicalFeatureName(raw, modality);
+        const available = new Set(getFeatureCatalog(modality).map(g => String(g)));
         return available.has(raw) || (!!canonical && available.has(canonical));
     }}
-    function isViewerGeneLoadable(gene) {{
-        return isEmbeddedViewerGene(gene) || isSidecarViewerGene(gene);
+    function isViewerFeatureLoadable(feature, modality = CURRENT_MODALITY) {{
+        return isEmbeddedViewerFeature(feature, modality) || isSidecarViewerFeature(feature, modality);
     }}
     function getCategoryVsRestGenes(annotationCol = explorationColorCol || currentAnnotation || '') {{
         const pseudobulkKey = getPseudobulkDEColorKey(annotationCol);
@@ -7878,7 +7929,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
     function getInsightsSelectedGene() {{
         const value = String(document.getElementById('marker-gene-search')?.value || '').trim();
-        return value ? (resolveCanonicalGeneName(value) || value) : '';
+        return value ? (resolveCanonicalFeatureName(value) || value) : '';
     }}
     function getFeatureDatalistValuesForModality(modality = CURRENT_MODALITY) {{
         if (isModuleModality(modality)) return uniqueSortedFeatures(getGeneModuleDatalistValues());
@@ -7890,56 +7941,68 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return desc?.value_kind === 'intensity';
     }}
 
-    // Rebuilt on modality switch. Sidecar RNA viewers use the full available gene catalog.
-    let AVAILABLE_GENE_SET = new Set(getActiveFeatureList());
-    let GENE_NAME_BY_LOWER = new Map(
-        getActiveFeatureList().map(gene => [String(gene).toLowerCase(), gene])
-    );
-    function rebuildActiveFeatureIndex() {{
-        const features = getActiveFeatureList();
-        AVAILABLE_GENE_SET = new Set(features);
-        GENE_NAME_BY_LOWER = new Map(features.map(gene => [String(gene).toLowerCase(), gene]));
-    }}
-    function getActiveFeatureSet() {{
-        return AVAILABLE_GENE_SET;
-    }}
-
-    // Per-modality cache of hydrated gene state. On switch we stash the current
-    // state and restore (or initialize) the new modality's slice.
-    const MODALITY_GENE_STATE = {{}};
-    function _snapshotModalityGeneState(name) {{
-        if (!name) return;
-        const sections = Array.isArray(DATA.sections) ? DATA.sections : [];
-        MODALITY_GENE_STATE[name] = {{
-            features_meta: DATA.features_meta || {{}},
-            feature_encodings: DATA.feature_encodings || {{}},
-            feature_value_encodings: DATA.feature_value_encodings || {{}},
-            sections: sections.map(s => ({{
-                genes: s.genes || {{}},
-                genes_sparse: s.genes_sparse || {{}},
-            }})),
+    const FEATURE_INDEX_BY_MODALITY = new Map();
+    function buildFeatureIndex(modality = CURRENT_MODALITY) {{
+        const name = normalizeFeatureModalityName(modality);
+        const catalog = getFeatureCatalog(name);
+        return {{
+            exact: new Set(catalog.map(feature => String(feature))),
+            byLower: new Map(catalog.map(feature => [String(feature).toLowerCase(), feature])),
         }};
     }}
-    function _restoreModalityGeneState(name) {{
-        const cached = MODALITY_GENE_STATE[name];
-        const sections = Array.isArray(DATA.sections) ? DATA.sections : [];
-        if (cached) {{
-            DATA.features_meta = cached.features_meta;
-            DATA.feature_encodings = cached.feature_encodings;
-            DATA.feature_value_encodings = cached.feature_value_encodings;
-            sections.forEach((s, i) => {{
-                s.genes = cached.sections[i]?.genes || {{}};
-                s.genes_sparse = cached.sections[i]?.genes_sparse || {{}};
-            }});
-        }} else {{
-            DATA.features_meta = {{}};
-            DATA.feature_encodings = {{}};
-            DATA.feature_value_encodings = {{}};
-            sections.forEach(s => {{
-                s.genes = {{}};
-                s.genes_sparse = {{}};
-            }});
+    function getFeatureIndex(modality = CURRENT_MODALITY) {{
+        const name = normalizeFeatureModalityName(modality);
+        if (!FEATURE_INDEX_BY_MODALITY.has(name)) {{
+            FEATURE_INDEX_BY_MODALITY.set(name, buildFeatureIndex(name));
         }}
+        return FEATURE_INDEX_BY_MODALITY.get(name);
+    }}
+    function rebuildFeatureIndex(modality = null) {{
+        if (modality) {{
+            FEATURE_INDEX_BY_MODALITY.delete(normalizeFeatureModalityName(modality));
+        }} else {{
+            FEATURE_INDEX_BY_MODALITY.clear();
+        }}
+    }}
+    function rebuildActiveFeatureIndex() {{
+        rebuildFeatureIndex(CURRENT_MODALITY);
+    }}
+    function getActiveFeatureSet() {{
+        return getFeatureIndex(CURRENT_MODALITY).exact;
+    }}
+
+    function _snapshotModalityFeatureState(name) {{
+        if (!name) return;
+        const state = getFeatureState(name);
+        const sections = Array.isArray(DATA.sections) ? DATA.sections : [];
+        state.features_meta = DATA.features_meta || state.features_meta || {{}};
+        state.feature_encodings = DATA.feature_encodings || state.feature_encodings || {{}};
+        state.feature_value_encodings = DATA.feature_value_encodings || state.feature_value_encodings || {{}};
+        const sectionState = {{}};
+        sections.forEach((s) => {{
+            const sectionId = String(s.id || '');
+            if (!sectionId) return;
+            sectionState[sectionId] = {{
+                features: s.genes || {{}},
+                features_sparse: s.genes_sparse || {{}},
+            }};
+        }});
+        state.sections = sectionState;
+        FEATURE_STATE_BY_MODALITY[name] = state;
+        rebuildFeatureIndex(name);
+    }}
+    function _restoreModalityFeatureState(name) {{
+        const cached = getFeatureState(name);
+        const sections = Array.isArray(DATA.sections) ? DATA.sections : [];
+        DATA.features_meta = cached.features_meta || {{}};
+        DATA.feature_encodings = cached.feature_encodings || {{}};
+        DATA.feature_value_encodings = cached.feature_value_encodings || {{}};
+        const sectionState = cached.sections || {{}};
+        sections.forEach((s) => {{
+            const payload = sectionState[String(s.id || '')] || {{}};
+            s.genes = payload.features || payload.genes || {{}};
+            s.genes_sparse = payload.features_sparse || payload.genes_sparse || {{}};
+        }});
     }}
     function getActiveModalityManifestEntry(manifest) {{
         if (!manifest) return null;
@@ -7955,9 +8018,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             console.warn('Unknown modality:', name);
             return;
         }}
-        _snapshotModalityGeneState(CURRENT_MODALITY);
+        _snapshotModalityFeatureState(CURRENT_MODALITY);
         CURRENT_MODALITY = name;
-        _restoreModalityGeneState(CURRENT_MODALITY);
+        _restoreModalityFeatureState(CURRENT_MODALITY);
         rebuildActiveFeatureIndex();
         populateGeneInputDatalist();
         // Clear any active gene selection so cells don't render with a feature
@@ -7969,6 +8032,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             try {{ renderGeneDiscoveryPanel(); }} catch (e) {{}}
         }}
     }}
+    _restoreModalityFeatureState(CURRENT_MODALITY);
 
     const USER_AGENT = navigator.userAgent || '';
     const IS_SAFARI = /Safari/i.test(USER_AGENT) &&
@@ -10253,7 +10317,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (typeof setInsightsMode === 'function') setInsightsMode('module');
         if (!geneModuleDraftGenes.length) {{
             const genes = (typeof getGeneInputFeatureList === 'function' ? getGeneInputFeatureList() : getFeatureDatalistValuesForModality(CURRENT_MODALITY))
-                .map(gene => resolveCanonicalGeneName(gene) || gene)
+                .map(gene => resolveCanonicalFeatureName(gene) || gene)
                 .filter(Boolean);
             geneModuleDraftGenes = [...new Set(genes)].slice(0, 2);
         }}
@@ -13161,9 +13225,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             return {{ vmin, vmax }};
         }}
         const targetModality = modality || CURRENT_MODALITY;
-        const isCurrent = targetModality === CURRENT_MODALITY;
-        const manifest = isCurrent ? DATA : (MODALITY_GENE_STATE[targetModality] || DATA);
-        const base = manifest.features_meta?.[gene] || {{}};
+        const base = getFeatureState(targetModality).features_meta?.[gene] || {{}};
         
         const autoScale = geneScaleAuto[gene];
         const overrideScale = options.includeOverrides === false ? null : geneScaleOverrides[gene];
@@ -13281,10 +13343,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const targetModality = modality || CURRENT_MODALITY;
         const isCurrent = targetModality === CURRENT_MODALITY;
         
-        let sectionsSource = DATA.sections || [];
-        if (!isCurrent && MODALITY_GENE_STATE[targetModality]) {{
-            sectionsSource = MODALITY_GENE_STATE[targetModality].sections;
-        }}
+        let sectionsSource = isCurrent ? (DATA.sections || []) : getFeatureSectionList(targetModality);
 
         const samples = [];
         let seenNonZero = 0;
@@ -13772,17 +13831,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const targetModality = modality || CURRENT_MODALITY;
         const isCurrent = targetModality === CURRENT_MODALITY;
         
-        let sectionSource = section;
-        let manifestSource = DATA;
-
-        if (!isCurrent && MODALITY_GENE_STATE[targetModality]) {{
-            const cachedMod = MODALITY_GENE_STATE[targetModality];
-            const sectionIdx = DATA.sections.indexOf(section);
-            if (sectionIdx >= 0 && cachedMod.sections[sectionIdx]) {{
-                sectionSource = cachedMod.sections[sectionIdx];
-                manifestSource = cachedMod;
-            }}
-        }}
+        const sectionPayload = getFeatureSectionPayload(section, targetModality);
+        const sectionSource = isCurrent
+            ? Object.assign({{}}, section, {{
+                genes: section.genes || sectionPayload.features,
+                genes_sparse: section.genes_sparse || sectionPayload.features_sparse,
+            }})
+            : Object.assign({{}}, section, {{
+                genes: sectionPayload.features,
+                genes_sparse: sectionPayload.features_sparse,
+            }});
+        const manifestSource = getFeatureState(targetModality);
 
         const dense = sectionSource.genes?.[gene];
         if (dense) return dense;
@@ -13900,21 +13959,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             || manifest?.features_meta?.[gene];
         if (!geneEntry || !geneMeta) return false;
 
-        let targetManifest = DATA;
-        let targetSections = DATA.sections || [];
-
-        if (!isCurrent) {{
-            if (!MODALITY_GENE_STATE[targetModality]) {{
-                MODALITY_GENE_STATE[targetModality] = {{
-                    features_meta: {{}},
-                    feature_encodings: {{}},
-                    feature_value_encodings: {{}},
-                    sections: (DATA.sections || []).map(() => ({{ genes: {{}}, genes_sparse: {{}} }})),
-                }};
-            }}
-            targetManifest = MODALITY_GENE_STATE[targetModality];
-            targetSections = targetManifest.sections;
-        }}
+        const targetState = getFeatureState(targetModality);
+        const targetManifest = isCurrent ? DATA : targetState;
+        targetManifest.features_meta = targetManifest.features_meta || {{}};
+        targetManifest.feature_encodings = targetManifest.feature_encodings || {{}};
+        targetManifest.feature_value_encodings = targetManifest.feature_value_encodings || {{}};
 
         targetManifest.features_meta[gene] = geneMeta;
         const encoding = auxData?.feature_encodings?.[gene]
@@ -13930,12 +13979,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             targetManifest.feature_value_encodings[gene] = valueEncoding;
         }}
 
-        targetSections.forEach((section, i) => {{
-            const sectionId = isCurrent ? section.id : (DATA.sections[i]?.id);
+        (DATA.sections || []).forEach((section) => {{
+            const sectionId = section.id;
             const sectionEntry = geneEntry.sections?.[sectionId];
             if (!sectionEntry) return;
-            section.genes = section.genes || {{}};
-            section.genes_sparse = section.genes_sparse || {{}};
+            const targetPayload = isCurrent
+                ? {{ features: section.genes || {{}}, features_sparse: section.genes_sparse || {{}} }}
+                : getFeatureSectionPayload(sectionId, targetModality);
+            targetPayload.features = targetPayload.features || {{}};
+            targetPayload.features_sparse = targetPayload.features_sparse || {{}};
             if (typeof sectionEntry.db64 === 'string' || typeof sectionEntry.dq16b64 === 'string' || typeof sectionEntry.dq8b64 === 'string') {{
                 const denseValues = decodeDenseSidecarSection({{
                     ...sectionEntry,
@@ -13943,16 +13995,22 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     qmax: geneMeta?.vmax,
                 }});
                 if (!denseValues) return;
-                section.genes[gene] = denseValues;
-                if (section.genes_sparse[gene]) delete section.genes_sparse[gene];
+                targetPayload.features[gene] = denseValues;
+                if (targetPayload.features_sparse[gene]) delete targetPayload.features_sparse[gene];
             }} else if (Array.isArray(sectionEntry.dense)) {{
-                section.genes[gene] = sectionEntry.dense;
-                if (section.genes_sparse[gene]) delete section.genes_sparse[gene];
+                targetPayload.features[gene] = sectionEntry.dense;
+                if (targetPayload.features_sparse[gene]) delete targetPayload.features_sparse[gene];
             }} else if (sectionEntry.sparse) {{
-                section.genes_sparse[gene] = sectionEntry.sparse;
-                if (section.genes[gene]) delete section.genes[gene];
+                targetPayload.features_sparse[gene] = sectionEntry.sparse;
+                if (targetPayload.features[gene]) delete targetPayload.features[gene];
             }}
+            if (isCurrent) {{
+                section.genes = targetPayload.features;
+                section.genes_sparse = targetPayload.features_sparse;
+            }}
+            setFeatureSectionPayload(sectionId, targetModality, targetPayload);
         }});
+        rebuildFeatureIndex(targetModality);
         return true;
     }}
 
@@ -14199,22 +14257,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const geneMeta = modalityEntry?.features_meta?.[gene] || manifest?.features_meta?.[gene];
         if (!geneEntry || !geneMeta) return false;
 
-        let targetManifest = DATA;
-        let targetSections = DATA.sections || [];
-
-        if (!isCurrent) {{
-            if (!MODALITY_GENE_STATE[targetModality]) {{
-                // Initialize if missing
-                MODALITY_GENE_STATE[targetModality] = {{
-                    features_meta: {{}},
-                    feature_encodings: {{}},
-                    feature_value_encodings: {{}},
-                    sections: (DATA.sections || []).map(() => ({{ genes: {{}}, genes_sparse: {{}} }})),
-                }};
-            }}
-            targetManifest = MODALITY_GENE_STATE[targetModality];
-            targetSections = targetManifest.sections;
-        }}
+        const targetState = getFeatureState(targetModality);
+        const targetManifest = isCurrent ? DATA : targetState;
+        targetManifest.features_meta = targetManifest.features_meta || {{}};
+        targetManifest.feature_encodings = targetManifest.feature_encodings || {{}};
+        targetManifest.feature_value_encodings = targetManifest.feature_value_encodings || {{}};
 
         targetManifest.features_meta[gene] = geneMeta;
         const encoding = modalityEntry?.feature_encodings?.[gene] || manifest?.feature_encodings?.[gene];
@@ -14226,20 +14273,29 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             targetManifest.feature_value_encodings[gene] = valueEncoding;
         }}
 
-        targetSections.forEach((section, i) => {{
-            const sectionId = isCurrent ? section.id : (DATA.sections[i]?.id);
+        (DATA.sections || []).forEach((section) => {{
+            const sectionId = section.id;
             const sectionEntry = geneEntry?.sections?.[sectionId];
             if (!sectionEntry) return;
-            section.genes = section.genes || {{}};
-            section.genes_sparse = section.genes_sparse || {{}};
+            const targetPayload = isCurrent
+                ? {{ features: section.genes || {{}}, features_sparse: section.genes_sparse || {{}} }}
+                : getFeatureSectionPayload(sectionId, targetModality);
+            targetPayload.features = targetPayload.features || {{}};
+            targetPayload.features_sparse = targetPayload.features_sparse || {{}};
             if (sectionEntry.dense) {{
-                section.genes[gene] = sectionEntry.dense;
-                if (section.genes_sparse[gene]) delete section.genes_sparse[gene];
+                targetPayload.features[gene] = sectionEntry.dense;
+                if (targetPayload.features_sparse[gene]) delete targetPayload.features_sparse[gene];
             }} else if (sectionEntry.sparse) {{
-                section.genes_sparse[gene] = sectionEntry.sparse;
-                if (section.genes[gene]) delete section.genes[gene];
+                targetPayload.features_sparse[gene] = sectionEntry.sparse;
+                if (targetPayload.features[gene]) delete targetPayload.features[gene];
             }}
+            if (isCurrent) {{
+                section.genes = targetPayload.features;
+                section.genes_sparse = targetPayload.features_sparse;
+            }}
+            setFeatureSectionPayload(sectionId, targetModality, targetPayload);
         }});
+        rebuildFeatureIndex(targetModality);
         return true;
     }}
 
@@ -14338,8 +14394,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return promise;
     }}
 
-    async function ensureGeneAvailable(gene, options = {{}}) {{
-        const token = String(gene || '').trim();
+    async function ensureFeatureAvailable(feature, options = {{}}) {{
+        const token = String(feature || '').trim();
         const showErrors = options.showErrors !== false;
         const targetModality = options.modality || CURRENT_MODALITY;
         const isCurrent = targetModality === CURRENT_MODALITY;
@@ -14348,13 +14404,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const module = getGeneModuleByToken(token);
         if (module) return await ensureGeneModuleAvailable(module, options);
         
-        // Check if already in current DATA or MODALITY_GENE_STATE
-        const currentMeta = (isCurrent || (targetModality === 'gene' && CURRENT_MODALITY === 'rna'))
-            ? DATA.features_meta
-            : (MODALITY_GENE_STATE[targetModality]?.features_meta);
+        // Check if already hydrated for the requested modality.
+        const currentMeta = getFeatureState(targetModality).features_meta;
         if (currentMeta && currentMeta[token]) return true;
 
-        if (!AVAILABLE_GENE_SET.has(token) && isCurrent) {{
+        if (!getFeatureIndex(targetModality).exact.has(token)) {{
             if (showErrors) {{
                 alert(`Gene "${{token}}" was not found in this dataset.`);
             }}
@@ -14727,7 +14781,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         if (geneInput) geneInput.value = getGeneDisplayLabel(token);
         const ok = await runAsyncUIAction('Gene selection', async () => {{
-            if (!(await ensureGeneAvailable(token, {{ showErrors }}))) {{
+            if (!(await ensureFeatureAvailable(token, {{ showErrors }}))) {{
                 return false;
             }}
             currentGene = token;
@@ -14889,7 +14943,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const genes = [];
         parts.forEach(g => {{
             if (seen.has(g)) return;
-            if (AVAILABLE_GENE_SET.has(g)) {{
+            if (getActiveFeatureSet().has(g)) {{
                 seen.add(g);
                 genes.push(g);
             }}
@@ -15241,7 +15295,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!token || isModuleModality(modality) || isFeatureLoadedForModality(token, modality) || overviewBlendGeneLoads.has(key)) return;
         overviewBlendGeneLoads.add(key);
         runAsyncUIAction(`Overview split gene load (${{token}})`, async () => {{
-            const ok = await ensureGeneAvailable(token, {{ showErrors: false, modality }});
+            const ok = await ensureFeatureAvailable(token, {{ showErrors: false, modality }});
             if (ok) {{
                 ensureGeneAutoScale(token, modality);
                 renderLegend('legend');
@@ -15844,7 +15898,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         typeSummary.entries.forEach((entry) => {{
             const genes = getMarkerGenesForColorCategory(typeSummary.annotationCol, entry.category);
             genes.forEach((rawGene, rankIdx) => {{
-                const token = resolveCanonicalGeneName(rawGene) || (AVAILABLE_GENE_SET.has(String(rawGene || '').trim()) ? String(rawGene || '').trim() : null);
+                const rawToken = String(rawGene || '').trim();
+                const token = resolveCanonicalFeatureName(rawGene) || (getActiveFeatureSet().has(rawToken) ? rawToken : null);
                 if (!token) return;
                 const key = token.toLowerCase();
                 const next = ranked.get(key) || {{
@@ -18372,16 +18427,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
     }}
 
-    function resolveCanonicalGeneName(token) {{
+    function resolveCanonicalFeatureName(token, modality = CURRENT_MODALITY) {{
         const text = String(token || '').trim();
         if (!text) return '';
-        if (AVAILABLE_GENE_SET.has(text)) return text;
-        return GENE_NAME_BY_LOWER.get(text.toLowerCase()) || '';
+        const index = getFeatureIndex(typeof modality === 'string' ? modality : CURRENT_MODALITY);
+        if (index.exact.has(text)) return text;
+        return index.byLower.get(text.toLowerCase()) || '';
     }}
 
     function resolveFeatureTokenForModality(value, modality = CURRENT_MODALITY) {{
         if (isModuleModality(modality)) return resolveGeneModuleToken(value);
-        return resolveCanonicalGeneName(value);
+        return resolveCanonicalFeatureName(value, modality);
     }}
 
     function resolveViewerFeatureToken(value) {{
@@ -18390,16 +18446,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (lower.startsWith(`${{MODULE_MODALITY_NAME}}:`)) {{
             return resolveGeneModuleToken(text) || '';
         }}
-        return resolveCanonicalGeneName(text);
+        return resolveCanonicalFeatureName(text);
     }}
 
     function isFeatureLoadedForModality(feature, modality = CURRENT_MODALITY) {{
         const token = String(feature || '').trim();
         if (!token) return false;
         if (isModuleModality(modality)) return !!getGeneModuleByToken(token);
-        const meta = (modality === CURRENT_MODALITY || (modality === 'gene' && CURRENT_MODALITY === 'rna'))
-            ? DATA.features_meta
-            : (MODALITY_GENE_STATE[modality]?.features_meta);
+        const meta = getFeatureState(modality).features_meta;
         return !!(meta && meta[token]);
     }}
 
@@ -18665,7 +18719,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             return {{ type: 'ref', kind: 'obs', name: colorName }};
         }}
         if (fnName === 'gene') {{
-            const geneName = resolveCanonicalGeneName(rawName);
+            const geneName = resolveCanonicalFeatureName(rawName);
             if (!geneName) throw new Error(`Unknown gene "${{rawName}}".`);
             return {{ type: 'ref', kind: 'gene', name: geneName }};
         }}
@@ -18684,7 +18738,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (colorName) return {{ type: 'ref', kind: 'obs', name: colorName }};
         const metadataKey = resolveCanonicalSectionMetadataKey(raw);
         if (metadataKey) return {{ type: 'ref', kind: 'section', name: metadataKey }};
-        const geneName = resolveCanonicalGeneName(raw);
+        const geneName = resolveCanonicalFeatureName(raw);
         if (geneName) return {{ type: 'ref', kind: 'gene', name: geneName }};
         return {{ type: 'string', value: raw }};
     }}
@@ -18889,7 +18943,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     ? `Loading gene ${{gene}}…`
                     : `Loading gene ${{i + 1}}/${{genes.length}}: ${{gene}}…`;
                 syncSelectionQueryUi();
-                const ok = await ensureGeneAvailable(gene, {{ showErrors: false }});
+                const ok = await ensureFeatureAvailable(gene, {{ showErrors: false }});
                 if (!ok) throw new Error(`Failed to load gene "${{gene}}".`);
             }}
 
@@ -18993,7 +19047,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const stored = readViewerJsonStorage(GENE_RECENTS_STORAGE_KEY, []);
         if (!Array.isArray(stored)) return [];
         return stored
-            .map(resolveCanonicalGeneName)
+            .map(resolveCanonicalFeatureName)
             .filter(Boolean)
             .slice(0, GENE_DISCOVERY_RECENT_LIMIT);
     }}
@@ -19003,7 +19057,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function recordRecentGene(gene) {{
-        const token = resolveCanonicalGeneName(gene);
+        const token = resolveCanonicalFeatureName(gene);
         if (!token) return;
         recentGenes = [token, ...recentGenes.filter(item => item !== token)].slice(0, GENE_DISCOVERY_RECENT_LIMIT);
         persistRecentGenes();
@@ -19016,7 +19070,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             .map((entry) => {{
                 const name = String(entry?.name || '').trim();
                 const genes = Array.isArray(entry?.genes)
-                    ? entry.genes.map(resolveCanonicalGeneName).filter(Boolean)
+                    ? entry.genes.map(resolveCanonicalFeatureName).filter(Boolean)
                     : [];
                 if (!name) return null;
                 return {{ name, genes: [...new Set(genes)] }};
@@ -19077,7 +19131,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const id = String(entry?.id || `m${{Date.now()}}-${{index}}`).trim();
             const name = String(entry?.name || `Module ${{index + 1}}`).trim() || `Module ${{index + 1}}`;
             const genes = Array.isArray(entry?.genes)
-                ? entry.genes.map(resolveCanonicalGeneName).filter(gene => gene && !gene.startsWith('module:'))
+                ? entry.genes.map(resolveCanonicalFeatureName).filter(gene => gene && !gene.startsWith('module:'))
                 : [];
             return {{ id, name, genes: [...new Set(genes)] }};
         }}).filter(module => module.id && module.name);
@@ -19155,7 +19209,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!module || !Array.isArray(module.genes) || !module.genes.length) return false;
         const loaded = [];
         for (const gene of module.genes) {{
-            const ok = await ensureGeneAvailable(gene, {{ showErrors: options.showErrors !== false }});
+            const ok = await ensureFeatureAvailable(gene, {{ showErrors: options.showErrors !== false }});
             if (ok) {{
                 loaded.push(gene);
                 ensureGeneAutoScale(gene);
@@ -19167,16 +19221,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function getGenePanelSeedToken() {{
-        const fromCurrent = resolveCanonicalGeneName(currentGene);
+        const fromCurrent = resolveCanonicalFeatureName(currentGene);
         if (fromCurrent) return fromCurrent;
         const geneInput = document.getElementById('gene-input');
-        return resolveCanonicalGeneName(geneInput?.value || '');
+        return resolveCanonicalFeatureName(geneInput?.value || '');
     }}
 
     function upsertSavedGenePanel(panelName, gene = '') {{
         const normalizedName = String(panelName || '').trim();
         if (!normalizedName) return false;
-        const geneToken = resolveCanonicalGeneName(gene);
+        const geneToken = resolveCanonicalFeatureName(gene);
         const existingIndex = savedGenePanels.findIndex(
             panel => panel.name.toLowerCase() === normalizedName.toLowerCase()
         );
@@ -19390,7 +19444,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         (Array.isArray(genes) ? genes : []).forEach((gene) => {{
             const raw = String(gene || '').trim();
             if (!raw) return;
-            const canonical = resolveCanonicalGeneName(raw);
+            const canonical = resolveCanonicalFeatureName(raw);
             const key = (canonical || raw).toLowerCase();
             if (seen.has(key)) return;
             seen.add(key);
@@ -19570,7 +19624,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const groups = categoryOrder
             .map((category) => {{
                 const genes = getMarkerGenesForColorCategory(currentAnnotation, category)
-                    .map(resolveCanonicalGeneName)
+                    .map(resolveCanonicalFeatureName)
                     .filter(Boolean)
                     .slice(0, GENE_DISCOVERY_SUGGESTION_GENES_PER_GROUP);
                 if (!genes.length) return null;
@@ -20900,14 +20954,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }};
 
         try {{
-            if (genesToExport.length && typeof ensureGeneAvailable === 'function') {{
+            if (genesToExport.length && typeof ensureFeatureAvailable === 'function') {{
                 updateExportProgress('Fetching feature shards', 0, genesToExport.length);
                 for (let i = 0; i < genesToExport.length; i++) {{
                     checkCancel();
                     const g = genesToExport[i];
                     if (!DATA.features_meta?.[g]) {{
                         setLabel(`Fetching genes ${{i + 1}}/${{genesToExport.length}}`);
-                        try {{ await ensureGeneAvailable(g, {{ showErrors: false }}); }} catch (_) {{}}
+                        try {{ await ensureFeatureAvailable(g, {{ showErrors: false }}); }} catch (_) {{}}
                     }}
                     updateExportProgress('Fetching feature shards', i + 1, genesToExport.length);
                 }}
@@ -25100,7 +25154,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         `;
 
         panel.querySelector('#gene-module-gene-picker')?.addEventListener('change', (event) => {{
-            const gene = resolveCanonicalGeneName(event.target.value);
+            const gene = resolveCanonicalFeatureName(event.target.value);
             if (gene && !geneModuleDraftGenes.includes(gene)) {{
                 geneModuleDraftGenes.push(gene);
                 renderGeneModulePanel();
@@ -25624,7 +25678,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 advanceTutorialIfReady();
                 return;
             }}
-            if (isViewerGeneLoadable(gene)) {{
+            if (isViewerFeatureLoadable(gene)) {{
                 await activateViewerGene(gene, {{ showErrors: true }});
                 advanceTutorialIfReady();
                 return;
@@ -26636,7 +26690,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const token = String(gene || '').trim();
             if (!token) return '';
             if (meanGeneSet.has(token)) return token;
-            const canonical = resolveCanonicalGeneName(token);
+            const canonical = resolveCanonicalFeatureName(token);
             if (canonical && meanGeneSet.has(canonical)) return canonical;
             return meanGeneByLower.get(token.toLowerCase()) || '';
         }}
@@ -26989,7 +27043,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     if (!raw) return null;
                     return {{
                         raw,
-                        canonical: resolveCanonicalGeneName(raw),
+                        canonical: resolveCanonicalFeatureName(raw),
                     }};
                 }})
                 .filter(Boolean);
@@ -27001,7 +27055,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
             const geneButtons = genes.length
                 ? genes.map((entry) => {{
-                    const loadable = isViewerGeneLoadable(entry.raw);
+                    const loadable = isViewerFeatureLoadable(entry.raw);
                     return renderGeneTokenButton(entry.raw, {{
                         allowUnknown: true,
                         disableActivation: !loadable,
@@ -27225,7 +27279,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const geneIndex = new Map(payload.genes.map((g, idx) => [String(g), idx]));
         let idx = geneIndex.get(geneToken);
         if (idx === undefined) {{
-            const canonical = resolveCanonicalGeneName(geneToken);
+            const canonical = resolveCanonicalFeatureName(geneToken);
             if (canonical) idx = geneIndex.get(canonical);
         }}
         if (idx === undefined) {{
@@ -27684,7 +27738,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return `
             <div class="gene-token-grid">
                 ${{entries.map((entry) => {{
-                    const loadable = isViewerGeneLoadable(entry.raw);
+                    const loadable = isViewerFeatureLoadable(entry.raw);
                     return renderGeneTokenButton(entry.raw, {{
                         allowUnknown: true,
                         disableActivation: !loadable,
@@ -28019,7 +28073,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const padjDisplay = formatAdjustedPValue(padj);
             const baseDisplay = formatScaleNumber(xValues[i]);
             const color = dotClass === 'red' ? '#d94f4f' : 'var(--border-color)';
-            const loadable = isViewerGeneLoadable(gene);
+            const loadable = isViewerFeatureLoadable(gene);
             const pctLine = 'pct expr: ' + escapeHtml(formatPseudobulkDEPct(Number.isFinite(sourcePct) ? sourcePct : NaN)) + ' / ' + escapeHtml(formatPseudobulkDEPct(Number.isFinite(referencePct) ? referencePct : NaN));
             const extraLine = loadable ? '' : '" data-tooltip-line6="Expression vector unavailable"';
             dots.push({{ dotClass, html: '<circle class="volcano-dot" cx="' + xs(xValues[i]).toFixed(1) + '" cy="' + ys(fc).toFixed(1) + '" r="2.8" fill="' + color + '" fill-opacity="0.78" data-volcano-gene="' + escapeHtml(gene) + '" data-gene-loadable="' + (loadable ? 'true' : 'false') + '" data-volcano-fc="' + fc.toFixed(3) + '" data-volcano-p="' + rawPDisplay + '" data-volcano-padj="' + padjDisplay + '" data-tooltip-title="' + escapeHtml(gene) + '" data-tooltip-line1="baseMean: ' + escapeHtml(baseDisplay) + '" data-tooltip-line2="logFC: ' + escapeHtml(fc.toFixed(3)) + '" data-tooltip-line3="pvalue: ' + escapeHtml(rawPDisplay) + '" data-tooltip-line4="adj. p: ' + escapeHtml(padjDisplay) + '" data-tooltip-line5="' + pctLine + extraLine + '"/>' }});
@@ -28206,7 +28260,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const col = dotClass === 'source' ? sourceColor : (dotClass === 'reference' ? referenceColor : 'var(--border-color)');
             const safePAdj = Number.isFinite(pvalAdj) ? pvalAdj : 1;
             const padjDisplay = formatAdjustedPValue(safePAdj);
-            const loadable = isViewerGeneLoadable(gene);
+            const loadable = isViewerFeatureLoadable(gene);
             const pctLine = 'pct expr: ' + escapeHtml(formatPseudobulkDEPct(Number.isFinite(sourcePct) ? sourcePct : NaN)) + ' / ' + escapeHtml(formatPseudobulkDEPct(Number.isFinite(referencePct) ? referencePct : NaN));
             const extraLine = loadable ? '' : '" data-tooltip-line4="Expression vector unavailable"';
             dots.push({{ dotClass, html: '<circle class="volcano-dot" cx="' + xs(fc).toFixed(1) + '" cy="' + ys(nlpi).toFixed(1) + '" r="3" fill="' + col + '" fill-opacity="0.82" data-volcano-class="' + dotClass + '" data-volcano-gene="' + escapeHtml(gene) + '" data-gene-loadable="' + (loadable ? 'true' : 'false') + '" data-volcano-fc="' + fc.toFixed(3) + '" data-volcano-padj="' + padjDisplay + '" data-tooltip-title="' + escapeHtml(gene) + '" data-tooltip-line1="log\u2082FC: ' + escapeHtml(fc.toFixed(3)) + '" data-tooltip-line2="adj. p: ' + escapeHtml(padjDisplay) + '" data-tooltip-line3="' + pctLine + extraLine + '"/>' }});
@@ -29216,7 +29270,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const scoreValue = scores[idx];
             const pctSourceValue = pctSource[idx];
             const pctReferenceValue = pctReference[idx];
-            const loadable = isViewerGeneLoadable(gene);
+            const loadable = isViewerFeatureLoadable(gene);
             const rowColor = Number.isFinite(log2fcValue)
                 ? (log2fcValue >= 0 ? sourceColor : referenceColor)
                 : '';
@@ -32697,7 +32751,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         const topEntries = sortedEntries.slice(0, 12);
         const renderInlineGeneLinks = (genes) => genes.map(g => {{
-            const loadable = isViewerGeneLoadable(g);
+            const loadable = isViewerFeatureLoadable(g);
             const cls = loadable ? 'interaction-gene-link' : 'interaction-gene-link disabled';
             const activateAttr = loadable ? ` data-gene-activate="${{escapeHtml(g)}}"` : '';
             const title = loadable
@@ -33721,8 +33775,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 return;
             }}
             const geneInput = document.getElementById('gene-input');
-            const requested = resolveCanonicalGeneName(geneInput?.value || '')
-                || resolveCanonicalGeneName(currentGene)
+            const requested = resolveCanonicalFeatureName(geneInput?.value || '')
+                || resolveCanonicalFeatureName(currentGene)
                 || '';
             if (!requested) return;
             await activateViewerGene(requested, {{ showErrors: false }});
@@ -33790,7 +33844,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
             if (e.key === 'Enter') {{
                 const highlightedGene = geneDiscoveryResults[geneDiscoveryActiveIndex];
-                const exactGene = resolveCanonicalGeneName(geneInput.value);
+                const exactGene = resolveCanonicalFeatureName(geneInput.value);
                 if (!highlightedGene && !exactGene && geneInput.value.trim()) return;
                 e.preventDefault();
                 await activateViewerGene(highlightedGene || exactGene || geneInput.value, {{ showErrors: false }});
@@ -33808,7 +33862,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 refreshInsights();
                 return;
             }}
-            const exactGene = resolveCanonicalGeneName(raw);
+            const exactGene = resolveCanonicalFeatureName(raw);
             if (exactGene) {{
                 await activateViewerGene(exactGene, {{ showErrors: false }});
                 refreshInsights();
@@ -33817,7 +33871,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
         }});
         genePanelNew?.addEventListener('click', () => {{
-            const seedGene = resolveCanonicalGeneName(currentGene);
+            const seedGene = resolveCanonicalFeatureName(currentGene);
             const suggestedName = seedGene ? `${{seedGene}} panel` : '';
             const panelName = prompt('Panel name', suggestedName);
             if (!panelName) return;
@@ -34082,7 +34136,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                             controls.gene.value = getGeneDisplayLabel(overviewBlendSpec[side].gene);
                             return;
                         }}
-                        if (!await ensureGeneAvailable(gene, {{ modality: modName }})) {{
+                        if (!await ensureFeatureAvailable(gene, {{ modality: modName }})) {{
                             controls.gene.value = getGeneDisplayLabel(overviewBlendSpec[side].gene);
                             return;
                         }}
