@@ -6892,9 +6892,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <div class="info-block">
                         <div class="info-title">Keyboard Shortcuts</div>
                         <table class="info-shortcuts-table">
-                            <tr><td class="info-shortcuts-key"><kbd>Esc</kbd></td><td>Close the modal, or close gene discovery if the modal is not open.</td></tr>
+                            <tr><td class="info-shortcuts-key"><kbd>Esc</kbd></td><td>Close the modal, or close feature discovery if the modal is not open.</td></tr>
                             <tr><td class="info-shortcuts-key"><kbd>?</kbd></td><td>Open the full keyboard shortcuts overlay.</td></tr>
-                            <tr><td class="info-shortcuts-key"><kbd>/</kbd></td><td>Focus the gene search input and open gene discovery.</td></tr>
+                            <tr><td class="info-shortcuts-key"><kbd>/</kbd></td><td>Focus the feature search input and open feature discovery.</td></tr>
                             <tr><td class="info-shortcuts-key"><kbd>←</kbd> <kbd>→</kbd></td><td>Move to the previous or next section while the modal is open.</td></tr>
                             <tr><td class="info-shortcuts-key"><kbd>T</kbd></td><td>Toggle theme.</td></tr>
                             <tr><td class="info-shortcuts-key"><kbd>I</kbd></td><td>Toggle the Insights panel.</td></tr>
@@ -6920,9 +6920,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                             <div class="button-help-item"><div class="button-help-icons" aria-label="Save and load"><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"></path><path d="m17 8-5-5-5 5"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path></svg></span></div><div class="button-help-text">Saves the current viewer state to JSON or restores a previously saved state.</div></div>
                             <div class="button-help-item"><div class="button-help-icons" aria-label="Export and download"><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"></path><path d="M14 2v4a2 2 0 0 0 2 2h4"></path><path d="M12 18v-6"></path><path d="m9 15 3 3 3-3"></path></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path></svg></span></div><div class="button-help-text">Downloads the available table, plot, palette, annotations, session, or data bundle for that panel.</div></div>
                             {reproducibility_button_help_html}
-                            <div class="button-help-item"><div class="button-help-icons" aria-label="Visual and gene settings"><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.2 14.8a2 2 0 0 1 2 2"></path><circle cx="18.5" cy="8.5" r="3.5"></circle><circle cx="7.5" cy="16.5" r="5.5"></circle><circle cx="7.5" cy="4.5" r="2.5"></circle></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><line x1="21" x2="14" y1="4" y2="4"></line><line x1="10" x2="3" y1="4" y2="4"></line><line x1="21" x2="12" y1="12" y2="12"></line><line x1="8" x2="3" y1="12" y2="12"></line><line x1="21" x2="16" y1="20" y2="20"></line><line x1="12" x2="3" y1="20" y2="20"></line><line x1="14" x2="14" y1="2" y2="6"></line><line x1="8" x2="8" y1="10" y2="14"></line><line x1="16" x2="16" y1="18" y2="22"></line></svg></span></div><div class="button-help-text">Opens visual parameters, UMAP appearance, or gene-expression display controls.</div></div>
+                            <div class="button-help-item"><div class="button-help-icons" aria-label="Visual and feature settings"><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7.2 14.8a2 2 0 0 1 2 2"></path><circle cx="18.5" cy="8.5" r="3.5"></circle><circle cx="7.5" cy="16.5" r="5.5"></circle><circle cx="7.5" cy="4.5" r="2.5"></circle></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><line x1="21" x2="14" y1="4" y2="4"></line><line x1="10" x2="3" y1="4" y2="4"></line><line x1="21" x2="12" y1="12" y2="12"></line><line x1="8" x2="3" y1="12" y2="12"></line><line x1="21" x2="16" y1="20" y2="20"></line><line x1="12" x2="3" y1="20" y2="20"></line><line x1="14" x2="14" y1="2" y2="6"></line><line x1="8" x2="8" y1="10" y2="14"></line><line x1="16" x2="16" y1="18" y2="22"></line></svg></span></div><div class="button-help-text">Opens visual parameters, UMAP appearance, or feature display controls.</div></div>
                             <div class="button-help-item"><div class="button-help-icons" aria-label="Cell selection tools"><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 11V6a2 2 0 0 0-4 0"></path><path d="M14 10V4a2 2 0 0 0-4 0v6"></path><path d="M10 10.5V6a2 2 0 0 0-4 0v8"></path><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.9-6.5-2.8L2 16a2.3 2.3 0 0 1 3.2-3.3L7 14"></path></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 22a5 5 0 0 1-2-4"></path><path d="M3.3 14A6.8 6.8 0 0 1 2 10c0-4.4 4.5-8 10-8s10 3.6 10 8-4.5 8-10 8a12 12 0 0 1-5-1"></path><path d="M5 18a2 2 0 1 0 4 0 2 2 0 0 0-4 0"></path></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"></path><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"></path><path d="M7 21h10"></path><path d="M12 3v18"></path><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"></path></svg></span></div><div class="button-help-text">Switches cell-selection interaction between moving, lasso selection, and selected-cell comparison.</div></div>
-                            <div class="button-help-item"><div class="button-help-icons" aria-label="Query and search"><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="22" x2="18" y1="12" y2="12"></line><line x1="6" x2="2" y1="12" y2="12"></line><line x1="12" x2="12" y1="6" y2="2"></line><line x1="12" x2="12" y1="22" y2="18"></line></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg></span></div><div class="button-help-text">Finds cells, genes, markers, or annotations depending on the active panel.</div></div>
+                            <div class="button-help-item"><div class="button-help-icons" aria-label="Query and search"><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="22" x2="18" y1="12" y2="12"></line><line x1="6" x2="2" y1="12" y2="12"></line><line x1="12" x2="12" y1="6" y2="2"></line><line x1="12" x2="12" y1="22" y2="18"></line></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg></span></div><div class="button-help-text">Finds cells, features, markers, or annotations depending on the active panel.</div></div>
                             <div class="button-help-item"><div class="button-help-icons" aria-label="Swap"><span class="button-help-icon"><svg class="lucide lucide-arrow-left-right" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3 4 7l4 4"></path><path d="M4 7h16"></path><path d="m16 21 4-4-4-4"></path><path d="M20 17H4"></path></svg></span></div><div class="button-help-text">Swaps the A and B sides of a comparison or changes comparison direction.</div></div>
                             <div class="button-help-item"><div class="button-help-icons" aria-label="Visibility and spotlight"><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"></path><circle cx="12" cy="12" r="3"></circle></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"></path><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"></path><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"></path><path d="m2 2 20 20"></path></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18h6"></path><path d="M10 22h4"></path><path d="M12 2v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="M2 12h2"></path><path d="m19.07 4.93-1.41 1.41"></path><path d="M20 12h2"></path><path d="M15 14a5 5 0 1 0-6 0l1 4h4z"></path></svg></span></div><div class="button-help-text">Shows, hides, or spotlights categories and overlay elements in legends and panels.</div></div>
                             <div class="button-help-item"><div class="button-help-icons" aria-label="Clear and delete"><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg></span></div><div class="button-help-text">Clears the current filter, selection, highlight, module, annotation, or panel-specific focus.</div></div>
@@ -7084,7 +7084,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <button class="visual-params-toggle" id="visual-params-toggle" type="button" title="Visual parameters" aria-expanded="false" aria-controls="visual-params-panel">
                         <svg viewBox="0 0 24 24" aria-hidden="true" data-icon="bubbles"><path d="M7.2 14.8a2 2 0 0 1 2 2"></path><circle cx="18.5" cy="8.5" r="3.5"></circle><circle cx="7.5" cy="16.5" r="5.5"></circle><circle cx="7.5" cy="4.5" r="2.5"></circle></svg>
                     </button>
-                    <button class="gene-params-toggle hidden" id="gene-params-toggle" type="button" title="Gene parameters" aria-expanded="false" aria-controls="gene-params-panel">
+                    <button class="gene-params-toggle hidden" id="gene-params-toggle" type="button" title="Feature parameters" aria-expanded="false" aria-controls="gene-params-panel">
                         <svg viewBox="0 0 24 24" aria-hidden="true"><line x1="21" x2="14" y1="4" y2="4"></line><line x1="10" x2="3" y1="4" y2="4"></line><line x1="21" x2="12" y1="12" y2="12"></line><line x1="8" x2="3" y1="12" y2="12"></line><line x1="21" x2="16" y1="20" y2="20"></line><line x1="12" x2="3" y1="20" y2="20"></line><line x1="14" x2="14" y1="2" y2="6"></line><line x1="8" x2="8" y1="10" y2="14"></line><line x1="16" x2="16" y1="18" y2="22"></line></svg>
                     </button>
                     <div class="visual-params-panel" id="visual-params-panel">
@@ -7192,7 +7192,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         <div class="focused-he-status" id="focused-he-status">No image loaded</div>
                     </div>
                     <div class="gene-params-panel" id="gene-params-panel">
-                        <div class="visual-params-title">Gene parameters</div>
+                        <div class="visual-params-title">Feature parameters</div>
                         <div class="gene-param-section">
                             <div class="gene-param-section-title">Scale</div>
                             <div class="control-group" id="expression-scale-section" style="display: none;">
@@ -7225,13 +7225,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         <div class="gene-param-section">
                             <div class="gene-param-section-title">Annotation</div>
                             <div class="control-group" id="expression-color-section" style="display: none;">
-                                <select id="expr-colormap" title="Colormap used for gene expression and continuous metadata" style="font-size:11px; padding:3px 4px; border:1px solid var(--border-color); border-radius:4px; background:var(--input-bg); color:var(--text-color);"></select>
+                                <select id="expr-colormap" title="Colormap used for feature values and continuous metadata" style="font-size:11px; padding:3px 4px; border:1px solid var(--border-color); border-radius:4px; background:var(--input-bg); color:var(--text-color);"></select>
                             </div>
                         </div>
                         <div class="gene-param-section">
                             <div class="gene-param-section-title">View</div>
                             <div class="control-group" id="overview-gene-view-block" style="display: none;">
-                                <select id="overview-gene-view-mode" title="Choose how active gene expression is rendered in the overview panels">
+                                <select id="overview-gene-view-mode" title="Choose how active feature values are rendered in the overview panels">
                                     <option value="cells">Cells</option>
                                     <option value="density">Density</option>
                                     <option value="both">Both</option>
@@ -7291,8 +7291,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             <div class="shortcuts-dialog-body">
                 <table class="info-shortcuts-table">
                     <tr><td class="info-shortcuts-key"><kbd>?</kbd></td><td>Open or close this shortcuts overlay.</td></tr>
-                    <tr><td class="info-shortcuts-key"><kbd>Esc</kbd></td><td>Close this overlay, then the modal, or close gene discovery if the modal is not open.</td></tr>
-                    <tr><td class="info-shortcuts-key"><kbd>/</kbd></td><td>Focus the gene search input and open gene discovery.</td></tr>
+                    <tr><td class="info-shortcuts-key"><kbd>Esc</kbd></td><td>Close this overlay, then the modal, or close feature discovery if the modal is not open.</td></tr>
+                    <tr><td class="info-shortcuts-key"><kbd>/</kbd></td><td>Focus the feature search input and open feature discovery.</td></tr>
                     <tr><td class="info-shortcuts-key"><kbd>←</kbd> <kbd>→</kbd></td><td>Move to the previous or next section while the modal is open.</td></tr>
                     <tr><td class="info-shortcuts-key"><kbd>T</kbd></td><td>Toggle theme.</td></tr>
                     <tr><td class="info-shortcuts-key"><kbd>I</kbd></td><td>Toggle the Insights panel.</td></tr>
@@ -8328,12 +8328,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }},
         selection_expression: {{
             title: 'Selection expression',
-            body: 'Genes are selected by a two-sided Welch test. The top positive and negative Welch T scores are displayed after the minimum-expression threshold. The value at the bar end is the mean expression followed by the percentage of cells expressing the gene. The factor is mean A divided by mean B.',
+            body: 'Features are selected by a two-sided Welch test. The top positive and negative Welch T scores are displayed after the minimum-expression threshold. The value at the bar end is the mean feature value followed by the percentage of cells above zero. The factor is mean A divided by mean B.',
             formula: 'Welch T = (mean A - mean B) / sqrt(variance A / n A + variance B / n B); the highest positive and lowest negative T scores are used; factor = mean A / mean B'
         }},
         region_expression: {{
             title: 'Region expression',
-            body: 'Genes are selected by a two-sided Welch test between Region A and Region B. The top positive and negative Welch T scores are retained after the minimum-expression threshold. Bar-end values show mean expression and the percentage of cells expressing the gene; the factor is mean A divided by mean B.',
+            body: 'Features are selected by a two-sided Welch test between Region A and Region B. The top positive and negative Welch T scores are retained after the minimum-expression threshold. Bar-end values show mean feature value and the percentage of cells above zero; the factor is mean A divided by mean B.',
             formula: 'Welch T = (mean A - mean B) / sqrt(variance A / n A + variance B / n B); factor = mean A / mean B; log2FC = log2(mean A / mean B)'
         }},
         selection_compare: {{
@@ -8357,18 +8357,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             formula: 'fraction(section, category) = category cells in section / total cells in section'
         }},
         de_genes: {{
-            title: 'Pseudobulk DE genes',
-            body: 'Differential expression uses one shared fit model across replicate and annotation, while statistical tests are calculated category-versus-category. Genes not expressed in a minimal percentage of cells in at least one category are removed from reported DE results. Model and statistical tests are calculated using DESeq2 and multiple testing correction is applied to the retained result genes using your method of choice. The table values report log2 fold-change, p-values, adjusted p-values, DESeq2 score and rank, base_mean, and percent expressed. Gene markers are ordered by adjusted pvalue then log2FC.',
+            title: 'Marker features',
+            body: 'Differential analysis uses one shared fit model across replicate and annotation, while statistical tests are calculated category-versus-category. Features not detected in a minimal percentage of cells in at least one category are removed from reported DE results. Model and statistical tests are calculated using DESeq2 and multiple testing correction is applied to the retained result features using your method of choice. The table values report log2 fold-change, p-values, adjusted p-values, DESeq2 score and rank, base_mean, and percent detected. Marker features are ordered by adjusted pvalue then log2FC.',
             formula: 'fit model: ~ replicate + annotation; reported gene filter: max(% expressed in A, % expressed in B) >= min_pct; statistical test: DESeq2 category A vs category B; padj: retained p-values adjusted with the selected correction method; marker order: padj ascending, then log2FC'
         }},
         pseudobulk_simple_de_section: {{
             title: 'Pseudobulk differential analysis',
-            body: 'This section is based on the selected Simple design category-vs-category pseudobulk DESeq2 contrast. Cells are grouped by biological replicate and annotation, raw counts are summed into pseudobulk samples, and a shared DESeq2 model is fit for the annotation. The selected Annotation A and Annotation B are then extracted as a pairwise contrast. Genes shown as DE pass the minimum percent-expressed result filter, then pass the adjusted p-value and absolute log2FC thresholds.',
+            body: 'This section is based on the selected Simple design category-vs-category pseudobulk DESeq2 contrast. Cells are grouped by biological replicate and annotation, raw counts are summed into pseudobulk samples, and a shared DESeq2 model is fit for the annotation. The selected Annotation A and Annotation B are then extracted as a pairwise contrast. Features shown as DE pass the minimum percent-detected result filter, then pass the adjusted p-value and absolute log2FC thresholds.',
             formula: 'model = ~ replicate + annotation; retained genes: max(% expressing cells in A, B) >= min_pct after DESeq2 statistics; DE genes: padj < padj_cutoff and |log2FC| >= log2fc_cutoff'
         }},
         pseudobulk_simple_de_table: {{
             title: 'Differential expression table',
-            body: 'The table lists genes from the selected Annotation A versus Annotation B contrast that pass the current DE thresholds. Rows are sorted by adjusted p-value, then p-value and log2FC. Gene buttons are disabled only when that gene expression vector is not available in the HTML or sidecar.',
+            body: 'The table lists features from the selected Annotation A versus Annotation B contrast that pass the current DE thresholds. Rows are sorted by adjusted p-value, then p-value and log2FC. Feature buttons are disabled only when that feature vector is not available in the HTML or sidecar.',
             formula: 'displayed rows: padj < padj_cutoff and |log2FC| >= log2fc_cutoff; row direction/color follows sign(log2FC)'
         }},
         pseudobulk_ma_plot: {{
@@ -8408,16 +8408,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }},
         de_heatmap: {{
             title: 'DE heatmap',
-            body: 'Tiles use aggregation of gene counts per category/replicate and calculate the mean of each category across replicates, then z-score against the full DE heatmap table before applying the visible gene filter. Genes are selected if found DE versus the balanced rest. A star marks genes found DE versus the balanced rest.',
+            body: 'Tiles use aggregation of feature counts per category/replicate and calculate the mean of each category across replicates, then z-score against the full DE heatmap table before applying the visible feature filter. Features are selected if found DE versus the balanced rest. A star marks features found DE versus the balanced rest.',
             formula: 'category mean = mean over replicates of (category gene counts / category cells); z = (category mean - full table mean) / full table SD'
         }},
         spatial_moran: {{
             title: 'Spatial Moran index',
-            body: 'Moran index measures whether nearby cells have similar expression values for a gene.',
+            body: 'Spatial features are ranked by Moran index, which measures whether nearby cells have similar values for a feature.',
             formula: 'I = (n / W) * sum_i sum_j w_ij (x_i - mean(x))(x_j - mean(x)) / sum_i (x_i - mean(x))^2'
         }},
         distribution: {{
-            title: 'Gene distribution',
+            title: 'Feature distribution',
             body: 'List of values and figures are computed from per-cell expression values in each Exploration annotation category. Selection can be restricted to subcategories',
             formula: 'mean = sum(values) / n; Q1/Q3 = 25th/75th percentile; % Expr = 100 * cells with value > 0 / n'
         }},
@@ -8428,7 +8428,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }},
         group_de: {{
             title: 'Annotation expression',
-            body: 'Genes are selected by a two-sided Welch test between Annotation A and Annotation B. The top positive and negative Welch T scores are retained after the minimum-expression threshold. Bar-end values show mean expression and the percentage of cells expressing the gene; the factor is mean A divided by mean B.',
+            body: 'Features are selected by a two-sided Welch test between Annotation A and Annotation B. The top positive and negative Welch T scores are retained after the minimum-detection threshold. Bar-end values show mean feature value and the percentage of cells above zero; the factor is mean A divided by mean B.',
             formula: 'Welch T = (mean A - mean B) / sqrt(variance A / n A + variance B / n B); factor = mean A / mean B; log2FC = log2(mean A / mean B)'
         }},
         neighbor_stats: {{
@@ -9403,8 +9403,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'Start with Default mode when browsing, then move to Split mode when comparing two signals.'
             ], {{ nextLabel: tryIt, placement: 'below' }}),
             step('Default source switch', ['#visual-source-switch'], [
-                'Default mode can show either a cell annotation layer or a gene expression layer.',
-                'The Annotation and Gene buttons decide which controls are visible.'
+                'Default mode can show either a cell annotation layer or a feature layer.',
+                'The Annotation and Feature buttons decide which controls are visible.'
             ], {{ nextLabel: tryIt }}),
             step('Annotation selector', ['#visual-annotation-controls', '#annotation-select'], [
                 'The annotation selector chooses which cell-level annotation colors every section.',
@@ -9412,15 +9412,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ], {{ nextLabel: tryIt }}),
             step('Open split mode', ['#overview-mode-split', '#visual-params-bar'], [
                 'Split mode compares two visual layers in the same spatial panels.',
-                'This is the easiest way to compare two annotations, two genes, or annotation versus gene.'
+                'This is the easiest way to compare two annotations, two features, or annotation versus feature.'
             ], {{ action: () => {{ if (typeof closeModal === 'function') closeModal(); safeTutorialClick('#overview-mode-split'); }}, nextLabel: tryIt }}),
             step('Choose split layer A', ['#overview-blend-row-a'], [
                 'Layer A controls the left side or first layer in split comparison.',
-                'It can represent an annotation, a gene, or another exported modality depending on the viewer.'
+                'It can represent an annotation or a feature from any exported namespace depending on the viewer.'
             ], {{ action: () => safeTutorialClick('#overview-mode-split'), nextLabel: tryIt }}),
             step('Choose split layer B', ['#overview-blend-row-b'], [
                 'Layer B is the comparison layer paired with layer A.',
-                'Pick a meaningful counterpart, such as another gene or the same annotation under a different category view.'
+                'Pick a meaningful counterpart, such as another feature or the same annotation under a different category view.'
             ], {{ action: () => safeTutorialClick('#overview-mode-split'), nextLabel: tryIt }}),
             step('Split boundary slider', ['#overview-blend-row-mix', '#overview-blend-mix'], [
                 'The slider controls where layer A ends and layer B begins inside each spatial panel.',
@@ -9453,7 +9453,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'This lets you keep it pinned while browsing the section grid.'
             ], {{ condition: () => !!DATA.has_umap, action: () => {{ if (DATA.has_umap && !umapVisible && typeof toggleUMAP === 'function') toggleUMAP(); }}, nextLabel: tryIt }}),
             step('Insights panel overview', ['#insights-toggle', '#insights-panel'], [
-                'Insights is the workspace for selected cells, regions, gene modules, and built-in analysis panels.'
+                'Insights is the workspace for selected cells, regions, feature modules, and built-in analysis panels.'
             ], {{ action: () => {{ if (typeof closeModal === 'function') closeModal(); if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); }}, nextLabel: tryIt }}),
             step('Insights Selection mode', ['#insights-mode-selection', '#insights-selection-panel'], [
                 'Selection contains the compact summary for cells selected by lasso, UMAP lasso, or query.',
@@ -9464,31 +9464,31 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'Use it to organize, group, compare, export, or reuse drawn regions.'
             ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); if (typeof setInsightsMode === 'function') setInsightsMode('region'); }}, nextLabel: tryIt }}),
             step('Insights Module mode', ['#insights-mode-module', '#insights-module-panel'], [
-                'The module area combines gene expression to visualize associated genes or pathways.',
+                'The module area combines feature values to visualize associated genes or pathways.',
                 'Use it for signatures, custom marker lists, or repeated gene-set review.'
             ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); if (typeof setInsightsMode === 'function') setInsightsMode('module'); }}, nextLabel: tryIt }}),
             step('Insights Exploration mode', ['#insights-mode-exploration', '#insights-exploration-panel'], [
                 'Exploration is the main navigation mode for built-in summaries.',
-                'It contains overview, gene, compare, pathway, neighborhood, and export-oriented analysis panels.'
+                'It contains overview, feature, compare, pathway, neighborhood, and export-oriented analysis panels.'
             ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); }}, nextLabel: tryIt }}),
             step('Insights Selection', ['#insights-selection-panel.insights-panel-mode'], [
                 'Selection summarizes the active cells selection by section and main annotation.'
             ], {{ action: () => {{ if (typeof closeModal === 'function') closeModal(); setTutorialFirstGridRandomSelection({{ areaFraction: 0.03, minCells: 8, maxCells: 80, attempts: 28 }}); if (typeof openInsightsMode === 'function') openInsightsMode('selection'); updateSelectionInfo?.(); }}, nextLabel: tryIt }}),
             step('Selection Find More', ['[data-selection-find-more]', '#insights-selection-panel'], [
-                'Use the Find More button to reach the Exploration panel and find gene markers of your selection.'
+                'Use the Find More button to reach the Exploration panel and find feature markers of your selection.'
             ], {{ action: () => {{ tutorialSelectionFindMoreClicked = false; if (typeof closeModal === 'function') closeModal(); if (typeof openInsightsMode === 'function') openInsightsMode('selection'); updateSelectionInfo?.(); }}, nextLabel: tryIt }}),
-            step('Selection gene markers', ['#compare-selection-panel .selection-summary-title-row'], [
-                'Compare > Per cell > Selections is the detailed workspace for marker genes of the active selection.',
-                'The search icon starts the marker-gene calculation for the selected cells.'
+            step('Selection feature markers', ['#compare-selection-panel .selection-summary-title-row'], [
+                'Compare > Per cell > Selections is the detailed workspace for marker features of the active selection.',
+                'The search icon starts the marker-feature calculation for the selected cells.'
             ], {{ action: () => {{ tutorialSelectionMarkersClicked = false; selectionWelchButtonHidden = false; selectionWelchRunRequested = false; selectionWelchRunning = false; openTutorialInsightsPanel('compare', 'selection'); updateSelectionInfo?.(); }}, onNext: () => safeTutorialClick('[data-find-welch-markers]'), nextLabel: tryIt }}),
             step('Selection composition comparison', ['#compare-selection-panel .selection-comparison-composition', '#compare-selection-panel .selection-summary-row', '#compare-selection-panel'], [
                 'The composition result summarizes which main annotations are present in the selected cells.',
                 'When Region B exists, the panel shows Region A versus Region B.'
             ], {{ action: () => {{ openTutorialInsightsPanel('compare', 'selection'); updateSelectionInfo?.(); }}, nextLabel: tryIt }}),
-            step('Selection expression comparison', ['#compare-selection-panel .selection-summary-expr', '#compare-selection-panel'], [
-                'Genes were selected by two sided Welch test.',
-                'The gene-expression area compares expression in the selected cells against the current reference.',
-                'Bars show mean expression and percent expressed for each displayed gene.'
+            step('Selection feature comparison', ['#compare-selection-panel .selection-summary-expr', '#compare-selection-panel'], [
+                'Features were selected by two sided Welch test.',
+                'The feature-value area compares values in the selected cells against the current reference.',
+                'Bars show mean value and percent detected for each displayed feature.'
             ], {{ action: () => {{ openTutorialInsightsPanel('compare', 'selection'); updateSelectionInfo?.(); }}, nextLabel: tryIt }}),
             step('Pan mode', '#selection-pan-btn', [
                 'Pan mode moves around the spatial view, and navigate without selecting cells.',
@@ -9532,21 +9532,21 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'Both controls clear the active selected-cell set.'
             ], {{ action: () => {{ updateSelectionInfo?.(); updateSelectionLassoButtonState?.(); }}, task: 'Deselect the cells by clicking the cross-format lasso button or the red cross in the selection chip.', requiresNoSelection: true, combineTargets: true, targetAfterGateSatisfied: ['#selection-lasso-btn', 'tutorial-first-grid-section'], scroll: false, nextLabel: tryIt }}),
             step('Find cells by query', ['#selection-query-panel', '#selection-query-toggle', '#insights-panel'], [
-                'Select cells based on annotations, level of gene expression or experiment metadata.'
+                'Select cells based on annotations, feature values or experiment metadata.'
             ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('selection'); updateSelectionInfo?.(); keepTutorialSelectionQueryPanelOpen(); }}, onNext: () => closeSelectionQueryPanel(), task: 'Cells can be selected by querying the text box rule and clicking the search icon below the text box', requiresQuerySelection: true, combineTargets: true, scroll: false, positionTarget: '#selection-query-panel', placement: 'right', nextLabel: tryIt }}),
-            step('Switch to Gene source', ['#default-source-feature', '#visual-feature-controls'], [
-                'Gene source changes the grid from categorical annotation colors to gene or feature expression.'
+            step('Switch to Feature source', ['#default-source-feature', '#visual-feature-controls'], [
+                'Feature source changes the grid from categorical annotation colors to feature values.'
             ], {{ action: () => safeTutorialClick('#default-source-feature'), nextLabel: tryIt }}),
-            step('Gene discovery panel', '#feature-discovery-panel', [
-                'Gene discovery helps you search, activate genes, and inspect related gene information.',
-                'Suggestion for gene markers are displayed depending on the selected annotation.',
-                'It can include marker genes, spatial genes, correlations, and module tools depending on the exported payload.'
+            step('Feature discovery panel', '#feature-discovery-panel', [
+                'Feature discovery helps you search, activate features, and inspect related feature information.',
+                'Marker feature suggestions are displayed depending on the selected annotation.',
+                'It can include marker features, spatial features, correlations, and module tools depending on the exported payload.'
             ], {{ action: () => {{ safeTutorialClick('#default-source-feature'); lockTutorialGeneDiscoveryPanel(); setTutorialToolbarPanel(null); document.getElementById('feature-input')?.focus(); }}, positionTarget: '#feature-discovery-panel', placement: 'right', nextLabel: tryIt }}),
-            step('Gene input field', ['#feature-input', '#feature-input-shell'], [
-                'The gene input accepts embedded genes and sidecar-loadable genes when sidecar mode is available.'
+            step('Feature input field', ['#feature-input', '#feature-input-shell'], [
+                'The feature input accepts embedded features and sidecar-loadable features when sidecar mode is available.'
             ], {{ action: () => safeTutorialClick('#default-source-feature'), onNext: () => setTutorialSplitGeneDisplay(), nextLabel: tryIt }}),
-            step('Gene expression scale', ['#gene-params-panel', '#gene-params-toggle'], [
-                'Modify the default scaling of a gene to highlight its expression. Scaling can be propagated to the other gene in the Split setup to compare gene expression.'
+            step('Feature value scale', ['#gene-params-panel', '#gene-params-toggle'], [
+                'Modify the default scaling of a feature to highlight its values. Scaling can be propagated to the other feature in the Split setup to compare feature values.'
             ], {{ action: () => lockTutorialGeneParamsPanel(), positionTarget: '#gene-params-panel', placement: 'right', prepareDelay: 360, nextLabel: tryIt }}),
             step('Modality selector', ['#visual-feature-namespace-control', '#visual-feature-namespace-select'], [
                 'If multiple modalities were exported, the modality selector switches the feature namespace.',
@@ -9714,8 +9714,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'Changing them updates the DE table, plots, diagnostics, and pathway section.'
             ], {{ action: () => {{ ensureTutorialPseudobulkDEAnnotation(); openTutorialInsightsPanel('compare', 'cell-de'); ensureTutorialPseudobulkDEAnnotation(); renderPseudobulkDE?.(); }}, task: 'Choose Annotation A and B if selectors are available.', combineTargets: true, prepareDelay: 420, nextLabel: tryIt }}),
             step('Compare Simple design view switch', ['#pseudobulk-de-section-title', '#pseudobulk-de-results .pseudobulk-de-panel-mode-switch'], [
-                'The Simple design switch separates the contrast into Raw table, Genes, and Samples views.',
-                'Raw table shows exact DE values, Genes shows MA and volcano plots, and Samples shows pseudobulk diagnostics such as PCA or distance matrix.'
+                'The Simple design switch separates the contrast into Raw table, Features, and Samples views.',
+                'Raw table shows exact DE values, Features shows MA and volcano plots, and Samples shows pseudobulk diagnostics such as PCA or distance matrix.'
             ], {{ action: () => {{ ensureTutorialPseudobulkDEAnnotation(); openTutorialInsightsPanel('compare', 'cell-de'); ensureTutorialPseudobulkDEAnnotation(); renderPseudobulkDE?.(); }}, combineTargets: true, prepareDelay: 420, scrollDelay: 620, spotlightPadding: 2, nextLabel: tryIt }}),
             step('Compare Simple design pathway switch', ['#pathway-enrichment-title', '#compare-tab-cell-de-content [data-pathway-annotation-select]', '#compare-tab-cell-de-content .pathway-panel-mode-switch'], [
                 'When pathway enrichment is available, the pathway switch changes between ORA pathways and GSEA enrichment.',
@@ -9758,11 +9758,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'It complements neighbor enrichment by describing global spatial arrangement rather than only immediate adjacency.'
             ], {{ action: () => openTutorialInsightsPanel('neighbors', 'dispersion'), nextLabel: tryIt }}),
             step('Finish the tutorial', '#tutorial-trigger', [
-                'You have now touched the major viewer workflows: browsing, filters, genes, modal inspection, selections, annotations, and Insights.',
+                'You have now touched the major viewer workflows: browsing, filters, features, modal inspection, selections, annotations, and Insights.',
                 'Restart the tutorial from the graduation-cap button if you want to revisit any step.'
             ], {{ scroll: false, spotlightPadding: 0, nextLabel: 'Finish' }})
         ];
-        const geneStartIndex = rawSteps.findIndex(item => item.title === 'Switch to Gene source');
+        const geneStartIndex = rawSteps.findIndex(item => item.title === 'Switch to Feature source');
         const geneEndIndex = rawSteps.findIndex(item => item.title === 'Open a section modal');
         const visualSetupEndIndex = rawSteps.findIndex(item => item.title === 'Split boundary slider');
         if (geneStartIndex >= 0 && geneEndIndex > geneStartIndex && visualSetupEndIndex >= 0 && visualSetupEndIndex < geneStartIndex) {{
@@ -9798,8 +9798,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const regionEndIndex = rawSteps.findIndex(item => item.title === 'Module gene picker') >= 0
             ? rawSteps.findIndex(item => item.title === 'Module gene picker')
             : rawSteps.findIndex(item => item.title === 'Exploration annotation selector');
-        const umapRegionAnchorTitle = rawSteps.findIndex(item => item.title === 'Selection expression comparison') >= 0
-            ? 'Selection expression comparison'
+        const umapRegionAnchorTitle = rawSteps.findIndex(item => item.title === 'Selection feature comparison') >= 0
+            ? 'Selection feature comparison'
             : (rawSteps.findIndex(item => item.title === 'Selection Find More') >= 0
                 ? 'Selection Find More'
                 : (rawSteps.findIndex(item => item.title === 'UMAP panel position and size') >= 0
@@ -9816,7 +9816,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ['Viewer info button', 'Helpers'],
             ['Theme toggle', 'Session tools'],
             ['Visual parameters', 'Visual Setup'],
-            ['Switch to Gene source', 'Gene Expression'],
+            ['Switch to Feature source', 'Feature Values'],
             ['Pan mode', 'Spatial Selection'],
             ['UMAP toggle', 'UMAP'],
             ['Insights panel overview', 'Insights'],
@@ -10387,7 +10387,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ensureTutorialSelection('grid');
             tutorialSelectionFindMoreClicked = true;
             updateSelectionInfo?.();
-        }} else if (title === 'Selection gene markers') {{
+        }} else if (title === 'Selection feature markers') {{
             ensureTutorialSelection('grid');
             tutorialSelectionMarkersClicked = true;
             openTutorialInsightsPanel('compare', 'selection');
@@ -11069,9 +11069,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!title) return;
         if (title !== 'Find cells by query') closeSelectionQueryPanel();
         if (title !== 'Visual parameters') unlockTutorialVisualParamsPanel(false);
-        if (title !== 'Gene discovery panel') unlockTutorialGeneDiscoveryPanel(false);
-        if (title !== 'Gene expression scale') unlockTutorialGeneParamsPanel(false);
-        const isSplitGeneScaleStep = title === 'Gene expression scale';
+        if (title !== 'Feature discovery panel') unlockTutorialGeneDiscoveryPanel(false);
+        if (title !== 'Feature value scale') unlockTutorialGeneParamsPanel(false);
+        const isSplitGeneScaleStep = title === 'Feature value scale';
         const isSplitStep = title.startsWith('Open split') || title.startsWith('Split boundary') || title.startsWith('Choose split') || title.startsWith('Split expression') || isSplitGeneScaleStep;
 
         if (chapter === 'Visual Setup' || isSplitStep) {{
@@ -11080,7 +11080,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 if (isSplitGeneScaleStep) lockTutorialGeneParamsPanel();
                 else if (title.startsWith('Split expression')) ensureTutorialGeneParametersOpen();
             }} else {{
-                ensureTutorialDefaultMode(title.includes('Gene') ? 'gene' : 'annotation');
+                ensureTutorialDefaultMode(title.includes('Feature') ? 'gene' : 'annotation');
             }}
         }}
 
@@ -11105,12 +11105,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ensureTutorialDefaultMode('annotation');
         }}
 
-        if (chapter === 'Gene Expression' && !isSplitStep) {{
+        if (chapter === 'Feature Values' && !isSplitStep) {{
             ensureTutorialDefaultMode('gene');
-            if (title === 'Switch to Gene source') clearTutorialGeneInput();
-            if (title === 'Gene input field') ensureTutorialFirstGeneSelected();
-            if (title === 'Gene expression scale') setTutorialToolbarPanel('gene');
-            if (title === 'Gene discovery panel') {{
+            if (title === 'Switch to Feature source') clearTutorialGeneInput();
+            if (title === 'Feature input field') ensureTutorialFirstGeneSelected();
+            if (title === 'Feature value scale') setTutorialToolbarPanel('gene');
+            if (title === 'Feature discovery panel') {{
                 lockTutorialGeneDiscoveryPanel();
             }}
         }}
@@ -13886,7 +13886,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function setGeneLoadingState(isLoading, message = '') {{
-        featureSidecarLoadingMessage = isLoading ? (message || 'Loading gene expression…') : '';
+        featureSidecarLoadingMessage = isLoading ? (message || 'Loading feature values…') : '';
         const geneInput = document.getElementById('feature-input');
         if (geneInput) {{
             geneInput.disabled = !!isLoading;
@@ -14305,8 +14305,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (featureSidecarShardCache.has(shardUrl)) return featureSidecarShardCache.get(shardUrl);
         if (featureSidecarShardPromises.has(shardUrl)) return featureSidecarShardPromises.get(shardUrl);
 
-        setGeneLoadingState(true, 'Loading gene expression…');
-        window.__karospaceShowLoadingWarning?.('Loading requested gene expression…');
+        setGeneLoadingState(true, 'Loading feature values…');
+        window.__karospaceShowLoadingWarning?.('Loading requested feature values…');
         const promise = fetch(shardUrl, {{ credentials: 'same-origin', cache: 'no-store' }})
             .then(async (response) => {{
                 if (!response.ok) {{
@@ -17157,7 +17157,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const pseudobulkKey = getPseudobulkDEColorKey(annotationCol, modality);
         const byColor = getPseudobulkDEPayloadForModality(modality)[pseudobulkKey] || null;
         if (!byColor || typeof byColor !== 'object') return '';
-        const rows = [['annotation_column', 'category', 'reference', 'rank', 'gene', 'base_mean', 'log2fc', 'pvalue', 'padj', 'score', 'pct_source', 'pct_reference']];
+        const rows = [['modality', 'annotation_column', 'category', 'reference', 'rank', 'feature', 'base_mean', 'log2fc', 'pvalue', 'padj', 'score', 'pct_source', 'pct_reference']];
         Object.entries(byColor).forEach(([sourceCategory, bucket]) => {{
             if (String(sourceCategory).startsWith('_') || !bucket || typeof bucket !== 'object') return;
             const comparisons = bucket.__rest__
@@ -17167,6 +17167,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const entries = getPseudobulkDETableEntries(result);
                 entries.forEach((entry, idx) => {{
                     rows.push([
+                        modality,
                         annotationCol,
                         sourceCategory,
                         reference,
@@ -17192,11 +17193,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function exportMarkerGenesCsv(annotationCol = currentAnnotation, modality = getExplorationModality()) {{
         const csvText = buildMarkerGenesCsv(annotationCol, modality);
         if (!csvText) {{
-            alert('No pseudobulk DE genes are available for this annotation to export.');
+            alert('No pseudobulk DE features are available for this annotation to export.');
             return;
         }}
         const colorLabel = sanitizeFilenamePart(annotationCol || 'color');
-        const filename = `karospace-pseudobulk-de-genes-${{colorLabel}}-${{getScreenshotTimestamp()}}.csv`;
+        const modName = sanitizeFilenamePart(modality || DEFAULT_MODALITY_NAME || 'modality');
+        const filename = `karospace-pseudobulk-de-features-${{modName}}-${{colorLabel}}-${{getScreenshotTimestamp()}}.csv`;
         downloadTextFile(csvText, filename, 'text/csv;charset=utf-8');
     }}
 
@@ -17347,7 +17349,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 ? escapeHtml(selectionQueryStatus)
                 : preview
                     ? `Current query: <code>${{escapeHtml(preview)}}</code>`
-                    : 'Find cells by annotation, gene value, or section metadata.';
+                    : 'Find cells by annotation, feature value, or section metadata.';
         return `
             <div class="selection-query">
                 ${{showToggle ? `
@@ -17523,7 +17525,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             html += '</div>';
         }}
 
-        // Welch test for gene expression A vs B.
+        // Welch test for feature values A vs B.
         const expr = getCachedSelectionWelchExpression(selectedCells, compareAllCells ? null : selectedCellsB);
         if (selectedCells.size > 0 && (compareAllCells || selectedCellsB.size > 0)) {{
             const top = getWelchTopResults(expr);
@@ -17568,7 +17570,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         </div>
                     </div>
                 `).join('');
-                html += `<div class="selection-comparison-de-results">${{buildGroupVolcanoPlot(top, volcanoToolbar, {{ positive: colorA, negative: colorB }})}}<div class="comparison-stack">${{cards}}</div><div style="display:flex;justify-content:flex-end;gap:6px;margin-top:6px;"><button class="icon-btn" type="button" data-selection-de-export-csv title="Download all comparison genes as CSV" aria-label="Download all comparison genes as CSV"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path></svg></button></div></div>`;
+                html += `<div class="selection-comparison-de-results">${{buildGroupVolcanoPlot(top, volcanoToolbar, {{ positive: colorA, negative: colorB }})}}<div class="comparison-stack">${{cards}}</div><div style="display:flex;justify-content:flex-end;gap:6px;margin-top:6px;"><button class="icon-btn" type="button" data-selection-de-export-csv title="Download all comparison features as CSV" aria-label="Download all comparison features as CSV"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path></svg></button></div></div>`;
             }}
         }}
 
@@ -19597,7 +19599,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!config || config.is_continuous) {{
             return {{
                 title: 'Suggestions unavailable',
-                subtitle: 'Switch to a categorical annotation to use pseudobulk DE gene suggestions.',
+                subtitle: 'Switch to a categorical annotation to use pseudobulk DE feature suggestions.',
                 groups: [],
                 hiddenCount: 0,
             }};
@@ -19608,10 +19610,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const availableColors = getAvailableMarkerGeneColors();
             const availableLabel = availableColors.length
                 ? ` Available for: ${{availableColors.join(', ')}}.`
-                : ' No pseudobulk DE genes are embedded in this viewer.';
+                : ' No pseudobulk DE features are embedded in this viewer.';
             return {{
                 title: `Suggested from ${{formatMetadataLabel(currentAnnotation)}}`,
-                subtitle: `No pseudobulk DE genes are available for the active color.${{availableLabel}}`,
+                subtitle: `No pseudobulk DE features are available for the active color.${{availableLabel}}`,
                 groups: [],
                 hiddenCount: 0,
             }};
@@ -19631,7 +19633,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         return {{
             title: `Suggested from ${{formatMetadataLabel(currentAnnotation)}}`,
-            subtitle: groups.length ? '' : 'No pseudobulk DE genes are available for the active color.',
+            subtitle: groups.length ? '' : 'No pseudobulk DE features are available for the active color.',
             groups: groups.slice(0, GENE_DISCOVERY_SUGGESTION_GROUP_LIMIT),
             hiddenCount: Math.max(0, groups.length - GENE_DISCOVERY_SUGGESTION_GROUP_LIMIT),
         }};
@@ -21094,7 +21096,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 '',
                 'Files:',
                 '- obs.csv      Per-cell metadata (' + totalCells.toLocaleString() + ' cells)',
-                '- var.csv      Gene list (' + nGenes.toLocaleString() + ' genes)',
+                '- var.csv      Feature list (' + nGenes.toLocaleString() + ' features)',
                 useSparse
                     ? '- X.mtx        Sparse expression matrix in Matrix Market coordinate format (' + nnz.toLocaleString() + ' non-zero entries)'
                     : '- X.csv        Dense expression matrix (rows = cells, columns = genes)',
@@ -24694,7 +24696,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                                 ${{renderGeneTokenButton(entry.gene, {{
                                     isActive: entry.gene === currentGene,
                                     showMeta: false,
-                                    title: 'Load region DE gene into the viewer',
+                                    title: 'Load region DE feature into the viewer',
                                 }})}}
                                 ${{renderGeneGoogleSearchButton(entry.gene, {{
                                     title: 'Search Google for this gene',
@@ -24810,7 +24812,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 </div>
             `;
         }} else if (!deResult.available && deResult.reason === 'no_loaded_features') {{
-            resultHtml = '<div class="agg-group-meta">No genes are currently loaded for region DE. Load genes in the Genes tab or click pseudobulk DE genes first.</div>';
+            resultHtml = '<div class="agg-group-meta">No features are currently loaded for region DE. Load features in the Features tab or click pseudobulk DE features first.</div>';
         }} else if (!deResult.available) {{
             resultHtml = '<div class="agg-group-meta">Choose two different regions to compare.</div>';
         }} else if (!displayedQuickResults.length) {{
@@ -24834,7 +24836,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (exportState) {{
             resultHtml += `
                 <div style="display:flex; justify-content:flex-end; gap:6px; margin-top:6px;">
-                    <button class="icon-btn" id="region-de-export-csv" type="button" title="Download all region DE genes as CSV" aria-label="Download all region DE genes as CSV"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path></svg></button>
+                    <button class="icon-btn" id="region-de-export-csv" type="button" title="Download all region DE features as CSV" aria-label="Download all region DE features as CSV"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path></svg></button>
                 </div>
             `;
         }}
@@ -24936,7 +24938,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             if (expressionEntries.length) {{
                 const colorA = getAnnotationDisplayColor(source) || 'var(--accent-strong)';
                 const colorB = getAnnotationDisplayColor(reference) || '#4cc9f0';
-                summaryHtml += `<div class="selection-summary-expr"><div class="selection-summary-title">Gene Expression by Region</div>`;
+                summaryHtml += `<div class="selection-summary-expr"><div class="selection-summary-title">Feature Values by Region</div>`;
                 expressionEntries.forEach((entry) => {{
                     const meanA = Number(entry.meanA || 0);
                     const meanB = Number(entry.meanB || 0);
@@ -26832,7 +26834,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function buildGeneDEHeatmap(data, annotationCol) {{
         if (!data || !data.genes.length || !data.categories.length) {{
-            return '<div class="marker-empty">No DE genes available for heatmap view.</div>';
+            return '<div class="marker-empty">No DE features available for heatmap view.</div>';
         }}
         const cellW = 30, cellH = 16, mt = 82, mr = 8, mb = 22;
         const maxGeneLabelChars = data.genes.length <= 1 ? 10 : 12;
@@ -27061,7 +27063,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const annotationMeta = DATA.annotations_meta?.[markerColorCol];
         if (!annotationMeta || annotationMeta.is_continuous) {{
             if (exportBtn) exportBtn.disabled = true;
-            container.innerHTML = toggleHtml + '<div class="marker-empty">Pseudobulk DE genes are available for categorical annotations only.</div>';
+            container.innerHTML = toggleHtml + '<div class="marker-empty">Pseudobulk DE features are available for categorical annotations only.</div>';
             bindGeneSubtabViewToggle(container, subtab, renderMarkerGenes);
             return;
         }}
@@ -27831,7 +27833,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         showMeta: false,
                         title: loadable
                             ? activateTitle
-                            : 'This DE gene is shown in the table but is not available for expression viewing',
+                            : 'This DE feature is shown in the table but is not available for feature viewing',
                     }});
                 }}).join('')}}
             </div>
@@ -27980,7 +27982,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             <div class="agg-group">
                 <div class="agg-group-title">${{title}}</div>
                 <div class="agg-group-meta">${{meta}}</div>
-                ${{renderComparisonGeneTokenGrid(summary.genes, available ? 'No contact-conditioned genes returned.' : 'Contact-conditioned DE genes unavailable for this direction.', 'Load contact-conditioned DE gene into the viewer', modality)}}
+                ${{renderComparisonGeneTokenGrid(summary.genes, available ? 'No contact-conditioned features returned.' : 'Contact-conditioned DE features unavailable for this direction.', 'Load contact-conditioned DE feature into the viewer', modality)}}
             </div>
         `;
     }}
@@ -28650,11 +28652,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         ].filter(Boolean).join('-');
     }}
 
-    function buildPseudobulkDECsv(entries) {{
-        const headers = ['gene', 'base_mean', 'log2fc', 'pvalue', 'padj', 'score', 'pct_source', 'pct_reference'];
+    function buildPseudobulkDECsv(entries, modality = getPseudobulkPanelModality()) {{
+        const headers = ['modality', 'feature', 'base_mean', 'log2fc', 'pvalue', 'padj', 'score', 'pct_source', 'pct_reference'];
         const lines = [headers.map(csvEscape).join(',')];
         entries.forEach((entry) => {{
             lines.push([
+                modality,
                 entry.gene,
                 csvFormatNumber(entry.baseMean),
                 csvFormatNumber(entry.log2fc),
@@ -28668,9 +28671,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return lines.join('\\n') + '\\n';
     }}
 
-    function buildPseudobulkDEExcelHtml(entries) {{
-        const headers = ['gene', 'base_mean', 'log2fc', 'pvalue', 'padj', 'score', 'pct_source', 'pct_reference'];
+    function buildPseudobulkDEExcelHtml(entries, modality = getPseudobulkPanelModality()) {{
+        const headers = ['modality', 'feature', 'base_mean', 'log2fc', 'pvalue', 'padj', 'score', 'pct_source', 'pct_reference'];
         const rows = entries.map((entry) => [
+            modality,
             entry.gene,
             csvFormatNumber(entry.baseMean),
             csvFormatNumber(entry.log2fc),
@@ -28697,14 +28701,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         );
         const entries = getPseudobulkDETableEntries(result);
         if (!entries.length) {{
-            alert('No pseudobulk DE genes are available for this comparison.');
+            alert('No pseudobulk DE features are available for this comparison.');
             return;
         }}
         const stem = getPseudobulkDEFilenameStem();
         if (format === 'excel') {{
-            downloadTextFile(buildPseudobulkDEExcelHtml(entries), `${{stem}}.xls`, 'application/vnd.ms-excel;charset=utf-8');
+            downloadTextFile(buildPseudobulkDEExcelHtml(entries, getPseudobulkPanelModality()), `${{stem}}.xls`, 'application/vnd.ms-excel;charset=utf-8');
         }} else {{
-            downloadTextFile(buildPseudobulkDECsv(entries), `${{stem}}.csv`, 'text/csv;charset=utf-8');
+            downloadTextFile(buildPseudobulkDECsv(entries, getPseudobulkPanelModality()), `${{stem}}.csv`, 'text/csv;charset=utf-8');
         }}
     }}
 
@@ -29360,7 +29364,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             return `
                 <div class="agg-group">
                     <div class="agg-group-title">Pseudobulk DE</div>
-                    <div class="agg-group-meta">No pseudobulk DE genes were returned for this comparison.</div>
+                    <div class="agg-group-meta">No pseudobulk DE features were returned for this comparison.</div>
                 </div>
             `;
         }}
@@ -29389,7 +29393,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 : '';
             return `
                 <tr${{extraAttrs}} style="background:${{rowBackground}};" data-most-expressed="${{escapeHtml(mostExpressed || '')}}">
-                    <td><button type="button" class="pseudobulk-de-gene-btn" ${{loadable ? `data-pseudobulk-de-gene="${{escapeHtml(gene)}}"` : 'disabled'}} title="${{loadable ? 'Load DE gene into the viewer' : 'Expression vector unavailable'}}">${{escapeHtml(gene)}}</button></td>
+                    <td><button type="button" class="pseudobulk-de-gene-btn" ${{loadable ? `data-pseudobulk-de-gene="${{escapeHtml(gene)}}"` : 'disabled'}} title="${{loadable ? 'Load DE feature into the viewer' : 'Feature vector unavailable'}}">${{escapeHtml(gene)}}</button></td>
                     <td>${{formatScaleNumber(Number.isFinite(log2fcValue) ? log2fcValue : NaN)}}</td>
                     <td>${{formatAdjustedPValue(pvalAdjValue)}}</td>
                     <td>${{formatScaleNumber(Number.isFinite(scoreValue) ? scoreValue : NaN)}}</td>
@@ -29402,7 +29406,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 <table class="pseudobulk-de-table">
                     <thead>
                         <tr>
-                            <th>Gene</th>
+                            <th>Feature</th>
                             <th>log\u2082FC</th>
                             <th>adj. p</th>
                             <th>Score</th>
@@ -29414,7 +29418,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 </table>
             ` : `
                 <div class="agg-group-meta">
-                    No genes pass adj. p < ${{formatScaleNumber(padjCutoff)}} and |log\u2082FC| >= ${{formatScaleNumber(log2fcCutoff)}}.
+                    No features pass adj. p < ${{formatScaleNumber(padjCutoff)}} and |log\u2082FC| >= ${{formatScaleNumber(log2fcCutoff)}}.
                 </div>
             `;
         const volcanoHtml = buildVolcanoPlot(
@@ -29450,7 +29454,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const modeSwitch = `
             <div class="pseudobulk-de-panel-mode-switch" role="group" aria-label="Pseudobulk DE result view">
                 ${{modeButton('raw', 'Raw table')}}
-                ${{modeButton('genes', 'Genes')}}
+                ${{modeButton('genes', 'Features')}}
                 ${{modeButton('samples', 'Samples')}}
             </div>
         `;
@@ -29459,7 +29463,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 ${{tablePanel}}
             </div>
             <div class="pseudobulk-de-mode-panel" data-pseudobulk-de-mode-panel="genes"${{pseudobulkDeResultMode === 'genes' ? '' : ' hidden'}}>
-                <div class="pseudobulk-de-plot-grid">${{genePanels || '<div class="agg-group-meta">No gene-level plots are available.</div>'}}</div>
+                <div class="pseudobulk-de-plot-grid">${{genePanels || '<div class="agg-group-meta">No feature-level plots are available.</div>'}}</div>
             </div>
             <div class="pseudobulk-de-mode-panel" data-pseudobulk-de-mode-panel="samples"${{pseudobulkDeResultMode === 'samples' ? '' : ' hidden'}}>
                 <div class="pseudobulk-de-plot-grid">${{samplePanels || '<div class="agg-group-meta">No pseudobulk sample diagnostics are available.</div>'}}</div>
@@ -29667,7 +29671,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             0.5
         );
         const contrastInfo = `
-            <div class="comparison-info-warning"><strong>Warning.</strong> If annotations were defined from the same expression patterns being tested here, DE results can be inflated by double dipping. Interpret these marker genes as exploratory unless the annotations were defined independently or validated on independent data.</div>
+            <div class="comparison-info-warning"><strong>Warning.</strong> If annotations were defined from the same feature patterns being tested here, DE results can be inflated by double dipping. Interpret these marker features as exploratory unless the annotations were defined independently or validated on independent data.</div>
             <div class="comparison-info">
                 <strong>DESeq2 contrast.</strong> Model: ${{escapeHtml(modelFormula)}}.
                 <div class="comparison-info-settings">
@@ -29688,7 +29692,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             modality
         );
         const markerSection = markerSummary
-            ? `<div class="selection-summary-title">Pseudobulk Markers${{renderCalcInfoButton('de_genes')}}</div>${{markerSummary}}`
+            ? `<div class="selection-summary-title">Pseudobulk marker features${{renderCalcInfoButton('de_genes')}}</div>${{markerSummary}}`
             : '';
         const pathwaySection = renderClusterPAResultSection(
             pseudobulkDeGroupby,
@@ -29701,7 +29705,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ${{controlsHtml}}
             ${{contrastInfo}}
             ${{markerSection}}
-            <div class="selection-summary-title" id="pseudobulk-de-section-title">Pseudobulk gene expression differential analysis${{renderCalcInfoButton('de_genes')}}${{getPseudobulkDEMethodBadge(pseudobulkDeGroupby, modality)}}</div>
+            <div class="selection-summary-title" id="pseudobulk-de-section-title">Pseudobulk feature differential analysis${{renderCalcInfoButton('de_genes')}}${{getPseudobulkDEMethodBadge(pseudobulkDeGroupby, modality)}}</div>
             ${{renderPseudobulkDEResultSection(pseudobulkDeGroupby, pseudobulkDeSourceCategory, pseudobulkDeReferenceCategory, modality)}}
             ${{pathwaySection ? '<div class="selection-summary-title" id="pathway-enrichment-title">Pathway Enrichment' + renderCalcInfoButton('pathway_enrichment_section') + '</div>' + pathwaySection : ''}}
         `;
@@ -30439,7 +30443,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                                 ${{renderGeneTokenButton(entry.gene, {{
                                     isActive: entry.gene === currentGene,
                                     showMeta: false,
-                                    title: 'Load group DE gene into the viewer',
+                                    title: 'Load group DE feature into the viewer',
                                 }})}}
                                 ${{renderGeneGoogleSearchButton(entry.gene, {{
                                     title: 'Search Google for this gene',
@@ -30584,7 +30588,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     </div>
                 `;
             }} else if (!quickResult.available && quickResult.reason === 'no_loaded_features') {{
-                resultHtml = '<div class="agg-group-meta">No genes are currently loaded for group DE. Load genes in the Genes tab or click pseudobulk DE genes first.</div>';
+                resultHtml = '<div class="agg-group-meta">No features are currently loaded for group DE. Load features in the Features tab or click pseudobulk DE features first.</div>';
             }} else if (!quickResult.available && quickResult.reason === 'same_group') {{
                 resultHtml = '<div class="agg-group-meta">Choose two different groups to compare.</div>';
             }} else if (!quickResult.available) {{
@@ -30804,7 +30808,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const displayed = result?.available ? selectWelchTopResults(result.results || [], groupDeTopN, groupDeMinPct, 1) : [];
         const renderCards = () => displayed.map((entry) => {{
             const sideColor = Number(entry.score || 0) >= 0 ? colorA : colorB;
-            return `<div class="comparison-card"><div class="comparison-card-title comparison-de-card-title"><div class="comparison-de-card-title-main">${{renderGeneTokenButton(entry.gene, {{ isActive: entry.gene === currentGene, showMeta: false, title: 'Load annotation DE gene into the viewer' }})}}${{renderGeneGoogleSearchButton(entry.gene, {{ title: 'Search Google for this gene' }})}}</div><div class="comparison-de-title-stats" style="border-color:${{sideColor}}"><span>log2FC ${{formatScaleNumber(entry.log2fc)}}</span><span>Score ${{formatScaleNumber(entry.score)}}</span></div></div><div class="comparison-metric-grid"><span class="comparison-de-metric-chip" style="background:${{getComparisonMetricChipBackground(colorA, sideColor)}};color:${{getTextColorForBackground(colorA)}}"><span>% expr A</span><strong>${{formatPseudobulkDEPct(entry.pctA)}}</strong><span>Mean A</span><strong>${{formatScaleNumber(entry.meanA)}}</strong></span><span class="comparison-de-metric-chip" style="background:${{getComparisonMetricChipBackground(colorB, sideColor)}};color:${{getTextColorForBackground(colorB)}}"><span>% expr B</span><strong>${{formatPseudobulkDEPct(entry.pctB)}}</strong><span>Mean B</span><strong>${{formatScaleNumber(entry.meanB)}}</strong></span></div></div>`;
+            return `<div class="comparison-card"><div class="comparison-card-title comparison-de-card-title"><div class="comparison-de-card-title-main">${{renderGeneTokenButton(entry.gene, {{ isActive: entry.gene === currentGene, showMeta: false, title: 'Load annotation DE feature into the viewer' }})}}${{renderGeneGoogleSearchButton(entry.gene, {{ title: 'Search Google for this feature' }})}}</div><div class="comparison-de-title-stats" style="border-color:${{sideColor}}"><span>log2FC ${{formatScaleNumber(entry.log2fc)}}</span><span>Score ${{formatScaleNumber(entry.score)}}</span></div></div><div class="comparison-metric-grid"><span class="comparison-de-metric-chip" style="background:${{getComparisonMetricChipBackground(colorA, sideColor)}};color:${{getTextColorForBackground(colorA)}}"><span>% detected A</span><strong>${{formatPseudobulkDEPct(entry.pctA)}}</strong><span>Mean A</span><strong>${{formatScaleNumber(entry.meanA)}}</strong></span><span class="comparison-de-metric-chip" style="background:${{getComparisonMetricChipBackground(colorB, sideColor)}};color:${{getTextColorForBackground(colorB)}}"><span>% detected B</span><strong>${{formatPseudobulkDEPct(entry.pctB)}}</strong><span>Mean B</span><strong>${{formatScaleNumber(entry.meanB)}}</strong></span></div></div>`;
         }}).join('');
         if (groupDeQuickRunning) {{
             html += '<div id="group-de-results"></div>';
@@ -30828,9 +30832,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     }});
                 }}
             }}
-            html += `<div class="selection-summary-expr"><div class="selection-summary-title">Gene Expression by Annotation</div>${{displayed.map((entry) => {{ const vmax = Math.max(1e-12, Number(entry.meanA || 0), Number(entry.meanB || 0)); const factor = entry.meanB > 0 ? `${{(entry.meanA / entry.meanB).toFixed(1)}}x` : '—'; return `<div class="selection-summary-expr-row"><span class="selection-summary-expr-gene" data-gene-activate="${{escapeHtml(entry.gene)}}">${{escapeHtml(entry.gene)}}</span><div class="selection-summary-expr-bars"><div class="selection-summary-expr-bar" style="width:${{clampPercent(100 * entry.meanA / vmax)}}%;background:${{colorA}}">${{formatCompactNumber(entry.meanA)}} (${{(100 * entry.pctA).toFixed(0)}}%)</div><div class="selection-summary-expr-bar" style="width:${{clampPercent(100 * entry.meanB / vmax)}}%;background:${{colorB}}">${{formatCompactNumber(entry.meanB)}} (${{(100 * entry.pctB).toFixed(0)}}%)</div></div><span class="selection-summary-expr-factor">${{factor}}</span></div>`; }}).join('')}}</div>`;
+            html += `<div class="selection-summary-expr"><div class="selection-summary-title">Feature Values by Annotation</div>${{displayed.map((entry) => {{ const vmax = Math.max(1e-12, Number(entry.meanA || 0), Number(entry.meanB || 0)); const factor = entry.meanB > 0 ? `${{(entry.meanA / entry.meanB).toFixed(1)}}x` : '—'; return `<div class="selection-summary-expr-row"><span class="selection-summary-expr-gene" data-gene-activate="${{escapeHtml(entry.gene)}}">${{escapeHtml(entry.gene)}}</span><div class="selection-summary-expr-bars"><div class="selection-summary-expr-bar" style="width:${{clampPercent(100 * entry.meanA / vmax)}}%;background:${{colorA}}">${{formatCompactNumber(entry.meanA)}} (${{(100 * entry.pctA).toFixed(0)}}%)</div><div class="selection-summary-expr-bar" style="width:${{clampPercent(100 * entry.meanB / vmax)}}%;background:${{colorB}}">${{formatCompactNumber(entry.meanB)}} (${{(100 * entry.pctB).toFixed(0)}}%)</div></div><span class="selection-summary-expr-factor">${{factor}}</span></div>`; }}).join('')}}</div>`;
             const volcanoToolbar = '<button class="icon-btn" type="button" data-group-de-export-volcano title="Download volcano plot as SVG" aria-label="Download volcano plot as SVG"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path></svg></button>';
-            html += `<div id="group-de-results">${{buildGroupVolcanoPlot(displayed, volcanoToolbar, {{ positive: colorA, negative: colorB }})}}<div class="comparison-stack">${{renderCards()}}</div><div style="display:flex;justify-content:flex-end;gap:6px;margin-top:6px;"><button class="icon-btn" type="button" data-group-de-export-csv title="Download all annotation comparison genes as CSV" aria-label="Download all annotation comparison genes as CSV"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path></svg></button></div>${{DATA.feature_manifest_url && result === quickResult && Number(result.loadedGeneCount || 0) < Number(result.totalGeneCount || 0) ? '<div style="display:flex;justify-content:flex-end"><button class="legend-btn" id="group-de-run-full" type="button">Run Full DE</button></div>' : ''}}</div>`;
+            html += `<div id="group-de-results">${{buildGroupVolcanoPlot(displayed, volcanoToolbar, {{ positive: colorA, negative: colorB }})}}<div class="comparison-stack">${{renderCards()}}</div><div style="display:flex;justify-content:flex-end;gap:6px;margin-top:6px;"><button class="icon-btn" type="button" data-group-de-export-csv title="Download all annotation comparison features as CSV" aria-label="Download all annotation comparison features as CSV"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path></svg></button></div>${{DATA.feature_manifest_url && result === quickResult && Number(result.loadedGeneCount || 0) < Number(result.totalGeneCount || 0) ? '<div style="display:flex;justify-content:flex-end"><button class="legend-btn" id="group-de-run-full" type="button">Run Full DE</button></div>' : ''}}</div>`;
         }} else if (quickResult && !quickResult.available) {{
             const noLoadedGenes = quickResult.reason === 'no_loaded_features' && !!DATA.feature_manifest_url;
             const message = noLoadedGenes
@@ -32927,7 +32931,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 : `${{g}} is shown in DE results but its expression vector is unavailable for ${{getModalityDisplayLabel(modality)}}`;
             return `<span class="${{cls}}"${{activateAttr}} title="${{escapeHtml(title)}}">${{escapeHtml(g)}}</span>`;
         }}).join(', ');
-        const sourceMarkerLabel = sourceMarkers.length ? renderInlineGeneLinks(sourceMarkers) : 'No pseudobulk DE genes available.';
+        const sourceMarkerLabel = sourceMarkers.length ? renderInlineGeneLinks(sourceMarkers) : 'No pseudobulk DE features available.';
         const sourceN = (nCells[sourceIdx] ?? 0).toLocaleString();
         const degreeLabel = Number.isFinite(meanDegree[sourceIdx]) ? meanDegree[sourceIdx].toFixed(2) : '0.00';
         const withContactMarkers = topEntries.filter(entry => !!entry.contact).length;
@@ -32968,9 +32972,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             <div class="agg-group">
                 <div class="agg-group-title">${{renderAggCategoryChip(annotationCol, source)}} → targets${{renderCalcInfoButton('neighbor_stats')}}</div>
                 <div class="agg-group-meta">n=${{sourceN}} | mean degree=${{degreeLabel}} | neighbor edges=${{formatNeighborCount(total)}}</div>
-                <div class="agg-group-meta">Source DE genes: ${{sourceMarkerLabel}}</div>
-                <div class="agg-group-meta">Contact-conditioned DE genes available for ${{withContactMarkers}}/${{topEntries.length}} shown targets in ${{escapeHtml(getModalityDisplayLabel(modality))}}.</div>
-                ${{hasInteractionMarkers ? '' : '<div class="agg-group-meta">Contact DE genes not precomputed for this annotation (use pseudobulk_additional_annotations during export for extra annotations).</div>'}}
+                <div class="agg-group-meta">Source DE features: ${{sourceMarkerLabel}}</div>
+                <div class="agg-group-meta">Contact-conditioned DE features available for ${{withContactMarkers}}/${{topEntries.length}} shown targets in ${{escapeHtml(getModalityDisplayLabel(modality))}}.</div>
+                ${{hasInteractionMarkers ? '' : '<div class="agg-group-meta">Contact DE features not precomputed for this annotation (use pseudobulk_additional_annotations during export for extra annotations).</div>'}}
             </div>
             <table class="trend-table">
                 <thead>
@@ -32979,8 +32983,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         <th>Share</th>
                         <th>Edges</th>
                         <th>Z</th>
-                        <th>Contact DE genes</th>
-                        <th>Type DE genes</th>
+                        <th>Contact DE features</th>
+                        <th>Type DE features</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -33807,7 +33811,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const gridSideToolbar = document.getElementById('grid-side-toolbar');
         const visualParamsToggle = document.getElementById('visual-params-toggle');
         const geneParamsToggle = document.getElementById('gene-params-toggle');
-        const isTutorialGeneParamsPanelLocked = () => tutorialGeneParamsLocked && tutorialSteps[tutorialStepIndex]?.title === 'Gene expression scale';
+        const isTutorialGeneParamsPanelLocked = () => tutorialGeneParamsLocked && tutorialSteps[tutorialStepIndex]?.title === 'Feature value scale';
         const keepTutorialGeneParamsPanelOpen = () => {{
             gridSideToolbar?.classList.add('gene-open');
             gridSideToolbar?.classList.remove('visual-open', 'neighbor-open');
@@ -35537,7 +35541,7 @@ def export_to_html(
             '<div class="info-block">'
             '<div class="info-title">Viewer</div>'
             '<div class="info-text">KaroSpace interactive spatial viewer for exploring '
-            'sections, annotations, and gene expression.</div>'
+            'sections, annotations, and feature values.</div>'
             '</div>'
             '<div class="info-block">'
             '<div class="info-title">Contact</div>'

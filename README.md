@@ -19,17 +19,17 @@ Visit [KaroSpace Website](https://karospace.se/).
 - [x] **Cells selection composition** — Selected-cell totals and per-type counts with expandable scrollable lists
 - [x] **Polygon regions** — Save lasso selections as persistent regions, reorder labels, and export JSON for downstream integration
 - [x] **Region-to-region comparison** — Compare saved regions directly in the viewer, export JSON/CSV reports, and search top hits
-- [x] **Cell search** — Select cells with query syntax based on annotations, genes, or section metadata, then reuse the selection in summaries and comparisons
-- [x] **Split screen** — Compare two variables side-by-side in the modal (`Annotation`, `Modality` or `Module`)
+- [x] **Cell search** — Select cells with query syntax based on annotations, features, or section metadata, then reuse the selection in summaries and comparisons
+- [x] **Split screen** — Compare two variables side-by-side in the modal (`Annotation`, a selected feature modality, or `Module`)
 - [x] **Gene modules** — Build custom gene sets, compute averaged module scores, display them like expression layers, and import/export module definitions
 - [x] **Legend controls** — Toggle/hide categories and spotlight one class across grid and UMAP
-- [x] **Gene exploration** — Search genes, inspect expression distributions, review marker genes, spatial genes, category means, and related-gene suggestions
+- [x] **Feature exploration** — Search within a selected modality, inspect value distributions, review marker features, spatial features, category means, and related-feature suggestions
 - [x] **Per cell comparison** — Live comparison of cell selections or regions with table and graphs visualization (Welch test scores, log2FC, mean, expression percentage)
-- [x] **Per sample comparison** — Precomputed pseudobulk differential gene expression using DESeq2 (PCA, distance matrices, volcano plots) and pathway enrichments.
+- [x] **Per sample comparison** — Precomputed pseudobulk differential feature analysis using DESeq2 (PCA, distance matrices, volcano plots) with pathway enrichment for gene-compatible modalities.
 - [x] **Neighbor graph tools** — Graph overlay, hover rings (1–3 hops), enrichment, interactions, and dispersion summaries when `adata.obsp` contains a spatial graph
 - [x] **Quality-of-life controls** — Hideable toolbar, screenshots, light/dark theme toggle, buttons explanation, keyboard shortcuts, and adjustable spot size
 - [x] **Standalone export** — One self-contained HTML file, no backend required
-- [x] **Compact sidecar** — Keep large gene matrices outside the HTML with lazy-loaded sidecar manifests and binary shards for lighter initial viewer files
+- [x] **Compact sidecar** — Keep large feature matrices outside the HTML with lazy-loaded sidecar manifests and binary shards for lighter initial viewer files
 - [x] **Shareable packages** — Export as `.karospace` bundles (ZIP + viewer HTML)
 
 ## Quick Start
@@ -140,11 +140,12 @@ export_to_html(
         "Cd8a",
         "Gfap",
     ],
-    features_list=None,             # Optional text file with one gene per line
+    features_list=None,             # Optional text file with one feature/gene per line
     feature_encoding="auto",        # "auto" | "dense" | "sparse"
     feature_storage="embedded",     # "embedded" | "sidecar"
     feature_manifest_path=None,          # Optional manifest path; defaults to viewer.features.json
     feature_sparse_zero_threshold=0.8,
+    modalities=["rna", "protein"],  # Feature namespaces to export into the viewer
     neighbor_stats_annotations=["cell_type"],
     neighbor_stats_permutations=20,
     pseudobulk="auto",           # Use None to disable category pseudobulk DE
@@ -230,10 +231,11 @@ karospace your_data.h5ad \
   --downsample 30000 \
   --cell-annotations leiden, niche \
   --features Cd4,Cd8a,Gfap \
-  --features-list genes.txt \
+  --features-list features.txt \
   --feature-encoding auto \
   --feature-storage embedded \
   --feature-sparse-zero-threshold 0.8 \
+  --modalities rna,protein \
   --neighbor-stats-annotations cell_type \
   --neighbor-permutations 20 \
   --pseudobulk auto \
@@ -264,7 +266,7 @@ karospace your_data.h5ad \
 | `--inspect-input` | Read input metadata and exit without building sections, downsampling, exporting HTML, or running analytics | off |
 | `--main-cell-annotation` | Main cell-annotation column shown first in the viewer | `leiden` |
 | `--cell-annotations` | Comma-separated extra cell obs annotation columns to embed as selectable cell annotations | empty |
-| `--features` | Comma-separated features or genes to preload. Requested names are matched against every exported `--modalities` namespace, so the same feature name is included in each selected modality where it exists. Significant pseudobulk DE genes are embedded automatically up to the per-comparison cap | empty |
+| `--features` | Comma-separated features or genes to preload. Requested names are matched against every exported `--modalities` namespace, so the same feature name is included in each selected modality where it exists. Significant pseudobulk DE features are embedded automatically up to the per-comparison cap | empty |
 | `--features-list` | Text file with one feature/gene per line; combined with `--features`, deduplicated, and resolved across selected modalities | empty |
 | `--section-metadata` | Comma-separated obs columns to use as section metadata shown in the visual params bar/filter chips | loader defaults |
 | `--section-metadata-extra` | Comma-separated obs columns to store as section metadata without visual params bar/filter chips | empty |
@@ -286,11 +288,11 @@ karospace your_data.h5ad \
 | `--viewer-info-html-file` | Path to an HTML fragment shown in the viewer Info tab | empty |
 | `--tutorial` | (in development) Embed the static Story Mode HTML tutorial; users start it from the graduation-cap control and move through prepared viewer states with Next/Back | off |
 | `--no-reproducibility-info` | Do not embed export arguments, thresholds, cutoffs, inputs, and resolved settings in the HTML reproducibility popover | off |
-| `--feature-encoding` | Gene vector encoding (`auto`, `dense`, `sparse`) | `auto` |
-| `--feature-value-encoding` | Sidecar/package gene value encoding for binary shards (`uint16`, `uint8`) | `uint16` |
-| `--feature-storage` | Feature storage mode: `embedded` stores requested/top DE expression vectors in the HTML; `sidecar` stores all gene expression vectors outside the HTML | `embedded` |
+| `--feature-encoding` | Feature vector encoding (`auto`, `dense`, `sparse`) | `auto` |
+| `--feature-value-encoding` | Sidecar/package feature value encoding for binary shards (`uint16`, `uint8`) | `uint16` |
+| `--feature-storage` | Feature storage mode: `embedded` stores requested/top DE feature vectors in the HTML; `sidecar` stores all feature vectors outside the HTML | `embedded` |
 | `--feature-manifest-path` | Path for the feature sidecar manifest JSON | auto |
-| `--feature-sidecar-shard-size` | Genes/features per sidecar shard | `256` |
+| `--feature-sidecar-shard-size` | Features per sidecar shard | `256` |
 | `--feature-sparse-zero-threshold` | Zero fraction threshold for `auto` sparse encoding | `0.8` |
 | `--modalities` | Comma-separated modalities to export | all detected |
 | `--neighbor-permutations` | Permutations for neighbor enrichment z-scores | `auto` |
@@ -298,7 +300,7 @@ karospace your_data.h5ad \
 | `--neighbor-stats-seed` | Random seed for neighbor enrichment permutations | `0` |
 | `--interaction-markers` | Contact-conditioned pseudobulk marker mode (`auto`, `None`) | `auto` |
 | `--interaction-markers-top-targets` | Target categories evaluated per source for contact-conditioned markers | `5` |
-| `--interaction-markers-top-genes` | Top DE genes kept per source-target interaction | `20` |
+| `--interaction-markers-top-genes` | Top DE features kept per source-target interaction | `20` |
 | `--interaction-markers-min-cells` | Minimum cells per replicate contact+ and contact- pseudobulk sample | `30` |
 | `--interaction-markers-min-neighbors` | Minimum target neighbors to classify contact+ source cells | `1` |
 | `--pseudobulk` | Category pseudobulk DE mode (`auto`, `None`) | `auto` |
@@ -308,25 +310,25 @@ karospace your_data.h5ad \
 | `--pseudobulk-modalities` | Comma-separated modalities to run category pseudobulk DE and contact-conditioned interaction markers on. Use `all` for all detected modalities. This is independent of `--modalities`, which controls feature export for the viewer | dataset default modality |
 | `--pseudobulk-simple-constrast-categories` | Categories to report in category-versus-category contrasts. With `--pseudobulk-additional-annotations`, use annotation-specific JSON wrapped in single quotes, such as `'{"cell_type":["Astrocyte","B cell"],"region":["Cortex"]}'`, or a nested list matching `[main-cell-annotation, additional...]` | empty |
 | `--pseudobulk-min-cell-counts` | Exclude cells with fewer than this many total raw counts before pseudobulk aggregation; use `0` to disable | `0` |
-| `--pseudobulk-min-gene-counts` | Exclude genes with fewer than this many total raw pseudobulk counts in the shared DESeq2 fit; use `0` to disable | `0` |
+| `--pseudobulk-min-gene-counts` | Exclude features with fewer than this many total raw pseudobulk counts in the shared DESeq2 fit; use `0` to disable | `0` |
 | `--pseudobulk-min-cells-per-pseudobulk` | Minimum cells required in each replicate × annotation pseudobulk sample before it can enter the shared DESeq2 fit | `20` |
 | `--pseudobulk-min-replicates` | Minimum paired replicates required for each reported contrast | `2` |
-| `--pseudobulk-min-pct-expressed` | Minimum fraction of cells expressing a gene required in at least one compared group before DE results are reported; values >1 are interpreted as percentages | `0` |
+| `--pseudobulk-min-pct-expressed` | Minimum fraction of cells with nonzero feature values required in at least one compared group before DE results are reported; values >1 are interpreted as percentages | `0` |
 | `--pseudobulk-p-adjust-method` | Multiple-testing correction method (`fdr_bh`, `bonferroni`, `holm`, `none`) | `fdr_bh` |
-| `--pseudobulk-padj-cutoff` | Adjusted p-value threshold for DE calls and plot coloring; DE genes must pass `padj < cutoff` | `0.05` |
+| `--pseudobulk-padj-cutoff` | Adjusted p-value threshold for DE calls and plot coloring; DE features must pass `padj < cutoff` | `0.05` |
 | `--pseudobulk-log2fc-cutoff` | Absolute log2FC cutoff for volcano highlighting and DE table inclusion | `1` |
 | `--pseudobulk-deseq2-fit-type` | PyDESeq2 dispersion trend fit type; use `mean` to avoid parametric trend fallback warnings | `parametric` |
 | `--pseudobulk-n-cpus` | CPU workers for the shared DESeq2 fit and maximum parallel shared-fit contrasts | `1` |
-| `--pseudobulk-embed-top-n-per-comparison` | Significant DE genes to auto-embed per category/contact comparison in embedded mode; ignored by sidecar mode because all gene expression vectors are sidecar-loaded | `2` |
+| `--pseudobulk-embed-top-n-per-comparison` | Significant DE features to auto-embed per category/contact comparison in embedded mode; ignored by sidecar mode because feature vectors are sidecar-loaded | `2` |
 | `--pathway-gmt` | GMT pathway file(s) for ORA/GSEA after Simple design DE; omitted uses cached/default Reactome when available, then falls back to GSEApy/Enrichr | Reactome |
 | `--pathway-organism` | Organism used for default Reactome loading, e.g. `Human` or `Mouse` | `Mouse` |
 | `--pathway-top-n` | Maximum ORA/GSEA pathways stored per direction and comparison | `10` |
 | `--pathway-min-overlap` | Minimum pathway/query gene overlap for ORA/GSEA reporting | `3` |
 | `--pathway-gsea-permutations` | Permutations for compact preranked GSEA p-values | `100` |
 | `--section-rotations` | Comma-separated `section_id:angle` pairs | empty |
-| `--gene-correlation-top-n` | Correlated genes shown per embedded gene in discovery panel | `5` |
-| `--category-means-n-genes` | Maximum embedded pseudobulk-DE genes used for category mean summaries; use `0` to disable | `500` |
-| `--spatial-variable-genes-n` | Top variable genes scored with Moran's I; use `0` to disable | `20` |
+| `--gene-correlation-top-n` | Correlated features shown per embedded feature in discovery panel | `5` |
+| `--category-means-n-genes` | Maximum embedded pseudobulk-DE features used for category mean summaries; use `0` to disable | `500` |
+| `--spatial-variable-genes-n` | Top variable features scored with Moran's I; use `0` to disable | `20` |
 | `--deconvolutions` | JSON object mapping deconvolution labels to obs/obsm keys | empty |
 | `--section-images` | JSON object mapping section IDs to image paths/specs | empty |
 | `--section-images-max-px` | Maximum image dimension when embedding section images | `4096` |
@@ -403,11 +405,21 @@ If the export is downsampled, the visible graph overlay and neighbor-hover contr
 
 `Insights → Neighbors → Enrichment` and `Interactions` use neighbor composition statistics for the selected Exploration annotation. If no graph or no stats exist for that annotation, the viewer shows a yellow warning and lists the annotations that do have neighbor stats. `Insights → Neighbors → Dispersion` is computed from all cells before HTML downsampling for the main cells annotation and any requested `cell_annotations`, then summarizes whether each category is clustered, random, or dispersed relative to the observed all-cell layout.
 
+### Multimodal feature viewer
+
+When multiple modalities are exported with `modalities=["rna", "protein"]` or `--modalities rna,protein`, the viewer treats each modality as its own feature namespace. In Default mode, switch from `Annotation` to `Feature`, then use the feature-namespace dropdown beside the source switch to choose RNA, protein, or `Module` when modules exist. The search box is scoped to that namespace, so a feature name shared by RNA and protein is loaded from the active namespace rather than shown with modality badges.
+
+Split view keeps an independent source and feature namespace for layer A and layer B. This allows comparisons such as RNA feature versus protein feature, annotation versus protein, or module score versus RNA without changing the main visual namespace.
+
+`Insights → Features` has its own feature-namespace selector for marker features, spatial features, per-cell distributions, per-sample/category means, and related-feature suggestions. `Insights → Compare → Per sample → Simple design` has a pseudobulk modality selector, and `Insights → Neighbors → Interactions` has an interaction-marker modality selector. Exported CSV/SVG filenames include the selected modality where a result is modality-specific.
+
+Pathway enrichment is gene-compatible only. It is computed for RNA/gene-like modalities and reported as unavailable for unsupported modalities unless a future export provides an explicit feature-to-gene mapping.
+
 ### Optional pseudobulk category selection
 
-Pseudobulk category DE is precomputed automatically for the initial `main cells annotation` column unless `pseudobulk=None` / `--pseudobulk None` is used, and shown in `Insights → Compare → Per sample → Simple design`. KaroSpace aggregates raw counts by replicate and annotation, keeps replicate × annotation pseudobulk samples with at least `pseudobulk_min_cells_per_pseudobulk` / `--pseudobulk-min-cells-per-pseudobulk` cells, fits one shared `~ replicate + annotation` DESeq2 model per annotation column, then extracts category-versus-category contrasts. It also extracts a balanced-rest contrast for every category: the category minus the equally weighted mean of all other retained annotation categories. Genes that do not reach `pseudobulk_min_pct_expressed` / `--pseudobulk-min-pct-expressed` in at least one compared group are removed from reported DE results, so they do not enter the contrast-level multiple-testing correction applied by KaroSpace. Pairwise PCA/distance diagnostics are generated automatically for selected category pairs.
+Pseudobulk category DE is precomputed automatically for the initial `main cells annotation` column unless `pseudobulk=None` / `--pseudobulk None` is used, and shown in `Insights → Compare → Per sample → Simple design`. KaroSpace aggregates raw counts by replicate and annotation, keeps replicate × annotation pseudobulk samples with at least `pseudobulk_min_cells_per_pseudobulk` / `--pseudobulk-min-cells-per-pseudobulk` cells, fits one shared `~ replicate + annotation` DESeq2 model per annotation column, then extracts category-versus-category contrasts. It also extracts a balanced-rest contrast for every category: the category minus the equally weighted mean of all other retained annotation categories. Features that do not reach `pseudobulk_min_pct_expressed` / `--pseudobulk-min-pct-expressed` in at least one compared group are removed from reported DE results, so they do not enter the contrast-level multiple-testing correction applied by KaroSpace. Pairwise PCA/distance diagnostics are generated automatically for selected category pairs.
 
-By default, pseudobulk DE and contact-conditioned interaction markers run on the dataset default modality, usually `rna`. Use `pseudobulk_modalities=["rna", "protein"]` in Python or `--pseudobulk-modalities rna,protein` on the CLI to run those analyses on selected modalities, or use `all` for every detected modality. When multiple pseudobulk modalities are selected, the first selected modality remains available through the legacy `pseudobulk_de` / `interaction_markers` payloads, and all selected results are stored in modality-keyed payloads.
+By default, pseudobulk DE and contact-conditioned interaction markers run on the dataset default modality, usually `rna`. Use `pseudobulk_modalities=["rna", "protein"]` in Python or `--pseudobulk-modalities rna,protein` on the CLI to run those analyses on selected modalities, or use `all` for every detected modality. Results are stored only in modality-keyed payloads such as `pseudobulk_de_by_modality`, `interaction_markers_by_modality`, `category_feature_means_by_modality`, `feature_correlations_by_modality`, `spatial_variable_features_by_modality`, and `pathway_settings_by_modality`.
 
 When selecting specific pairwise categories from the command line, wrap listed values in single quotes:
 
@@ -423,11 +435,11 @@ KaroSpace has three practical export modes:
 
 | Mode | Output | Best for | How to open |
 | --- | --- | --- | --- |
-| Embedded HTML | `viewer.html` | Small to medium gene payloads, easiest sharing | Double-click or open the file in a browser |
-| Sidecar viewer | `viewer.html` + `viewer.features.json` + `viewer.features/` | Large gene payloads with lazy gene loading | Serve the directory over HTTP(S), then open the HTML URL |
+| Embedded HTML | `viewer.html` | Small to medium feature payloads, easiest sharing | Double-click or open the file in a browser |
+| Sidecar viewer | `viewer.html` + `viewer.features.json` + `viewer.features/` | Large feature payloads with lazy loading | Serve the directory over HTTP(S), then open the HTML URL |
 | `.karospace` package | `viewer.karospace` + optional `viewer.loader.html` | One-file sharing of a sidecar viewer | Drop the package into the hosted loader or the generated local loader |
 
-Sidecar mode keeps the initial HTML smaller by moving all gene expression vectors into a manifest and binary shard files. The viewer fetches those shards only when a gene is needed. This is useful when many genes or modalities would make a single HTML file too large.
+Sidecar mode keeps the initial HTML smaller by moving feature vectors into a manifest and binary shard files. The viewer fetches those shards only when a feature is needed. This is useful when many features or modalities would make a single HTML file too large.
 
 ### Create a sidecar viewer
 
@@ -454,7 +466,7 @@ export_to_html(
     output_path="viewer.html",
     main_cell_annotation="cell_type",
     features=["Cd4", "Cd8a", "Gfap"],
-    features_list="genes.txt",
+    features_list="features.txt",
     feature_storage="sidecar",
     feature_manifest_path="viewer.features.json"
 )
@@ -472,7 +484,7 @@ viewer.features/
 ```
 
 > [!IMPORTANT]
-> Keep all three elements together. The HTML contains the viewer and embedded summary data, but no gene expression vectors in sidecar mode; `viewer.features.json` is the sidecar manifest; `viewer.features/` contains the binary feature shards.
+> Keep all three elements together. The HTML contains the viewer and embedded summary data, but no feature vectors in sidecar mode; `viewer.features.json` is the sidecar manifest; `viewer.features/` contains the binary feature shards.
 
 ### Open a sidecar viewer
 
@@ -551,7 +563,7 @@ karospace package-sidecar viewer.html \
 ### Sidecar troubleshooting
 
 > [!TIP]
-> - **The viewer opens but genes do not load**: check that the HTML is served over HTTP(S), not opened with `file://`.
+> - **The viewer opens but features do not load**: check that the HTML is served over HTTP(S), not opened with `file://`.
 > - **404 for `viewer.features.json` or `.bin` shards**: keep `viewer.html`, `viewer.features.json`, and `viewer.features/` in the same relative layout used at export time.
 > - **Custom `--feature-manifest-path`**: for normal sidecar HTML it may be a path; for direct `.karospace` export it must be a filename inside the package.
 > - **Large packages**: increase `--feature-sidecar-shard-size` for fewer shard files, decrease it for smaller individual requests.

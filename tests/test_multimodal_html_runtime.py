@@ -94,3 +94,22 @@ def test_interaction_markers_use_modality_payload(tmp_path=None):
     assert 'id="interaction-marker-modality-select"' in html
     assert "DATA.interaction_markers_by_modality" in html
     assert "(DATA.interaction_markers || {})" not in html
+
+
+def test_html_copy_has_no_generic_gene_labels(tmp_path=None):
+    html = _render_multimodal_html(tmp_path)
+
+    assert "Feature discovery" in html
+    assert "Marker features" in html
+    assert "Spatial features" in html
+    assert "Pseudobulk feature differential analysis" in html
+
+
+def test_download_filenames_include_modality(tmp_path=None):
+    html = _render_multimodal_html(tmp_path)
+
+    assert "'karospace-pseudobulk-de'," in html
+    assert "sanitizeFilenamePart(getPseudobulkPanelModality()" in html
+    assert "karospace-pseudobulk-de-features-${modName}-" in html
+    assert "['modality', 'feature', 'base_mean'" in html
+    assert "['modality', 'annotation_column', 'category', 'reference', 'rank', 'feature'" in html
