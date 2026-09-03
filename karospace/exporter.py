@@ -7218,6 +7218,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             <div class="overview-blend-row" id="overview-blend-row-a">
                 <span class="overview-blend-side">A</span>
                 <select id="overview-blend-a-kind"></select>
+                <select id="overview-blend-a-namespace" style="display:none;"></select>
                 <select id="overview-blend-a-annotation"></select>
                 <select id="overview-blend-a-category"></select>
                 <input type="text" id="overview-blend-a-gene" list="overview-blend-a-feature-list" placeholder="Gene symbol" style="display:none;">
@@ -7226,6 +7227,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             <div class="overview-blend-row" id="overview-blend-row-b">
                 <span class="overview-blend-side">B</span>
                 <select id="overview-blend-b-kind"></select>
+                <select id="overview-blend-b-namespace" style="display:none;"></select>
                 <select id="overview-blend-b-annotation"></select>
                 <select id="overview-blend-b-category"></select>
                 <input type="text" id="overview-blend-b-gene" list="overview-blend-b-feature-list" placeholder="Gene symbol" style="display:none;">
@@ -8793,8 +8795,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let overviewBlendEnabled = false;
     let overviewBlendMix = 0.5;
     let overviewBlendSpec = {{
-        a: {{ kind: 'cell', color: null, category: null, gene: '' }},
-        b: {{ kind: 'cell', color: null, category: null, gene: '' }},
+        a: {{ source: 'annotation', modality: DEFAULT_MODALITY_NAME, color: null, category: null, feature: '' }},
+        b: {{ source: 'annotation', modality: DEFAULT_MODALITY_NAME, color: null, category: null, feature: '' }},
     }};
     let overviewBlendGeneScaleOverrides = {{
         a: null,
@@ -10710,8 +10712,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             overviewBlendEnabled = false;
             overviewBlendMix = 0.5;
             overviewBlendSpec = {{
-                a: {{ kind: 'cell', color: null, category: null, gene: '' }},
-                b: {{ kind: 'cell', color: null, category: null, gene: '' }},
+                a: {{ source: 'annotation', modality: DEFAULT_MODALITY_NAME, color: null, category: null, feature: '' }},
+                b: {{ source: 'annotation', modality: DEFAULT_MODALITY_NAME, color: null, category: null, feature: '' }},
             }};
             overviewBlendGeneScaleOverrides = {{ a: null, b: null }};
             safeTutorialClick('#overview-mode-default');
@@ -10972,14 +10974,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         overviewBlendMix = 0.5;
         [['a', geneA], ['b', geneB || geneA]].forEach(([side, gene]) => {{
             if (!overviewBlendSpec?.[side] || !gene) return;
-            overviewBlendSpec[side].kind = modality;
-            overviewBlendSpec[side].gene = resolveFeatureTokenForModality(gene, modality) || gene;
-            overviewBlendSpec[side].geneCleared = false;
-            ensureGeneAutoScale?.(overviewBlendSpec[side].gene, modality);
-            setTutorialSelectValue(`#overview-blend-${{side}}-kind`, modality);
+            overviewBlendSpec[side].source = 'feature';
+            overviewBlendSpec[side].modality = modality;
+            setPanelModality(`split.${{side}}`, modality);
+            overviewBlendSpec[side].feature = resolveFeatureTokenForModality(gene, modality) || gene;
+            overviewBlendSpec[side].featureCleared = false;
+            ensureGeneAutoScale?.(overviewBlendSpec[side].feature, modality);
+            setTutorialSelectValue(`#overview-blend-${{side}}-kind`, 'feature');
+            setTutorialSelectValue(`#overview-blend-${{side}}-namespace`, modality);
             const geneInput = document.getElementById(`overview-blend-${{side}}-gene`);
             if (geneInput) {{
-                geneInput.value = getGeneDisplayLabel(overviewBlendSpec[side].gene);
+                geneInput.value = getGeneDisplayLabel(overviewBlendSpec[side].feature);
                 geneInput.dispatchEvent(new Event('change', {{ bubbles: true }}));
             }}
         }});
@@ -14855,12 +14860,31 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
     }}
 
+    function getOverviewBlendSource(spec) {{
+        if (!spec) return 'annotation';
+        if (spec.source === 'feature') return 'feature';
+        if (spec.source === 'annotation') return 'annotation';
+        return spec.kind && spec.kind !== 'cell' ? 'feature' : 'annotation';
+    }}
+
+    function getOverviewBlendModality(spec, side = null) {{
+        if (!spec) return side ? getPanelModality(`split.${{side}}`) : DEFAULT_MODALITY_NAME;
+        const fallback = side ? getPanelModality(`split.${{side}}`) : DEFAULT_MODALITY_NAME;
+        const legacyKind = spec.kind && spec.kind !== 'cell' ? spec.kind : '';
+        return spec.modality || legacyKind || fallback || DEFAULT_MODALITY_NAME;
+    }}
+
+    function getOverviewBlendFeature(spec) {{
+        return String(spec?.feature || spec?.gene || '').trim();
+    }}
+
     function getOverviewSplitGeneTarget(side) {{
         const spec = overviewBlendSpec?.[side];
-        if (!spec || spec.kind === 'cell') return null;
-        const gene = String(spec.gene || '').trim();
+        if (!spec || getOverviewBlendSource(spec) !== 'feature') return null;
+        const gene = getOverviewBlendFeature(spec);
         if (!gene) return null;
-        if (isFeatureLoadedForModality(gene, spec.kind)) return {{ gene, modality: spec.kind, side }};
+        const modality = getOverviewBlendModality(spec, side);
+        if (isFeatureLoadedForModality(gene, modality)) return {{ gene, modality, side }};
         return null;
     }}
 
@@ -15079,16 +15103,24 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function getBlendKindOptions() {{
-        const kindOptions = [{{ value: 'cell', label: 'Annotation' }}];
-        if (MODALITY_DESCRIPTORS.length > 0) {{
-            for (const mod of MODALITY_DESCRIPTORS) {{
-                kindOptions.push({{ value: mod.name, label: mod.label || mod.name }});
-            }}
-        }} else {{
-            kindOptions.push({{ value: 'gene', label: 'Gene' }});
+        return [
+            {{ value: 'annotation', label: 'Annotation' }},
+            {{ value: 'feature', label: 'Feature' }},
+        ];
+    }}
+
+    function getFeatureNamespaceOptions() {{
+        const options = MODALITY_DESCRIPTORS.map(desc => ({{
+            value: desc.name,
+            label: desc.label || desc.name,
+        }}));
+        if (!options.length) {{
+            options.push({{ value: DEFAULT_MODALITY_NAME, label: getModalityDisplayLabel(DEFAULT_MODALITY_NAME) }});
         }}
-        kindOptions.push({{ value: MODULE_MODALITY_NAME, label: 'Module' }});
-        return kindOptions;
+        if (Array.isArray(geneModules) && geneModules.length) {{
+            options.push({{ value: MODULE_MODALITY_NAME, label: 'Module' }});
+        }}
+        return options;
     }}
 
     function getCategoriesForColorColumn(annotationCol) {{
@@ -15198,18 +15230,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const defaultLabels = {{ a: 'A (left)', b: 'B (right)' }};
         const sideLabel = sideLabels?.[side] || defaultLabels[side] || side.toUpperCase();
         
-        if (spec.kind !== 'cell') {{
-            const modName = spec.kind;
+        if (getOverviewBlendSource(spec) === 'feature') {{
+            const modName = getOverviewBlendModality(spec, side);
             const modLabel = getModalityDisplayLabel(modName);
             const isGene = ['RNA', 'rna', 'Gene', 'gene'].includes(modLabel);
             const featureTypeLabel = isGene ? 'Gene' : modLabel;
-            const displayLabel = getGeneDisplayLabel(spec.gene);
-            const featureLabel = spec.gene
+            const feature = getOverviewBlendFeature(spec);
+            const displayLabel = getGeneDisplayLabel(feature);
+            const featureLabel = feature
                 ? (isModuleModality(modName) ? displayLabel : `${{featureTypeLabel}}: ${{displayLabel}}`)
                 : featureTypeLabel;
             
             const scale = (typeof scaleResolver === 'function' ? scaleResolver(side, spec) : null)
-                || getGeneScaleRange(spec.gene, modName);
+                || getGeneScaleRange(feature, modName);
             return {{
                 side,
                 sideLabel,
@@ -15273,11 +15306,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function getOverviewBlendRuntime(section, spec, scaleOverride = null) {{
         if (!section || !spec) return null;
         
-        if (spec.kind !== 'cell') {{
-            const gene = (spec.gene || '').trim();
+        if (getOverviewBlendSource(spec) === 'feature') {{
+            const gene = getOverviewBlendFeature(spec);
             if (!gene) return null;
             
-            const modName = spec.kind;
+            const modName = getOverviewBlendModality(spec);
             if (!isFeatureLoadedForModality(gene, modName)) {{
                 requestOverviewBlendGene(gene, modName);
                 return null;
@@ -23153,10 +23186,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!overviewBlendEnabled) return false;
         return ['a', 'b'].some(side => {{
             const spec = overviewBlendSpec?.[side];
-            if (!spec || spec.kind === 'cell') return false;
-            const gene = String(spec.gene || '').trim();
+            if (!spec || getOverviewBlendSource(spec) !== 'feature') return false;
+            const gene = getOverviewBlendFeature(spec);
             if (!gene) return false;
-            return isFeatureLoadedForModality(gene, spec.kind);
+            return isFeatureLoadedForModality(gene, getOverviewBlendModality(spec, side));
         }});
     }}
 
@@ -33792,16 +33825,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const defaultSourceGeneBtn = document.getElementById('default-source-feature');
         const modalityControl = document.getElementById('visual-feature-namespace-control');
         const modalitySelect = document.getElementById('visual-feature-namespace-select');
-        const getFeatureNamespaceOptions = () => {{
-            const options = MODALITY_DESCRIPTORS.map(desc => ({{
-                value: desc.name,
-                label: desc.label || desc.name,
-            }}));
-            if (Array.isArray(geneModules) && geneModules.length) {{
-                options.push({{ value: MODULE_MODALITY_NAME, label: 'Module' }});
-            }}
-            return options;
-        }};
         const syncFeatureNamespaceSelect = () => {{
             if (!modalityControl || !modalitySelect) return;
             const options = getFeatureNamespaceOptions();
@@ -34016,12 +34039,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const ovBlendControls = {{
                 a: {{
                     kind: document.getElementById('overview-blend-a-kind'),
+                    namespace: document.getElementById('overview-blend-a-namespace'),
                     color: document.getElementById('overview-blend-a-annotation'),
                     category: document.getElementById('overview-blend-a-category'),
                     gene: document.getElementById('overview-blend-a-gene'),
                 }},
                 b: {{
                     kind: document.getElementById('overview-blend-b-kind'),
+                    namespace: document.getElementById('overview-blend-b-namespace'),
                     color: document.getElementById('overview-blend-b-annotation'),
                     category: document.getElementById('overview-blend-b-category'),
                     gene: document.getElementById('overview-blend-b-gene'),
@@ -34031,13 +34056,30 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             function ensureOverviewBlendDefaults() {{
                 const catCols = getCategoricalColorColumns();
                 const preferredCol = catCols.includes(currentAnnotation) ? currentAnnotation : (catCols[0] || null);
-                const modalityNames = MODALITY_DESCRIPTORS.map(m => m.name);
-                const defaultModality = modalityNames.includes(DEFAULT_MODALITY_NAME) ? DEFAULT_MODALITY_NAME : (modalityNames[0] || 'gene');
+                const namespaceOptions = getFeatureNamespaceOptions();
+                const namespaceValues = namespaceOptions.map(entry => entry.value).filter(Boolean);
+                const namespaceSet = new Set(namespaceValues);
+                const defaultModality = namespaceSet.has(DEFAULT_MODALITY_NAME)
+                    ? DEFAULT_MODALITY_NAME
+                    : (namespaceValues[0] || DEFAULT_MODALITY_NAME || 'gene');
+                overviewBlendSpec.a.modality = overviewBlendSpec.a.modality || defaultModality;
+                overviewBlendSpec.b.modality = overviewBlendSpec.b.modality || defaultModality;
 
-                const normalize = (entry, preferSecond) => {{
-                    if (!entry.kind) entry.kind = catCols.length ? 'cell' : defaultModality;
-                    if (entry.kind === 'cell') {{
-                        if (!catCols.length) {{ entry.kind = defaultModality; }}
+                const normalize = (entry, side, preferSecond) => {{
+                    const legacyModality = entry.kind && entry.kind !== 'cell' ? entry.kind : '';
+                    if (!entry.source) entry.source = legacyModality ? 'feature' : (catCols.length ? 'annotation' : 'feature');
+                    if (entry.source !== 'feature' && entry.source !== 'annotation') entry.source = 'annotation';
+                    if (!entry.modality) entry.modality = legacyModality || getPanelModality(`split.${{side}}`, defaultModality);
+                    if (!namespaceSet.has(entry.modality)) entry.modality = defaultModality;
+                    setPanelModality(`split.${{side}}`, entry.modality);
+                    if (!entry.feature && entry.gene) entry.feature = entry.gene;
+                    if (entry.geneCleared && entry.featureCleared === undefined) entry.featureCleared = true;
+
+                    if (entry.source === 'annotation') {{
+                        if (!catCols.length) {{
+                            entry.source = 'feature';
+                            return normalize(entry, side, preferSecond);
+                        }}
                         else {{
                             if (!entry.color || !catCols.includes(entry.color)) entry.color = preferredCol;
                             const cats = getCategoriesForColorColumn(entry.color);
@@ -34047,23 +34089,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                             }}
                         }}
                     }}
-                    if (entry.kind !== 'cell') {{
-                        const modName = entry.kind;
+                    if (entry.source === 'feature') {{
+                        const modName = entry.modality;
                         const features = getFeatureDatalistValuesForModality(modName);
                         
                         if (!features.length && catCols.length) {{
-                            entry.kind = 'cell';
-                            return normalize(entry, preferSecond);
+                            entry.source = 'annotation';
+                            return normalize(entry, side, preferSecond);
                         }}
 
-                        if ((!entry.gene || !isFeatureLoadedForModality(entry.gene, modName)) && !entry.geneCleared) {{
+                        if ((!entry.feature || !isFeatureLoadedForModality(entry.feature, modName)) && !entry.featureCleared) {{
                             const defaultFeature = features[preferSecond && features.length > 1 ? 1 : 0] || '';
-                            entry.gene = resolveFeatureTokenForModality(defaultFeature, modName) || defaultFeature;
+                            entry.feature = resolveFeatureTokenForModality(defaultFeature, modName) || defaultFeature;
                         }}
                     }}
                 }};
-                normalize(overviewBlendSpec.a, false);
-                normalize(overviewBlendSpec.b, true);
+                normalize(overviewBlendSpec.a, 'a', false);
+                normalize(overviewBlendSpec.b, 'b', true);
             }}
 
             function syncOverviewBlendSide(side) {{
@@ -34071,13 +34113,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const spec = overviewBlendSpec[side];
                 if (!controls || !spec) return;
 
-                setSelectOptions(controls.kind, getBlendKindOptions(), spec.kind);
+                const source = getOverviewBlendSource(spec);
+                const modName = getOverviewBlendModality(spec, side);
+                spec.source = source;
+                spec.modality = modName;
+                setPanelModality(`split.${{side}}`, modName);
 
-                const isCell = spec.kind === 'cell';
-                controls.color.style.display = isCell ? '' : 'none';
-                controls.category.style.display = isCell ? '' : 'none';
-                controls.gene.style.display = isCell ? 'none' : '';
-                if (isCell) {{
+                setSelectOptions(controls.kind, getBlendKindOptions(), source);
+
+                const isFeature = source === 'feature';
+                if (controls.namespace) controls.namespace.style.display = isFeature ? '' : 'none';
+                controls.color.style.display = isFeature ? 'none' : '';
+                controls.category.style.display = isFeature ? 'none' : '';
+                controls.gene.style.display = isFeature ? '' : 'none';
+                if (!isFeature) {{
                     const cols = getCategoricalColorColumns();
                     setSelectOptions(controls.color, cols, spec.color);
                     const cats = getCategoriesForColorColumn(spec.color);
@@ -34085,10 +34134,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         .concat(cats.map(cat => ({{ value: cat, label: cat }})));
                     setSelectOptions(controls.category, catOpts, spec.category);
                 }} else {{
-                    const modName = spec.kind;
                     const modLabel = getModalityDisplayLabel(modName);
+                    setSelectOptions(controls.namespace, getFeatureNamespaceOptions(), modName);
                     controls.gene.placeholder = `${{modLabel}} feature`;
-                    controls.gene.value = getGeneDisplayLabel(spec.gene);
+                    controls.gene.value = getGeneDisplayLabel(spec.feature);
 
                     // Populate side-specific feature datalist
                     const listId = `overview-blend-${{side}}-feature-list`;
@@ -34104,7 +34153,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         listEl.replaceChildren(fragment);
                     }}
                     
-                    if (spec.gene) ensureGeneAutoScale(spec.gene, modName);
+                    if (spec.feature) ensureGeneAutoScale(spec.feature, modName);
                 }}
             }}
 
@@ -34162,8 +34211,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const controls = ovBlendControls[side];
                 if (!controls) return;
                 controls.kind?.addEventListener('change', () => {{
-                    overviewBlendSpec[side].kind = controls.kind.value;
-                    overviewBlendSpec[side].geneCleared = false;
+                    overviewBlendSpec[side].source = controls.kind.value === 'feature' ? 'feature' : 'annotation';
+                    overviewBlendSpec[side].featureCleared = false;
+                    clearOverviewSplitGeneScaleOverride(side);
+                    applyOverviewBlendChange();
+                }});
+                controls.namespace?.addEventListener('change', () => {{
+                    overviewBlendSpec[side].modality = controls.namespace.value || DEFAULT_MODALITY_NAME;
+                    setPanelModality(`split.${{side}}`, overviewBlendSpec[side].modality);
+                    overviewBlendSpec[side].featureCleared = false;
+                    clearOverviewSplitGeneScaleOverride(side);
                     applyOverviewBlendChange();
                 }});
                 controls.color?.addEventListener('change', () => {{
@@ -34177,24 +34234,26 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 }});
                 controls.gene?.addEventListener('change', async () => {{
                     await runAsyncUIAction(`Overview split feature (${{side.toUpperCase()}})`, async () => {{
-                        const modName = overviewBlendSpec[side].kind;
+                        const modName = getOverviewBlendModality(overviewBlendSpec[side], side);
                         const gene = resolveFeatureTokenForModality(controls.gene.value.trim(), modName) || controls.gene.value.trim();
                         if (!gene) {{
-                            overviewBlendSpec[side].gene = '';
-                            overviewBlendSpec[side].geneCleared = true;
+                            overviewBlendSpec[side].feature = '';
+                            overviewBlendSpec[side].featureCleared = true;
+                            clearOverviewSplitGeneScaleOverride(side);
                             applyOverviewBlendChange();
                             return;
                         }}
                         if (!isFeatureLoadedForModality(gene, modName)) {{
-                            controls.gene.value = getGeneDisplayLabel(overviewBlendSpec[side].gene);
+                            controls.gene.value = getGeneDisplayLabel(overviewBlendSpec[side].feature);
                             return;
                         }}
                         if (!await ensureFeatureAvailable(gene, {{ modality: modName }})) {{
-                            controls.gene.value = getGeneDisplayLabel(overviewBlendSpec[side].gene);
+                            controls.gene.value = getGeneDisplayLabel(overviewBlendSpec[side].feature);
                             return;
                         }}
-                        overviewBlendSpec[side].gene = gene;
-                        overviewBlendSpec[side].geneCleared = false;
+                        overviewBlendSpec[side].feature = gene;
+                        overviewBlendSpec[side].featureCleared = false;
+                        clearOverviewSplitGeneScaleOverride(side);
                         ensureGeneAutoScale(gene, modName);
                         applyOverviewBlendChange();
                     }});

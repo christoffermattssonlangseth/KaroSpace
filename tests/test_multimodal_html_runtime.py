@@ -58,3 +58,12 @@ def test_visual_controls_have_feature_namespace_select(tmp_path=None):
     assert 'id="feature-discovery-panel"' in html
     assert 'id="gene-input"' not in html
     assert 'id="modality-select"' not in html
+
+
+def test_split_controls_have_independent_feature_namespaces(tmp_path=None):
+    html = _render_multimodal_html(tmp_path)
+
+    assert 'id="overview-blend-a-namespace"' in html
+    assert 'id="overview-blend-b-namespace"' in html
+    assert "overviewBlendSpec.a.modality" in html
+    assert "overviewBlendSpec.b.modality" in html
