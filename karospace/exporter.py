@@ -16475,8 +16475,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!(groupA.nCells >= 2) || !(groupB.nCells >= 2)) {{
             return {{ available: false, reason: 'too_few_cells', nA: Number(groupA.nCells || 0), nB: Number(groupB.nCells || 0), results: [] }};
         }}
-        const loadedGenes = Object.keys(DATA.features_meta || {{}}).sort((a, b) => a.localeCompare(b));
-        const totalGenes = Array.isArray(DATA.available_features) ? DATA.available_features.length : loadedGenes.length;
+        const activeModality = getVisualModality();
+        const loadedGenes = getLoadedFeaturesForModality(activeModality);
+        const totalGenes = getFeatureCatalog(activeModality).length || loadedGenes.length;
         if (!loadedGenes.length) {{
             return {{ available: false, reason: 'no_loaded_features', nA: Number(groupA.nCells || 0), nB: Number(groupB.nCells || 0), loadedGeneCount: 0, totalGeneCount: totalGenes, results: [] }};
         }}
@@ -16519,8 +16520,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }};
         }}
 
-        const loadedGenes = Object.keys(DATA.features_meta || {{}}).sort((a, b) => a.localeCompare(b));
-        const totalGenes = Array.isArray(DATA.available_features) ? DATA.available_features.length : loadedGenes.length;
+        const activeModality = getVisualModality();
+        const loadedGenes = getLoadedFeaturesForModality(activeModality);
+        const totalGenes = getFeatureCatalog(activeModality).length || loadedGenes.length;
         if (!loadedGenes.length) {{
             return {{
                 available: false,
@@ -17253,17 +17255,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function getSelectionQueryExampleGene() {{
-        const loadedGenes = Object.keys(DATA.features_meta || {{}})
+        const activeModality = getVisualModality();
+        const activeMeta = getFeatureState(activeModality).features_meta || {{}};
+        const loadedGenes = Object.keys(activeMeta)
             .filter((gene) => String(gene || '').trim().length > 0)
             .sort((a, b) => a.localeCompare(b));
         const preferred = [
             currentGene,
-            ...(DATA.available_features || []),
+            ...getFeatureCatalog(activeModality),
             ...loadedGenes,
         ];
         for (const rawGene of preferred) {{
             const gene = String(rawGene || '').trim();
-            if (gene && DATA.features_meta?.[gene]) return gene;
+            if (gene && activeMeta?.[gene]) return gene;
         }}
         return loadedGenes[0] || '';
     }}
@@ -20877,9 +20881,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }});
     }}
 
-    function collectLoadedGenes() {{
-        const meta = DATA.features_meta || {{}};
-        return (DATA.available_features || []).filter(g => meta[g]);
+    function collectLoadedGenes(modality = getVisualModality()) {{
+        const loaded = new Set(getLoadedFeaturesForModality(modality));
+        return getFeatureCatalog(modality).filter(g => loaded.has(g));
     }}
 
     function makeChunkWriter(chunkTargetBytes) {{
@@ -20918,13 +20922,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             return;
         }}
 
-        const allGenes = DATA.available_features || [];
-        let genesToExport = collectLoadedGenes();
+        const exportModality = getVisualModality();
+        const allGenes = getFeatureCatalog(exportModality);
+        let genesToExport = collectLoadedGenes(exportModality);
         if (allGenes.length > 0) {{
             const choice = window.confirm(
-                `Include ALL ${{allGenes.length}} genes in X.csv?\n\n` +
-                `OK  = fetch + include every gene (may be slow and large for big datasets).\n` +
-                `Cancel = include only the ${{genesToExport.length}} gene${{genesToExport.length === 1 ? '' : 's'}} currently loaded in this session.`
+                `Include ALL ${{allGenes.length}} features from ${{getModalityDisplayLabel(exportModality)}} in X.csv?\n\n` +
+                `OK  = fetch + include every feature in that namespace (may be slow and large for big datasets).\n` +
+                `Cancel = include only the ${{genesToExport.length}} feature${{genesToExport.length === 1 ? '' : 's'}} currently loaded in this session.`
             );
             if (choice) genesToExport = allGenes.slice();
         }}
@@ -20958,13 +20963,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 for (let i = 0; i < genesToExport.length; i++) {{
                     checkCancel();
                     const g = genesToExport[i];
-                    if (!DATA.features_meta?.[g]) {{
-                        setLabel(`Fetching genes ${{i + 1}}/${{genesToExport.length}}`);
-                        try {{ await ensureFeatureAvailable(g, {{ showErrors: false }}); }} catch (_) {{}}
+                    const exportMeta = getFeatureState(exportModality).features_meta || {{}};
+                    if (!exportMeta?.[g]) {{
+                        setLabel(`Fetching features ${{i + 1}}/${{genesToExport.length}}`);
+                        try {{ await ensureFeatureAvailable(g, {{ modality: exportModality, showErrors: false }}); }} catch (_) {{}}
                     }}
                     updateExportProgress('Fetching feature shards', i + 1, genesToExport.length);
                 }}
-                genesToExport = genesToExport.filter(g => DATA.features_meta?.[g]);
+                const exportMeta = getFeatureState(exportModality).features_meta || {{}};
+                genesToExport = genesToExport.filter(g => exportMeta?.[g]);
             }}
 
             checkCancel();
@@ -21019,7 +21026,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     return {{ values, cats, isContinuous: !!meta?.is_continuous }};
                 }});
 
-                const geneArrays = genesToExport.map(gene => getSectionGeneValues(section, gene) || null);
+                const geneArrays = genesToExport.map(gene => getSectionGeneValues(section, gene, exportModality) || null);
 
                 for (let i = 0; i < n; i++) {{
                     const globalIdx = (obsIdx && obsIdx.length > i) ? obsIdx[i] : (totalCells + i);
@@ -30164,8 +30171,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }};
         }}
 
-        const loadedGenes = Object.keys(DATA.features_meta || {{}}).sort((a, b) => a.localeCompare(b));
-        const totalGenes = Array.isArray(DATA.available_features) ? DATA.available_features.length : loadedGenes.length;
+        const activeModality = getVisualModality();
+        const loadedGenes = getLoadedFeaturesForModality(activeModality);
+        const totalGenes = getFeatureCatalog(activeModality).length || loadedGenes.length;
         if (!loadedGenes.length) {{
             return {{
                 available: false,

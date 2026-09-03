@@ -35,6 +35,7 @@ def test_generated_html_uses_modality_scoped_feature_helpers(tmp_path=None):
     assert "const FEATURE_INDEX_BY_MODALITY = new Map()" in html
     assert "function buildFeatureIndex(modality" in html
     assert "AVAILABLE_GENE_SET" not in html
+    assert "DATA.available_features" not in html
     assert "resolveCanonicalGeneName" not in html
 
 
