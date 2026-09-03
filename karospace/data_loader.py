@@ -1781,6 +1781,7 @@ class SpatialDataset:
         pseudobulk_replicate_annotation: Optional[str] = None,
         pseudobulk_simple_constrast_categories: Any = None,
         pseudobulk_counts_layer: Optional[str] = "counts",
+        pseudobulk_modalities: Optional[Sequence[str]] = None,
         pseudobulk_min_cell_counts: int = 0,
         pseudobulk_min_gene_counts: int = 0,
         pseudobulk_min_cells_per_pseudobulk: int = 20,
@@ -1846,6 +1847,10 @@ class SpatialDataset:
         pseudobulk_counts_layer : str, optional
             AnnData layer containing raw counts for pseudobulk aggregation.
             Defaults to "counts" when present, otherwise adata.X.
+        pseudobulk_modalities : list, optional
+            Modality names to run pseudobulk DE on. Defaults to the dataset
+            default modality, usually "rna". Use ["all"] for all detected
+            modalities.
         pseudobulk_min_cell_counts : int
             Exclude cells below this total raw-count threshold before pseudobulk
             aggregation. Zero disables filtering.
@@ -2459,6 +2464,56 @@ class SpatialDataset:
                     )
             return dispersion
 
+        def _normalize_pseudobulk_modalities(
+            value: Optional[Sequence[str]],
+        ) -> List[str]:
+            available = list(self.modalities.keys())
+            if not available:
+                return [str(self.default_modality or "rna")]
+            default_name = (
+                str(self.default_modality)
+                if self.default_modality in self.modalities
+                else available[0]
+            )
+            if value is None:
+                return [default_name]
+            if isinstance(value, str):
+                tokens = [item.strip() for item in value.split(",") if item.strip()]
+            else:
+                tokens = [str(item).strip() for item in value if str(item).strip()]
+            if not tokens:
+                return [default_name]
+            if any(token.lower() == "all" for token in tokens):
+                return available
+            requested = list(dict.fromkeys(tokens))
+            unknown = [name for name in requested if name not in self.modalities]
+            if unknown:
+                raise ValueError(
+                    f"Unknown pseudobulk modalities: {unknown}. Available: {available}"
+                )
+            return requested
+
+        def _adata_for_pseudobulk_modality(modality_name: str) -> Any:
+            if not self.modalities:
+                return self.adata
+            if modality_name == self.default_modality:
+                return self.adata
+            mod = self.modalities.get(modality_name)
+            if mod is None:
+                raise ValueError(f"Unknown pseudobulk modality: {modality_name}")
+            var = mod.var.copy()
+            if var.shape[0] != int(mod.matrix.shape[1]):
+                var = pd.DataFrame(index=[str(i) for i in range(int(mod.matrix.shape[1]))])
+            var.index = var.index.map(str)
+            mod_adata = sc.AnnData(X=mod.matrix, obs=self.adata.obs.copy(), var=var)
+            for layer_name, layer_matrix in (mod.layers or {}).items():
+                if getattr(layer_matrix, "shape", None) == mod.matrix.shape:
+                    mod_adata.layers[str(layer_name)] = layer_matrix
+            return mod_adata
+
+        pseudobulk_modality_names = _normalize_pseudobulk_modalities(pseudobulk_modalities)
+        primary_pseudobulk_modality = pseudobulk_modality_names[0] if pseudobulk_modality_names else None
+
         replicate_override = str(pseudobulk_replicate_annotation or "").strip()
         pseudobulk_replicate_name = replicate_override or str(self.section_key)
         if pseudobulk_replicate_name not in self.adata.obs.columns:
@@ -2467,58 +2522,16 @@ class SpatialDataset:
                 f"'{pseudobulk_replicate_name}' is not an obs column"
             )
         marker_genes = {}
-        pseudobulk_de = {}
         requested_pseudobulk_de_annotations = list(pseudobulk_de_annotations or [])
         pseudobulk_simple_categories_by_annotation = normalize_pseudobulk_simple_constrast_categories(
             pseudobulk_simple_constrast_categories,
             requested_pseudobulk_de_annotations,
         )
-        pending_pseudobulk_de_annotations = list(requested_pseudobulk_de_annotations)
+        pseudobulk_de_by_modality: Dict[str, Dict[str, Any]] = {}
         companion_pseudobulk_de = companion_analytics.get("pseudobulk_de")
         companion_gene_means = companion_analytics.get("category_gene_means")
         companion_de_method = companion_analytics.get("cluster_de_method")
-        if (
-            not replicate_override
-            and pending_pseudobulk_de_annotations
-            and isinstance(companion_pseudobulk_de, dict)
-        ):
-            reused_pseudobulk_de_annotations = [
-                annotation_key
-                for annotation_key in pending_pseudobulk_de_annotations
-                if annotation_key in companion_pseudobulk_de
-            ]
-            if reused_pseudobulk_de_annotations:
-                log_step(
-                    f"Reusing KaroSpaceCompanion pseudobulk DE for "
-                    f"{len(reused_pseudobulk_de_annotations)} annotation column"
-                    f"{'s' if len(reused_pseudobulk_de_annotations) != 1 else ''}."
-                )
-                for annotation_key in reused_pseudobulk_de_annotations:
-                    reused_payload = _strip_category_pseudobulk_sample_diagnostics(
-                        companion_pseudobulk_de[annotation_key]
-                    )
-                    # Companion cluster DE lacks _summary and a method tag;
-                    # stitch in per-cluster means + a cell-level source tag so
-                    # the badge/category panels render correctly.
-                    reused_payload = _backfill_companion_pseudobulk_summary(
-                        reused_payload,
-                        annotation_key,
-                        companion_gene_means,
-                        companion_de_method,
-                    )
-                    pseudobulk_de[annotation_key] = reused_payload
-            pending_pseudobulk_de_annotations = [
-                annotation_key
-                for annotation_key in pending_pseudobulk_de_annotations
-                if annotation_key not in pseudobulk_de
-            ]
-        if pending_pseudobulk_de_annotations:
-            log_step(
-                f"Computing pseudobulk differential expression for "
-                f"{len(pending_pseudobulk_de_annotations)} annotation column"
-                f"{'s' if len(pending_pseudobulk_de_annotations) != 1 else ''}; "
-                "output feeds Insights > Compare > Per sample."
-            )
+        if requested_pseudobulk_de_annotations:
             pseudobulk_min_cells_n = int(pseudobulk_min_cells_per_pseudobulk)
             pseudobulk_min_cell_counts_n = int(pseudobulk_min_cell_counts)
             pseudobulk_min_gene_counts_n = int(pseudobulk_min_gene_counts)
@@ -2533,12 +2546,12 @@ class SpatialDataset:
             section_metadata_columns = set(self.section_metadata or [])
             section_metadata_columns.update(self.section_metadata_extra or [])
 
-            def _use_sample_metadata_pseudobulk(annotation_key: str) -> bool:
+            def _use_sample_metadata_pseudobulk(analysis_adata: Any, annotation_key: str) -> bool:
                 if annotation_key not in section_metadata_columns:
                     return False
-                if annotation_key not in self.adata.obs.columns:
+                if annotation_key not in analysis_adata.obs.columns:
                     return False
-                frame = self.adata.obs[[pseudobulk_replicate_name, annotation_key]].dropna()
+                frame = analysis_adata.obs[[pseudobulk_replicate_name, annotation_key]].dropna()
                 if frame.empty:
                     return False
                 replicate_values = frame[pseudobulk_replicate_name].astype(str)
@@ -2555,94 +2568,152 @@ class SpatialDataset:
                     return False
                 return True
 
-            for annotation_key in pending_pseudobulk_de_annotations:
-                annotation_pairwise_categories = (
-                    (pseudobulk_simple_categories_by_annotation or {}).get(annotation_key)
-                    if pseudobulk_simple_categories_by_annotation
-                    else None
+            for modality_name in pseudobulk_modality_names:
+                analysis_adata = _adata_for_pseudobulk_modality(modality_name)
+                modality_pseudobulk_de: Dict[str, Any] = {}
+                pending_pseudobulk_de_annotations = list(requested_pseudobulk_de_annotations)
+                allow_companion_reuse = (
+                    modality_name == self.default_modality
+                    and not replicate_override
+                    and isinstance(companion_pseudobulk_de, dict)
                 )
-                sample_metadata_model = _use_sample_metadata_pseudobulk(annotation_key)
-                log_step(
-                    f"Pseudobulk DE: annotation column {annotation_key}; replicate={pseudobulk_replicate_name}",
-                    level=1,
-                )
-                pairwise_categories_label = (
-                    ", ".join(str(value) for value in annotation_pairwise_categories)
-                    if annotation_pairwise_categories
-                    else "all categories"
-                )
-                log_detail("Parameters:", level=2)
-                log_detail(
-                    (
-                        f"model=sample_metadata(~ {annotation_key})"
-                        if sample_metadata_model
-                        else f"model=shared_all_category(~ {pseudobulk_replicate_name} + {annotation_key})"
-                    ),
-                    level=3,
-                )
-                log_detail("rest=balanced_equal_category_weight", level=3)
-                log_detail(f"counts_layer={pseudobulk_counts_layer or 'X'}", level=3)
-                log_detail(f"min_cell_counts={pseudobulk_min_cell_counts_n}", level=3)
-                log_detail(f"min_gene_counts={pseudobulk_min_gene_counts_n}", level=3)
-                log_detail(f"min_cells_per_pseudobulk={pseudobulk_min_cells_n}", level=3)
-                log_detail(f"min_replicates={max(2, pseudobulk_min_rep_n)}", level=3)
-                log_detail(f"min_pct_expressed={pseudobulk_min_pct_n:g}", level=3)
-                log_detail(f"p_adjust={pseudobulk_p_adjust_method}", level=3)
-                log_detail(f"padj_cutoff={pseudobulk_padj_cutoff_n:g}", level=3)
-                log_detail(f"log2fc_cutoff={pseudobulk_log2fc_cutoff_n:g}", level=3)
-                log_detail(f"fit_type={pseudobulk_deseq2_fit_type}", level=3)
-                log_detail(f"n_cpus={pseudobulk_n_cpus_n}", level=3)
-                log_detail("diagnostics=pairwise", level=3)
-                log_detail(f"reported_pairwise_categories={pairwise_categories_label}", level=3)
-                compute_de = (
-                    compute_pseudobulk_sample_metadata_de
-                    if sample_metadata_model
-                    else compute_pseudobulk_group_de
-                )
-                annotation_results = compute_de(
-                    self.adata,
-                    annotation_key,
-                    replicate=pseudobulk_replicate_name,
-                    pairwise_categories=annotation_pairwise_categories,
-                    counts_layer=pseudobulk_counts_layer,
-                    min_cell_counts=pseudobulk_min_cell_counts_n,
-                    min_gene_counts=pseudobulk_min_gene_counts_n,
-                    min_cells=pseudobulk_min_cells_n,
-                    min_replicates=pseudobulk_min_rep_n,
-                    min_pct_expressed=pseudobulk_min_pct_n,
-                    p_adjust_method=pseudobulk_p_adjust_method,
-                    padj_cutoff=pseudobulk_padj_cutoff_n,
-                    log2fc_cutoff=pseudobulk_log2fc_cutoff_n,
-                    fit_type=pseudobulk_deseq2_fit_type,
-                    n_cpus=max(1, int(pseudobulk_n_cpus)),
-                )
-                if annotation_results:
-                    pseudobulk_de[annotation_key] = annotation_results
-                elif not sample_metadata_model:
-                    # Pseudobulk DESeq2 needs >= 2 biological replicates. When it
-                    # can't run (e.g. a single-sample dataset), fall back to
-                    # cell-level Welch markers (category vs rest) so the per-
-                    # category marker panel is still populated. Same payload
-                    # schema, so no viewer changes are needed.
-                    from .pseudobulk import compute_cell_level_group_markers
+                if allow_companion_reuse:
+                    reused_pseudobulk_de_annotations = [
+                        annotation_key
+                        for annotation_key in pending_pseudobulk_de_annotations
+                        if annotation_key in companion_pseudobulk_de
+                    ]
+                    if reused_pseudobulk_de_annotations:
+                        log_step(
+                            f"Reusing KaroSpaceCompanion pseudobulk DE for modality {modality_name}: "
+                            f"{len(reused_pseudobulk_de_annotations)} annotation column"
+                            f"{'s' if len(reused_pseudobulk_de_annotations) != 1 else ''}."
+                        )
+                        for annotation_key in reused_pseudobulk_de_annotations:
+                            reused_payload = _strip_category_pseudobulk_sample_diagnostics(
+                                companion_pseudobulk_de[annotation_key]
+                            )
+                            # Companion cluster DE lacks _summary and a method tag;
+                            # stitch in per-cluster means + a cell-level source tag so
+                            # the badge/category panels render correctly.
+                            reused_payload = _backfill_companion_pseudobulk_summary(
+                                reused_payload,
+                                annotation_key,
+                                companion_gene_means,
+                                companion_de_method,
+                            )
+                            modality_pseudobulk_de[annotation_key] = reused_payload
+                    pending_pseudobulk_de_annotations = [
+                        annotation_key
+                        for annotation_key in pending_pseudobulk_de_annotations
+                        if annotation_key not in modality_pseudobulk_de
+                    ]
 
-                    fallback_results = compute_cell_level_group_markers(
-                        self.adata,
+                if pending_pseudobulk_de_annotations:
+                    log_step(
+                        f"Computing pseudobulk differential expression for modality {modality_name}: "
+                        f"{len(pending_pseudobulk_de_annotations)} annotation column"
+                        f"{'s' if len(pending_pseudobulk_de_annotations) != 1 else ''}; "
+                        "output feeds Insights > Compare > Per sample."
+                    )
+
+                for annotation_key in pending_pseudobulk_de_annotations:
+                    annotation_pairwise_categories = (
+                        (pseudobulk_simple_categories_by_annotation or {}).get(annotation_key)
+                        if pseudobulk_simple_categories_by_annotation
+                        else None
+                    )
+                    sample_metadata_model = _use_sample_metadata_pseudobulk(analysis_adata, annotation_key)
+                    log_step(
+                        f"Pseudobulk DE: modality={modality_name}; annotation column {annotation_key}; "
+                        f"replicate={pseudobulk_replicate_name}",
+                        level=1,
+                    )
+                    pairwise_categories_label = (
+                        ", ".join(str(value) for value in annotation_pairwise_categories)
+                        if annotation_pairwise_categories
+                        else "all categories"
+                    )
+                    log_detail("Parameters:", level=2)
+                    log_detail(
+                        (
+                            f"model=sample_metadata(~ {annotation_key})"
+                            if sample_metadata_model
+                            else f"model=shared_all_category(~ {pseudobulk_replicate_name} + {annotation_key})"
+                        ),
+                        level=3,
+                    )
+                    log_detail("rest=balanced_equal_category_weight", level=3)
+                    log_detail(f"counts_layer={pseudobulk_counts_layer or 'X'}", level=3)
+                    log_detail(f"min_cell_counts={pseudobulk_min_cell_counts_n}", level=3)
+                    log_detail(f"min_gene_counts={pseudobulk_min_gene_counts_n}", level=3)
+                    log_detail(f"min_cells_per_pseudobulk={pseudobulk_min_cells_n}", level=3)
+                    log_detail(f"min_replicates={max(2, pseudobulk_min_rep_n)}", level=3)
+                    log_detail(f"min_pct_expressed={pseudobulk_min_pct_n:g}", level=3)
+                    log_detail(f"p_adjust={pseudobulk_p_adjust_method}", level=3)
+                    log_detail(f"padj_cutoff={pseudobulk_padj_cutoff_n:g}", level=3)
+                    log_detail(f"log2fc_cutoff={pseudobulk_log2fc_cutoff_n:g}", level=3)
+                    log_detail(f"fit_type={pseudobulk_deseq2_fit_type}", level=3)
+                    log_detail(f"n_cpus={pseudobulk_n_cpus_n}", level=3)
+                    log_detail("diagnostics=pairwise", level=3)
+                    log_detail(f"reported_pairwise_categories={pairwise_categories_label}", level=3)
+                    compute_de = (
+                        compute_pseudobulk_sample_metadata_de
+                        if sample_metadata_model
+                        else compute_pseudobulk_group_de
+                    )
+                    annotation_results = compute_de(
+                        analysis_adata,
                         annotation_key,
-                        expression_layer="normalized",
+                        replicate=pseudobulk_replicate_name,
+                        pairwise_categories=annotation_pairwise_categories,
+                        counts_layer=pseudobulk_counts_layer,
+                        min_cell_counts=pseudobulk_min_cell_counts_n,
+                        min_gene_counts=pseudobulk_min_gene_counts_n,
+                        min_cells=pseudobulk_min_cells_n,
+                        min_replicates=pseudobulk_min_rep_n,
+                        min_pct_expressed=pseudobulk_min_pct_n,
+                        p_adjust_method=pseudobulk_p_adjust_method,
                         padj_cutoff=pseudobulk_padj_cutoff_n,
                         log2fc_cutoff=pseudobulk_log2fc_cutoff_n,
-                        p_adjust_method=pseudobulk_p_adjust_method,
-                        min_cells=pseudobulk_min_cells_n,
+                        fit_type=pseudobulk_deseq2_fit_type,
+                        n_cpus=max(1, int(pseudobulk_n_cpus)),
                     )
-                    if fallback_results:
-                        pseudobulk_de[annotation_key] = fallback_results
-                        log_detail(
-                            f"pseudobulk DE unavailable for '{annotation_key}'; used "
-                            "cell-level Welch markers (category vs rest) as a "
-                            "replicate-free fallback.",
-                            level=2,
+                    if annotation_results:
+                        modality_pseudobulk_de[annotation_key] = annotation_results
+                    elif not sample_metadata_model:
+                        # Pseudobulk DESeq2 needs >= 2 biological replicates. When it
+                        # can't run (e.g. a single-sample dataset), fall back to
+                        # cell-level Welch markers (category vs rest) so the per-
+                        # category marker panel is still populated. Same payload
+                        # schema, so no viewer changes are needed.
+                        from .pseudobulk import compute_cell_level_group_markers
+
+                        fallback_results = compute_cell_level_group_markers(
+                            analysis_adata,
+                            annotation_key,
+                            expression_layer="normalized",
+                            padj_cutoff=pseudobulk_padj_cutoff_n,
+                            log2fc_cutoff=pseudobulk_log2fc_cutoff_n,
+                            p_adjust_method=pseudobulk_p_adjust_method,
+                            min_cells=pseudobulk_min_cells_n,
                         )
+                        if fallback_results:
+                            modality_pseudobulk_de[annotation_key] = fallback_results
+                            log_detail(
+                                f"pseudobulk DE unavailable for '{annotation_key}' "
+                                f"on modality {modality_name}; used cell-level Welch markers "
+                                "(category vs rest) as a replicate-free fallback.",
+                                level=2,
+                            )
+
+                pseudobulk_de_by_modality[modality_name] = modality_pseudobulk_de
+
+        pseudobulk_de = (
+            dict(pseudobulk_de_by_modality.get(primary_pseudobulk_modality, {}))
+            if primary_pseudobulk_modality is not None
+            else {}
+        )
 
         # Compute neighbor composition stats
         neighbor_stats = {}
@@ -2692,40 +2763,10 @@ class SpatialDataset:
 
         # Compute contact-conditioned interaction markers:
         # for source S and target T, compare source cells contacting T vs source cells not contacting T.
-        interaction_markers = {}
         requested_interaction_marker_annotations = list(interaction_marker_annotations or [])
-        pending_interaction_marker_annotations = list(requested_interaction_marker_annotations)
+        interaction_markers_by_modality: Dict[str, Dict[str, Any]] = {}
         companion_interaction_markers = companion_analytics.get("interaction_markers")
-        if (
-            not replicate_override
-            and pending_interaction_marker_annotations
-            and isinstance(companion_interaction_markers, dict)
-        ):
-            reused_interaction_annotations = [
-                annotation_key
-                for annotation_key in pending_interaction_marker_annotations
-                if annotation_key in companion_interaction_markers
-            ]
-            if reused_interaction_annotations:
-                log_step(
-                    f"Reusing KaroSpaceCompanion interaction markers for "
-                    f"{len(reused_interaction_annotations)} "
-                    f"annotation column{'s' if len(reused_interaction_annotations) != 1 else ''}."
-                )
-                for annotation_key in reused_interaction_annotations:
-                    interaction_markers[annotation_key] = companion_interaction_markers[annotation_key]
-            pending_interaction_marker_annotations = [
-                annotation_key
-                for annotation_key in pending_interaction_marker_annotations
-                if annotation_key not in interaction_markers
-            ]
-        if neighbor_graph is not None and pending_interaction_marker_annotations:
-            log_step(
-                f"Computing contact-conditioned pseudobulk interaction markers for "
-                f"{len(pending_interaction_marker_annotations)} annotation column"
-                f"{'s' if len(pending_interaction_marker_annotations) != 1 else ''}; "
-                "output feeds Neighbors > Interactions."
-            )
+        if neighbor_graph is not None and requested_interaction_marker_annotations:
             top_targets = int(interaction_markers_top_targets)
             top_genes = int(interaction_markers_top_genes)
             min_cells = int(interaction_markers_min_cells)
@@ -2734,73 +2775,119 @@ class SpatialDataset:
             interaction_min_rep_n = int(pseudobulk_min_replicates)
             from .pseudobulk import compute_pseudobulk_interaction_markers
 
-            for annotation_key in pending_interaction_marker_annotations:
-                log_step(
-                    f"Interaction markers: annotation column {annotation_key}; replicate={interaction_replicate_name}",
-                    level=1,
+            for modality_name in pseudobulk_modality_names:
+                analysis_adata = _adata_for_pseudobulk_modality(modality_name)
+                modality_interaction_markers: Dict[str, Any] = {}
+                pending_interaction_marker_annotations = list(requested_interaction_marker_annotations)
+                allow_companion_reuse = (
+                    modality_name == self.default_modality
+                    and not replicate_override
+                    and isinstance(companion_interaction_markers, dict)
                 )
-                if annotation_key not in neighbor_stats_context:
-                    companion_neighbor_entry = None
-                    if isinstance(companion_neighbor_stats, dict):
-                        companion_neighbor_entry = companion_neighbor_stats.get(annotation_key)
-                    entry, context = _prepare_neighbor_stats_annotations(
+                if allow_companion_reuse:
+                    reused_interaction_annotations = [
+                        annotation_key
+                        for annotation_key in pending_interaction_marker_annotations
+                        if annotation_key in companion_interaction_markers
+                    ]
+                    if reused_interaction_annotations:
+                        log_step(
+                            f"Reusing KaroSpaceCompanion interaction markers for modality {modality_name}: "
+                            f"{len(reused_interaction_annotations)} "
+                            f"annotation column{'s' if len(reused_interaction_annotations) != 1 else ''}."
+                        )
+                        for annotation_key in reused_interaction_annotations:
+                            modality_interaction_markers[annotation_key] = companion_interaction_markers[annotation_key]
+                    pending_interaction_marker_annotations = [
+                        annotation_key
+                        for annotation_key in pending_interaction_marker_annotations
+                        if annotation_key not in modality_interaction_markers
+                    ]
+
+                if pending_interaction_marker_annotations:
+                    log_step(
+                        f"Computing contact-conditioned pseudobulk interaction markers for modality {modality_name}: "
+                        f"{len(pending_interaction_marker_annotations)} annotation column"
+                        f"{'s' if len(pending_interaction_marker_annotations) != 1 else ''}; "
+                        "output feeds Neighbors > Interactions."
+                    )
+
+                for annotation_key in pending_interaction_marker_annotations:
+                    log_step(
+                        f"Interaction markers: modality={modality_name}; annotation column {annotation_key}; "
+                        f"replicate={interaction_replicate_name}",
+                        level=1,
+                    )
+                    if annotation_key not in neighbor_stats_context:
+                        companion_neighbor_entry = None
+                        if isinstance(companion_neighbor_stats, dict):
+                            companion_neighbor_entry = companion_neighbor_stats.get(annotation_key)
+                        entry, context = _prepare_neighbor_stats_annotations(
+                            annotation_key,
+                            precomputed_entry=companion_neighbor_entry,
+                        )
+                        if context is not None:
+                            neighbor_stats_context[annotation_key] = context
+                        if (
+                            entry is not None
+                            and annotation_key in requested_neighbor_stats_annotations_set
+                            and annotation_key not in neighbor_stats
+                        ):
+                            neighbor_stats[annotation_key] = entry
+
+                    ctx = neighbor_stats_context.get(annotation_key)
+                    if ctx is None:
+                        log_warning(
+                            f"interaction markers '{annotation_key}' unavailable "
+                            "(missing neighbor stats for this annotation).",
+                            level=2,
+                        )
+                        continue
+
+                    categories = [str(c) for c in ctx["categories"]]
+                    labels = np.asarray(ctx["labels"], dtype=np.int32)
+                    graph = ctx["graph"]
+                    obs_idx = np.asarray(ctx["obs_idx"], dtype=np.int64)
+                    counts = np.asarray(ctx["counts"], dtype=float)
+                    zscore = ctx.get("zscore")
+                    n_cells = np.asarray(ctx["n_cells"], dtype=int)
+
+                    group_interactions = compute_pseudobulk_interaction_markers(
+                        analysis_adata,
                         annotation_key,
-                        precomputed_entry=companion_neighbor_entry,
+                        replicate=interaction_replicate_name,
+                        graph=graph,
+                        obs_idx=obs_idx,
+                        labels=labels,
+                        categories=categories,
+                        neighbor_counts=counts,
+                        neighbor_zscore=zscore,
+                        neighbor_n_cells=n_cells,
+                        counts_layer=pseudobulk_counts_layer,
+                        min_cell_counts=int(pseudobulk_min_cell_counts),
+                        min_gene_counts=int(pseudobulk_min_gene_counts),
+                        top_targets=top_targets,
+                        top_genes=top_genes,
+                        min_cells=min_cells,
+                        min_neighbors=min_neighbors,
+                        min_replicates=interaction_min_rep_n,
+                        min_pct_expressed=pseudobulk_min_pct_expressed,
+                        p_adjust_method=pseudobulk_p_adjust_method,
+                        padj_cutoff=pseudobulk_padj_cutoff,
+                        log2fc_cutoff=pseudobulk_log2fc_cutoff,
+                        fit_type=pseudobulk_deseq2_fit_type,
+                        n_cpus=max(1, int(pseudobulk_n_cpus)),
                     )
-                    if context is not None:
-                        neighbor_stats_context[annotation_key] = context
-                    if (
-                        entry is not None
-                        and annotation_key in requested_neighbor_stats_annotations_set
-                        and annotation_key not in neighbor_stats
-                    ):
-                        neighbor_stats[annotation_key] = entry
+                    if group_interactions:
+                        modality_interaction_markers[annotation_key] = group_interactions
 
-                ctx = neighbor_stats_context.get(annotation_key)
-                if ctx is None:
-                    log_warning(
-                        f"interaction markers '{annotation_key}' unavailable "
-                        "(missing neighbor stats for this annotation).",
-                        level=2,
-                    )
-                    continue
+                interaction_markers_by_modality[modality_name] = modality_interaction_markers
 
-                categories = [str(c) for c in ctx["categories"]]
-                labels = np.asarray(ctx["labels"], dtype=np.int32)
-                graph = ctx["graph"]
-                obs_idx = np.asarray(ctx["obs_idx"], dtype=np.int64)
-                counts = np.asarray(ctx["counts"], dtype=float)
-                zscore = ctx.get("zscore")
-                n_cells = np.asarray(ctx["n_cells"], dtype=int)
-
-                group_interactions = compute_pseudobulk_interaction_markers(
-                    self.adata,
-                    annotation_key,
-                    replicate=interaction_replicate_name,
-                    graph=graph,
-                    obs_idx=obs_idx,
-                    labels=labels,
-                    categories=categories,
-                    neighbor_counts=counts,
-                    neighbor_zscore=zscore,
-                    neighbor_n_cells=n_cells,
-                    counts_layer=pseudobulk_counts_layer,
-                    min_cell_counts=int(pseudobulk_min_cell_counts),
-                    min_gene_counts=int(pseudobulk_min_gene_counts),
-                    top_targets=top_targets,
-                    top_genes=top_genes,
-                    min_cells=min_cells,
-                    min_neighbors=min_neighbors,
-                    min_replicates=interaction_min_rep_n,
-                    min_pct_expressed=pseudobulk_min_pct_expressed,
-                    p_adjust_method=pseudobulk_p_adjust_method,
-                    padj_cutoff=pseudobulk_padj_cutoff,
-                    log2fc_cutoff=pseudobulk_log2fc_cutoff,
-                    fit_type=pseudobulk_deseq2_fit_type,
-                    n_cpus=max(1, int(pseudobulk_n_cpus)),
-                )
-                if group_interactions:
-                    interaction_markers[annotation_key] = group_interactions
+        interaction_markers = (
+            dict(interaction_markers_by_modality.get(primary_pseudobulk_modality, {}))
+            if primary_pseudobulk_modality is not None
+            else {}
+        )
 
         dispersion_stats = _compute_full_dispersion_stats(
             log_as_neighbor_child=printed_neighbor_stats_header
@@ -3139,6 +3226,8 @@ class SpatialDataset:
             "section_key": self.section_key,
             "pseudobulk_replicate_annotation": pseudobulk_replicate_name,
             "pseudobulk_settings": {
+                "modalities": list(pseudobulk_modality_names),
+                "primary_modality": primary_pseudobulk_modality,
                 "min_replicates": max(2, int(pseudobulk_min_replicates)),
                 "min_cell_counts": int(pseudobulk_min_cell_counts),
                 "min_gene_counts": int(pseudobulk_min_gene_counts),
@@ -3166,12 +3255,14 @@ class SpatialDataset:
             "available_features": list(feature_data.keys()),
             "marker_genes": marker_genes,
             "pseudobulk_de": pseudobulk_de,
+            "pseudobulk_de_by_modality": pseudobulk_de_by_modality,
             "has_umap": umap_coords is not None,
             "umap_bounds": umap_bounds,
             "has_neighbors": neighbor_graph is not None,
             "neighbors_key": neighbor_graph_key,
             "neighbor_stats": neighbor_stats,
             "interaction_markers": interaction_markers,
+            "interaction_markers_by_modality": interaction_markers_by_modality,
             "dispersion_stats": dispersion_stats,
         }
 

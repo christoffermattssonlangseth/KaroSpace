@@ -361,6 +361,15 @@ def _run_export_cli(argv=None):
         help="AnnData layer containing raw counts for pseudobulk DE. Use 'None' for adata.X. (default: counts)"
     )
     pseudobulk_args.add_argument(
+        "--pseudobulk-modalities",
+        type=str,
+        default="",
+        help=(
+            "Comma-separated modalities to run pseudobulk DE on (e.g. 'rna,protein'). "
+            "Use 'all' for all detected modalities. Defaults to the dataset default modality."
+        ),
+    )
+    pseudobulk_args.add_argument(
         "--pseudobulk-min-cell-counts",
         type=int,
         default=0,
@@ -681,6 +690,7 @@ def _run_export_cli(argv=None):
     pseudobulk_mode = _parse_auto_or_none(args.pseudobulk, "--pseudobulk")
     interaction_markers_mode = _parse_auto_or_none(args.interaction_markers, "--interaction-markers")
     pseudobulk_additional_annotations = _parse_csv(args.pseudobulk_additional_annotations)
+    pseudobulk_modalities = _parse_csv(args.pseudobulk_modalities)
     pseudobulk_annotation_columns = [
         args.main_cell_annotation,
         *(pseudobulk_additional_annotations or []),
@@ -811,6 +821,7 @@ def _run_export_cli(argv=None):
         pseudobulk_replicate_annotation=args.pseudobulk_replicate_annotation,
         pseudobulk_simple_constrast_categories=pseudobulk_simple_constrast_categories,
         pseudobulk_counts_layer=_parse_optional_layer(args.pseudobulk_counts_layer),
+        pseudobulk_modalities=pseudobulk_modalities,
         pseudobulk_min_cell_counts=args.pseudobulk_min_cell_counts,
         pseudobulk_min_gene_counts=args.pseudobulk_min_gene_counts,
         pseudobulk_min_cells_per_pseudobulk=args.pseudobulk_min_cells_per_pseudobulk,

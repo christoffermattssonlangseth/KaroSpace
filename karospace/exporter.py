@@ -34823,6 +34823,7 @@ def export_to_html(
     pseudobulk_replicate_annotation: Optional[str] = None,
     pseudobulk_simple_constrast_categories: Any = None,
     pseudobulk_counts_layer: Optional[str] = "counts",
+    pseudobulk_modalities: Optional[Union[str, Sequence[str]]] = None,
     pseudobulk_min_cell_counts: int = 0,
     pseudobulk_min_gene_counts: int = 0,
     pseudobulk_min_cells_per_pseudobulk: int = 20,
@@ -34945,6 +34946,9 @@ def export_to_html(
     pseudobulk_counts_layer : str, optional
         Raw-count AnnData layer for pseudobulk aggregation. Defaults to "counts";
         falls back to adata.X with a warning if absent.
+    pseudobulk_modalities : str or list, optional
+        Modality names to run pseudobulk DE on. Defaults to the dataset default
+        modality, usually "rna". Use "all" or ["all"] for all detected modalities.
     pseudobulk_min_cell_counts : int
         Exclude cells below this total raw-count threshold before pseudobulk
         aggregation. Zero disables filtering.
@@ -35124,8 +35128,45 @@ def export_to_html(
             return False
         raise ValueError(f"{name} must be 'auto' or None")
 
+    available_modalities = list(getattr(dataset, "modalities", {}).keys())
+    default_modality_name = getattr(dataset, "default_modality", "rna")
+
+    def _normalize_modality_selection(
+        value: Optional[Union[str, Sequence[str]]],
+        *,
+        option_name: str,
+        default_to_all: bool,
+    ) -> List[str]:
+        if not available_modalities:
+            return []
+        default_name = (
+            str(default_modality_name)
+            if default_modality_name in available_modalities
+            else available_modalities[0]
+        )
+        if value is None:
+            return list(available_modalities) if default_to_all else [default_name]
+        if isinstance(value, str):
+            requested = [item.strip() for item in value.split(",") if item.strip()]
+        else:
+            requested = [str(item).strip() for item in value if str(item).strip()]
+        if not requested:
+            return list(available_modalities) if default_to_all else [default_name]
+        if any(item.lower() == "all" for item in requested):
+            return list(available_modalities)
+        selected = list(dict.fromkeys(requested))
+        unknown = [name for name in selected if name not in available_modalities]
+        if unknown:
+            raise ValueError(f"Unknown {option_name}: {unknown}. Available: {available_modalities}")
+        return selected
+
     pseudobulk_enabled = _analysis_mode_enabled(pseudobulk, "pseudobulk")
     interaction_markers_enabled = _analysis_mode_enabled(interaction_markers, "interaction_markers")
+    selected_pseudobulk_modalities = _normalize_modality_selection(
+        pseudobulk_modalities,
+        option_name="pseudobulk_modalities",
+        default_to_all=False,
+    )
     resolved_pseudobulk_replicate_annotation = (
         str(pseudobulk_replicate_annotation).strip()
         if pseudobulk_replicate_annotation is not None
@@ -35233,6 +35274,7 @@ def export_to_html(
     log_detail(
         f"Pseudobulk={'on' if pseudobulk_enabled else 'off'}; "
         f"interaction markers={'on' if interaction_markers_enabled else 'off'}; "
+        f"pseudobulk modalities={', '.join(selected_pseudobulk_modalities) or 'none'}; "
         f"neighbor stats columns={', '.join(neighbor_stats_annotations or []) or 'none'}."
     )
     if bool(tutorial):
@@ -35251,6 +35293,7 @@ def export_to_html(
         pseudobulk_replicate_annotation=resolved_pseudobulk_replicate_annotation,
         pseudobulk_simple_constrast_categories=pseudobulk_simple_constrast_categories,
         pseudobulk_counts_layer=pseudobulk_counts_layer,
+        pseudobulk_modalities=selected_pseudobulk_modalities,
         pseudobulk_min_cell_counts=pseudobulk_min_cell_counts,
         pseudobulk_min_gene_counts=pseudobulk_min_gene_counts,
         pseudobulk_min_cells_per_pseudobulk=pseudobulk_min_cells_per_pseudobulk,
@@ -35464,16 +35507,11 @@ def export_to_html(
         log_warning(f"pathway enrichment failed ({exc}).")
 
     # Resolve which non-default modalities to export. Only meaningful when sidecar-based.
-    available_modalities = list(getattr(dataset, "modalities", {}).keys())
-    default_modality_name = getattr(dataset, "default_modality", "rna")
-    if modalities is None:
-        selected_modalities = list(available_modalities)
-    else:
-        requested = [str(m) for m in modalities]
-        unknown = [m for m in requested if m not in available_modalities]
-        if unknown:
-            raise ValueError(f"Unknown modalities: {unknown}. Available: {available_modalities}")
-        selected_modalities = requested
+    selected_modalities = _normalize_modality_selection(
+        modalities,
+        option_name="modalities",
+        default_to_all=True,
+    )
     if default_modality_name in available_modalities and default_modality_name not in selected_modalities:
         selected_modalities.insert(0, default_modality_name)
     extra_modalities = [m for m in selected_modalities if m != default_modality_name]
@@ -35675,6 +35713,7 @@ def export_to_html(
                 "pseudobulk_replicate_annotation": pseudobulk_replicate_annotation,
                 "pseudobulk_simple_constrast_categories": pseudobulk_simple_constrast_categories,
                 "pseudobulk_counts_layer": pseudobulk_counts_layer,
+                "pseudobulk_modalities": pseudobulk_modalities,
                 "pseudobulk_min_cell_counts": int(pseudobulk_min_cell_counts),
                 "pseudobulk_min_gene_counts": int(pseudobulk_min_gene_counts),
                 "pseudobulk_min_cells_per_pseudobulk": int(pseudobulk_min_cells_per_pseudobulk),
@@ -35720,6 +35759,7 @@ def export_to_html(
                 "section_metadata_extra": list(data.get("section_metadata_extra") or []),
                 "pseudobulk_enabled": bool(pseudobulk_enabled),
                 "pseudobulk_de_annotations": list(pseudobulk_de_annotations),
+                "pseudobulk_modalities": list(selected_pseudobulk_modalities),
                 "pseudobulk_replicate_annotation": data.get("pseudobulk_replicate_annotation"),
                 "pseudobulk_settings": data.get("pseudobulk_settings"),
                 "pathway_settings": data.get("pathway_settings"),
