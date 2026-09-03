@@ -7252,7 +7252,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             <button class="legend-toggle active" id="legend-toggle" title="Toggle legend panel" data-help="Show or hide the legend panel with annotation keys, category toggles, and spotlight controls.">
                 Legend
             </button>
-            <button class="insights-toggle" id="insights-toggle" title="Toggle Insights panel" data-help="Insights opens Overview, Genes, Compare, and Neighbors views for the current dataset and selection state.">
+            <button class="insights-toggle" id="insights-toggle" title="Toggle Insights panel" data-help="Insights opens Overview, Features, Compare, and Neighbors views for the current dataset and selection state.">
                 Insights
             </button>
         </div>
@@ -7907,9 +7907,41 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function isViewerFeatureLoadable(feature, modality = getVisualModality()) {{
         return isEmbeddedViewerFeature(feature, modality) || isSidecarViewerFeature(feature, modality);
     }}
-    function getCategoryVsRestGenes(annotationCol = explorationColorCol || currentAnnotation || '') {{
+    function getExplorationModality() {{
+        return getPanelModality('exploration');
+    }}
+    function setExplorationModality(modality) {{
+        return setPanelModality('exploration', modality);
+    }}
+    function getModalityPayload(payloadName, modality = getExplorationModality()) {{
+        let root = DATA[payloadName];
+        if (payloadName === 'pseudobulk_de_by_modality') root = DATA.pseudobulk_de_by_modality;
+        else if (payloadName === 'marker_features_by_modality') root = DATA.marker_features_by_modality;
+        else if (payloadName === 'category_feature_means_by_modality') root = DATA.category_feature_means_by_modality;
+        else if (payloadName === 'feature_correlations_by_modality') root = DATA.feature_correlations_by_modality;
+        else if (payloadName === 'spatial_variable_features_by_modality') root = DATA.spatial_variable_features_by_modality;
+        if (!root || typeof root !== 'object') return null;
+        return root[modality] || null;
+    }}
+    function getExplorationPseudobulkDEPayload(modality = getExplorationModality()) {{
+        return getModalityPayload('pseudobulk_de_by_modality', modality) || {{}};
+    }}
+    function getExplorationMarkerFeaturesPayload(modality = getExplorationModality()) {{
+        return getModalityPayload('marker_features_by_modality', modality) || {{}};
+    }}
+    function getExplorationCategoryFeatureMeansPayload(modality = getExplorationModality()) {{
+        return getModalityPayload('category_feature_means_by_modality', modality) || null;
+    }}
+    function getExplorationFeatureCorrelationsPayload(modality = getExplorationModality()) {{
+        return getModalityPayload('feature_correlations_by_modality', modality) || {{}};
+    }}
+    function getExplorationSpatialVariableFeaturesPayload(modality = getExplorationModality()) {{
+        const payload = getModalityPayload('spatial_variable_features_by_modality', modality);
+        return Array.isArray(payload) ? payload : [];
+    }}
+    function getCategoryVsRestGenes(annotationCol = explorationColorCol || currentAnnotation || '', modality = getExplorationModality()) {{
         const pseudobulkKey = getPseudobulkDEColorKey(annotationCol);
-        const byCategory = (DATA.pseudobulk_de || {{}})[pseudobulkKey] || {{}};
+        const byCategory = getExplorationPseudobulkDEPayload(modality)[pseudobulkKey] || {{}};
         const summaryGenes = byCategory?._summary?.category_gene_means?.genes;
         if (Array.isArray(summaryGenes) && summaryGenes.length) {{
             return uniqueSortedFeatures(summaryGenes);
@@ -7922,18 +7954,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }});
         return uniqueSortedFeatures(genes);
     }}
-    function renderInsightsGeneSearchOptions(selected = '', placeholder = 'All genes') {{
+    function renderInsightsGeneSearchOptions(selected = '', placeholder = 'All features') {{
+        const modality = getExplorationModality();
         const selectedValue = String(selected || '');
-        const embedded = getGeneInputFeatureList();
+        const embedded = getFeatureDatalistValuesForModality(modality);
         const embeddedSet = new Set(embedded);
-        const categoryVsRest = getCategoryVsRestGenes()
+        const categoryVsRest = getCategoryVsRestGenes(explorationColorCol || currentAnnotation || '', modality)
             .filter(gene => !embeddedSet.has(gene));
         const allFeatures = new Set([...embedded, ...categoryVsRest]);
         const current = allFeatures.has(selectedValue) ? selectedValue : '';
         const emptySelected = current ? '' : ' selected';
         const options = [`<option value=""${{emptySelected}}>${{escapeHtml(placeholder)}}</option>`];
         if (embedded.length) {{
-            options.push('<optgroup label="Embedded genes">');
+            options.push(`<optgroup label="${{escapeHtml(getModalityDisplayLabel(modality))}} features">`);
             embedded.forEach((gene) => {{
                 const isSelected = gene === current ? ' selected' : '';
                 options.push(`<option value="${{escapeHtml(gene)}}"${{isSelected}}>${{escapeHtml(gene)}}</option>`);
@@ -7941,7 +7974,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             options.push('</optgroup>');
         }}
         if (categoryVsRest.length) {{
-            options.push('<optgroup label="Balanced-rest genes (not embedded)">');
+            options.push('<optgroup label="Balanced-rest features (not embedded)">');
             categoryVsRest.forEach((gene) => {{
                 const isSelected = gene === current ? ' selected' : '';
                 options.push(`<option value="${{escapeHtml(gene)}}"${{isSelected}}>${{escapeHtml(gene)}}</option>`);
@@ -7952,7 +7985,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
     function refreshLoadedGeneFilterDropdowns() {{
         [
-            ['marker-gene-search', 'All genes'],
+            ['marker-gene-search', 'All features'],
         ].forEach(([id, placeholder]) => {{
             const select = document.getElementById(id);
             if (!select) return;
@@ -7961,7 +7994,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
     function getInsightsSelectedGene() {{
         const value = String(document.getElementById('marker-gene-search')?.value || '').trim();
-        return value ? (resolveCanonicalFeatureName(value) || value) : '';
+        return value ? (resolveCanonicalFeatureName(value, getExplorationModality()) || value) : '';
     }}
     function getFeatureDatalistValuesForModality(modality = getVisualModality()) {{
         if (isModuleModality(modality)) return uniqueSortedFeatures(getGeneModuleDatalistValues());
@@ -9425,10 +9458,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const openTutorialVisualizationLeafMenu = (topLevel, subtab, nestedBranch = null) => {{
             if (typeof closeModal === 'function') closeModal();
             if (typeof openInsightsMode === 'function') openInsightsMode('exploration');
+            topLevel = normalizeInsightsTopLevelName(topLevel);
             insightsTreeOpen = true;
             insightsTreeOpenBranch = topLevel;
             insightsTreeOpenCompareBranch = topLevel === 'compare' ? nestedBranch : null;
-            insightsTreeOpenGenesBranch = topLevel === 'genes' ? nestedBranch : null;
+            insightsTreeOpenGenesBranch = topLevel === 'features' ? nestedBranch : null;
             insightsTreeSelectedLeaf = null;
             syncInsightsModeClasses?.();
             syncInsightsTabClasses?.();
@@ -9680,8 +9714,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'The Visualization menu is the navigation tree.'
             ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); }}, onNext: () => {{ const tree = document.querySelector('[data-insights-tree]'); if (!tree?.classList.contains('is-open')) safeTutorialClick('[data-insights-tree-root]'); }}, nextLabel: tryIt }}),
             step('Visualization menu options', ['.insights-tree-panel-content', '[data-insights-tree]'], [
-                'The menu options open Overview, Genes, Compare, and Neighbors panels.',
-                'Overview summarizes section composition and metadata trends; Genes focuses marker, spatial, distribution, and mean-expression gene views; Compare contains selection, region, annotation, pseudobulk, and relationship comparisons; Neighbors contains spatial adjacency, interaction, and dispersion analyses.'
+                'The menu options open Overview, Features, Compare, and Neighbors panels.',
+                'Overview summarizes section composition and metadata trends; Features focuses marker, spatial, distribution, and mean-expression feature views; Compare contains selection, region, annotation, pseudobulk, and relationship comparisons; Neighbors contains spatial adjacency, interaction, and dispersion analyses.'
             ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); const tree = document.querySelector('[data-insights-tree]'); if (!tree?.classList.contains('is-open')) safeTutorialClick('[data-insights-tree-root]'); }}, nextLabel: tryIt }}),
             step('Open Overview > Summary', '[data-insights-tree-leaf="summary"][data-insights-tree-parent="overview"]', [
                 'Open Visualization, then Overview, then Summary to inspect annotation composition across section metadata.',
@@ -9707,53 +9741,53 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             step('Overview Sections view switch', '.samples-view-icon-toggle', [
                 'The section composition switch changes the same data between stacked bars and a heatmap.'
             ], {{ action: () => openTutorialInsightsPanel('overview', 'sections'), scrollDelay: 720, nextLabel: tryIt }}),
-            step('Open Genes > Markers', '[data-insights-tree-leaf="de-genes"][data-insights-tree-parent="genes"]', [
-                'Open Visualization, then Genes, then Markers to inspect exported pseudobulk marker genes.'
-            ], {{ action: () => openTutorialVisualizationLeafMenu('genes', 'de-genes'), task: 'Click Markers in the Genes options.', nextLabel: tryIt }}),
-            step('Genes Markers panel', ['#marker-genes', '#genes-tab-de-genes-content'], [
-                'The marker panel lists pseudobulk-derived marker genes by category when available.',
-                'Genes that were not embedded may be shown but disabled for direct expression viewing.'
+            step('Open Features > Markers', '[data-insights-tree-leaf="de-genes"][data-insights-tree-parent="features"]', [
+                'Open Visualization, then Features, then Markers to inspect exported pseudobulk marker features.'
+            ], {{ action: () => openTutorialVisualizationLeafMenu('genes', 'de-genes'), task: 'Click Markers in the Features options.', nextLabel: tryIt }}),
+            step('Features Markers panel', ['#marker-genes', '#genes-tab-de-genes-content'], [
+                'The marker panel lists pseudobulk-derived marker features by category when available.',
+                'Features that were not embedded may be shown but disabled for direct expression viewing.'
             ], {{ action: () => openTutorialInsightsPanel('genes', 'de-genes'), nextLabel: tryIt }}),
-            step('Genes Markers view switch', '[data-gene-subtab-toggle="de-genes"]', [
-                'The marker view switch changes between a compact gene list and a heatmap.'
+            step('Features Markers view switch', '[data-gene-subtab-toggle="de-genes"]', [
+                'The marker view switch changes between a compact feature list and a heatmap.'
             ], {{ action: () => openTutorialInsightsPanel('genes', 'de-genes'), scrollDelay: 720, nextLabel: tryIt }}),
-            step('Open Genes > Spatial', '[data-insights-tree-leaf="spatial"][data-insights-tree-parent="genes"]', [
-                'Open Visualization, then Genes, then Spatial to inspect spatially variable genes.'
-            ], {{ action: () => openTutorialVisualizationLeafMenu('genes', 'spatial'), task: 'Click Spatial in the Genes options.', nextLabel: tryIt }}),
-            step('Genes Spatial panel', ['#spatially-variable-genes', '#genes-tab-spatial-content'], [
-                'The Spatial genes panel shows Moran Index rankings computed at export.',
-                'High values suggest genes with stronger spatial autocorrelation.'
+            step('Open Features > Spatial', '[data-insights-tree-leaf="spatial"][data-insights-tree-parent="features"]', [
+                'Open Visualization, then Features, then Spatial to inspect spatially variable features.'
+            ], {{ action: () => openTutorialVisualizationLeafMenu('genes', 'spatial'), task: 'Click Spatial in the Features options.', nextLabel: tryIt }}),
+            step('Features Spatial panel', ['#spatially-variable-genes', '#genes-tab-spatial-content'], [
+                'The Spatial features panel shows Moran Index rankings computed at export.',
+                'High values suggest features with stronger spatial autocorrelation.'
             ], {{ action: () => openTutorialInsightsPanel('genes', 'spatial'), nextLabel: tryIt }}),
-            step('Genes Spatial view switch', '[data-gene-subtab-toggle="spatial"]', [
+            step('Features Spatial view switch', '[data-gene-subtab-toggle="spatial"]', [
                 'The Spatial panel can be shown as a ranked list or as a graph.'
             ], {{ action: () => openTutorialInsightsPanel('genes', 'spatial'), nextLabel: tryIt }}),
-            step('Open Genes > Distribution > Per cell', '[data-insights-tree-leaf="distribution"][data-insights-tree-parent="genes"]', [
-                'Open Visualization, then Genes, then Distribution, then Per cell to inspect expression distributions.',
+            step('Open Features > Distribution > Per cell', '[data-insights-tree-leaf="distribution"][data-insights-tree-parent="features"]', [
+                'Open Visualization, then Features, then Distribution, then Per cell to inspect feature distributions.',
                 'All calculation in this section is done on cells embedded in the HTML file.'
-            ], {{ action: () => openTutorialVisualizationLeafMenu('genes', 'distribution', 'distribution'), task: 'Click Per cell in the Genes > Distribution options.', nextLabel: tryIt }}),
-            step('Genes Distribution per cell gene search', '.marker-gene-search-wrap', [
-                'Enter or select a gene in the Search control.'
-            ], {{ action: () => openTutorialInsightsPanel('genes', 'distribution'), task: 'Enter or select a gene in Search.', requiresInsightsGeneSelected: true, nextLabel: tryIt }}),
-            step('Genes Distribution per cell panel', ['#gene-distribution-panel', '#genes-tab-distribution-content'], [
+            ], {{ action: () => openTutorialVisualizationLeafMenu('genes', 'distribution', 'distribution'), task: 'Click Per cell in the Features > Distribution options.', nextLabel: tryIt }}),
+            step('Features Distribution per cell search', '.marker-gene-search-wrap', [
+                'Enter or select a feature in the Search control.'
+            ], {{ action: () => openTutorialInsightsPanel('genes', 'distribution'), task: 'Enter or select a feature in Search.', requiresInsightsGeneSelected: true, nextLabel: tryIt }}),
+            step('Features Distribution per cell panel', ['#gene-distribution-panel', '#genes-tab-distribution-content'], [
                 'The distribution panel summarizes expression distributions across categories.'
             ], {{ action: () => {{ openTutorialInsightsPanel('genes', 'distribution'); ensureTutorialInsightsGeneSelected(); }}, nextLabel: tryIt }}),
-            step('Genes Distribution per cell controls', '#gene-distribution-panel .pseudobulk-de-controls', [
+            step('Features Distribution per cell controls', '#gene-distribution-panel .pseudobulk-de-controls', [
                 'These controls restrict the per-cell distribution to a selected annotation or sample-metadata group.'
             ], {{ action: () => {{ openTutorialInsightsPanel('genes', 'distribution'); ensureTutorialInsightsGeneSelected(); }}, nextLabel: tryIt }}),
-            step('Genes Distribution per cell view switch', '.samples-view-toggle[data-gene-subtab-toggle="distribution"]', [
+            step('Features Distribution per cell view switch', '.samples-view-toggle[data-gene-subtab-toggle="distribution"]', [
                 'The distribution view switch changes between a table and a violin/boxplot.'
             ], {{ action: () => openTutorialInsightsPanel('genes', 'distribution'), prepareDelay: 420, scrollDelay: 520, spotlightPadding: 2, nextLabel: tryIt }}),
-            step('Open Genes > Distribution > Per sample', '[data-insights-tree-leaf="means"][data-insights-tree-parent="genes"]', [
-                'Open Visualization, then Genes, then Distribution, then Per sample to inspect pseudobulk statistics.',
+            step('Open Features > Distribution > Per sample', '[data-insights-tree-leaf="means"][data-insights-tree-parent="features"]', [
+                'Open Visualization, then Features, then Distribution, then Per sample to inspect pseudobulk statistics.',
                 'All calculation in this section is done on the raw data before the creation of the HTML file.'
-            ], {{ action: () => openTutorialVisualizationLeafMenu('genes', 'means', 'distribution'), task: 'Click Per sample in the Genes > Distribution options.', nextLabel: tryIt }}),
-            step('Genes Distribution per sample gene search', '.marker-gene-search-wrap', [
-                'Enter or select a gene in the Search control before inspecting the per-sample means panel.'
-            ], {{ action: () => openTutorialInsightsPanel('genes', 'means'), task: 'Enter or select a gene in Search.', requiresInsightsGeneSelected: true, nextLabel: tryIt }}),
-            step('Genes Distribution per sample panel', ['#pseudobulk-gene-means', '#genes-tab-means-content'], [
+            ], {{ action: () => openTutorialVisualizationLeafMenu('genes', 'means', 'distribution'), task: 'Click Per sample in the Features > Distribution options.', nextLabel: tryIt }}),
+            step('Features Distribution per sample search', '.marker-gene-search-wrap', [
+                'Enter or select a feature in the Search control before inspecting the per-sample means panel.'
+            ], {{ action: () => openTutorialInsightsPanel('genes', 'means'), task: 'Enter or select a feature in Search.', requiresInsightsGeneSelected: true, nextLabel: tryIt }}),
+            step('Features Distribution per sample panel', ['#pseudobulk-gene-means', '#genes-tab-means-content'], [
                 'The means panel uses pseudobulk mean per category to compare expression across categories.'
             ], {{ action: () => {{ openTutorialInsightsPanel('genes', 'means'); ensureTutorialInsightsGeneSelected(); }}, nextLabel: tryIt }}),
-            step('Genes Distribution per sample view switch', '.samples-view-toggle[data-gene-subtab-toggle="means"]', [
+            step('Features Distribution per sample view switch', '.samples-view-toggle[data-gene-subtab-toggle="means"]', [
                 'The per-sample means view can switch between category means and a barplot.'
             ], {{ action: () => openTutorialInsightsPanel('genes', 'means'), prepareDelay: 420, scrollDelay: 520, spotlightPadding: 2, nextLabel: tryIt }}),
             step('Open Compare > Per cell > Selections', '[data-insights-tree-leaf="selection"][data-insights-tree-parent="compare"]', [
@@ -9902,7 +9936,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ['Module gene picker', 'Module'],
             ['Exploration annotation selector', 'Exploration'],
             ['Open Overview > Summary', 'Exploration > Overview'],
-            ['Open Genes > Markers', 'Exploration > Genes'],
+            ['Open Features > Markers', 'Exploration > Features'],
             ['Open Compare > Per cell > Selections', 'Exploration > Compare'],
             ['Open Neighbors > Enrichment', 'Exploration > Neighbors'],
             ['Finish the tutorial', 'Finish']
@@ -9910,7 +9944,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const chaptersAfterModuleWithoutTasks = new Set([
             'Exploration',
             'Exploration > Overview',
-            'Exploration > Genes',
+            'Exploration > Features',
             'Exploration > Compare',
             'Exploration > Neighbors',
             'Finish',
@@ -10428,10 +10462,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const map = {{
             'Open Overview > Summary': ['overview', 'summary', null],
             'Open Overview > Sections': ['overview', 'sections', null],
-            'Open Genes > Markers': ['genes', 'de-genes', null],
-            'Open Genes > Spatial': ['genes', 'spatial', null],
-            'Open Genes > Distribution > Per cell': ['genes', 'distribution', 'distribution'],
-            'Open Genes > Distribution > Per sample': ['genes', 'means', 'distribution'],
+            'Open Features > Markers': ['features', 'de-genes', null],
+            'Open Features > Spatial': ['features', 'spatial', null],
+            'Open Features > Distribution > Per cell': ['features', 'distribution', 'distribution'],
+            'Open Features > Distribution > Per sample': ['features', 'means', 'distribution'],
             'Open Compare > Per cell > Selections': ['compare', 'selection', 'quick'],
             'Open Compare > Per cell > Regions': ['compare', 'regions', 'quick'],
             'Open Compare > Per cell > Annotations': ['compare', 'groups', 'quick'],
@@ -14524,7 +14558,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function renderGeneTokenButton(gene, options = {{}}) {{
         const rawToken = String(gene || '').trim();
-        const token = resolveViewerFeatureToken(rawToken);
+        const tokenModality = options.modality || null;
+        const token = tokenModality
+            ? (resolveFeatureTokenForModality(rawToken, tokenModality) || rawToken)
+            : resolveViewerFeatureToken(rawToken);
         if (!token && options.allowUnknown !== true) return '';
         const module = getGeneModuleByToken(token);
         const label = module ? getGeneDisplayLabel(token) : (token || rawToken);
@@ -14534,11 +14571,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (options.isActive) classes.push('active');
         if (options.isSearchActive) classes.push('search-active');
         if (!canActivate) classes.push('disabled');
-        else if (!module && !DATA.features_meta?.[token]) classes.push('unloaded');
+        else if (!module && !isFeatureLoadedForModality(token, tokenModality || getVisualModality())) classes.push('unloaded');
         const showMeta = options.showMeta !== false;
         const metaLabel = options.metaLabel !== undefined
             ? options.metaLabel
-            : (!canActivate ? 'not embedded' : (module ? `${{module.genes.length}} genes` : (DATA.features_meta?.[token] ? 'loaded' : 'sidecar')));
+            : (!canActivate ? 'not embedded' : (module ? `${{module.genes.length}} genes` : (isFeatureLoadedForModality(token, tokenModality || getVisualModality()) ? 'loaded' : 'sidecar')));
         const metaHtml = showMeta && metaLabel
             ? `<span class="gene-token-meta">${{escapeHtml(metaLabel)}}</span>`
             : '';
@@ -14547,6 +14584,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 type="button"
                 class="${{classes.join(' ')}}"
                 ${{canActivate ? `data-gene-activate="${{escapeHtml(token)}}"` : ''}}
+                ${{canActivate && tokenModality ? `data-gene-modality="${{escapeHtml(tokenModality)}}"` : ''}}
                 title="${{escapeHtml(options.title || label)}}"
                 ${{canActivate ? '' : 'disabled'}}
             >
@@ -14578,6 +14616,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             btn.addEventListener('click', async () => {{
                 const gene = btn.getAttribute('data-gene-activate') || '';
                 if (!gene) return;
+                const modality = btn.getAttribute('data-gene-modality') || '';
+                if (modality && getVisualModality() !== modality && typeof setActiveModality === 'function') {{
+                    await setActiveModality(modality);
+                }}
                 const ok = await activateViewerGene(gene, {{ showErrors: true }});
                 if (ok && typeof rerenderFn === 'function') rerenderFn();
             }});
@@ -14661,11 +14703,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         `);
 
         const currentGeneModule = getGeneModuleByToken(currentGene);
-        if (currentGene && !currentGeneModule && DATA.gene_correlations?.[currentGene]?.length) {{
-            const corrData = DATA.gene_correlations[currentGene];
+        const explorationModality = getExplorationModality();
+        const featureCorrelations = getExplorationFeatureCorrelationsPayload(explorationModality);
+        if (currentGene && !currentGeneModule && featureCorrelations?.[currentGene]?.length) {{
+            const corrData = featureCorrelations[currentGene];
             const corrRows = `<div class="gene-token-grid">${{corrData.map(({{gene, r}}) =>
                 renderGeneTokenButton(gene, {{
                     isActive: gene === currentGene,
+                    modality: explorationModality,
                     metaLabel: `r=${{r.toFixed(2)}}`,
                     title: `Pearson r = ${{r.toFixed(2)}} with ${{escapeHtml(currentGene)}}`,
                 }})
@@ -14676,11 +14721,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     ${{corrRows}}
                 </div>
             `);
-        }} else if (currentGene && !currentGeneModule && !DATA.gene_correlations?.[currentGene]?.length) {{
-            const originallyEmbedded = Array.isArray(DATA.embedded_features) && DATA.embedded_features.includes(currentGene);
+        }} else if (currentGene && !currentGeneModule && !featureCorrelations?.[currentGene]?.length) {{
+            const originallyEmbedded = getEmbeddedFeatureSet(explorationModality).has(currentGene);
             const emptyText = DATA.feature_manifest_url && !originallyEmbedded
-                ? 'No precomputed correlations for this sidecar-loaded gene.'
-                : 'No positive precomputed correlations for this gene among the embedded genes.';
+                ? 'No precomputed correlations for this sidecar-loaded feature.'
+                : 'No positive precomputed correlations for this feature among the embedded features.';
             sections.push(`
                 <div class="gene-discovery-section">
                     <div class="gene-discovery-label">Correlated with ${{escapeHtml(currentGene)}}</div>
@@ -14689,18 +14734,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             `);
         }}
 
-        if (DATA.spatial_variable_genes?.length) {{
-            const topSVG = DATA.spatial_variable_genes.slice(0, 12);
+        const spatialFeatures = getExplorationSpatialVariableFeaturesPayload(explorationModality);
+        if (spatialFeatures.length) {{
+            const topSVG = spatialFeatures.slice(0, 12);
             const svgRows = `<div class="gene-token-grid">${{topSVG.map((item) =>
                 renderGeneTokenButton(item.gene, {{
                     isActive: item.gene === currentGene,
+                    modality: explorationModality,
                     metaLabel: `I=${{item.I.toFixed(2)}}`,
                     title: `Moran's I = ${{item.I.toFixed(4)}}`,
                 }})
             ).join('')}}</div>`;
             sections.push(`
                 <div class="gene-discovery-section">
-                    <div class="gene-discovery-label">Spatially variable genes</div>
+                    <div class="gene-discovery-label">Spatially variable features</div>
                     ${{svgRows}}
                 </div>
             `);
@@ -19368,22 +19415,22 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function getAvailableMarkerGeneColors() {{
-        return Object.entries(DATA.marker_genes || {{}})
+        return Object.entries(getExplorationMarkerFeaturesPayload())
             .filter(([, groups]) => groups && typeof groups === 'object' && Object.keys(groups).length > 0)
             .map(([color]) => color)
             .sort((a, b) => a.localeCompare(b));
     }}
 
-    function getAvailablePseudobulkDEColors() {{
-        return Object.entries(DATA.pseudobulk_de || {{}})
+    function getAvailablePseudobulkDEColors(modality = getExplorationModality()) {{
+        return Object.entries(getExplorationPseudobulkDEPayload(modality))
             .filter(([, groups]) => groups && typeof groups === 'object' && Object.keys(groups).some((key) => !String(key).startsWith('_')))
             .map(([color]) => color)
             .sort((a, b) => a.localeCompare(b));
     }}
 
-    function getPseudobulkDEColorKey(annotationCol) {{
+    function getPseudobulkDEColorKey(annotationCol, modality = getExplorationModality()) {{
         const key = String(annotationCol || '');
-        const payload = DATA.pseudobulk_de || {{}};
+        const payload = getExplorationPseudobulkDEPayload(modality);
         if (payload[key]) return key;
         if (key.startsWith(SECTION_METADATA_COLOR_PREFIX)) {{
             const metadataKey = key.slice(SECTION_METADATA_COLOR_PREFIX.length);
@@ -19392,8 +19439,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return key;
     }}
 
-    function hasPseudobulkDEForAnnotation(annotationCol) {{
-        const groups = annotationCol ? (DATA.pseudobulk_de || {{}})[getPseudobulkDEColorKey(annotationCol)] : null;
+    function hasPseudobulkDEForAnnotation(annotationCol, modality = getExplorationModality()) {{
+        const groups = annotationCol ? getExplorationPseudobulkDEPayload(modality)[getPseudobulkDEColorKey(annotationCol, modality)] : null;
         return !!(groups && typeof groups === 'object'
             && Object.keys(groups).some((key) => !String(key).startsWith('_')));
     }}
@@ -19404,8 +19451,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         // ranking is never misread as a formal DESeq2 result. Discriminator is
         // written into _summary.category_gene_means.source by pseudobulk.py.
         if (!annotationCol || !hasPseudobulkDEForAnnotation(annotationCol)) return '';
-        const key = getPseudobulkDEColorKey(annotationCol);
-        const groups = (DATA.pseudobulk_de || {{}})[key] || {{}};
+        const modality = getExplorationModality();
+        const key = getPseudobulkDEColorKey(annotationCol, modality);
+        const groups = getExplorationPseudobulkDEPayload(modality)[key] || {{}};
         const summary = groups._summary || {{}};
         const source = String(
             (summary.category_gene_means && summary.category_gene_means.source)
@@ -19423,22 +19471,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return '<span class="de-method-badge de-method-deseq2" title="Pseudobulk differential expression: cells summed into per-replicate pseudobulk samples and fit with DESeq2 (~ replicate + annotation), then evaluated as a category-vs-category contrast.">Pseudobulk DE &middot; DESeq2</span>';
     }}
 
-    function renderPseudobulkDEWarning(annotationCol) {{
-        if (!annotationCol || hasPseudobulkDEForAnnotation(annotationCol)) return '';
-        const availableColors = getAvailablePseudobulkDEColors();
+    function renderPseudobulkDEWarning(annotationCol, modality = getExplorationModality()) {{
+        if (!annotationCol || hasPseudobulkDEForAnnotation(annotationCol, modality)) return '';
+        const availableColors = getAvailablePseudobulkDEColors(modality);
         const chips = availableColors.length
             ? availableColors.map((color) => renderAggChip(formatMetadataLabel(color), 'color-mix(in srgb, #e2a400 18%, #ffffff)')).join('')
             : renderAggChip('none', 'color-mix(in srgb, #e2a400 18%, #ffffff)');
-        return `<div class="genes-warning">No pseudobulk DE genes available for this annotation.<br>Available DE for: ${{chips}}</div>`;
+        return `<div class="genes-warning">No pseudobulk DE features available for this annotation in ${{escapeHtml(getModalityDisplayLabel(modality))}}.<br>Available DE for: ${{chips}}</div>`;
     }}
 
     function renderGenesDetailsWarnings() {{
         const container = document.getElementById('genes-details-warnings');
         if (!container) return;
         const annotationCol = explorationColorCol || currentAnnotation;
+        const modality = getExplorationModality();
         const warnings = [];
         if (insightsGenesTab !== 'distribution') {{
-            const pseudobulkWarning = renderPseudobulkDEWarning(annotationCol);
+            const pseudobulkWarning = renderPseudobulkDEWarning(annotationCol, modality);
             if (pseudobulkWarning) warnings.push(pseudobulkWarning);
         }}
         if (insightsGenesTab === 'distribution') {{
@@ -19453,7 +19502,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function syncGenesDetailsContentVisibility() {{
         const annotationCol = explorationColorCol || currentAnnotation;
-        const hasDE = hasPseudobulkDEForAnnotation(annotationCol);
+        const hasDE = hasPseudobulkDEForAnnotation(annotationCol, getExplorationModality());
         const details = document.getElementById('genes-details-content');
         const search = document.getElementById('genes-search-section');
         if (details) {{
@@ -19466,7 +19515,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function getMarkerGenesForColorCategory(annotationCol, category) {{
         if (!annotationCol || category === null || category === undefined || category === BLEND_ALL_CATEGORIES) return [];
-        const byColor = (DATA.marker_genes || {{}})[annotationCol];
+        const byColor = getExplorationMarkerFeaturesPayload()[annotationCol];
         if (!byColor || typeof byColor !== 'object') return [];
         const rawCategory = resolveRawCategoryValue(annotationCol, category);
         if (Array.isArray(byColor[category])) return byColor[category];
@@ -19483,7 +19532,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function getAvailableComparisonColors() {{
-        const withDE = new Set(Object.keys(DATA.pseudobulk_de || {{}}));
+        const withDE = new Set(Object.keys(getExplorationPseudobulkDEPayload()));
         return Array.from(new Set([...getCategoricalColorColumns(), ...getAvailablePseudobulkDEColors()])).sort((a, b) => {{
             const aHas = withDE.has(a), bHas = withDE.has(b);
             if (aHas !== bHas) return bHas - aHas;
@@ -19494,20 +19543,21 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function getPseudobulkDECategories(annotationCol) {{
         if (!annotationCol) return [];
         const fromMeta = getCategoriesForColorColumn(annotationCol).map(value => String(value));
-        const pseudobulkKey = getPseudobulkDEColorKey(annotationCol);
-        const fromData = Object.keys((DATA.pseudobulk_de || {{}})[pseudobulkKey] || {{}})
+        const modality = getExplorationModality();
+        const pseudobulkKey = getPseudobulkDEColorKey(annotationCol, modality);
+        const fromData = Object.keys(getExplorationPseudobulkDEPayload(modality)[pseudobulkKey] || {{}})
             .filter((value) => !String(value).startsWith('_'))
             .map((value) => formatCategoryLabel(annotationCol, value));
         return Array.from(new Set([...fromMeta, ...fromData]));
     }}
 
-    function normalizeGeneEntries(genes, limit = 0) {{
+    function normalizeGeneEntries(genes, limit = 0, modality = getExplorationModality()) {{
         const seen = new Set();
         const entries = [];
         (Array.isArray(genes) ? genes : []).forEach((gene) => {{
             const raw = String(gene || '').trim();
             if (!raw) return;
-            const canonical = resolveCanonicalFeatureName(raw);
+            const canonical = resolveCanonicalFeatureName(raw, modality);
             const key = (canonical || raw).toLowerCase();
             if (seen.has(key)) return;
             seen.add(key);
@@ -19516,19 +19566,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return limit > 0 ? entries.slice(0, limit) : entries;
     }}
 
-    function getMarkerGeneEntries(annotationCol, category, limit = 0) {{
-        return normalizeGeneEntries(getMarkerGenesForColorCategory(annotationCol, category), limit);
+    function getMarkerGeneEntries(annotationCol, category, limit = 0, modality = getExplorationModality()) {{
+        return normalizeGeneEntries(getMarkerGenesForColorCategory(annotationCol, category), limit, modality);
     }}
 
-    function getMarkerOverlapEntries(annotationCol, sourceCategory, referenceCategory, limit = 0) {{
-        const sourceEntries = getMarkerGeneEntries(annotationCol, sourceCategory, 0);
+    function getMarkerOverlapEntries(annotationCol, sourceCategory, referenceCategory, limit = 0, modality = getExplorationModality()) {{
+        const sourceEntries = getMarkerGeneEntries(annotationCol, sourceCategory, 0, modality);
         const sourceMap = new Map();
         sourceEntries.forEach((entry) => {{
             sourceMap.set((entry.canonical || entry.raw).toLowerCase(), entry);
         }});
         const overlap = [];
         const seen = new Set();
-        getMarkerGeneEntries(annotationCol, referenceCategory, 0).forEach((entry) => {{
+        getMarkerGeneEntries(annotationCol, referenceCategory, 0, modality).forEach((entry) => {{
             const key = (entry.canonical || entry.raw).toLowerCase();
             if (!sourceMap.has(key) || seen.has(key)) return;
             seen.add(key);
@@ -24387,32 +24437,45 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
     }}
 
-    const INSIGHTS_TOP_LEVEL_TABS = ['overview', 'genes', 'compare', 'neighbors'];
+    function normalizeInsightsTopLevelName(topLevel) {{
+        return topLevel === 'genes' ? 'features' : topLevel;
+    }}
+
+    function getInsightsDomTopLevel(topLevel) {{
+        return normalizeInsightsTopLevelName(topLevel) === 'features' ? 'genes' : topLevel;
+    }}
+
+    const INSIGHTS_TOP_LEVEL_TABS = ['overview', 'features', 'compare', 'neighbors'];
     const INSIGHTS_SUBTABS = {{
         overview: ['summary', 'sections'],
-        genes: ['de-genes', 'spatial', 'distribution', 'means'],
+        features: ['de-genes', 'spatial', 'distribution', 'means'],
         compare: ['groups', 'regions', 'selection', 'cell-de', 'complex-contrast', 'river'],
         neighbors: ['enrichment', 'interactions', 'dispersion'],
     }};
 
     function normalizeInsightsTabsState() {{
+        insightsTopLevelTab = normalizeInsightsTopLevelName(insightsTopLevelTab);
+        if (insightsTreeOpenBranch) insightsTreeOpenBranch = normalizeInsightsTopLevelName(insightsTreeOpenBranch);
+        if (insightsTreeSelectedLeaf) insightsTreeSelectedLeaf.topLevel = normalizeInsightsTopLevelName(insightsTreeSelectedLeaf.topLevel);
         if (!INSIGHTS_TOP_LEVEL_TABS.includes(insightsTopLevelTab)) insightsTopLevelTab = 'overview';
         if (!INSIGHTS_SUBTABS.overview.includes(insightsOverviewTab)) insightsOverviewTab = 'summary';
-        if (!INSIGHTS_SUBTABS.genes.includes(insightsGenesTab)) insightsGenesTab = 'de-genes';
+        if (!INSIGHTS_SUBTABS.features.includes(insightsGenesTab)) insightsGenesTab = 'de-genes';
         if (!INSIGHTS_SUBTABS.compare.includes(insightsCompareTab)) insightsCompareTab = 'groups';
         if (!INSIGHTS_SUBTABS.neighbors.includes(insightsNeighborsTab)) insightsNeighborsTab = 'enrichment';
     }}
 
     function getActiveInsightsSubtab(topLevel) {{
         normalizeInsightsTabsState();
-        if (topLevel === 'genes') return insightsGenesTab;
+        topLevel = normalizeInsightsTopLevelName(topLevel);
+        if (topLevel === 'features') return insightsGenesTab;
         if (topLevel === 'compare') return insightsCompareTab;
         if (topLevel === 'neighbors') return insightsNeighborsTab;
         return insightsOverviewTab;
     }}
 
     function setActiveInsightsSubtab(topLevel, value) {{
-        if (topLevel === 'genes') {{
+        topLevel = normalizeInsightsTopLevelName(topLevel);
+        if (topLevel === 'features') {{
             insightsGenesTab = value;
             return;
         }}
@@ -24429,18 +24492,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     const INSIGHTS_TREE_TOP_LABELS = {{
         overview: 'Overview',
-        genes: 'Genes',
+        features: 'Features',
         compare: 'Compare',
         neighbors: 'Neighbors',
     }};
     const INSIGHTS_TREE_LEAF_LABELS = {{
         overview: {{ summary: 'Summary', sections: 'Sections' }},
-        genes: {{ 'de-genes': 'Markers', spatial: 'Spatial', distribution: 'Per cell', means: 'Per sample' }},
+        features: {{ 'de-genes': 'Markers', spatial: 'Spatial', distribution: 'Per cell', means: 'Per sample' }},
         compare: {{ groups: 'Annotations', regions: 'Regions', selection: 'Selections', 'cell-de': 'Simple design', 'complex-contrast': 'Complex design', river: 'Relationships' }},
         neighbors: {{ enrichment: 'Enrichment', interactions: 'Interactions', dispersion: 'Dispersion' }},
     }};
 
     function getInsightsTreePath(topLevel, subtab) {{
+        topLevel = normalizeInsightsTopLevelName(topLevel);
         const path = [INSIGHTS_TREE_TOP_LABELS[topLevel] || topLevel];
         if (topLevel === 'compare') {{
             const group = ['groups', 'regions', 'selection'].includes(subtab)
@@ -24448,7 +24512,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 : (['cell-de', 'complex-contrast'].includes(subtab) ? 'Per sample' : 'Relationships');
             if (group !== 'Relationships') path.push(group);
         }}
-        if (topLevel === 'genes' && ['distribution', 'means'].includes(subtab)) {{
+        if (topLevel === 'features' && ['distribution', 'means'].includes(subtab)) {{
             path.push('Distribution');
         }}
         const leaf = INSIGHTS_TREE_LEAF_LABELS[topLevel]?.[subtab];
@@ -24469,7 +24533,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
         }});
         document.querySelectorAll('[data-insights-tree-node]').forEach((node) => {{
-            const topLevel = node.getAttribute('data-insights-tree-node') || 'overview';
+            const topLevel = normalizeInsightsTopLevelName(node.getAttribute('data-insights-tree-node') || 'overview');
             const isOpen = insightsTreeOpen && insightsTreeOpenBranch === topLevel;
             const hideSibling = insightsTreeOpen && !!insightsTreeOpenBranch && !isOpen;
             node.classList.toggle('is-open', isOpen);
@@ -24490,22 +24554,22 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }});
         document.querySelectorAll('[data-insights-tree-genes-node]').forEach((node) => {{
             const branch = node.getAttribute('data-insights-tree-genes-node') || '';
-            const isOpen = insightsTreeOpen && insightsTreeOpenBranch === 'genes' && insightsTreeOpenGenesBranch === branch;
+            const isOpen = insightsTreeOpen && insightsTreeOpenBranch === 'features' && insightsTreeOpenGenesBranch === branch;
             node.classList.toggle('is-open', isOpen);
             node.querySelector('[data-insights-tree-genes-branch]')?.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
         }});
         document.querySelectorAll('[data-insights-tree-leaf]').forEach((leaf) => {{
-            const topLevel = leaf.getAttribute('data-insights-tree-parent') || 'overview';
+            const topLevel = normalizeInsightsTopLevelName(leaf.getAttribute('data-insights-tree-parent') || 'overview');
             const subtab = leaf.getAttribute('data-insights-tree-leaf') || '';
             const hideRelationship = topLevel === 'compare'
                 && subtab === 'river'
                 && insightsTreeOpen
                 && insightsTreeOpenBranch === 'compare'
                 && !!insightsTreeOpenCompareBranch;
-            const hideGenesDirectLeaf = topLevel === 'genes'
+            const hideGenesDirectLeaf = topLevel === 'features'
                 && leaf.hasAttribute('data-insights-tree-genes-direct-leaf')
                 && insightsTreeOpen
-                && insightsTreeOpenBranch === 'genes'
+                && insightsTreeOpenBranch === 'features'
                 && !!insightsTreeOpenGenesBranch;
             leaf.classList.toggle('is-selected', insightsTreeSelectedLeaf?.topLevel === topLevel && insightsTreeSelectedLeaf?.subtab === subtab);
             leaf.classList.toggle('is-sibling-hidden', hideRelationship || hideGenesDirectLeaf);
@@ -24518,12 +24582,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const hasSelectedLeaf = !!insightsTreeSelectedLeaf;
         INSIGHTS_TOP_LEVEL_TABS.forEach((topLevel) => {{
             const topLevelSelected = hasSelectedLeaf && insightsTreeSelectedLeaf.topLevel === topLevel;
-            document.getElementById(`insights-tab-${{topLevel}}`)?.classList.toggle('active', topLevelSelected);
-            document.getElementById(`insights-tab-${{topLevel}}-content`)?.classList.toggle('active', topLevelSelected);
+            const domTopLevel = getInsightsDomTopLevel(topLevel);
+            document.getElementById(`insights-tab-${{domTopLevel}}`)?.classList.toggle('active', topLevelSelected);
+            document.getElementById(`insights-tab-${{domTopLevel}}-content`)?.classList.toggle('active', topLevelSelected);
             (INSIGHTS_SUBTABS[topLevel] || []).forEach((subtab) => {{
                 const isActive = topLevelSelected && insightsTreeSelectedLeaf.subtab === subtab;
-                document.getElementById(`${{topLevel}}-tab-${{subtab}}`)?.classList.toggle('active', isActive);
-                document.getElementById(`${{topLevel}}-tab-${{subtab}}-content`)?.classList.toggle('active', isActive);
+                document.getElementById(`${{domTopLevel}}-tab-${{subtab}}`)?.classList.toggle('active', isActive);
+                document.getElementById(`${{domTopLevel}}-tab-${{subtab}}-content`)?.classList.toggle('active', isActive);
             }});
         }});
     }}
@@ -24582,7 +24647,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             return;
         }}
 
-        if (insightsTopLevelTab === 'genes') {{
+        if (insightsTopLevelTab === 'features') {{
             renderGenesDetailsWarnings();
             syncGenesDetailsContentVisibility();
             if (insightsGenesTab === 'de-genes') {{
@@ -24624,6 +24689,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function activateInsightsTopLevelTab(topLevel, focusSubtab = null) {{
+        topLevel = normalizeInsightsTopLevelName(topLevel);
         if (!INSIGHTS_TOP_LEVEL_TABS.includes(topLevel)) return;
         insightsTopLevelTab = topLevel;
         if (focusSubtab && INSIGHTS_SUBTABS[topLevel]?.includes(focusSubtab)) {{
@@ -24633,6 +24699,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function activateInsightsSubtab(topLevel, subtab) {{
+        topLevel = normalizeInsightsTopLevelName(topLevel);
         if (!INSIGHTS_SUBTABS[topLevel]?.includes(subtab)) return;
         insightsTopLevelTab = topLevel;
         setActiveInsightsSubtab(topLevel, subtab);
@@ -25374,18 +25441,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                                         <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="sections" data-insights-tree-parent="overview">Sections</button>
                                     </div></div>
                                 </div>
-                                <div class="insights-tree-node" data-insights-tree-node="genes">
-                                    <button class="insights-tab insights-tree-trigger has-children" type="button" data-insights-tree-branch="genes" aria-expanded="false"><span data-insights-tree-label>Genes</span></button>
+                                <div class="insights-tree-node" data-insights-tree-node="features">
+                                    <button class="insights-tab insights-tree-trigger has-children" type="button" data-insights-tree-branch="features" aria-expanded="false"><span data-insights-tree-label>Features</span></button>
                                     <div class="insights-tree-children"><div class="insights-tree-children-content">
                                         <div class="insights-tree-node" data-insights-tree-genes-node="distribution">
                                             <button class="insights-tab insights-tree-trigger has-children" type="button" data-insights-tree-genes-branch="distribution" aria-expanded="false">Distribution</button>
                                             <div class="insights-tree-children"><div class="insights-tree-children-content">
-                                                <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="distribution" data-insights-tree-parent="genes">Per cell</button>
-                                                <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="means" data-insights-tree-parent="genes">Per sample</button>
+                                                <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="distribution" data-insights-tree-parent="features">Per cell</button>
+                                                <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="means" data-insights-tree-parent="features">Per sample</button>
                                             </div></div>
                                         </div>
-                                        <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="de-genes" data-insights-tree-parent="genes" data-insights-tree-genes-direct-leaf>Markers</button>
-                                        <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="spatial" data-insights-tree-parent="genes" data-insights-tree-genes-direct-leaf>Spatial</button>
+                                        <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="de-genes" data-insights-tree-parent="features" data-insights-tree-genes-direct-leaf>Markers</button>
+                                        <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="spatial" data-insights-tree-parent="features" data-insights-tree-genes-direct-leaf>Spatial</button>
                                     </div></div>
                                 </div>
                                 <div class="insights-tree-node" data-insights-tree-node="compare">
@@ -25454,19 +25521,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 <div class="insights-tab-content" id="insights-tab-genes-content">
                     <div id="genes-details-warnings"></div>
                     <div id="genes-details-content">
+                    <div class="insights-panel-section" id="exploration-feature-modality-section">
+                        <label for="exploration-feature-modality-select">Feature namespace</label>
+                        <select id="exploration-feature-modality-select"></select>
+                    </div>
                     <div class="insights-panel-section" id="genes-search-section">
                         <label for="marker-gene-search">Search</label>
                         <div class="marker-gene-search-wrap">
-                            <select class="marker-search" id="marker-gene-search" aria-label="Search pseudobulk genes">
-                                ${{renderInsightsGeneSearchOptions('', 'All genes')}}
+                            <select class="marker-search" id="marker-gene-search" aria-label="Search pseudobulk features">
+                                ${{renderInsightsGeneSearchOptions('', 'All features')}}
                             </select>
-                            <button class="marker-gene-clear-btn" id="marker-gene-search-clear" type="button" title="Clear selected gene" aria-label="Clear selected gene">&times;</button>
+                            <button class="marker-gene-clear-btn" id="marker-gene-search-clear" type="button" title="Clear selected feature" aria-label="Clear selected feature">&times;</button>
                         </div>
                     </div>
                     <div class="insights-tab-content active" id="genes-tab-de-genes-content">
                         <div class="samples-view-toggle gene-subtab-view-toggle" data-gene-subtab-toggle="de-genes"></div>
                         <div class="gene-subtab-action-row" id="marker-genes-action-row">
-                            <button class="selection-summary-compare-btn icon-only" type="button" id="marker-genes-export-btn" title="Download pseudobulk DE genes CSV" aria-label="Download pseudobulk DE genes CSV">${{LEGEND_EXPORT_ICON}}</button>
+                            <button class="selection-summary-compare-btn icon-only" type="button" id="marker-genes-export-btn" title="Download pseudobulk DE features CSV" aria-label="Download pseudobulk DE features CSV">${{LEGEND_EXPORT_ICON}}</button>
                             <span id="marker-genes-calc-info">${{renderCalcInfoButton('de_genes')}}</span>
                         </div>
                         <div class="marker-genes" id="marker-genes"></div>
@@ -25641,6 +25712,41 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }});
         }}
 
+        const explorationFeatureModalitySection = document.getElementById('exploration-feature-modality-section');
+        const explorationFeatureModalitySelect = document.getElementById('exploration-feature-modality-select');
+        if (explorationFeatureModalitySelect) {{
+            const modalityOptions = MODALITY_DESCRIPTORS.length
+                ? MODALITY_DESCRIPTORS.map(desc => ({{ value: desc.name, label: desc.label || desc.name }}))
+                : [{{ value: DEFAULT_MODALITY_NAME, label: getModalityDisplayLabel(DEFAULT_MODALITY_NAME) }}];
+            const validModalities = modalityOptions.map(entry => entry.value).filter(Boolean);
+            if (!validModalities.includes(getExplorationModality())) {{
+                setExplorationModality(validModalities[0] || DEFAULT_MODALITY_NAME);
+            }}
+            explorationFeatureModalitySelect.replaceChildren();
+            modalityOptions.forEach((entry) => {{
+                const option = document.createElement('option');
+                option.value = entry.value;
+                option.textContent = entry.label;
+                if (entry.value === getExplorationModality()) option.selected = true;
+                explorationFeatureModalitySelect.appendChild(option);
+            }});
+            if (explorationFeatureModalitySection) {{
+                explorationFeatureModalitySection.style.display = modalityOptions.length > 1 ? '' : 'none';
+            }}
+            explorationFeatureModalitySelect.addEventListener('change', async () => {{
+                const nextModality = explorationFeatureModalitySelect.value || DEFAULT_MODALITY_NAME;
+                setExplorationModality(nextModality);
+                const markerSearch = document.getElementById('marker-gene-search');
+                if (markerSearch) {{
+                    markerSearch.value = '';
+                    refreshLoadedGeneFilterDropdowns();
+                }}
+                await activateViewerGene('', {{ showErrors: false }});
+                renderGeneDiscoveryPanel?.();
+                renderActiveInsightsPanel();
+            }});
+        }}
+
         const groupBy = document.getElementById('annotation-section-key');
         groupBy.addEventListener('change', () => {{
             renderOverviewAggregation();
@@ -25666,7 +25772,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }});
         panel.querySelectorAll('[data-insights-tree-branch]').forEach((button) => {{
             button.addEventListener('click', () => {{
-                const topLevel = button.getAttribute('data-insights-tree-branch') || 'overview';
+                const topLevel = normalizeInsightsTopLevelName(button.getAttribute('data-insights-tree-branch') || 'overview');
                 const wasOpen = insightsTreeOpen && insightsTreeOpenBranch === topLevel;
                 insightsTreeOpen = true;
                 insightsTreeOpenBranch = wasOpen ? null : topLevel;
@@ -25691,18 +25797,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         panel.querySelectorAll('[data-insights-tree-genes-branch]').forEach((button) => {{
             button.addEventListener('click', () => {{
                 const branch = button.getAttribute('data-insights-tree-genes-branch') || 'distribution';
-                const wasOpen = insightsTreeOpen && insightsTreeOpenBranch === 'genes' && insightsTreeOpenGenesBranch === branch;
+                const wasOpen = insightsTreeOpen && insightsTreeOpenBranch === 'features' && insightsTreeOpenGenesBranch === branch;
                 insightsTreeOpen = true;
-                insightsTreeOpenBranch = 'genes';
+                insightsTreeOpenBranch = 'features';
                 insightsTreeOpenGenesBranch = wasOpen ? null : branch;
                 insightsTreeOpenCompareBranch = null;
                 insightsTreeSelectedLeaf = null;
-                activateInsightsTopLevelTab('genes');
+                activateInsightsTopLevelTab('features');
             }});
         }});
         panel.querySelectorAll('[data-insights-tree-leaf]').forEach((button) => {{
             button.addEventListener('click', () => {{
-                const topLevel = button.getAttribute('data-insights-tree-parent') || 'overview';
+                const topLevel = normalizeInsightsTopLevelName(button.getAttribute('data-insights-tree-parent') || 'overview');
                 const subtab = button.getAttribute('data-insights-tree-leaf') || '';
                 if (!INSIGHTS_SUBTABS[topLevel]?.includes(subtab)) return;
                 insightsTreeSelectedLeaf = {{ topLevel, subtab }};
@@ -25741,7 +25847,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 advanceTutorialIfReady();
                 return;
             }}
-            if (isViewerFeatureLoadable(gene)) {{
+            const modality = getExplorationModality();
+            if (isViewerFeatureLoadable(gene, modality)) {{
+                if (getVisualModality() !== modality && typeof setActiveModality === 'function') {{
+                    await setActiveModality(modality);
+                }}
                 await activateViewerGene(gene, {{ showErrors: true }});
                 advanceTutorialIfReady();
                 return;
@@ -26638,9 +26748,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return sorted[base] + rest * (next - sorted[base]);
     }}
 
-    function getRestOrFallbackDEResults(annotationCol, category) {{
-        const pseudobulkKey = getPseudobulkDEColorKey(annotationCol);
-        const byCategory = (DATA.pseudobulk_de || {{}})[pseudobulkKey] || {{}};
+    function getRestOrFallbackDEResults(annotationCol, category, modality = getExplorationModality()) {{
+        const pseudobulkKey = getPseudobulkDEColorKey(annotationCol, modality);
+        const byCategory = getExplorationPseudobulkDEPayload(modality)[pseudobulkKey] || {{}};
         const rawCategory = resolveRawCategoryValue(annotationCol, category);
         const bucket = byCategory[String(rawCategory)] || byCategory[String(category)] || null;
         if (!bucket || typeof bucket !== 'object') return [];
@@ -26675,7 +26785,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return significant;
     }}
 
-    function computeCategoryGeneMeans(annotationCol, genes, categories) {{
+    function computeCategoryGeneMeans(annotationCol, genes, categories, modality = getExplorationModality()) {{
         const sums = new Map();
         const counts = new Map();
         genes.forEach((gene) => {{
@@ -26690,7 +26800,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             if (!colVals) return;
             const geneValues = new Map();
             genes.forEach((gene) => {{
-                const vals = getSectionGeneValues(section, gene);
+                const vals = getSectionGeneValues(section, gene, modality);
                 if (vals) geneValues.set(gene, vals);
             }});
             if (!geneValues.size) return;
@@ -26716,8 +26826,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}));
     }}
 
-    function getClusterGeneMeansColumn(annotationCol) {{
-        const data = DATA.category_gene_means;
+    function getClusterGeneMeansColumn(annotationCol, modality = getExplorationModality()) {{
+        const data = getExplorationCategoryFeatureMeansPayload(modality);
         const genes = Array.isArray(data?.genes) ? data.genes.map(g => String(g)) : [];
         const columns = data?.columns || {{}};
         const column = columns[annotationCol] || null;
@@ -26725,8 +26835,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return {{ genes, column }};
     }}
 
-    function computeClusterGeneMeanMatrix(annotationCol, genes, categories) {{
-        const payload = getPseudobulkGeneMeansPayload(annotationCol) || getClusterGeneMeansColumn(annotationCol);
+    function computeClusterGeneMeanMatrix(annotationCol, genes, categories, modality = getExplorationModality()) {{
+        const payload = getPseudobulkGeneMeansPayload(annotationCol, modality) || getClusterGeneMeansColumn(annotationCol, modality);
         if (!payload) return null;
         const meanGenes = payload.genes;
         const colData = payload.column;
@@ -26742,10 +26852,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }});
     }}
 
-    function getGeneDEHeatmapData(annotationCol, selectedGene = '', topN = 3) {{
+    function getGeneDEHeatmapData(annotationCol, selectedGene = '', topN = 3, modality = getExplorationModality()) {{
         const annotationMeta = DATA.annotations_meta?.[annotationCol];
         if (!annotationMeta || annotationMeta.is_continuous) return null;
-        const meanPayload = getPseudobulkGeneMeansPayload(annotationCol) || getClusterGeneMeansColumn(annotationCol);
+        const meanPayload = getPseudobulkGeneMeansPayload(annotationCol, modality) || getClusterGeneMeansColumn(annotationCol, modality);
         if (!meanPayload) return null;
         const meanGeneSet = new Set(meanPayload.genes);
         const meanGeneByLower = new Map(meanPayload.genes.map(gene => [String(gene).toLowerCase(), gene]));
@@ -26753,7 +26863,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const token = String(gene || '').trim();
             if (!token) return '';
             if (meanGeneSet.has(token)) return token;
-            const canonical = resolveCanonicalFeatureName(token);
+            const canonical = resolveCanonicalFeatureName(token, modality);
             if (canonical && meanGeneSet.has(canonical)) return canonical;
             return meanGeneByLower.get(token.toLowerCase()) || '';
         }}
@@ -26769,7 +26879,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const limit = Math.max(1, Math.min(10000, Number(topN) || 3));
         categories.forEach((category) => {{
             let categoryVisible = 0;
-            getRestOrFallbackDEResults(annotationCol, category).forEach((comparison) => {{
+            getRestOrFallbackDEResults(annotationCol, category, modality).forEach((comparison) => {{
                 if (comparison.reference !== '__rest__') return;
                 const result = comparison.result || {{}};
                 const significantGenes = getSignificantDEResultGeneSet(result);
@@ -26798,12 +26908,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!genes.length || !fullGenes.length) {{
             return {{ categories, genes: [], means: [], zscores: [], deStars, source: 'category_gene_means' }};
         }}
-        const fullMeans = computeClusterGeneMeanMatrix(annotationCol, fullGenes, categories);
+        const fullMeans = computeClusterGeneMeanMatrix(annotationCol, fullGenes, categories, modality);
         const values = fullMeans.flat().filter(Number.isFinite);
         const mean = values.reduce((sum, value) => sum + value, 0) / Math.max(values.length, 1);
         const variance = values.reduce((sum, value) => sum + Math.pow(value - mean, 2), 0) / Math.max(values.length, 1);
         const sd = Math.sqrt(variance) || 1;
-        const means = computeClusterGeneMeanMatrix(annotationCol, genes, categories);
+        const means = computeClusterGeneMeanMatrix(annotationCol, genes, categories, modality);
         return {{ categories, genes, means, zscores: means.map(row => row.map(value => Number.isFinite(value) ? (value - mean) / sd : null)), deStars, source: 'category_gene_means' }};
     }}
 
@@ -27037,7 +27147,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const exportBtn = document.getElementById('marker-genes-export-btn');
         const calcInfo = document.getElementById('marker-genes-calc-info');
         const selectedGene = getInsightsSelectedGene();
-        const markers = DATA.marker_genes || {{}};
+        const modality = getExplorationModality();
+        const markers = getExplorationMarkerFeaturesPayload(modality);
         const viewMode = getGeneSubtabView(subtab);
         if (calcInfo) calcInfo.innerHTML = renderCalcInfoButton(viewMode === 'graph' ? 'de_heatmap' : 'de_genes');
         renderGenesDetailsWarnings();
@@ -27051,8 +27162,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             return;
         }}
 
-        const markerPseudobulkKey = getPseudobulkDEColorKey(markerColorCol);
-        const deForColor = (DATA.pseudobulk_de || {{}})[markerPseudobulkKey] || null;
+        const markerPseudobulkKey = getPseudobulkDEColorKey(markerColorCol, modality);
+        const deForColor = getExplorationPseudobulkDEPayload(modality)[markerPseudobulkKey] || null;
         const hasDEForColor = !!(deForColor && typeof deForColor === 'object' && Object.keys(deForColor).some((key) => !String(key).startsWith('_')));
         const groupMarkers = markers[markerColorCol] || markers[markerPseudobulkKey] || {{}};
         if (!hasDEForColor) {{
@@ -27082,10 +27193,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
 
         if (viewMode === 'graph') {{
-            const heatmapData = getGeneDEHeatmapData(markerColorCol, selectedGene, markerHeatmapTopN);
+            const heatmapData = getGeneDEHeatmapData(markerColorCol, selectedGene, markerHeatmapTopN, modality);
             const heatmapControls = selectedGene
                 ? ''
-                : `<div class="marker-heatmap-controls"><label for="marker-heatmap-topn">Top N genes per category</label><input id="marker-heatmap-topn" type="number" min="1" max="10000" step="1" value="${{Math.max(1, Math.min(10000, Number(markerHeatmapTopN) || 3))}}" aria-label="Top N marker genes per category to display"></div>`;
+                : `<div class="marker-heatmap-controls"><label for="marker-heatmap-topn">Top N features per category</label><input id="marker-heatmap-topn" type="number" min="1" max="10000" step="1" value="${{Math.max(1, Math.min(10000, Number(markerHeatmapTopN) || 3))}}" aria-label="Top N marker features per category to display"></div>`;
             container.innerHTML = heatmapControls + toggleHtml + buildGeneDEHeatmap(heatmapData, markerColorCol);
             bindGeneSubtabViewToggle(container, subtab, renderMarkerGenes);
             bindPseudobulkDEPlotInteractions(container, renderMarkerGenes);
@@ -27106,7 +27217,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     if (!raw) return null;
                     return {{
                         raw,
-                        canonical: resolveCanonicalFeatureName(raw),
+                        canonical: resolveCanonicalFeatureName(raw, modality),
                     }};
                 }})
                 .filter(Boolean);
@@ -27118,19 +27229,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
             const geneButtons = genes.length
                 ? genes.map((entry) => {{
-                    const loadable = isViewerFeatureLoadable(entry.raw);
+                    const loadable = isViewerFeatureLoadable(entry.raw, modality);
                     return renderGeneTokenButton(entry.raw, {{
                         allowUnknown: true,
                         disableActivation: !loadable,
                         isActive: loadable && !!entry.canonical && entry.canonical === currentGene,
                         isSearchActive: !!selectedGene && (entry.raw === selectedGene || entry.canonical === selectedGene),
+                        modality,
                         showMeta: false,
                         title: loadable
-                            ? 'Load pseudobulk DE gene into the viewer'
-                            : 'This category-vs-balanced-rest gene is not available for expression viewing',
+                            ? 'Load pseudobulk DE feature into the viewer'
+                            : 'This category-vs-balanced-rest feature is not available for expression viewing',
                     }});
                 }}).join('')
-                : '<div class="marker-empty">No pseudobulk DE genes found.</div>';
+                : '<div class="marker-empty">No pseudobulk DE features found.</div>';
             const isSpotlit = linkedSpotlightEnabled && spotlightPinnedCategory === key;
             return `
                 <div class="marker-group">
@@ -27142,7 +27254,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         if (rows.length === 0) {{
             if (exportBtn) exportBtn.disabled = false;
-            container.innerHTML = toggleHtml + '<div class="marker-empty">No pseudobulk DE genes match your selection.</div>';
+            container.innerHTML = toggleHtml + '<div class="marker-empty">No pseudobulk DE features match your selection.</div>';
             bindGeneSubtabViewToggle(container, subtab, renderMarkerGenes);
             return;
         }}
@@ -27287,7 +27399,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }};
     }}
 
-    function computeGeneDistributionStats(gene, spec, restrictSpec, restrictValue) {{
+    function computeGeneDistributionStats(gene, spec, restrictSpec, restrictValue, modality = getExplorationModality()) {{
         if (!gene || !spec || !spec.key) return null;
         const restrict = buildGeneDistributionRestrictPredicate(restrictSpec, restrictValue);
 
@@ -27296,7 +27408,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const groups = new Map();
             (DATA.sections || []).forEach((section) => {{
                 if (restrict && !restrict.sectionAllows(section)) return;
-                const vals = getSectionGeneValues(section, gene);
+                const vals = getSectionGeneValues(section, gene, modality);
                 if (!vals || !vals.length) return;
                 const raw = section.metadata ? section.metadata[metaKey] : undefined;
                 const groupVal = (raw === undefined || raw === null || raw === '') ? 'unknown' : String(raw);
@@ -27318,7 +27430,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         cats.forEach((cat) => groups.set(String(cat), []));
         (DATA.sections || []).forEach((section) => {{
             if (restrict && !restrict.sectionAllows(section)) return;
-            const vals = getSectionGeneValues(section, gene);
+            const vals = getSectionGeneValues(section, gene, modality);
             const colVals = getSectionColorValues(section, spec.key);
             if (!vals || !colVals) return;
             const n = Math.min(vals.length, colVals.length);
@@ -27335,14 +27447,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return finalizeDistributionBuckets(groups);
     }}
 
-    function computePseudobulkGeneDistributionStats(gene, annotationCol) {{
-        const payload = getClusterGeneMeansColumn(annotationCol);
+    function computePseudobulkGeneDistributionStats(gene, annotationCol, modality = getExplorationModality()) {{
+        const payload = getClusterGeneMeansColumn(annotationCol, modality);
         if (!gene || !payload) return null;
         const geneToken = String(gene || '').trim();
         const geneIndex = new Map(payload.genes.map((g, idx) => [String(g), idx]));
         let idx = geneIndex.get(geneToken);
         if (idx === undefined) {{
-            const canonical = resolveCanonicalFeatureName(geneToken);
+            const canonical = resolveCanonicalFeatureName(geneToken, modality);
             if (canonical) idx = geneIndex.get(canonical);
         }}
         if (idx === undefined) {{
@@ -27442,6 +27554,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!container) return;
         const subtab = 'distribution';
         const selectedGene = getInsightsSelectedGene();
+        const modality = getExplorationModality();
         if (!selectedGene) {{
             setInsightsGeneSubtabContentVisibility(subtab, false);
             container.innerHTML = '';
@@ -27456,8 +27569,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             exportBtn.onclick = (event) => {{
                 event.preventDefault();
                 event.stopPropagation();
-                const gene = sanitizeFilenamePart(getInsightsSelectedGene() || 'gene');
-                downloadGeneGraphSvg('gene-distribution-panel', `karospace-gene-distribution-${{gene}}`, 'No distribution graph is available to export.');
+                const gene = sanitizeFilenamePart(getInsightsSelectedGene() || 'feature');
+                const modName = sanitizeFilenamePart(modality || 'modality');
+                downloadGeneGraphSvg('gene-distribution-panel', `karospace-feature-distribution-${{modName}}-${{gene}}`, 'No distribution graph is available to export.');
             }};
         }}
 
@@ -27475,7 +27589,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             return;
         }}
         if (!annotationCol || !annotationMeta || annotationMeta.is_continuous || !(annotationMeta.categories || []).length) {{
-            container.innerHTML = toggleHtml + '<div class="marker-empty">Choose a categorical Exploration annotation to view gene distribution.</div>';
+            container.innerHTML = toggleHtml + '<div class="marker-empty">Choose a categorical Exploration annotation to view feature distribution.</div>';
             bindGeneSubtabViewToggle(container, subtab, renderGeneDistributionInsights);
             return;
         }}
@@ -27531,9 +27645,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             spec,
             activeRestrict ? restrictSpec : null,
             activeRestrict ? geneDistributionRestrictValue : null,
+            modality,
         );
         if (!stats || !stats.length) {{
-            container.innerHTML = toggleHtml + controlsHtml + '<div class="marker-empty">No data available for this gene × group combination.</div>';
+            container.innerHTML = toggleHtml + controlsHtml + '<div class="marker-empty">No data available for this feature × group combination.</div>';
             bindGeneSubtabViewToggle(container, subtab, renderGeneDistributionInsights);
             wireGeneDistributionInputs(container);
             return;
@@ -27574,7 +27689,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ? ` \u2014 restricted to ${{escapeHtml(formatMetadataLabel(restrictSpec.key))}} = <strong>${{escapeHtml(String(geneDistributionRestrictValue))}}</strong>`
             : '';
         const tableHtml = `
-            <div class="gene-distribution-summary">Expression of <strong>${{escapeHtml(selectedGene)}}</strong> across ${{escapeHtml(formatMetadataLabel(spec.key))}}${{restrictLabel}}</div>
+            <div class="gene-distribution-summary">Expression of <strong>${{escapeHtml(selectedGene)}}</strong> in ${{escapeHtml(getModalityDisplayLabel(modality))}} across ${{escapeHtml(formatMetadataLabel(spec.key))}}${{restrictLabel}}</div>
             <table class="gene-distribution-table">
                 <thead>
                     <tr>
@@ -27590,7 +27705,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         `;
 
         const graphHtml = `
-            <div class="gene-distribution-summary">Expression of <strong>${{escapeHtml(selectedGene)}}</strong> across ${{escapeHtml(formatMetadataLabel(spec.key))}}${{restrictLabel}}</div>
+            <div class="gene-distribution-summary">Expression of <strong>${{escapeHtml(selectedGene)}}</strong> in ${{escapeHtml(getModalityDisplayLabel(modality))}} across ${{escapeHtml(formatMetadataLabel(spec.key))}}${{restrictLabel}}</div>
             ${{buildGeneDistributionBoxplot(sorted, spec)}}
         `;
         container.innerHTML = toggleHtml + controlsHtml + (isGraphView ? graphHtml : tableHtml);
@@ -27599,9 +27714,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (isGraphView) bindPseudobulkDEPlotInteractions(container, renderGeneDistributionInsights);
     }}
 
-    function getPseudobulkGeneMeansPayload(annotationCol) {{
-        const pseudobulkKey = getPseudobulkDEColorKey(annotationCol);
-        const summary = (DATA.pseudobulk_de || {{}})[pseudobulkKey]?._summary?.category_gene_means;
+    function getPseudobulkGeneMeansPayload(annotationCol, modality = getExplorationModality()) {{
+        const pseudobulkKey = getPseudobulkDEColorKey(annotationCol, modality);
+        const summary = getExplorationPseudobulkDEPayload(modality)[pseudobulkKey]?._summary?.category_gene_means;
         const summaryGenes = Array.isArray(summary?.genes) ? summary.genes.map(gene => String(gene)) : [];
         if (summaryGenes.length && summary?.means) {{
             return {{
@@ -27615,9 +27730,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 }},
             }};
         }}
-        // Compatibility fallback for viewers exported before category means were
-        // stored alongside the balanced-rest pseudobulk results.
-        const data = DATA.category_gene_means;
+        const data = getExplorationCategoryFeatureMeansPayload(modality);
         const genes = Array.isArray(data?.genes) ? data.genes.map(gene => String(gene)) : [];
         const column = data?.columns?.[annotationCol];
         return genes.length && column?.means ? {{ genes, column }} : null;
@@ -27629,7 +27742,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const subtab = 'means';
         const selectedCol = explorationColorCol || currentAnnotation || '';
         const geneRaw = getInsightsSelectedGene();
-        if (!hasPseudobulkDEForAnnotation(selectedCol) || !geneRaw) {{
+        const modality = getExplorationModality();
+        if (!hasPseudobulkDEForAnnotation(selectedCol, modality) || !geneRaw) {{
             setInsightsGeneSubtabContentVisibility(subtab, false);
             container.innerHTML = '';
             return;
@@ -27643,11 +27757,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             exportBtn.onclick = (event) => {{
                 event.preventDefault();
                 event.stopPropagation();
-                const gene = sanitizeFilenamePart(getInsightsSelectedGene() || 'gene');
-                downloadGeneGraphSvg('pseudobulk-gene-means', `karospace-gene-means-${{gene}}`, 'No means graph is available to export.');
+                const gene = sanitizeFilenamePart(getInsightsSelectedGene() || 'feature');
+                const modName = sanitizeFilenamePart(modality || 'modality');
+                downloadGeneGraphSvg('pseudobulk-gene-means', `karospace-feature-means-${{modName}}-${{gene}}`, 'No means graph is available to export.');
             }};
         }}
-        const payload = getPseudobulkGeneMeansPayload(selectedCol);
+        const payload = getPseudobulkGeneMeansPayload(selectedCol, modality);
         if (!payload) {{
             container.innerHTML = toggleHtml + '<div class="marker-empty">No pseudobulk-derived category means are available.</div>';
             bindGeneSubtabViewToggle(container, subtab, renderPseudobulkGeneMeans);
@@ -27655,7 +27770,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         const genes = payload.genes;
         if (!genes.includes(geneRaw)) {{
-            container.innerHTML = toggleHtml + '<div class="marker-empty">No pseudobulk-derived category means are available for the selected gene.</div>';
+            container.innerHTML = toggleHtml + '<div class="marker-empty">No pseudobulk-derived category means are available for the selected feature.</div>';
             bindGeneSubtabViewToggle(container, subtab, renderPseudobulkGeneMeans);
             return;
         }}
@@ -27695,7 +27810,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}).join('');
 
         const listHtml = `
-            <div class="gene-distribution-summary">Pseudobulk-derived category means for <strong>${{escapeHtml(selectedGene)}}</strong>. Background mean: ${{Number.isFinite(background) ? background.toFixed(4) : 'n/a'}}.</div>
+            <div class="gene-distribution-summary">Pseudobulk-derived category means for <strong>${{escapeHtml(selectedGene)}}</strong> in ${{escapeHtml(getModalityDisplayLabel(modality))}}. Background mean: ${{Number.isFinite(background) ? background.toFixed(4) : 'n/a'}}.</div>
             <table class="gene-distribution-table">
                 <thead>
                     <tr><th>Category</th><th>Mean</th><th>Cells</th></tr>
@@ -27704,7 +27819,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             </table>
         `;
         const graphHtml = `
-            <div class="gene-distribution-summary">Pseudobulk-derived category means for <strong>${{escapeHtml(selectedGene)}}</strong>. Background mean: ${{Number.isFinite(background) ? background.toFixed(4) : 'n/a'}}.</div>
+            <div class="gene-distribution-summary">Pseudobulk-derived category means for <strong>${{escapeHtml(selectedGene)}}</strong> in ${{escapeHtml(getModalityDisplayLabel(modality))}}. Background mean: ${{Number.isFinite(background) ? background.toFixed(4) : 'n/a'}}.</div>
             ${{buildPseudobulkMeanDeviationPlot(meanRows, background, selectedCol)}}
         `;
         container.innerHTML = toggleHtml + (isGraphView ? graphHtml : listHtml);
@@ -27734,10 +27849,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const subtab = 'spatial';
         const toggleHtml = renderGeneSubtabViewToggle(subtab);
         const selectedGene = getInsightsSelectedGene();
-        const entries = Array.isArray(DATA.spatial_variable_genes) ? DATA.spatial_variable_genes : [];
+        const modality = getExplorationModality();
+        const entries = getExplorationSpatialVariableFeaturesPayload(modality);
 
         if (!entries.length) {{
-            container.innerHTML = toggleHtml + '<div class="marker-empty">No spatially variable genes were precomputed for this viewer.</div>';
+            container.innerHTML = toggleHtml + '<div class="marker-empty">No spatially variable features were precomputed for this modality.</div>';
             bindGeneSubtabViewToggle(container, subtab, renderSpatialVariableGenes);
             return;
         }}
@@ -27757,7 +27873,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             .filter((entry) => !selectedGene || entry.gene === selectedGene);
 
         if (!filtered.length) {{
-            container.innerHTML = toggleHtml + '<div class="marker-empty">No spatially variable genes match your selected gene.</div>';
+            container.innerHTML = toggleHtml + '<div class="marker-empty">No spatially variable features match your selected feature.</div>';
             bindGeneSubtabViewToggle(container, subtab, renderSpatialVariableGenes);
             return;
         }}
@@ -27776,15 +27892,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <span class="spatial-gene-rank">#${{entry.rank}}</span>
                     ${{renderGeneTokenButton(entry.gene, {{
                         isActive: entry.gene === currentGene,
+                        modality,
                         showMeta: false,
-                        title: `Load spatially variable gene into the viewer (Moran's I ${{entry.score.toFixed(4)}})`,
+                        title: `Load spatially variable feature into the viewer (Moran's I ${{entry.score.toFixed(4)}})`,
                     }})}}
                     <span class="spatial-gene-score">${{scoreLabel}}</span>
                 </div>
             `;
         }}).join('');
 
-        container.innerHTML = toggleHtml + `<div class="gene-distribution-summary">Moran Index for ${{filtered.length.toLocaleString()}} gene${{filtered.length === 1 ? '' : 's'}}</div>` + rows;
+        container.innerHTML = toggleHtml + `<div class="gene-distribution-summary">Moran Index for ${{filtered.length.toLocaleString()}} feature${{filtered.length === 1 ? '' : 's'}} in ${{escapeHtml(getModalityDisplayLabel(modality))}}</div>` + rows;
         bindGeneSubtabViewToggle(container, subtab, renderSpatialVariableGenes);
         bindGeneActivateButtons(container, renderSpatialVariableGenes);
     }}
@@ -35787,7 +35904,7 @@ def export_to_html(
         log_detail(
             f"Running Moran's I for up to {int(spatial_variable_genes_n)} variable genes "
             f"on the full input cell set ({int(dataset.adata.n_obs):,} cells); "
-            "output feeds Insights > Exploration > Genes > Spatial."
+            "output feeds Insights > Exploration > Features > Spatial."
         )
         data["spatial_variable_features_by_modality"][default_modality_name] = _compute_morans_i(
             dataset.adata, list(dataset.var_names), n_genes=int(spatial_variable_genes_n)
@@ -35806,7 +35923,7 @@ def export_to_html(
         log_detail(
             f"Using up to {int(category_means_n_genes)} embedded DE genes from the current "
             "pseudobulk analysis; output feeds Insights > Exploration > "
-            "Genes > Distribution > Per sample."
+            "Features > Distribution > Per sample."
         )
         data["category_feature_means_by_modality"][default_modality_name] = _category_gene_means_from_pseudobulk_de(
             (data.get("pseudobulk_de_by_modality") or {}).get(default_modality_name),

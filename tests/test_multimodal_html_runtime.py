@@ -67,3 +67,14 @@ def test_split_controls_have_independent_feature_namespaces(tmp_path=None):
     assert 'id="overview-blend-b-namespace"' in html
     assert "overviewBlendSpec.a.modality" in html
     assert "overviewBlendSpec.b.modality" in html
+
+
+def test_exploration_uses_features_and_modality_payloads(tmp_path=None):
+    html = _render_multimodal_html(tmp_path)
+
+    assert 'data-insights-tree-parent="features"' in html
+    assert 'id="exploration-feature-modality-select"' in html
+    assert "DATA.pseudobulk_de_by_modality" in html
+    assert "DATA.category_feature_means_by_modality" in html
+    assert "DATA.gene_correlations" not in html
+    assert "DATA.spatial_variable_genes" not in html
