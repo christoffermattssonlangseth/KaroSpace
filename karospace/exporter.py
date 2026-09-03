@@ -7917,9 +7917,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function setPseudobulkPanelModality(modality) {{
         return setPanelModality('pseudobulk', modality);
     }}
+    function getInteractionsModality() {{
+        return getPanelModality('interactions');
+    }}
+    function setInteractionsModality(modality) {{
+        return setPanelModality('interactions', modality);
+    }}
     function getModalityPayload(payloadName, modality = getExplorationModality()) {{
         let root = DATA[payloadName];
         if (payloadName === 'pseudobulk_de_by_modality') root = DATA.pseudobulk_de_by_modality;
+        else if (payloadName === 'interaction_markers_by_modality') root = DATA.interaction_markers_by_modality;
         else if (payloadName === 'marker_features_by_modality') root = DATA.marker_features_by_modality;
         else if (payloadName === 'category_feature_means_by_modality') root = DATA.category_feature_means_by_modality;
         else if (payloadName === 'feature_correlations_by_modality') root = DATA.feature_correlations_by_modality;
@@ -7965,6 +7972,35 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
     function getExplorationMarkerFeaturesPayload(modality = getExplorationModality()) {{
         return getModalityPayload('marker_features_by_modality', modality) || {{}};
+    }}
+    function getMarkerFeaturesPayloadForModality(modality = getExplorationModality()) {{
+        return getModalityPayload('marker_features_by_modality', modality) || {{}};
+    }}
+    function getInteractionMarkersPayloadForModality(modality = getInteractionsModality()) {{
+        return getModalityPayload('interaction_markers_by_modality', modality) || {{}};
+    }}
+    function modalityHasInteractionMarkers(modality) {{
+        return Object.values(getInteractionMarkersPayloadForModality(modality)).some((byAnnotation) => (
+            byAnnotation && typeof byAnnotation === 'object' && Object.keys(byAnnotation).length > 0
+        ));
+    }}
+    function getInteractionMarkerModalities() {{
+        const root = DATA.interaction_markers_by_modality && typeof DATA.interaction_markers_by_modality === 'object'
+            ? DATA.interaction_markers_by_modality
+            : {{}};
+        const registryNames = MODALITY_DESCRIPTORS
+            .map((descriptor) => descriptor?.name)
+            .filter(Boolean);
+        return uniqueSortedFeatures([...registryNames, ...Object.keys(root)])
+            .filter((modality) => modalityHasInteractionMarkers(modality));
+    }}
+    function ensureInteractionsModality() {{
+        const available = getInteractionMarkerModalities();
+        const current = getInteractionsModality();
+        if (available.length && !available.includes(current)) {{
+            return setInteractionsModality(available[0]);
+        }}
+        return current;
     }}
     function getExplorationCategoryFeatureMeansPayload(modality = getExplorationModality()) {{
         return getModalityPayload('category_feature_means_by_modality', modality) || null;
@@ -11285,8 +11321,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function tutorialHasNeighborhoods() {{
         const stats = DATA.neighbor_stats || {{}};
-        const interactions = DATA.interaction_markers || {{}};
-        return !!DATA.has_neighbors || Object.keys(stats).length > 0 || Object.keys(interactions).length > 0;
+        return !!DATA.has_neighbors || Object.keys(stats).length > 0 || getInteractionMarkerModalities().length > 0;
     }}
 
     function openTutorialInsightsPanel(topLevel, subtab) {{
@@ -19545,9 +19580,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
     }}
 
-    function getMarkerGenesForColorCategory(annotationCol, category) {{
+    function getMarkerGenesForColorCategory(annotationCol, category, modality = getExplorationModality()) {{
         if (!annotationCol || category === null || category === undefined || category === BLEND_ALL_CATEGORIES) return [];
-        const byColor = getExplorationMarkerFeaturesPayload()[annotationCol];
+        const byColor = getMarkerFeaturesPayloadForModality(modality)[annotationCol];
         if (!byColor || typeof byColor !== 'object') return [];
         const rawCategory = resolveRawCategoryValue(annotationCol, category);
         if (Array.isArray(byColor[category])) return byColor[category];
@@ -19598,7 +19633,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function getMarkerGeneEntries(annotationCol, category, limit = 0, modality = getExplorationModality()) {{
-        return normalizeGeneEntries(getMarkerGenesForColorCategory(annotationCol, category), limit, modality);
+        return normalizeGeneEntries(getMarkerGenesForColorCategory(annotationCol, category, modality), limit, modality);
     }}
 
     function getMarkerOverlapEntries(annotationCol, sourceCategory, referenceCategory, limit = 0, modality = getExplorationModality()) {{
@@ -19687,8 +19722,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }};
     }}
 
-    function getInteractionPairSummary(annotationCol, sourceCategory, targetCategory) {{
-        const annotationData = (DATA.interaction_markers || {{}})[annotationCol] || {{}};
+    function getInteractionPairSummary(annotationCol, sourceCategory, targetCategory, modality = getInteractionsModality()) {{
+        const annotationData = getInteractionMarkersPayloadForModality(modality)[annotationCol] || {{}};
         const rawSource = resolveRawCategoryValue(annotationCol, sourceCategory);
         const rawTarget = resolveRawCategoryValue(annotationCol, targetCategory);
         const result = (annotationData[String(rawSource)] || {{}})[String(rawTarget)];
@@ -19697,7 +19732,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             sourceCategory: String(sourceCategory),
             targetCategory: String(targetCategory),
             result,
-            genes: normalizeGeneEntries(result.genes || [], 4),
+            genes: normalizeGeneEntries(result.genes || [], 4, modality),
         }};
     }}
 
@@ -25658,6 +25693,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     </div>
                     <div class="insights-tab-content" id="neighbors-tab-interactions-content">
                         <div>
+                            <label>Feature namespace</label>
+                            <select id="interaction-marker-modality-select"></select>
+                        </div>
+                        <div>
                             <label>Interaction Source</label>
                             <select id="interaction-source"></select>
                         </div>
@@ -25928,6 +25967,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 renderNeighborStats();
             }});
         }}
+        const interactionModality = document.getElementById('interaction-marker-modality-select');
+        interactionModality?.addEventListener('change', () => {{
+            setInteractionsModality(interactionModality.value || DEFAULT_MODALITY_NAME);
+            interactionSourceCategory = null;
+            renderInteractionBrowser();
+        }});
         const interactionSource = document.getElementById('interaction-source');
         interactionSource?.addEventListener('change', () => {{
             interactionSourceCategory = interactionSource.value || null;
@@ -28093,8 +28138,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             + renderMarkerGroup(referenceMarkerEntries, referenceCategory, 'reference');
     }}
 
-    function renderInteractionComparisonCard(annotationCol, sourceCategory, targetCategory) {{
-        const summary = getInteractionPairSummary(annotationCol, sourceCategory, targetCategory);
+    function renderInteractionComparisonCard(annotationCol, sourceCategory, targetCategory, modality = getInteractionsModality()) {{
+        const summary = getInteractionPairSummary(annotationCol, sourceCategory, targetCategory, modality);
         const title = `${{escapeHtml(sourceCategory)}} → ${{escapeHtml(targetCategory)}}`;
         if (!summary) {{
             return `
@@ -28117,13 +28162,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             <div class="agg-group">
                 <div class="agg-group-title">${{title}}</div>
                 <div class="agg-group-meta">${{meta}}</div>
-                ${{renderComparisonGeneTokenGrid(summary.genes, available ? 'No contact-conditioned genes returned.' : 'Contact-conditioned DE genes unavailable for this direction.', 'Load contact-conditioned DE gene into the viewer')}}
+                ${{renderComparisonGeneTokenGrid(summary.genes, available ? 'No contact-conditioned genes returned.' : 'Contact-conditioned DE genes unavailable for this direction.', 'Load contact-conditioned DE gene into the viewer', modality)}}
             </div>
         `;
     }}
 
-    function renderComparisonInteractionSummary(annotationCol, sourceCategory, referenceCategory) {{
-        const annotationData = (DATA.interaction_markers || {{}})[annotationCol] || {{}};
+    function renderComparisonInteractionSummary(annotationCol, sourceCategory, referenceCategory, modality = getInteractionsModality()) {{
+        const annotationData = getInteractionMarkersPayloadForModality(modality)[annotationCol] || {{}};
         if (!Object.keys(annotationData).length) {{
             return `
                 <div class="agg-group">
@@ -28138,8 +28183,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 <div class="agg-group-title">Contact-Conditioned Markers</div>
                 <div class="agg-group-meta">Directional DE between contact-positive and contact-negative source cells.</div>
             </div>
-            ${{renderInteractionComparisonCard(annotationCol, sourceCategory, referenceCategory)}}
-            ${{renderInteractionComparisonCard(annotationCol, referenceCategory, sourceCategory)}}
+            ${{renderInteractionComparisonCard(annotationCol, sourceCategory, referenceCategory, modality)}}
+            ${{renderInteractionComparisonCard(annotationCol, referenceCategory, sourceCategory, modality)}}
         `;
     }}
 
@@ -32937,10 +32982,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function renderInteractionBrowser() {{
         const container = document.getElementById('interaction-browser');
+        const modalitySelect = document.getElementById('interaction-marker-modality-select');
         const sourceSelect = document.getElementById('interaction-source');
         if (!container || !sourceSelect) return;
 
         const annotationCol = getNeighborStatsColorColumn();
+        const availableModalities = getInteractionMarkerModalities();
+        const modality = ensureInteractionsModality();
+        if (modalitySelect) {{
+            modalitySelect.innerHTML = availableModalities
+                .map((name) => `<option value="${{escapeHtml(name)}}"${{name === modality ? ' selected' : ''}}>${{escapeHtml(getModalityDisplayLabel(name))}}</option>`)
+                .join('');
+            modalitySelect.value = availableModalities.includes(modality) ? modality : '';
+            modalitySelect.disabled = availableModalities.length < 2;
+        }}
         if (!DATA.has_neighbors) {{
             setNeighborStatsPanelAvailability('neighbors-tab-interactions-content', true, annotationCol);
             container.innerHTML = '<div class="agg-group-meta">No neighbor graph was found in this dataset.</div>';
@@ -32970,8 +33025,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const zscores = stats.zscore || null;
         const nCells = stats.n_cells || [];
         const meanDegree = stats.mean_degree || [];
-        const markers = (DATA.marker_genes || {{}})[annotationCol] || {{}};
-        const interactionMarkersByColor = (DATA.interaction_markers || {{}})[annotationCol] || {{}};
+        const interactionMarkersByColor = getInteractionMarkersPayloadForModality(modality)[annotationCol] || {{}};
         const hasInteractionMarkers = Object.keys(interactionMarkersByColor).length > 0;
         if (categories.length === 0 || counts.length === 0) {{
             container.innerHTML = '<div class="agg-group-meta">Interaction data is empty for this annotation.</div>';
@@ -33015,7 +33069,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const row = counts[sourceIdx] || [];
         const total = row.reduce((sum, value) => sum + (Number.isFinite(value) ? value : 0), 0);
         const targetQuery = (document.getElementById('interaction-search')?.value || '').trim().toLowerCase();
-        const sourceMarkers = (markers[rawSource] || []).slice(0, 6);
+        const sourceMarkers = getMarkerGenesForColorCategory(annotationCol, source, modality).slice(0, 6);
         const sortedEntries = categories
             .map((target, targetIdx) => {{
                 const count = Number(row[targetIdx] ?? 0);
@@ -33024,7 +33078,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     ? Number(zscores[sourceIdx][targetIdx])
                     : null;
                 const rawTarget = resolveRawCategoryValue(annotationCol, target);
-                const targetMarkers = (markers[rawTarget] || []).slice(0, 4);
+                const targetMarkers = getMarkerGenesForColorCategory(annotationCol, target, modality).slice(0, 4);
                 const contact = sourceInteractionMarkers[rawTarget] || null;
                 const contactMarkers = contact && Array.isArray(contact.genes)
                     ? contact.genes.slice(0, 4).filter(Boolean)
@@ -33046,12 +33100,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         const topEntries = sortedEntries.slice(0, 12);
         const renderInlineGeneLinks = (genes) => genes.map(g => {{
-            const loadable = isViewerFeatureLoadable(g);
+            const token = resolveFeatureTokenForModality(g, modality) || String(g || '').trim();
+            const loadable = isViewerFeatureLoadable(g, modality);
             const cls = loadable ? 'interaction-gene-link' : 'interaction-gene-link disabled';
-            const activateAttr = loadable ? ` data-gene-activate="${{escapeHtml(g)}}"` : '';
+            const activateAttr = loadable ? ` data-gene-activate="${{escapeHtml(token)}}" data-gene-modality="${{escapeHtml(modality)}}"` : '';
             const title = loadable
-                ? `Load ${{g}} into the viewer`
-                : `${{g}} is shown in DE results but its expression vector is unavailable`;
+                ? `Load ${{g}} into the ${{getModalityDisplayLabel(modality)}} viewer`
+                : `${{g}} is shown in DE results but its expression vector is unavailable for ${{getModalityDisplayLabel(modality)}}`;
             return `<span class="${{cls}}"${{activateAttr}} title="${{escapeHtml(title)}}">${{escapeHtml(g)}}</span>`;
         }}).join(', ');
         const sourceMarkerLabel = sourceMarkers.length ? renderInlineGeneLinks(sourceMarkers) : 'No pseudobulk DE genes available.';
@@ -33096,7 +33151,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 <div class="agg-group-title">${{renderAggCategoryChip(annotationCol, source)}} → targets${{renderCalcInfoButton('neighbor_stats')}}</div>
                 <div class="agg-group-meta">n=${{sourceN}} | mean degree=${{degreeLabel}} | neighbor edges=${{formatNeighborCount(total)}}</div>
                 <div class="agg-group-meta">Source DE genes: ${{sourceMarkerLabel}}</div>
-                <div class="agg-group-meta">Contact-conditioned DE genes available for ${{withContactMarkers}}/${{topEntries.length}} shown targets.</div>
+                <div class="agg-group-meta">Contact-conditioned DE genes available for ${{withContactMarkers}}/${{topEntries.length}} shown targets in ${{escapeHtml(getModalityDisplayLabel(modality))}}.</div>
                 ${{hasInteractionMarkers ? '' : '<div class="agg-group-meta">Contact DE genes not precomputed for this annotation (use pseudobulk_additional_annotations during export for extra annotations).</div>'}}
             </div>
             <table class="trend-table">

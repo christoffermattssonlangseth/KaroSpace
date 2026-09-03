@@ -86,3 +86,11 @@ def test_compare_pseudobulk_has_modality_selector(tmp_path=None):
     assert 'id="pseudobulk-de-modality-select"' in html
     assert "getPseudobulkDEPayloadForModality" in html
     assert "(DATA.pseudobulk_de || {})" not in html
+
+
+def test_interaction_markers_use_modality_payload(tmp_path=None):
+    html = _render_multimodal_html(tmp_path)
+
+    assert 'id="interaction-marker-modality-select"' in html
+    assert "DATA.interaction_markers_by_modality" in html
+    assert "(DATA.interaction_markers || {})" not in html
