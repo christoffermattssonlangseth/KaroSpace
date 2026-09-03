@@ -49,6 +49,8 @@ output/
 *.karospace
 *.genes.json
 *.genes/
+*.features.json
+*.features/
 *.bin
 *.loader.html
 *sidecar.html
@@ -58,6 +60,7 @@ tmp_hydrated_script_*.js
 # Overlay images extracted from h5ad by the example scripts — regenerable and
 # patient-derived, so they should never be committed.
 xenium_dapi_he*_images/
+*_images/
 # Keep unpublished local exports out of git
 BALO.html
 

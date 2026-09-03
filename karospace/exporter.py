@@ -19298,6 +19298,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (source.indexOf('cell_welch') === 0) {{
             return '<span class="de-method-badge de-method-welch" title="Single-sample data (fewer than 2 biological replicates): per-cluster markers were computed with a Welch t-test, treating each cell as a replicate and testing each category vs the rest. This is a descriptive marker ranking, NOT a DESeq2 pseudobulk result — p-values are anti-conservative (pseudoreplication). Use for marker discovery, not formal inference.">Cluster markers &middot; Welch <span class="de-method-badge-note">(single-sample, descriptive)</span></span>';
         }}
+        if (source.indexOf('companion') === 0) {{
+            const isWilcoxon = source.indexOf('wilcoxon') !== -1;
+            const methodLabel = isWilcoxon ? 'Wilcoxon' : 't-test';
+            return '<span class="de-method-badge de-method-welch" title="Precomputed by KaroSpaceCompanion: per-cluster markers from a cell-level ' + methodLabel + ' (each cell treated as a replicate, category vs category). This is a descriptive marker ranking, NOT a DESeq2 pseudobulk result — use for marker discovery, not formal inference.">Cluster markers &middot; ' + methodLabel + ' <span class="de-method-badge-note">(cell-level, descriptive)</span></span>';
+        }}
         return '<span class="de-method-badge de-method-deseq2" title="Pseudobulk differential expression: cells summed into per-replicate pseudobulk samples and fit with DESeq2 (~ replicate + annotation), then evaluated as a category-vs-category contrast.">Pseudobulk DE &middot; DESeq2</span>';
     }}
 
@@ -27012,7 +27017,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const isSpotlit = linkedSpotlightEnabled && spotlightPinnedCategory === key;
             return `
                 <div class="marker-group">
-                    <div class="marker-group-title${{isSpotlit ? ' is-spotlit' : ''}}" data-marker-category="${{escapeHtml(key)}}" title="Click to highlight this annotation in the viewer">${{renderAggCategoryChip(markerColorCol, key, catIdx)}}</div>
+                    <div class="marker-group-title${{isSpotlit ? ' is-spotlit' : ''}}" data-marker-category="${{escapeHtml(key)}}" title="Click to color the map by this annotation and highlight this cluster">${{renderAggCategoryChip(markerColorCol, key, catIdx)}}</div>
                     <div class="gene-token-grid">${{geneButtons}}</div>
                 </div>
             `;
@@ -27033,9 +27038,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             title.addEventListener('click', (event) => {{
                 const cat = title.getAttribute('data-marker-category');
                 if (!cat) return;
+                // The spotlight is validated against getColorConfig().categories,
+                // which follows the map's active coloring (currentAnnotation, or a
+                // continuous gene scale when currentGene is set). If the map is
+                // showing a gene or a different annotation than this markers panel,
+                // a pinned category from here would be silently rejected. So bring
+                // the map onto this marker annotation (dropping any active gene)
+                // first, then toggle the category spotlight.
+                const onThisAnnotation = !currentGene && currentAnnotation === markerColorCol;
+                const alreadySpotlit = linkedSpotlightEnabled
+                    && spotlightPinnedCategory === cat
+                    && onThisAnnotation;
+                if (!alreadySpotlit && !onThisAnnotation) {{
+                    setViewerColorColumn(markerColorCol);
+                }}
                 linkedSpotlightEnabled = true;
                 neighborNetworkFocusCategories = null;
-                spotlightPinnedCategory = spotlightPinnedCategory === cat ? null : cat;
+                spotlightPinnedCategory = alreadySpotlit ? null : cat;
                 spotlightHoverCategory = null;
                 updateAllLegendSpotlightClasses();
                 rerenderForSpotlightChange();

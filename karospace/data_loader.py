@@ -951,6 +951,13 @@ def _load_companion_analytics(adata) -> Dict[str, Any]:
     analytics: Dict[str, Any] = {}
     if "analytics_columns" in companion:
         analytics["analytics_columns"] = _normalize_uns_text_list(companion.get("analytics_columns"))
+    # Plain string scalar (not JSON): the cell-level DE method Companion used
+    # ("ttest" / "wilcoxon"). Used to tag reused cluster DE so the viewer badge
+    # labels it as cell-level markers rather than a DESeq2 pseudobulk result.
+    if "analytics_cluster_de_method" in companion:
+        analytics["cluster_de_method"] = _normalize_uns_text(
+            companion.get("analytics_cluster_de_method")
+        )
 
     for uns_key, analytics_key in COMPANION_ANALYTICS_JSON_FIELDS.items():
         if uns_key not in companion:
@@ -967,6 +974,79 @@ def _load_companion_analytics(adata) -> Dict[str, Any]:
             )
 
     return analytics
+
+
+def _companion_de_source_tag(method: Optional[str]) -> str:
+    """Map Companion's DE-method scalar to a viewer badge source tag."""
+    normalized = str(method or "").strip().lower().replace("-", "").replace("_", "")
+    if normalized == "wilcoxon":
+        return "companion_wilcoxon"
+    # Companion's default (and TTest enum) is a cell-level Welch t-test.
+    return "companion_ttest"
+
+
+def _backfill_companion_pseudobulk_summary(
+    payload: Any,
+    annotation_key: str,
+    companion_gene_means: Any,
+    method: Optional[str],
+) -> Any:
+    """Give a reused Companion cluster-DE payload the _summary the viewer expects.
+
+    Companion emits cell-level t-test / Wilcoxon DE (no ``_summary``, no method
+    tag) and stores per-cluster means in a separate ``cluster_gene_means_json``
+    field. Stitch the two together so (a) the DE-method badge labels these as
+    cell-level markers instead of defaulting to the DESeq2 label, and (b) the
+    category-means / category-vs-rest panels render. Idempotent: a future
+    Companion that already writes ``_summary.category_gene_means`` is left alone
+    apart from ensuring a source tag.
+    """
+    if not isinstance(payload, dict):
+        return payload
+    source_tag = _companion_de_source_tag(method)
+
+    existing_summary = payload.get("_summary")
+    if isinstance(existing_summary, dict) and isinstance(
+        existing_summary.get("category_gene_means"), dict
+    ):
+        existing_summary["category_gene_means"].setdefault("source", source_tag)
+        existing_summary.setdefault("source", source_tag)
+        return payload
+
+    # Per-category cell counts aren't in cluster_gene_means_json; recover them
+    # from any contrast leaf's n_source (source category == that leaf's source).
+    n_cells: Dict[str, int] = {}
+    for source_cat, refs in payload.items():
+        if str(source_cat).startswith("_") or not isinstance(refs, dict):
+            continue
+        for ref_result in refs.values():
+            if isinstance(ref_result, dict) and ref_result.get("n_source") is not None:
+                try:
+                    n_cells[str(source_cat)] = int(ref_result["n_source"])
+                except (TypeError, ValueError):
+                    pass
+                break
+
+    category_gene_means = None
+    if isinstance(companion_gene_means, dict):
+        columns = companion_gene_means.get("columns")
+        column = columns.get(annotation_key) if isinstance(columns, dict) else None
+        if isinstance(column, dict):
+            category_gene_means = {
+                "genes": list(companion_gene_means.get("genes") or []),
+                "categories": list(column.get("categories") or []),
+                "means": dict(column.get("means") or {}),
+                "background": list(column.get("background") or []),
+                "n_cells": n_cells,
+                "source": source_tag,
+            }
+
+    summary = dict(existing_summary) if isinstance(existing_summary, dict) else {}
+    if category_gene_means is not None:
+        summary["category_gene_means"] = category_gene_means
+    summary.setdefault("source", source_tag)
+    payload["_summary"] = summary
+    return payload
 
 
 def _strip_category_pseudobulk_sample_diagnostics(payload: Any) -> Any:
@@ -2395,6 +2475,8 @@ class SpatialDataset:
         )
         pending_pseudobulk_de_annotations = list(requested_pseudobulk_de_annotations)
         companion_pseudobulk_de = companion_analytics.get("pseudobulk_de")
+        companion_gene_means = companion_analytics.get("category_gene_means")
+        companion_de_method = companion_analytics.get("cluster_de_method")
         if (
             not replicate_override
             and pending_pseudobulk_de_annotations
@@ -2412,9 +2494,19 @@ class SpatialDataset:
                     f"{'s' if len(reused_pseudobulk_de_annotations) != 1 else ''}."
                 )
                 for annotation_key in reused_pseudobulk_de_annotations:
-                    pseudobulk_de[annotation_key] = _strip_category_pseudobulk_sample_diagnostics(
+                    reused_payload = _strip_category_pseudobulk_sample_diagnostics(
                         companion_pseudobulk_de[annotation_key]
                     )
+                    # Companion cluster DE lacks _summary and a method tag;
+                    # stitch in per-cluster means + a cell-level source tag so
+                    # the badge/category panels render correctly.
+                    reused_payload = _backfill_companion_pseudobulk_summary(
+                        reused_payload,
+                        annotation_key,
+                        companion_gene_means,
+                        companion_de_method,
+                    )
+                    pseudobulk_de[annotation_key] = reused_payload
             pending_pseudobulk_de_annotations = [
                 annotation_key
                 for annotation_key in pending_pseudobulk_de_annotations
