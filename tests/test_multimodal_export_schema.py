@@ -9,6 +9,7 @@ def _make_multimodal_dataset():
     obs = pd.DataFrame(
         {
             "section": pd.Categorical(["s1", "s1", "s1", "s1"]),
+            "replicate": pd.Categorical(["r1", "r2", "r1", "r2"]),
             "cell_type": pd.Categorical(["A", "A", "B", "B"]),
         },
         index=[f"cell{i}" for i in range(4)],
@@ -31,6 +32,15 @@ def _make_multimodal_dataset():
             [1, 0],
             [0, 1],
             [1, 1],
+        ],
+        dtype=np.float32,
+    )
+    adata.obsp["spatial_connectivities"] = np.asarray(
+        [
+            [0, 1, 1, 0],
+            [1, 0, 0, 1],
+            [1, 0, 0, 1],
+            [0, 1, 1, 0],
         ],
         dtype=np.float32,
     )
@@ -66,7 +76,7 @@ def _make_multimodal_dataset():
         adata=adata,
         sections=[SectionData("s1", adata.obsm["spatial"])],
         section_key="section",
-        obs_columns=["section", "cell_type"],
+        obs_columns=["section", "replicate", "cell_type"],
         var_names=list(var.index),
         modalities=modalities,
         default_modality="rna",
@@ -110,3 +120,34 @@ def test_multimodal_export_uses_only_by_modality_payloads():
         "pathway_settings",
     ]:
         assert removed_key not in data
+
+
+def test_secondary_analytics_are_modality_scoped():
+    multimodal_dataset = _make_multimodal_dataset()
+    data = multimodal_dataset.to_json_data(
+        annotation="cell_type",
+        features=["rna_a", "protein_a"],
+        pseudobulk_de_annotations=["cell_type"],
+        pseudobulk_replicate_annotation="replicate",
+        pseudobulk_modalities=["rna", "protein"],
+        pseudobulk_min_replicates=1,
+        pseudobulk_min_cells_per_pseudobulk=1,
+        spatial_variable_genes_n=2,
+        category_means_n_genes=2,
+        gene_correlation_top_n=1,
+    )
+
+    assert set(data["category_feature_means_by_modality"]) == {"rna", "protein"}
+    assert set(data["feature_correlations_by_modality"]) == {"rna", "protein"}
+    assert set(data["spatial_variable_features_by_modality"]) == {"rna", "protein"}
+
+    for modality, feature_name in [("rna", "rna_a"), ("protein", "protein_a")]:
+        means = data["category_feature_means_by_modality"][modality]
+        assert means is not None
+        assert feature_name in means["genes"]
+
+        correlations = data["feature_correlations_by_modality"][modality]
+        assert feature_name in correlations
+
+        spatial = data["spatial_variable_features_by_modality"][modality]
+        assert any(row["gene"] == feature_name for row in spatial)

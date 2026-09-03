@@ -1110,6 +1110,168 @@ def _drop_legacy_logfoldchanges(payload: Any) -> Any:
     return payload
 
 
+def _select_top_variable_features(adata: Any, n: int) -> List[str]:
+    """Return up to n feature names ranked by expression variance across cells."""
+    X = adata.X
+    if hasattr(X, "toarray"):
+        mean_sq = np.asarray(X.power(2).mean(axis=0)).ravel()
+        sq_mean = np.asarray(X.mean(axis=0)).ravel() ** 2
+        variances = mean_sq - sq_mean
+    else:
+        variances = np.var(np.asarray(X, dtype=float), axis=0)
+    top_idx = np.argsort(variances)[::-1][: int(n)]
+    return [str(adata.var_names[i]) for i in top_idx]
+
+
+def _compute_morans_i_for_features(adata: Any, features: List[str], n_features: int = 200) -> list:
+    """Compute Moran's I spatial autocorrelation for the top variable features."""
+    W = None
+    for key in ("spatial_connectivities", "connectivities", "neighbors", "neighbor_graph"):
+        if key in adata.obsp:
+            W = adata.obsp[key]
+            break
+    if W is None:
+        return []
+
+    if not sp.issparse(W):
+        W = sp.csr_matrix(W)
+    else:
+        W = W.tocsr().astype(float)
+
+    n_obs = W.shape[0]
+    row_sums = np.asarray(W.sum(axis=1)).ravel()
+    row_sums[row_sums == 0] = 1.0
+    W = sp.diags(1.0 / row_sums) @ W
+    s0 = float(W.sum())
+    if s0 == 0:
+        return []
+
+    selected = _select_top_variable_features(adata, int(n_features))
+    selected = [feature for feature in selected if feature in set(features)]
+    if not selected:
+        return []
+
+    X = adata[:, selected].X
+    if hasattr(X, "toarray"):
+        X = X.toarray()
+    X = np.asarray(X, dtype=float)
+    Z = X - X.mean(axis=0)
+    WZ = W.dot(Z)
+
+    num = n_obs * (Z * WZ).sum(axis=0)
+    denom = s0 * (Z * Z).sum(axis=0)
+    valid = denom > 0
+    i_values = np.where(valid, num / np.where(valid, denom, 1.0), 0.0)
+    i_values = np.clip(i_values, -1.0, 1.0)
+
+    results = [
+        {"gene": feature, "I": round(float(i_values[idx]), 4)}
+        for idx, feature in enumerate(selected)
+        if valid[idx]
+    ]
+    results.sort(key=lambda row: row["I"], reverse=True)
+    return results
+
+
+def _compute_feature_correlations_from_category_means(
+    category_feature_means: Optional[dict],
+    features: List[str],
+    top_n: int = 10,
+) -> dict:
+    """Compute feature correlations across pseudobulk/category mean profiles."""
+    if not features or int(top_n) < 1:
+        return {feature: [] for feature in features} if features else {}
+    if not category_feature_means or not isinstance(category_feature_means, dict):
+        return {feature: [] for feature in features}
+    mean_features = [str(g) for g in (category_feature_means.get("genes") or [])]
+    if len(mean_features) < 2:
+        return {feature: [] for feature in features}
+    feature_positions = {feature: idx for idx, feature in enumerate(mean_features)}
+    selected = [str(g) for g in features if str(g) in feature_positions]
+    if len(selected) < 2:
+        return {feature: [] for feature in features}
+
+    profiles: List[List[float]] = []
+    for col_data in (category_feature_means.get("columns") or {}).values():
+        if not isinstance(col_data, dict):
+            continue
+        means = col_data.get("means") or {}
+        for values in means.values():
+            if isinstance(values, list) and len(values) == len(mean_features):
+                profiles.append([float(values[feature_positions[g]] or 0.0) for g in selected])
+    if len(profiles) < 2:
+        return {feature: [] for feature in features}
+
+    X = np.asarray(profiles, dtype=float)
+    X[~np.isfinite(X)] = 0
+    corr = np.corrcoef(X.T)
+    result = {feature: [] for feature in features}
+    for i, feature in enumerate(selected):
+        scores = corr[i].copy()
+        scores[i] = -2.0
+        top_idx = np.argsort(scores)[::-1][: int(top_n)]
+        result[feature] = [
+            {"gene": selected[j], "r": round(float(corr[i, j]), 3)}
+            for j in top_idx
+            if j != i and np.isfinite(corr[i, j]) and corr[i, j] > 0
+        ]
+    return result
+
+
+def _category_feature_means_from_pseudobulk_de(
+    pseudobulk_de: Optional[dict],
+    features: List[str],
+    max_features: int,
+) -> Optional[dict]:
+    """Build viewer category mean payload from pseudobulk DE aggregate summaries."""
+    if not isinstance(pseudobulk_de, dict) or int(max_features) <= 0:
+        return None
+    requested = [str(feature) for feature in features if str(feature)]
+    if not requested:
+        return None
+    selected = requested[: int(max_features)]
+    columns = {}
+    feature_order: List[str] = []
+    for annotation_col, by_source in pseudobulk_de.items():
+        if not isinstance(by_source, dict):
+            continue
+        summary = by_source.get("_summary") or {}
+        cmeans = summary.get("category_gene_means") or {}
+        src_features = [str(g) for g in (cmeans.get("genes") or [])]
+        if not src_features:
+            continue
+        src_pos = {feature: idx for idx, feature in enumerate(src_features)}
+        keep = [feature for feature in selected if feature in src_pos]
+        if not keep:
+            continue
+        if not feature_order:
+            feature_order = keep
+        else:
+            keep = [feature for feature in feature_order if feature in src_pos]
+        idx = [src_pos[feature] for feature in keep]
+        means = {}
+        for category, values in (cmeans.get("means") or {}).items():
+            if isinstance(values, list) and len(values) == len(src_features):
+                means[str(category)] = [values[i] for i in idx]
+        background_values = cmeans.get("background") or []
+        background = (
+            [background_values[i] for i in idx]
+            if isinstance(background_values, list) and len(background_values) == len(src_features)
+            else [0.0 for _ in idx]
+        )
+        if means:
+            columns[str(annotation_col)] = {
+                "categories": [str(c) for c in (cmeans.get("categories") or means.keys())],
+                "means": means,
+                "background": background,
+                "n_cells": cmeans.get("n_cells") or {},
+                "source": "pseudobulk_de",
+            }
+    if not columns or not feature_order:
+        return None
+    return {"genes": feature_order, "columns": columns, "source": "pseudobulk_de"}
+
+
 @dataclass
 class SectionData:
     """Data for a single tissue section."""
@@ -1801,6 +1963,11 @@ class SpatialDataset:
         interaction_markers_top_genes: int = 20,
         interaction_markers_min_cells: int = 30,
         interaction_markers_min_neighbors: int = 1,
+        analytics_modalities: Optional[Sequence[str]] = None,
+        analytics_features: Optional[Sequence[str]] = None,
+        gene_correlation_top_n: int = 0,
+        category_means_n_genes: int = 0,
+        spatial_variable_genes_n: int = 0,
         section_rotations: Optional[Dict[str, float]] = None,
         deconvolutions: Optional[Dict[str, str]] = None,
     ) -> Dict:
@@ -2509,6 +2676,12 @@ class SpatialDataset:
             for layer_name, layer_matrix in (mod.layers or {}).items():
                 if getattr(layer_matrix, "shape", None) == mod.matrix.shape:
                     mod_adata.layers[str(layer_name)] = layer_matrix
+            for obsm_key, obsm_value in (getattr(self.adata, "obsm", {}) or {}).items():
+                if getattr(obsm_value, "shape", (None,))[0] == self.adata.n_obs:
+                    mod_adata.obsm[str(obsm_key)] = obsm_value.copy() if hasattr(obsm_value, "copy") else obsm_value
+            for obsp_key, obsp_value in (getattr(self.adata, "obsp", {}) or {}).items():
+                if getattr(obsp_value, "shape", None) == (self.adata.n_obs, self.adata.n_obs):
+                    mod_adata.obsp[str(obsp_key)] = obsp_value.copy() if hasattr(obsp_value, "copy") else obsp_value
             return mod_adata
 
         pseudobulk_modality_names = _normalize_pseudobulk_modalities(pseudobulk_modalities)
@@ -2527,6 +2700,10 @@ class SpatialDataset:
             )
             for modality_name in modality_names
         }
+        if analytics_modalities is None:
+            analytics_modality_names = list(modality_names)
+        else:
+            analytics_modality_names = [str(name) for name in analytics_modalities if str(name) in modality_names]
 
         replicate_override = str(pseudobulk_replicate_annotation or "").strip()
         pseudobulk_replicate_name = replicate_override or str(self.section_key)
@@ -3271,6 +3448,87 @@ class SpatialDataset:
             )
             for modality_name, modality_payload in pseudobulk_de_by_modality.items()
         }
+        requested_feature_names = [
+            str(feature)
+            for feature in (analytics_features if analytics_features is not None else (features or []))
+            if str(feature)
+        ]
+        requested_features_by_modality = {
+            modality_name: [
+                feature
+                for feature in requested_feature_names
+                if feature in set(features_by_modality.get(modality_name) or [])
+            ]
+            for modality_name in modality_names
+        }
+
+        def _flatten_marker_features(payload: Any) -> List[str]:
+            flattened: List[str] = []
+            if not isinstance(payload, dict):
+                return flattened
+            for by_category in payload.values():
+                if not isinstance(by_category, dict):
+                    continue
+                for values in by_category.values():
+                    if isinstance(values, list):
+                        flattened.extend(str(value) for value in values if str(value))
+            return flattened
+
+        def _analytics_features_for_modality(modality_name: str) -> List[str]:
+            available = set(features_by_modality.get(modality_name) or [])
+            requested = requested_features_by_modality.get(modality_name) or []
+            markers = _flatten_marker_features(marker_features_by_modality.get(modality_name))
+            return [
+                feature
+                for feature in dict.fromkeys([*requested, *markers])
+                if feature in available
+            ]
+
+        category_feature_means_by_modality: Dict[str, Optional[dict]] = {
+            modality_name: None for modality_name in modality_names
+        }
+        feature_correlations_by_modality: Dict[str, dict] = {
+            modality_name: {} for modality_name in modality_names
+        }
+        spatial_variable_features_by_modality: Dict[str, list] = {
+            modality_name: [] for modality_name in modality_names
+        }
+
+        if int(category_means_n_genes) > 0:
+            for modality_name in analytics_modality_names:
+                features_for_means = _analytics_features_for_modality(modality_name)
+                category_feature_means_by_modality[modality_name] = _category_feature_means_from_pseudobulk_de(
+                    pseudobulk_de_by_modality.get(modality_name),
+                    features_for_means,
+                    int(category_means_n_genes),
+                )
+
+        if int(gene_correlation_top_n) > 0:
+            for modality_name in analytics_modality_names:
+                features_for_correlations = _analytics_features_for_modality(modality_name)
+                mean_payload = category_feature_means_by_modality.get(modality_name)
+                required_feature_count = len([feature for feature in features_for_correlations if str(feature)])
+                available_mean_count = len((mean_payload or {}).get("genes") or [])
+                if required_feature_count and available_mean_count < required_feature_count:
+                    mean_payload = _category_feature_means_from_pseudobulk_de(
+                        pseudobulk_de_by_modality.get(modality_name),
+                        features_for_correlations,
+                        max(required_feature_count, int(category_means_n_genes)),
+                    )
+                feature_correlations_by_modality[modality_name] = _compute_feature_correlations_from_category_means(
+                    mean_payload,
+                    features_for_correlations,
+                    top_n=int(gene_correlation_top_n),
+                )
+
+        if int(spatial_variable_genes_n) > 0:
+            for modality_name in analytics_modality_names:
+                modality_adata = _adata_for_pseudobulk_modality(modality_name)
+                spatial_variable_features_by_modality[modality_name] = _compute_morans_i_for_features(
+                    modality_adata,
+                    list(features_by_modality.get(modality_name) or []),
+                    n_features=int(spatial_variable_genes_n),
+                )
 
         return {
             "initial_annotation": annotation,
@@ -3314,7 +3572,7 @@ class SpatialDataset:
             "features_by_modality": features_by_modality,
             "embedded_features_by_modality": embedded_features_by_modality,
             "feature_state_by_modality": feature_state_by_modality,
-            "requested_features_by_modality": {},
+            "requested_features_by_modality": requested_features_by_modality,
             "metadata_filters": metadata_filters,
             "section_metadata": list(self.section_metadata),
             "section_metadata_extra": list(self.section_metadata_extra),
@@ -3335,15 +3593,9 @@ class SpatialDataset:
             "neighbors_key": neighbor_graph_key,
             "neighbor_stats": neighbor_stats,
             "interaction_markers_by_modality": interaction_markers_by_modality,
-            "category_feature_means_by_modality": {
-                modality_name: None for modality_name in modality_names
-            },
-            "feature_correlations_by_modality": {
-                modality_name: {} for modality_name in modality_names
-            },
-            "spatial_variable_features_by_modality": {
-                modality_name: [] for modality_name in modality_names
-            },
+            "category_feature_means_by_modality": category_feature_means_by_modality,
+            "feature_correlations_by_modality": feature_correlations_by_modality,
+            "spatial_variable_features_by_modality": spatial_variable_features_by_modality,
             "pathway_settings_by_modality": {
                 modality_name: {"available": False, "reason": "not_computed"}
                 for modality_name in modality_names

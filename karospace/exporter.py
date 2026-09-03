@@ -752,188 +752,6 @@ def package_sidecar_viewer(
     return str(resolved_output_path)
 
 
-def _select_top_variable_genes(adata, n: int) -> List[str]:
-    """Return up to n gene names ranked by expression variance across cells."""
-    X = adata.X
-    if hasattr(X, "toarray"):
-        # For sparse matrices compute variance without densifying the whole thing.
-        # Var(X) = E[X^2] - E[X]^2
-        mean_sq = np.asarray(X.power(2).mean(axis=0)).ravel()
-        sq_mean = np.asarray(X.mean(axis=0)).ravel() ** 2
-        variances = mean_sq - sq_mean
-    else:
-        variances = np.var(np.asarray(X, dtype=float), axis=0)
-    top_idx = np.argsort(variances)[::-1][:n]
-    return [adata.var_names[i] for i in top_idx]
-
-
-def _compute_morans_i(adata, genes: List[str], n_genes: int = 200) -> list:
-    """Compute Moran's I spatial autocorrelation for the top variable genes.
-
-    Returns a list of {gene, I} dicts sorted descending by I value, or [] if
-    no spatial weight matrix is found in adata.obsp.
-
-    W is kept sparse throughout. All genes are processed in a single sparse
-    matmul (W @ Z), so cost is O(G * nnz) rather than O(G * N^2).
-    """
-    import scipy.sparse as sp
-
-    # Find spatial weight matrix — keep sparse
-    W = None
-    for key in ("spatial_connectivities", "connectivities", "neighbors", "neighbor_graph"):
-        if key in adata.obsp:
-            W = adata.obsp[key]
-            break
-    if W is None:
-        return []
-
-    if not sp.issparse(W):
-        W = sp.csr_matrix(W)
-    else:
-        W = W.tocsr().astype(float)
-
-    N = W.shape[0]
-
-    # Row-normalize in place using sparse diagonal scaling
-    row_sums = np.asarray(W.sum(axis=1)).ravel()
-    row_sums[row_sums == 0] = 1.0
-    W = sp.diags(1.0 / row_sums) @ W
-    S0 = float(W.sum())
-    if S0 == 0:
-        return []
-
-    # Select top variable genes and densify only those (N × G, manageable)
-    selected = _select_top_variable_genes(adata, n_genes)
-    selected = [g for g in selected if g in set(genes)]
-    if not selected:
-        return []
-
-    X = adata[:, selected].X
-    if hasattr(X, "toarray"):
-        X = X.toarray()
-    X = np.asarray(X, dtype=float)          # (N, G)
-
-    # Center each gene
-    Z = X - X.mean(axis=0)                  # (N, G)
-
-    # One sparse matmul for all genes: W @ Z  →  (N, G)
-    WZ = W.dot(Z)                            # sparse × dense = dense (N, G)
-
-    num = N * (Z * WZ).sum(axis=0)          # (G,)
-    denom = S0 * (Z * Z).sum(axis=0)        # (G,)
-
-    valid = denom > 0
-    I_vals = np.where(valid, num / np.where(valid, denom, 1.0), 0.0)
-    I_vals = np.clip(I_vals, -1.0, 1.0)
-
-    results = [
-        {"gene": gene, "I": round(float(I_vals[j]), 4)}
-        for j, gene in enumerate(selected)
-        if valid[j]
-    ]
-    results.sort(key=lambda d: d["I"], reverse=True)
-    return results
-
-
-def _compute_gene_correlations_from_category_means(
-    category_gene_means: Optional[dict],
-    genes: List[str],
-    top_n: int = 10,
-) -> dict:
-    """Compute gene correlations across pseudobulk/category mean profiles."""
-    if not genes or int(top_n) < 1:
-        return {gene: [] for gene in genes} if genes else {}
-    if not category_gene_means or not isinstance(category_gene_means, dict):
-        return {gene: [] for gene in genes}
-    mean_genes = [str(g) for g in (category_gene_means.get("genes") or [])]
-    if len(mean_genes) < 2:
-        return {gene: [] for gene in genes}
-    gene_positions = {gene: idx for idx, gene in enumerate(mean_genes)}
-    selected = [str(g) for g in genes if str(g) in gene_positions]
-    if len(selected) < 2:
-        return {gene: [] for gene in genes}
-
-    profiles: List[List[float]] = []
-    for col_data in (category_gene_means.get("columns") or {}).values():
-        if not isinstance(col_data, dict):
-            continue
-        means = col_data.get("means") or {}
-        for values in means.values():
-            if isinstance(values, list) and len(values) == len(mean_genes):
-                profiles.append([float(values[gene_positions[g]] or 0.0) for g in selected])
-    if len(profiles) < 2:
-        return {gene: [] for gene in genes}
-
-    X = np.asarray(profiles, dtype=float)
-    X[~np.isfinite(X)] = 0
-    corr = np.corrcoef(X.T)
-    result = {gene: [] for gene in genes}
-    for i, gene in enumerate(selected):
-        scores = corr[i].copy()
-        scores[i] = -2.0
-        top_idx = np.argsort(scores)[::-1][: int(top_n)]
-        result[gene] = [
-            {"gene": selected[j], "r": round(float(corr[i, j]), 3)}
-            for j in top_idx
-            if j != i and np.isfinite(corr[i, j]) and corr[i, j] > 0
-        ]
-    return result
-
-
-def _category_gene_means_from_pseudobulk_de(
-    pseudobulk_de: Optional[dict],
-    genes: List[str],
-    max_genes: int,
-) -> Optional[dict]:
-    """Build viewer category mean payload from pseudobulk DE aggregate summaries."""
-    if not isinstance(pseudobulk_de, dict) or int(max_genes) <= 0:
-        return None
-    requested = [str(g) for g in genes if str(g)]
-    if not requested:
-        return None
-    selected = requested[: int(max_genes)]
-    columns = {}
-    gene_order: List[str] = []
-    for annotation_col, by_source in pseudobulk_de.items():
-        if not isinstance(by_source, dict):
-            continue
-        summary = by_source.get("_summary") or {}
-        cmeans = summary.get("category_gene_means") or {}
-        src_genes = [str(g) for g in (cmeans.get("genes") or [])]
-        if not src_genes:
-            continue
-        src_pos = {gene: idx for idx, gene in enumerate(src_genes)}
-        keep = [gene for gene in selected if gene in src_pos]
-        if not keep:
-            continue
-        if not gene_order:
-            gene_order = keep
-        else:
-            keep = [gene for gene in gene_order if gene in src_pos]
-        idx = [src_pos[gene] for gene in keep]
-        means = {}
-        for category, values in (cmeans.get("means") or {}).items():
-            if isinstance(values, list) and len(values) == len(src_genes):
-                means[str(category)] = [values[i] for i in idx]
-        background_values = cmeans.get("background") or []
-        background = (
-            [background_values[i] for i in idx]
-            if isinstance(background_values, list) and len(background_values) == len(src_genes)
-            else [0.0 for _ in idx]
-        )
-        if means:
-            columns[str(annotation_col)] = {
-                "categories": [str(c) for c in (cmeans.get("categories") or means.keys())],
-                "means": means,
-                "background": background,
-                "n_cells": cmeans.get("n_cells") or {},
-                "source": "pseudobulk_de",
-            }
-    if not columns or not gene_order:
-        return None
-    return {"genes": gene_order, "columns": columns, "source": "pseudobulk_de"}
-
-
 def _estimate_auto_spot_size(dataset: SpatialDataset, min_panel_size: int) -> float:
     """Estimate a reasonable default spot radius from section density."""
     panel_px = max(48.0, float(min_panel_size) - 16.0)  # Account for canvas padding.
@@ -35822,6 +35640,11 @@ def export_to_html(
         interaction_markers_top_genes=interaction_markers_top_genes,
         interaction_markers_min_cells=interaction_markers_min_cells,
         interaction_markers_min_neighbors=interaction_markers_min_neighbors,
+        analytics_modalities=selected_modalities,
+        analytics_features=requested_feature_names,
+        gene_correlation_top_n=int(gene_correlation_top_n),
+        category_means_n_genes=int(category_means_n_genes),
+        spatial_variable_genes_n=int(spatial_variable_genes_n),
         section_rotations=resolved_section_rotations,
         deconvolutions=deconvolutions,
     )
@@ -35870,6 +35693,17 @@ def export_to_html(
         log_detail(f"Requested image overlays for {len(section_images)} section(s).")
         _embed_section_images(data, section_images, max_px=section_images_max_px)
         log_detail("Section image overlay payload stored in the HTML data.")
+
+    pathway_modality_names = list(dict.fromkeys(selected_pseudobulk_modalities or [default_modality_name]))
+
+    def _is_pathway_compatible_modality(modality_name: str) -> bool:
+        if not available_modalities:
+            return True
+        mod = getattr(dataset, "modalities", {}).get(modality_name)
+        value_kind = str(getattr(mod, "value_kind", "") or "").strip().lower()
+        if not value_kind:
+            return modality_name == default_modality_name
+        return value_kind in {"counts", "count", "expression", "rna", "gene"}
 
     try:
         from .pathways import add_pathway_enrichment_to_pseudobulk_de
@@ -35994,46 +35828,57 @@ def export_to_html(
                     level=2,
                 )
 
-        pathway_modality_name = (
-            selected_pseudobulk_modalities[0]
-            if selected_pseudobulk_modalities
-            else default_modality_name
-        )
         pathway_settings_by_modality = dict(data.get("pathway_settings_by_modality") or {})
-        pathway_settings_by_modality[pathway_modality_name] = add_pathway_enrichment_to_pseudobulk_de(
-            (data.get("pseudobulk_de_by_modality") or {}).get(pathway_modality_name),
-            pathway_gmt=pathway_gmt,
-            top_n=int(pathway_top_n),
-            min_overlap=int(pathway_min_overlap),
-            gsea_permutations=int(pathway_gsea_permutations),
-            organism=str(pathway_organism or "Mouse"),
-            n_cpus=1,
-            progress_callback=_log_pathway_progress,
-        )
-        data["pathway_settings_by_modality"] = pathway_settings_by_modality
-        if not pathway_settings_by_modality[pathway_modality_name].get("available"):
-            reason = pathway_settings_by_modality[pathway_modality_name].get("reason") or "unavailable"
-            error = pathway_settings_by_modality[pathway_modality_name].get("error")
-            log_warning(f"pathway enrichment unavailable ({reason}{': ' + error if error else ''}).")
-        else:
-            log_detail(
-                f"Stored pathway enrichment for "
-                f"{int(pathway_settings_by_modality[pathway_modality_name].get('enriched_comparisons') or 0):,}/"
-                f"{int(pathway_settings_by_modality[pathway_modality_name].get('comparisons') or 0):,} pseudobulk comparisons.",
-                level=2,
+        pseudobulk_payloads = data.get("pseudobulk_de_by_modality") or {}
+        for pathway_modality_name in pathway_modality_names:
+            if not _is_pathway_compatible_modality(pathway_modality_name):
+                pathway_settings_by_modality[pathway_modality_name] = {
+                    "available": False,
+                    "reason": "unsupported_modality",
+                    "modality": pathway_modality_name,
+                }
+                log_detail(
+                    f"Skipping pathway enrichment for modality {pathway_modality_name} "
+                    "(not gene-compatible).",
+                    level=2,
+                )
+                continue
+            log_detail(f"Pathway modality: {pathway_modality_name}.", level=2)
+            pathway_settings_by_modality[pathway_modality_name] = add_pathway_enrichment_to_pseudobulk_de(
+                pseudobulk_payloads.get(pathway_modality_name),
+                pathway_gmt=pathway_gmt,
+                top_n=int(pathway_top_n),
+                min_overlap=int(pathway_min_overlap),
+                gsea_permutations=int(pathway_gsea_permutations),
+                organism=str(pathway_organism or "Mouse"),
+                n_cpus=1,
+                progress_callback=_log_pathway_progress,
             )
+        data["pathway_settings_by_modality"] = pathway_settings_by_modality
+        for pathway_modality_name in pathway_modality_names:
+            settings = pathway_settings_by_modality.get(pathway_modality_name) or {}
+            if not settings.get("available"):
+                reason = settings.get("reason") or "unavailable"
+                error = settings.get("error")
+                log_warning(
+                    f"pathway enrichment unavailable for modality {pathway_modality_name} "
+                    f"({reason}{': ' + error if error else ''})."
+                )
+            else:
+                log_detail(
+                    f"Stored pathway enrichment for modality {pathway_modality_name}: "
+                    f"{int(settings.get('enriched_comparisons') or 0):,}/"
+                    f"{int(settings.get('comparisons') or 0):,} pseudobulk comparisons.",
+                    level=2,
+                )
     except Exception as exc:
-        pathway_modality_name = (
-            selected_pseudobulk_modalities[0]
-            if selected_pseudobulk_modalities
-            else default_modality_name
-        )
         pathway_settings_by_modality = dict(data.get("pathway_settings_by_modality") or {})
-        pathway_settings_by_modality[pathway_modality_name] = {
-            "available": False,
-            "reason": "pathway_enrichment_failed",
-            "error": str(exc),
-        }
+        for pathway_modality_name in pathway_modality_names:
+            pathway_settings_by_modality[pathway_modality_name] = {
+                "available": False,
+                "reason": "pathway_enrichment_failed",
+                "error": str(exc),
+            }
         data["pathway_settings_by_modality"] = pathway_settings_by_modality
         log_warning(f"pathway enrichment failed ({exc}).")
 
@@ -36068,78 +35913,6 @@ def export_to_html(
     data.setdefault("feature_correlations_by_modality", {})
     data.setdefault("spatial_variable_features_by_modality", {})
     data.setdefault("pathway_settings_by_modality", {})
-
-    if int(spatial_variable_genes_n) > 0:
-        log_step("Computing spatially variable genes")
-        log_detail(
-            f"Running Moran's I for up to {int(spatial_variable_genes_n)} variable genes "
-            f"on the full input cell set ({int(dataset.adata.n_obs):,} cells); "
-            "output feeds Insights > Exploration > Features > Spatial."
-        )
-        data["spatial_variable_features_by_modality"][default_modality_name] = _compute_morans_i(
-            dataset.adata, list(dataset.var_names), n_genes=int(spatial_variable_genes_n)
-        )
-        log_detail(
-            "Stored "
-            f"{len(data['spatial_variable_features_by_modality'].get(default_modality_name) or [])} "
-            "spatially variable feature rows."
-        )
-    else:
-        data["spatial_variable_features_by_modality"][default_modality_name] = []
-
-    category_gene_means_for_correlations = None
-    if int(category_means_n_genes) > 0 and embedded_features:
-        log_step("Computing category gene means from pseudobulk DE genes")
-        log_detail(
-            f"Using up to {int(category_means_n_genes)} embedded DE genes from the current "
-            "pseudobulk analysis; output feeds Insights > Exploration > "
-            "Features > Distribution > Per sample."
-        )
-        data["category_feature_means_by_modality"][default_modality_name] = _category_gene_means_from_pseudobulk_de(
-            (data.get("pseudobulk_de_by_modality") or {}).get(default_modality_name),
-            embedded_features,
-            int(category_means_n_genes),
-        )
-        category_gene_means_for_correlations = data["category_feature_means_by_modality"][default_modality_name]
-        mean_rows = sum(
-            len((col_data or {}).get("means") or {})
-            for col_data in ((category_gene_means_for_correlations or {}).get("columns") or {}).values()
-            if isinstance(col_data, dict)
-        )
-        log_detail(f"Stored category mean payload for {mean_rows} category entries.")
-    else:
-        data["category_feature_means_by_modality"][default_modality_name] = None
-
-    if int(gene_correlation_top_n) > 0 and embedded_features:
-        log_step("Computing gene correlations from category means")
-        required_gene_count = len([g for g in embedded_features if str(g)])
-        available_mean_count = len((category_gene_means_for_correlations or {}).get("genes") or [])
-        if required_gene_count and available_mean_count < required_gene_count:
-            category_gene_means_for_correlations = _category_gene_means_from_pseudobulk_de(
-                (data.get("pseudobulk_de_by_modality") or {}).get(default_modality_name),
-                embedded_features,
-                required_gene_count,
-            )
-            log_detail(
-                "Built an internal category mean payload from current pseudobulk DE summaries "
-                "for gene correlations."
-            )
-        log_detail(
-            f"Keeping top {int(gene_correlation_top_n)} correlated genes per embedded gene "
-            "using pseudobulk-derived category means; output feeds gene discovery "
-            "related-gene suggestions."
-        )
-        data["feature_correlations_by_modality"][default_modality_name] = _compute_gene_correlations_from_category_means(
-            category_gene_means_for_correlations,
-            embedded_features,
-            top_n=int(gene_correlation_top_n),
-        )
-        log_detail(
-            "Stored correlations for "
-            f"{len(data['feature_correlations_by_modality'].get(default_modality_name) or {})} features."
-        )
-    else:
-        data["feature_correlations_by_modality"][default_modality_name] = {}
 
     resolved_spot_size, used_auto_spot_size = _resolve_spot_size(
         dataset=dataset,
