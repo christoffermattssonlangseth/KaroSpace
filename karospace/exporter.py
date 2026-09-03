@@ -27017,7 +27017,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const isSpotlit = linkedSpotlightEnabled && spotlightPinnedCategory === key;
             return `
                 <div class="marker-group">
-                    <div class="marker-group-title${{isSpotlit ? ' is-spotlit' : ''}}" data-marker-category="${{escapeHtml(key)}}" title="Click to highlight this annotation in the viewer">${{renderAggCategoryChip(markerColorCol, key, catIdx)}}</div>
+                    <div class="marker-group-title${{isSpotlit ? ' is-spotlit' : ''}}" data-marker-category="${{escapeHtml(key)}}" title="Click to color the map by this annotation and highlight this cluster">${{renderAggCategoryChip(markerColorCol, key, catIdx)}}</div>
                     <div class="gene-token-grid">${{geneButtons}}</div>
                 </div>
             `;
@@ -27038,9 +27038,23 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             title.addEventListener('click', (event) => {{
                 const cat = title.getAttribute('data-marker-category');
                 if (!cat) return;
+                // The spotlight is validated against getColorConfig().categories,
+                // which follows the map's active coloring (currentAnnotation, or a
+                // continuous gene scale when currentGene is set). If the map is
+                // showing a gene or a different annotation than this markers panel,
+                // a pinned category from here would be silently rejected. So bring
+                // the map onto this marker annotation (dropping any active gene)
+                // first, then toggle the category spotlight.
+                const onThisAnnotation = !currentGene && currentAnnotation === markerColorCol;
+                const alreadySpotlit = linkedSpotlightEnabled
+                    && spotlightPinnedCategory === cat
+                    && onThisAnnotation;
+                if (!alreadySpotlit && !onThisAnnotation) {{
+                    setViewerColorColumn(markerColorCol);
+                }}
                 linkedSpotlightEnabled = true;
                 neighborNetworkFocusCategories = null;
-                spotlightPinnedCategory = spotlightPinnedCategory === cat ? null : cat;
+                spotlightPinnedCategory = alreadySpotlit ? null : cat;
                 spotlightHoverCategory = null;
                 updateAllLegendSpotlightClasses();
                 rerenderForSpotlightChange();
