@@ -7721,8 +7721,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
         }});
     }}
-    DATA.pseudobulk_de = DATA.pseudobulk_de || DATA.pseudobulk_de_json || {{}};
-    delete DATA.pseudobulk_de_json;
     const TUTORIAL_CONFIG = DATA.tutorial && typeof DATA.tutorial === 'object' ? DATA.tutorial : {{ enabled: false }};
     const PALETTE = {palette_json};
     const METADATA_LABELS = {metadata_labels_json};
@@ -7913,6 +7911,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function setExplorationModality(modality) {{
         return setPanelModality('exploration', modality);
     }}
+    function getPseudobulkPanelModality() {{
+        return getPanelModality('pseudobulk');
+    }}
+    function setPseudobulkPanelModality(modality) {{
+        return setPanelModality('pseudobulk', modality);
+    }}
     function getModalityPayload(payloadName, modality = getExplorationModality()) {{
         let root = DATA[payloadName];
         if (payloadName === 'pseudobulk_de_by_modality') root = DATA.pseudobulk_de_by_modality;
@@ -7925,6 +7929,39 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
     function getExplorationPseudobulkDEPayload(modality = getExplorationModality()) {{
         return getModalityPayload('pseudobulk_de_by_modality', modality) || {{}};
+    }}
+    function getPseudobulkDEPayloadForModality(modality = getPseudobulkPanelModality()) {{
+        return getModalityPayload('pseudobulk_de_by_modality', modality) || {{}};
+    }}
+    function getPseudobulkPathwaySettingsForModality(modality = getPseudobulkPanelModality()) {{
+        const root = DATA.pathway_settings_by_modality && typeof DATA.pathway_settings_by_modality === 'object'
+            ? DATA.pathway_settings_by_modality
+            : {{}};
+        const settings = root[modality];
+        return settings && typeof settings === 'object' ? settings : {{}};
+    }}
+    function modalityHasPseudobulkDE(modality) {{
+        return Object.values(getPseudobulkDEPayloadForModality(modality)).some((groups) => (
+            groups && typeof groups === 'object' && Object.keys(groups).some((key) => !String(key).startsWith('_'))
+        ));
+    }}
+    function getPseudobulkDEModalities() {{
+        const root = DATA.pseudobulk_de_by_modality && typeof DATA.pseudobulk_de_by_modality === 'object'
+            ? DATA.pseudobulk_de_by_modality
+            : {{}};
+        const registryNames = MODALITY_DESCRIPTORS
+            .map((descriptor) => descriptor?.name)
+            .filter(Boolean);
+        return uniqueSortedFeatures([...registryNames, ...Object.keys(root)])
+            .filter((modality) => modalityHasPseudobulkDE(modality));
+    }}
+    function ensurePseudobulkPanelModality() {{
+        const available = getPseudobulkDEModalities();
+        const current = getPseudobulkPanelModality();
+        if (available.length && !available.includes(current)) {{
+            return setPseudobulkPanelModality(available[0]);
+        }}
+        return current;
     }}
     function getExplorationMarkerFeaturesPayload(modality = getExplorationModality()) {{
         return getModalityPayload('marker_features_by_modality', modality) || {{}};
@@ -7940,7 +7977,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return Array.isArray(payload) ? payload : [];
     }}
     function getCategoryVsRestGenes(annotationCol = explorationColorCol || currentAnnotation || '', modality = getExplorationModality()) {{
-        const pseudobulkKey = getPseudobulkDEColorKey(annotationCol);
+        const pseudobulkKey = getPseudobulkDEColorKey(annotationCol, modality);
         const byCategory = getExplorationPseudobulkDEPayload(modality)[pseudobulkKey] || {{}};
         const summaryGenes = byCategory?._summary?.category_gene_means?.genes;
         if (Array.isArray(summaryGenes) && summaryGenes.length) {{
@@ -11243,11 +11280,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function tutorialHasPseudobulk() {{
-        const payload = DATA.pseudobulk_de || {{}};
-        return Object.entries(payload).some(([key, value]) => {{
-            if (String(key).startsWith('_') || !value || typeof value !== 'object') return false;
-            return Object.keys(value).some(k => !String(k).startsWith('_'));
-        }});
+        return getPseudobulkDEModalities().length > 0;
     }}
 
     function tutorialHasNeighborhoods() {{
@@ -11280,7 +11313,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function getTutorialPseudobulkGroupby() {{
         const available = typeof getAvailablePseudobulkDEColors === 'function'
             ? getAvailablePseudobulkDEColors()
-            : Object.keys(DATA.pseudobulk_de || {{}}).filter(key => !String(key).startsWith('_'));
+            : Object.keys(getPseudobulkDEPayloadForModality()).filter(key => !String(key).startsWith('_'));
         return available.find(color => hasPseudobulkDEForAnnotation?.(color)) || available[0] || null;
     }}
 
@@ -17267,9 +17300,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         downloadTextFile(csvText, filename, 'text/csv;charset=utf-8');
     }}
 
-    function buildMarkerGenesCsv(annotationCol) {{
-        const pseudobulkKey = getPseudobulkDEColorKey(annotationCol);
-        const byColor = (DATA.pseudobulk_de || {{}})[pseudobulkKey] || null;
+    function buildMarkerGenesCsv(annotationCol, modality = getExplorationModality()) {{
+        const pseudobulkKey = getPseudobulkDEColorKey(annotationCol, modality);
+        const byColor = getPseudobulkDEPayloadForModality(modality)[pseudobulkKey] || null;
         if (!byColor || typeof byColor !== 'object') return '';
         const rows = [['annotation_column', 'category', 'reference', 'rank', 'gene', 'base_mean', 'log2fc', 'pvalue', 'padj', 'score', 'pct_source', 'pct_reference']];
         Object.entries(byColor).forEach(([sourceCategory, bucket]) => {{
@@ -17303,8 +17336,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             .join('\\n');
     }}
 
-    function exportMarkerGenesCsv(annotationCol = currentAnnotation) {{
-        const csvText = buildMarkerGenesCsv(annotationCol);
+    function exportMarkerGenesCsv(annotationCol = currentAnnotation, modality = getExplorationModality()) {{
+        const csvText = buildMarkerGenesCsv(annotationCol, modality);
         if (!csvText) {{
             alert('No pseudobulk DE genes are available for this annotation to export.');
             return;
@@ -19421,16 +19454,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             .sort((a, b) => a.localeCompare(b));
     }}
 
-    function getAvailablePseudobulkDEColors(modality = getExplorationModality()) {{
-        return Object.entries(getExplorationPseudobulkDEPayload(modality))
+    function getAvailablePseudobulkDEColors(modality = getPseudobulkPanelModality()) {{
+        return Object.entries(getPseudobulkDEPayloadForModality(modality))
             .filter(([, groups]) => groups && typeof groups === 'object' && Object.keys(groups).some((key) => !String(key).startsWith('_')))
             .map(([color]) => color)
             .sort((a, b) => a.localeCompare(b));
     }}
 
-    function getPseudobulkDEColorKey(annotationCol, modality = getExplorationModality()) {{
+    function getPseudobulkDEColorKey(annotationCol, modality = getPseudobulkPanelModality()) {{
         const key = String(annotationCol || '');
-        const payload = getExplorationPseudobulkDEPayload(modality);
+        const payload = getPseudobulkDEPayloadForModality(modality);
         if (payload[key]) return key;
         if (key.startsWith(SECTION_METADATA_COLOR_PREFIX)) {{
             const metadataKey = key.slice(SECTION_METADATA_COLOR_PREFIX.length);
@@ -19439,21 +19472,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return key;
     }}
 
-    function hasPseudobulkDEForAnnotation(annotationCol, modality = getExplorationModality()) {{
-        const groups = annotationCol ? getExplorationPseudobulkDEPayload(modality)[getPseudobulkDEColorKey(annotationCol, modality)] : null;
+    function hasPseudobulkDEForAnnotation(annotationCol, modality = getPseudobulkPanelModality()) {{
+        const groups = annotationCol ? getPseudobulkDEPayloadForModality(modality)[getPseudobulkDEColorKey(annotationCol, modality)] : null;
         return !!(groups && typeof groups === 'object'
             && Object.keys(groups).some((key) => !String(key).startsWith('_')));
     }}
 
-    function getPseudobulkDEMethodBadge(annotationCol) {{
+    function getPseudobulkDEMethodBadge(annotationCol, modality = getPseudobulkPanelModality()) {{
         // Distinguish a true DESeq2 pseudobulk fit (>=2 biological replicates)
         // from the single-sample Welch fallback so the descriptive marker
         // ranking is never misread as a formal DESeq2 result. Discriminator is
         // written into _summary.category_gene_means.source by pseudobulk.py.
-        if (!annotationCol || !hasPseudobulkDEForAnnotation(annotationCol)) return '';
-        const modality = getExplorationModality();
+        if (!annotationCol || !hasPseudobulkDEForAnnotation(annotationCol, modality)) return '';
         const key = getPseudobulkDEColorKey(annotationCol, modality);
-        const groups = getExplorationPseudobulkDEPayload(modality)[key] || {{}};
+        const groups = getPseudobulkDEPayloadForModality(modality)[key] || {{}};
         const summary = groups._summary || {{}};
         const source = String(
             (summary.category_gene_means && summary.category_gene_means.source)
@@ -19531,21 +19563,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return [];
     }}
 
-    function getAvailableComparisonColors() {{
-        const withDE = new Set(Object.keys(getExplorationPseudobulkDEPayload()));
-        return Array.from(new Set([...getCategoricalColorColumns(), ...getAvailablePseudobulkDEColors()])).sort((a, b) => {{
+    function getAvailableComparisonColors(modality = getPseudobulkPanelModality()) {{
+        const withDE = new Set(getAvailablePseudobulkDEColors(modality));
+        return Array.from(new Set([...getCategoricalColorColumns(), ...getAvailablePseudobulkDEColors(modality)])).sort((a, b) => {{
             const aHas = withDE.has(a), bHas = withDE.has(b);
             if (aHas !== bHas) return bHas - aHas;
             return a.localeCompare(b);
         }});
     }}
 
-    function getPseudobulkDECategories(annotationCol) {{
+    function getPseudobulkDECategories(annotationCol, modality = getPseudobulkPanelModality()) {{
         if (!annotationCol) return [];
         const fromMeta = getCategoriesForColorColumn(annotationCol).map(value => String(value));
-        const modality = getExplorationModality();
         const pseudobulkKey = getPseudobulkDEColorKey(annotationCol, modality);
-        const fromData = Object.keys(getExplorationPseudobulkDEPayload(modality)[pseudobulkKey] || {{}})
+        const fromData = Object.keys(getPseudobulkDEPayloadForModality(modality)[pseudobulkKey] || {{}})
             .filter((value) => !String(value).startsWith('_'))
             .map((value) => formatCategoryLabel(annotationCol, value));
         return Array.from(new Set([...fromMeta, ...fromData]));
@@ -19670,19 +19701,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }};
     }}
 
-    function getPairwisePseudobulkDEResult(annotationCol, sourceCategory, referenceCategory) {{
-        const pseudobulkKey = getPseudobulkDEColorKey(annotationCol);
+    function getPairwisePseudobulkDEResult(annotationCol, sourceCategory, referenceCategory, modality = getPseudobulkPanelModality()) {{
+        const pseudobulkKey = getPseudobulkDEColorKey(annotationCol, modality);
         const rawSource = resolveRawCategoryValue(annotationCol, sourceCategory);
         const rawReference = resolveRawCategoryValue(annotationCol, referenceCategory);
-        return (((DATA.pseudobulk_de || {{}})[pseudobulkKey] || {{}})[rawSource] || {{}})[rawReference] || null;
+        return ((getPseudobulkDEPayloadForModality(modality)[pseudobulkKey] || {{}})[rawSource] || {{}})[rawReference] || null;
     }}
 
-    function getPseudobulkPairDiagnostics(annotationCol, sourceCategory, referenceCategory, result = null) {{
+    function getPseudobulkPairDiagnostics(annotationCol, sourceCategory, referenceCategory, result = null, modality = getPseudobulkPanelModality()) {{
         if (result?.pseudobulk_samples) return result.pseudobulk_samples;
-        const pseudobulkKey = getPseudobulkDEColorKey(annotationCol);
+        const pseudobulkKey = getPseudobulkDEColorKey(annotationCol, modality);
         const rawSource = resolveRawCategoryValue(annotationCol, sourceCategory);
         const rawReference = resolveRawCategoryValue(annotationCol, referenceCategory);
-        const diagnostics = (DATA.pseudobulk_de || {{}})[pseudobulkKey]?._summary?.pair_diagnostics || {{}};
+        const diagnostics = getPseudobulkDEPayloadForModality(modality)[pseudobulkKey]?._summary?.pair_diagnostics || {{}};
         return diagnostics?.[rawSource]?.[rawReference]
             || diagnostics?.[rawReference]?.[rawSource]
             || null;
@@ -25907,6 +25938,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             renderInteractionBrowser();
         }});
 
+        const pseudobulkDeModalitySelect = document.getElementById('pseudobulk-de-modality-select');
         const pseudobulkDeGroupbySelect = document.getElementById('pseudobulk-de-annotation');
         const pseudobulkDeSourceSelect = document.getElementById('pseudobulk-de-source');
         const pseudobulkDeReferenceSelect = document.getElementById('pseudobulk-de-reference');
@@ -25914,6 +25946,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         const catCols = getCategoricalColorColumns();
         syncPseudobulkDEControls();
+        pseudobulkDeModalitySelect?.addEventListener('change', () => {{
+            setPseudobulkPanelModality(pseudobulkDeModalitySelect.value || DEFAULT_MODALITY_NAME);
+            pseudobulkDeGroupby = null;
+            pseudobulkDeSourceCategory = null;
+            pseudobulkDeReferenceCategory = null;
+            clusterDETableExpanded = false;
+            pathwayAnnotationSide = 'source';
+            renderPseudobulkDE();
+        }});
         pseudobulkDeGroupbySelect?.addEventListener('change', () => {{
             pseudobulkDeGroupby = pseudobulkDeGroupbySelect.value || null;
             pseudobulkDeSourceCategory = null;
@@ -26870,7 +26911,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const meanCategories = (meanPayload.column.categories || Object.keys(meanPayload.column.means || {{}})).map(cat => String(cat));
         const categories = meanCategories.length
             ? meanCategories
-            : (annotationMeta.categories || getPseudobulkDECategories(annotationCol)).map(cat => String(cat));
+            : (annotationMeta.categories || getPseudobulkDECategories(annotationCol, modality)).map(cat => String(cat));
         const selected = String(selectedGene || '').trim();
         const selectedMeanGene = resolveMeanGeneToken(selected);
         const fullGeneSet = new Set();
@@ -27187,7 +27228,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 exportBtn.onclick = (e) => {{
                     e.preventDefault();
                     e.stopPropagation();
-                    exportMarkerGenesCsv(markerColorCol);
+                    exportMarkerGenesCsv(markerColorCol, getExplorationModality());
                 }};
             }}
         }}
@@ -27911,18 +27952,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return `${{(100 * value).toFixed(1)}}%`;
     }}
 
-    function renderComparisonGeneTokenGrid(entries, emptyMessage, activateTitle = 'Load gene into the viewer') {{
+    function renderComparisonGeneTokenGrid(entries, emptyMessage, activateTitle = 'Load gene into the viewer', modality = getPseudobulkPanelModality()) {{
         if (!entries || !entries.length) {{
             return `<div class="agg-group-meta">${{escapeHtml(emptyMessage)}}</div>`;
         }}
         return `
             <div class="gene-token-grid">
                 ${{entries.map((entry) => {{
-                    const loadable = isViewerFeatureLoadable(entry.raw);
+                    const loadable = isViewerFeatureLoadable(entry.raw, modality);
                     return renderGeneTokenButton(entry.raw, {{
                         allowUnknown: true,
                         disableActivation: !loadable,
                         isActive: loadable && !!entry.canonical && entry.canonical === currentGene,
+                        modality,
                         showMeta: false,
                         title: loadable
                             ? activateTitle
@@ -28004,8 +28046,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         `;
     }}
 
-    function renderComparisonMarkerSummary(annotationCol, sourceCategory, referenceCategory) {{
-        const result = getPairwisePseudobulkDEResult(annotationCol, sourceCategory, referenceCategory);
+    function renderComparisonMarkerSummary(annotationCol, sourceCategory, referenceCategory, modality = getPseudobulkPanelModality()) {{
+        const result = getPairwisePseudobulkDEResult(annotationCol, sourceCategory, referenceCategory, modality);
         if (!result || result.available === false) {{
             return '';
         }}
@@ -28017,12 +28059,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const sourceMarkerEntries = normalizeGeneEntries(
             significantIndices
                 .filter((index) => Number(log2fc[index]) > 0)
-                .map((index) => genes[index])
+                .map((index) => genes[index]),
+            0,
+            modality
         );
         const referenceMarkerEntries = normalizeGeneEntries(
             significantIndices
                 .filter((index) => Number(log2fc[index]) < 0)
-                .map((index) => genes[index])
+                .map((index) => genes[index]),
+            0,
+            modality
         );
         const renderMarkerGroup = (entries, enrichedCategory, side) => {{
             const key = [annotationCol, sourceCategory, referenceCategory, side].map(value => String(value ?? '')).join('\\u001f');
@@ -28038,7 +28084,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <span class="agg-group-title-main">${{renderAggCategoryChip(annotationCol, enrichedCategory)}}</span>
                     <span class="agg-group-title-actions"><span class="agg-chip agg-count-chip">${{entries.length.toLocaleString()}} genes</span></span>
                 </div>
-                ${{renderComparisonGeneTokenGrid(visibleEntries, 'No genes pass the current adjusted p-value and log\u2082FC thresholds in this direction.', 'Load pseudobulk marker into the viewer')}}
+                ${{renderComparisonGeneTokenGrid(visibleEntries, 'No genes pass the current adjusted p-value and log\u2082FC thresholds in this direction.', 'Load pseudobulk marker into the viewer', modality)}}
                 ${{link ? `<div class="pseudobulk-de-table-actions">${{link}}</div>` : ''}}
             </div>
         `;
@@ -28207,7 +28253,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         `;
     }}
 
-    function buildMAPlot(genes, baseMean, log2fc, pvals, pvalsAdj, pctSource = [], pctReference = [], minPctCutoff = 0, padjCutoff = 0.05, log2fcCutoff = 0.5, annotationCol = null, sourceCategory = null, referenceCategory = null) {{
+    function buildMAPlot(genes, baseMean, log2fc, pvals, pvalsAdj, pctSource = [], pctReference = [], minPctCutoff = 0, padjCutoff = 0.05, log2fcCutoff = 0.5, annotationCol = null, sourceCategory = null, referenceCategory = null, modality = getPseudobulkPanelModality()) {{
         if (!genes.length) return '';
         const maPadjThreshold = 0.1;
         const W = 390, H = 180, ml = 38, mr = 10, mt = 8, mb = 24;
@@ -28253,7 +28299,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const padjDisplay = formatAdjustedPValue(padj);
             const baseDisplay = formatScaleNumber(xValues[i]);
             const color = dotClass === 'red' ? '#d94f4f' : 'var(--border-color)';
-            const loadable = isViewerFeatureLoadable(gene);
+            const loadable = isViewerFeatureLoadable(gene, modality);
             const pctLine = 'pct expr: ' + escapeHtml(formatPseudobulkDEPct(Number.isFinite(sourcePct) ? sourcePct : NaN)) + ' / ' + escapeHtml(formatPseudobulkDEPct(Number.isFinite(referencePct) ? referencePct : NaN));
             const extraLine = loadable ? '' : '" data-tooltip-line6="Expression vector unavailable"';
             dots.push({{ dotClass, html: '<circle class="volcano-dot" cx="' + xs(xValues[i]).toFixed(1) + '" cy="' + ys(fc).toFixed(1) + '" r="2.8" fill="' + color + '" fill-opacity="0.78" data-volcano-gene="' + escapeHtml(gene) + '" data-gene-loadable="' + (loadable ? 'true' : 'false') + '" data-volcano-fc="' + fc.toFixed(3) + '" data-volcano-p="' + rawPDisplay + '" data-volcano-padj="' + padjDisplay + '" data-tooltip-title="' + escapeHtml(gene) + '" data-tooltip-line1="baseMean: ' + escapeHtml(baseDisplay) + '" data-tooltip-line2="logFC: ' + escapeHtml(fc.toFixed(3)) + '" data-tooltip-line3="pvalue: ' + escapeHtml(rawPDisplay) + '" data-tooltip-line4="adj. p: ' + escapeHtml(padjDisplay) + '" data-tooltip-line5="' + pctLine + extraLine + '"/>' }});
@@ -28381,7 +28427,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         );
     }}
 
-    function buildVolcanoPlot(genes, log2fc, pvalsAdj, pctSource = [], pctReference = [], minPctCutoff = 0, padjCutoff = 0.05, log2fcCutoff = 0.5, annotationCol = null, sourceCategory = null, referenceCategory = null) {{
+    function buildVolcanoPlot(genes, log2fc, pvalsAdj, pctSource = [], pctReference = [], minPctCutoff = 0, padjCutoff = 0.05, log2fcCutoff = 0.5, annotationCol = null, sourceCategory = null, referenceCategory = null, modality = getPseudobulkPanelModality()) {{
         if (!genes.length) return '';
         const padjThreshold = Math.min(Math.max(normalizePositiveThreshold(padjCutoff, 0.05), 0), 1);
         const fcThr = normalizePositiveThreshold(log2fcCutoff, 0.5);
@@ -28440,7 +28486,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const col = dotClass === 'source' ? sourceColor : (dotClass === 'reference' ? referenceColor : 'var(--border-color)');
             const safePAdj = Number.isFinite(pvalAdj) ? pvalAdj : 1;
             const padjDisplay = formatAdjustedPValue(safePAdj);
-            const loadable = isViewerFeatureLoadable(gene);
+            const loadable = isViewerFeatureLoadable(gene, modality);
             const pctLine = 'pct expr: ' + escapeHtml(formatPseudobulkDEPct(Number.isFinite(sourcePct) ? sourcePct : NaN)) + ' / ' + escapeHtml(formatPseudobulkDEPct(Number.isFinite(referencePct) ? referencePct : NaN));
             const extraLine = loadable ? '' : '" data-tooltip-line4="Expression vector unavailable"';
             dots.push({{ dotClass, html: '<circle class="volcano-dot" cx="' + xs(fc).toFixed(1) + '" cy="' + ys(nlpi).toFixed(1) + '" r="3" fill="' + col + '" fill-opacity="0.82" data-volcano-class="' + dotClass + '" data-volcano-gene="' + escapeHtml(gene) + '" data-gene-loadable="' + (loadable ? 'true' : 'false') + '" data-volcano-fc="' + fc.toFixed(3) + '" data-volcano-padj="' + padjDisplay + '" data-tooltip-title="' + escapeHtml(gene) + '" data-tooltip-line1="log\u2082FC: ' + escapeHtml(fc.toFixed(3)) + '" data-tooltip-line2="adj. p: ' + escapeHtml(padjDisplay) + '" data-tooltip-line3="' + pctLine + extraLine + '"/>' }});
@@ -28732,6 +28778,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function getPseudobulkDEFilenameStem() {{
         return [
             'karospace-pseudobulk-de',
+            sanitizeFilenamePart(getPseudobulkPanelModality() || DEFAULT_MODALITY_NAME),
             sanitizeFilenamePart(pseudobulkDeGroupby || 'annotation'),
             sanitizeFilenamePart(pseudobulkDeSourceCategory || 'A'),
             'vs',
@@ -28779,7 +28826,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function downloadCurrentPseudobulkDETable(format) {{
-        const result = getPairwisePseudobulkDEResult(pseudobulkDeGroupby, pseudobulkDeSourceCategory, pseudobulkDeReferenceCategory);
+        const result = getPairwisePseudobulkDEResult(
+            pseudobulkDeGroupby,
+            pseudobulkDeSourceCategory,
+            pseudobulkDeReferenceCategory,
+            getPseudobulkPanelModality()
+        );
         const entries = getPseudobulkDETableEntries(result);
         if (!entries.length) {{
             alert('No pseudobulk DE genes are available for this comparison.');
@@ -28794,7 +28846,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function downloadCurrentPathwayTable(method) {{
-        const result = getPairwisePseudobulkDEResult(pseudobulkDeGroupby, pseudobulkDeSourceCategory, pseudobulkDeReferenceCategory);
+        const result = getPairwisePseudobulkDEResult(
+            pseudobulkDeGroupby,
+            pseudobulkDeSourceCategory,
+            pseudobulkDeReferenceCategory,
+            getPseudobulkPanelModality()
+        );
         if (!result?.pathway_enrichment) {{
             alert('No pathway enrichment result is available for this comparison.');
             return;
@@ -29360,9 +29417,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return `<div class="pathway-analysis-empty">No ORA or GSEA pathways were retained for ${{escapeHtml(label)}}.</div>`;
     }}
 
-    function renderClusterPAResultSection(annotationCol, sourceCategory, referenceCategory) {{
-        const result = getPairwisePseudobulkDEResult(annotationCol, sourceCategory, referenceCategory);
-        if (!result?.pathway_enrichment) return '';
+    function renderClusterPAResultSection(annotationCol, sourceCategory, referenceCategory, modality = getPseudobulkPanelModality()) {{
+        const result = getPairwisePseudobulkDEResult(annotationCol, sourceCategory, referenceCategory, modality);
+        if (!result?.pathway_enrichment) {{
+            const settings = getPseudobulkPathwaySettingsForModality(modality);
+            if (settings.available === false && settings.reason) {{
+                return `<div class="pathway-analysis-empty">Pathway enrichment is unavailable for ${{escapeHtml(getModalityDisplayLabel(modality))}} (${{escapeHtml(String(settings.reason))}}).</div>`;
+            }}
+            return '';
+        }}
         const sourceColor = annotationCol && sourceCategory !== null ? getCategoryColorForValue(annotationCol, sourceCategory) : '#d94f4f';
         const referenceColor = annotationCol && referenceCategory !== null ? getCategoryColorForValue(annotationCol, referenceCategory) : '#4f82d9';
         const sourcePanel = renderPathwayAnnotationPanel(result, sourceCategory, referenceCategory, sourceColor, referenceColor, 'source');
@@ -29387,8 +29450,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         `;
     }}
 
-    function renderPseudobulkDEResultSection(annotationCol, sourceCategory, referenceCategory) {{
-        const result = getPairwisePseudobulkDEResult(annotationCol, sourceCategory, referenceCategory);
+    function renderPseudobulkDEResultSection(annotationCol, sourceCategory, referenceCategory, modality = getPseudobulkPanelModality()) {{
+        const result = getPairwisePseudobulkDEResult(annotationCol, sourceCategory, referenceCategory, modality);
         if (!result) {{
             return '';
         }}
@@ -29425,7 +29488,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const pctReference = Array.isArray(result.pct_reference) ? result.pct_reference : [];
         const baseMean = Array.isArray(result.base_mean) ? result.base_mean : [];
         const sampleInfo = getPseudobulkPairDiagnostics(
-            annotationCol, sourceCategory, referenceCategory, result
+            annotationCol, sourceCategory, referenceCategory, result, modality
         );
         const padjCutoff = Math.min(Math.max(normalizePositiveThreshold(result.padj_cutoff, 0.05), 0), 1);
         const log2fcCutoff = normalizePositiveThreshold(result.log2fc_cutoff, 0.5);
@@ -29450,7 +29513,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const scoreValue = scores[idx];
             const pctSourceValue = pctSource[idx];
             const pctReferenceValue = pctReference[idx];
-            const loadable = isViewerFeatureLoadable(gene);
+            const loadable = isViewerFeatureLoadable(gene, modality);
             const rowColor = Number.isFinite(log2fcValue)
                 ? (log2fcValue >= 0 ? sourceColor : referenceColor)
                 : '';
@@ -29493,7 +29556,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             `;
         const volcanoHtml = buildVolcanoPlot(
             genes, log2fc, pvalsAdj, pctSource, pctReference, minPctCutoff, padjCutoff, log2fcCutoff,
-            annotationCol, sourceCategory, referenceCategory
+            annotationCol, sourceCategory, referenceCategory, modality
         );
         const tableMoreButton = significantIndices.length > 20
             ? `<button type="button" class="pseudobulk-de-more-link" data-pseudobulk-de-table-more>${{clusterDETableExpanded ? 'Hide extra lines' : `Show more (${{(significantIndices.length - 20).toLocaleString()}})`}}</button>`
@@ -29512,7 +29575,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             </div>
         `;
         const genePanels = [
-            buildMAPlot(genes, baseMean, log2fc, pvals, pvalsAdj, pctSource, pctReference, minPctCutoff, padjCutoff, log2fcCutoff, annotationCol, sourceCategory, referenceCategory),
+            buildMAPlot(genes, baseMean, log2fc, pvals, pvalsAdj, pctSource, pctReference, minPctCutoff, padjCutoff, log2fcCutoff, annotationCol, sourceCategory, referenceCategory, modality),
             wrapPseudobulkDEVolcanoPlot(volcanoHtml),
         ].filter(Boolean).join('');
         const samplePanels = [
@@ -29554,10 +29617,21 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function syncPseudobulkDEControls() {{
+        const modalitySelect = document.getElementById('pseudobulk-de-modality-select');
         const annotationSelect = document.getElementById('pseudobulk-de-annotation');
         const sourceSelect = document.getElementById('pseudobulk-de-source');
         const referenceSelect = document.getElementById('pseudobulk-de-reference');
-        const availableGroupbys = getAvailableComparisonColors();
+        const availableModalities = getPseudobulkDEModalities();
+        const modality = ensurePseudobulkPanelModality();
+        const availableGroupbys = getAvailableComparisonColors(modality);
+
+        if (modalitySelect) {{
+            modalitySelect.innerHTML = availableModalities
+                .map((name) => `<option value="${{escapeHtml(name)}}"${{name === modality ? ' selected' : ''}}>${{escapeHtml(getModalityDisplayLabel(name))}}</option>`)
+                .join('');
+            modalitySelect.value = modality;
+            modalitySelect.disabled = availableModalities.length < 2;
+        }}
 
         if (annotationSelect) {{
             annotationSelect.innerHTML = availableGroupbys.length
@@ -29571,11 +29645,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             pseudobulkDeReferenceCategory = null;
             if (sourceSelect) sourceSelect.innerHTML = '';
             if (referenceSelect) referenceSelect.innerHTML = '';
-            return {{ availableGroupbys, categories: [] }};
+            return {{ availableGroupbys, categories: [], availableModalities, modality }};
         }}
 
         const activeAnnotation = String(explorationColorCol || '');
-        const activePseudobulkAnnotation = getPseudobulkDEColorKey(activeAnnotation);
+        const activePseudobulkAnnotation = getPseudobulkDEColorKey(activeAnnotation, modality);
         if (availableGroupbys.includes(activePseudobulkAnnotation)) {{
             if (pseudobulkDeGroupby !== activePseudobulkAnnotation) {{
                 pseudobulkDeGroupby = activePseudobulkAnnotation;
@@ -29587,7 +29661,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         if (annotationSelect) annotationSelect.value = pseudobulkDeGroupby;
 
-        const categories = getPseudobulkDECategories(pseudobulkDeGroupby);
+        const categories = getPseudobulkDECategories(pseudobulkDeGroupby, modality);
         const options = categories.map(category => `<option value="${{escapeHtml(category)}}">${{escapeHtml(category)}}</option>`).join('');
         if (sourceSelect) sourceSelect.innerHTML = options;
         if (referenceSelect) referenceSelect.innerHTML = options;
@@ -29595,7 +29669,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!categories.length) {{
             pseudobulkDeSourceCategory = null;
             pseudobulkDeReferenceCategory = null;
-            return {{ availableGroupbys, categories }};
+            return {{ availableGroupbys, categories, availableModalities, modality }};
         }}
 
         if (!pseudobulkDeSourceCategory || !categories.includes(pseudobulkDeSourceCategory)) {{
@@ -29611,26 +29685,26 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             referenceSelect.disabled = categories.length < 2;
         }}
 
-        return {{ availableGroupbys, categories }};
+        return {{ availableGroupbys, categories, availableModalities, modality }};
     }}
 
     function renderPseudobulkDE() {{
         const container = document.getElementById('pseudobulk-de-results');
         if (!container) return;
 
-        const {{ availableGroupbys, categories }} = syncPseudobulkDEControls();
+        const {{ availableGroupbys, categories, availableModalities, modality }} = syncPseudobulkDEControls();
         const selectedAnnotation = pseudobulkDeGroupby && availableGroupbys.includes(pseudobulkDeGroupby)
             ? pseudobulkDeGroupby
             : null;
-        if (!selectedAnnotation || !hasPseudobulkDEForAnnotation(selectedAnnotation)) {{
-            const availableComparisons = getAvailablePseudobulkDEColors();
+        if (!selectedAnnotation || !hasPseudobulkDEForAnnotation(selectedAnnotation, modality)) {{
+            const availableComparisons = getAvailablePseudobulkDEColors(modality);
             const comparisonChips = availableComparisons.length
                 ? availableComparisons.map((color) => renderAggChip(
                     getAnnotationColumnLabel(color),
                     'color-mix(in srgb, #eab308 18%, var(--input-bg))'
                 )).join('')
                 : renderAggChip('none', 'color-mix(in srgb, #eab308 18%, var(--input-bg))');
-            container.innerHTML = `<div class="pseudobulk-comparison-warning"><strong>Pseudobulk warning.</strong> No pseudobulk DE result is available for this comparison.<br>Available comparison: ${{comparisonChips}}</div>`;
+            container.innerHTML = `<div class="pseudobulk-comparison-warning"><strong>Pseudobulk warning.</strong> No pseudobulk DE result is available for this comparison in ${{escapeHtml(getModalityDisplayLabel(modality))}}.<br>Available comparison: ${{comparisonChips}}</div>`;
             return;
         }}
         if (!pseudobulkDeGroupby) {{
@@ -29656,21 +29730,32 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const contrastResult = getPairwisePseudobulkDEResult(
             pseudobulkDeGroupby,
             pseudobulkDeSourceCategory,
-            pseudobulkDeReferenceCategory
+            pseudobulkDeReferenceCategory,
+            modality
         );
         const sourceColor = getCategoryColorForValue(pseudobulkDeGroupby, pseudobulkDeSourceCategory) || 'var(--accent-strong)';
         const referenceColor = getCategoryColorForValue(pseudobulkDeGroupby, pseudobulkDeReferenceCategory) || '#4cc9f0';
         const buildCategoryOptions = (otherCategory) => categories.map((category) => {{
             const label = formatCategoryLabel(pseudobulkDeGroupby, category);
-            const pairResult = getPairwisePseudobulkDEResult(pseudobulkDeGroupby, category, otherCategory);
+            const pairResult = getPairwisePseudobulkDEResult(pseudobulkDeGroupby, category, otherCategory, modality);
             const count = getPseudobulkContrastCellCount(pairResult, pseudobulkDeGroupby, category);
             const countLabel = Number.isFinite(count) ? count.toLocaleString() : '—';
             return `<option value="${{escapeHtml(category)}}">${{escapeHtml(label)}} (${{countLabel}} cells)</option>`;
         }}).join('');
         const sourceOptions = buildCategoryOptions(pseudobulkDeReferenceCategory);
         const referenceOptions = buildCategoryOptions(pseudobulkDeSourceCategory);
+        const modalityOptions = availableModalities.map((name) => `
+            <option value="${{escapeHtml(name)}}"${{name === modality ? ' selected' : ''}}>${{escapeHtml(getModalityDisplayLabel(name))}}</option>
+        `).join('');
+        const annotationOptions = availableGroupbys.map((col) => `
+            <option value="${{escapeHtml(col)}}"${{col === pseudobulkDeGroupby ? ' selected' : ''}}>${{escapeHtml(getAnnotationColumnLabel(col))}}</option>
+        `).join('');
         const controlsHtml = `
             <div class="pseudobulk-de-controls">
+                <div class="pseudobulk-de-select-row">
+                    <div><label>Feature namespace</label><select id="pseudobulk-de-modality-select" ${{availableModalities.length < 2 ? 'disabled' : ''}}>${{modalityOptions}}</select></div>
+                    <div><label>Annotation</label><select id="pseudobulk-de-annotation">${{annotationOptions}}</select></div>
+                </div>
                 <div class="pseudobulk-de-select-row comparison-pair-select-row">
                     <div><label>Annotation A</label><select id="pseudobulk-de-source" style="border-color:${{sourceColor}}">${{sourceOptions}}</select></div>
                     <div><label>Annotation B</label><select id="pseudobulk-de-reference" style="border-color:${{referenceColor}}">${{referenceOptions}}</select></div>
@@ -29736,7 +29821,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const markerSummary = renderComparisonMarkerSummary(
             pseudobulkDeGroupby,
             pseudobulkDeSourceCategory,
-            pseudobulkDeReferenceCategory
+            pseudobulkDeReferenceCategory,
+            modality
         );
         const markerSection = markerSummary
             ? `<div class="selection-summary-title">Pseudobulk Markers${{renderCalcInfoButton('de_genes')}}</div>${{markerSummary}}`
@@ -29744,20 +29830,46 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const pathwaySection = renderClusterPAResultSection(
             pseudobulkDeGroupby,
             pseudobulkDeSourceCategory,
-            pseudobulkDeReferenceCategory
+            pseudobulkDeReferenceCategory,
+            modality
         );
 
         container.innerHTML = `
             ${{controlsHtml}}
             ${{contrastInfo}}
             ${{markerSection}}
-            <div class="selection-summary-title" id="pseudobulk-de-section-title">Pseudobulk gene expression differential analysis${{renderCalcInfoButton('de_genes')}}${{getPseudobulkDEMethodBadge(pseudobulkDeGroupby)}}</div>
-            ${{renderPseudobulkDEResultSection(pseudobulkDeGroupby, pseudobulkDeSourceCategory, pseudobulkDeReferenceCategory)}}
+            <div class="selection-summary-title" id="pseudobulk-de-section-title">Pseudobulk gene expression differential analysis${{renderCalcInfoButton('de_genes')}}${{getPseudobulkDEMethodBadge(pseudobulkDeGroupby, modality)}}</div>
+            ${{renderPseudobulkDEResultSection(pseudobulkDeGroupby, pseudobulkDeSourceCategory, pseudobulkDeReferenceCategory, modality)}}
             ${{pathwaySection ? '<div class="selection-summary-title" id="pathway-enrichment-title">Pathway Enrichment' + renderCalcInfoButton('pathway_enrichment_section') + '</div>' + pathwaySection : ''}}
         `;
 
+        const modalitySelect = container.querySelector('#pseudobulk-de-modality-select');
+        const annotationSelect = container.querySelector('#pseudobulk-de-annotation');
         const sourceSelect = container.querySelector('#pseudobulk-de-source');
         const referenceSelect = container.querySelector('#pseudobulk-de-reference');
+        if (modalitySelect) {{
+            modalitySelect.value = modality;
+            modalitySelect.addEventListener('change', () => {{
+                setPseudobulkPanelModality(modalitySelect.value || DEFAULT_MODALITY_NAME);
+                pseudobulkDeGroupby = null;
+                pseudobulkDeSourceCategory = null;
+                pseudobulkDeReferenceCategory = null;
+                clusterDETableExpanded = false;
+                pathwayAnnotationSide = 'source';
+                renderPseudobulkDE();
+            }});
+        }}
+        if (annotationSelect) {{
+            annotationSelect.value = pseudobulkDeGroupby || '';
+            annotationSelect.addEventListener('change', () => {{
+                pseudobulkDeGroupby = annotationSelect.value || null;
+                pseudobulkDeSourceCategory = null;
+                pseudobulkDeReferenceCategory = null;
+                clusterDETableExpanded = false;
+                pathwayAnnotationSide = 'source';
+                renderPseudobulkDE();
+            }});
+        }}
         if (sourceSelect) {{
             sourceSelect.value = pseudobulkDeSourceCategory;
             sourceSelect.addEventListener('change', () => {{
@@ -29809,6 +29921,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             btn.addEventListener('click', async () => {{
                 const gene = btn.getAttribute('data-pseudobulk-de-gene') || '';
                 if (!gene) return;
+                if (modality && getVisualModality() !== modality && typeof setActiveModality === 'function') {{
+                    await setActiveModality(modality);
+                }}
                 const ok = await activateViewerGene(gene, {{ showErrors: true }});
                 if (ok) renderPseudobulkDE();
             }});

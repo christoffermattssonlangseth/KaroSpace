@@ -78,3 +78,11 @@ def test_exploration_uses_features_and_modality_payloads(tmp_path=None):
     assert "DATA.category_feature_means_by_modality" in html
     assert "DATA.gene_correlations" not in html
     assert "DATA.spatial_variable_genes" not in html
+
+
+def test_compare_pseudobulk_has_modality_selector(tmp_path=None):
+    html = _render_multimodal_html(tmp_path)
+
+    assert 'id="pseudobulk-de-modality-select"' in html
+    assert "getPseudobulkDEPayloadForModality" in html
+    assert "(DATA.pseudobulk_de || {})" not in html
