@@ -35373,8 +35373,16 @@ def export_to_html(
         deconvolutions=deconvolutions,
     )
     data["scalebar_unit"] = str(scalebar_unit or "μm")
-    embedded_features = [] if feature_storage == "sidecar" else list(data.get("available_features") or embedded_features)
-    data["embedded_features"] = list(embedded_features)
+    embedded_features_by_modality = dict(data.get("embedded_features_by_modality") or {})
+    if feature_storage == "sidecar":
+        embedded_features = []
+    else:
+        embedded_features = list(
+            embedded_features_by_modality.get(default_modality_name)
+            or embedded_features
+        )
+    embedded_features_by_modality.setdefault(default_modality_name, list(embedded_features))
+    data["embedded_features_by_modality"] = embedded_features_by_modality
     if feature_storage == "sidecar":
         sidecar_features = list(dataset.var_names)
     original_total_cells = int(dataset.adata.n_obs)
@@ -35533,8 +35541,14 @@ def export_to_html(
                     level=2,
                 )
 
-        data["pathway_settings"] = add_pathway_enrichment_to_pseudobulk_de(
-            data.get("pseudobulk_de"),
+        pathway_modality_name = (
+            selected_pseudobulk_modalities[0]
+            if selected_pseudobulk_modalities
+            else default_modality_name
+        )
+        pathway_settings_by_modality = dict(data.get("pathway_settings_by_modality") or {})
+        pathway_settings_by_modality[pathway_modality_name] = add_pathway_enrichment_to_pseudobulk_de(
+            (data.get("pseudobulk_de_by_modality") or {}).get(pathway_modality_name),
             pathway_gmt=pathway_gmt,
             top_n=int(pathway_top_n),
             min_overlap=int(pathway_min_overlap),
@@ -35543,28 +35557,35 @@ def export_to_html(
             n_cpus=1,
             progress_callback=_log_pathway_progress,
         )
-        if not data["pathway_settings"].get("available"):
-            reason = data["pathway_settings"].get("reason") or "unavailable"
-            error = data["pathway_settings"].get("error")
+        data["pathway_settings_by_modality"] = pathway_settings_by_modality
+        if not pathway_settings_by_modality[pathway_modality_name].get("available"):
+            reason = pathway_settings_by_modality[pathway_modality_name].get("reason") or "unavailable"
+            error = pathway_settings_by_modality[pathway_modality_name].get("error")
             log_warning(f"pathway enrichment unavailable ({reason}{': ' + error if error else ''}).")
         else:
             log_detail(
                 f"Stored pathway enrichment for "
-                f"{int(data['pathway_settings'].get('enriched_comparisons') or 0):,}/"
-                f"{int(data['pathway_settings'].get('comparisons') or 0):,} pseudobulk comparisons.",
+                f"{int(pathway_settings_by_modality[pathway_modality_name].get('enriched_comparisons') or 0):,}/"
+                f"{int(pathway_settings_by_modality[pathway_modality_name].get('comparisons') or 0):,} pseudobulk comparisons.",
                 level=2,
             )
     except Exception as exc:
-        data["pathway_settings"] = {
+        pathway_modality_name = (
+            selected_pseudobulk_modalities[0]
+            if selected_pseudobulk_modalities
+            else default_modality_name
+        )
+        pathway_settings_by_modality = dict(data.get("pathway_settings_by_modality") or {})
+        pathway_settings_by_modality[pathway_modality_name] = {
             "available": False,
             "reason": "pathway_enrichment_failed",
             "error": str(exc),
         }
+        data["pathway_settings_by_modality"] = pathway_settings_by_modality
         log_warning(f"pathway enrichment failed ({exc}).")
 
     if feature_storage == "sidecar":
         assert resolved_feature_manifest_path is not None
-        data["available_features"] = list(dataset.var_names)
         data["feature_manifest_url"] = Path(
             os.path.relpath(resolved_feature_manifest_path, start=requested_output_path.resolve().parent)
         ).as_posix()
@@ -35590,6 +35611,10 @@ def export_to_html(
     data["features_by_modality"] = features_by_modality
     data["requested_features_by_modality"] = requested_features_by_modality
     data["default_modality"] = default_modality_name if modality_descriptors else None
+    data.setdefault("category_feature_means_by_modality", {})
+    data.setdefault("feature_correlations_by_modality", {})
+    data.setdefault("spatial_variable_features_by_modality", {})
+    data.setdefault("pathway_settings_by_modality", {})
 
     if int(spatial_variable_genes_n) > 0:
         log_step("Computing spatially variable genes")
@@ -35598,12 +35623,16 @@ def export_to_html(
             f"on the full input cell set ({int(dataset.adata.n_obs):,} cells); "
             "output feeds Insights > Exploration > Genes > Spatial."
         )
-        data["spatial_variable_genes"] = _compute_morans_i(
+        data["spatial_variable_features_by_modality"][default_modality_name] = _compute_morans_i(
             dataset.adata, list(dataset.var_names), n_genes=int(spatial_variable_genes_n)
         )
-        log_detail(f"Stored {len(data['spatial_variable_genes'])} spatially variable gene rows.")
+        log_detail(
+            "Stored "
+            f"{len(data['spatial_variable_features_by_modality'].get(default_modality_name) or [])} "
+            "spatially variable feature rows."
+        )
     else:
-        data["spatial_variable_genes"] = []
+        data["spatial_variable_features_by_modality"][default_modality_name] = []
 
     category_gene_means_for_correlations = None
     if int(category_means_n_genes) > 0 and embedded_features:
@@ -35613,20 +35642,20 @@ def export_to_html(
             "pseudobulk analysis; output feeds Insights > Exploration > "
             "Genes > Distribution > Per sample."
         )
-        data["category_gene_means"] = _category_gene_means_from_pseudobulk_de(
-            data.get("pseudobulk_de"),
+        data["category_feature_means_by_modality"][default_modality_name] = _category_gene_means_from_pseudobulk_de(
+            (data.get("pseudobulk_de_by_modality") or {}).get(default_modality_name),
             embedded_features,
             int(category_means_n_genes),
         )
-        category_gene_means_for_correlations = data["category_gene_means"]
+        category_gene_means_for_correlations = data["category_feature_means_by_modality"][default_modality_name]
         mean_rows = sum(
             len((col_data or {}).get("means") or {})
-            for col_data in ((data["category_gene_means"] or {}).get("columns") or {}).values()
+            for col_data in ((category_gene_means_for_correlations or {}).get("columns") or {}).values()
             if isinstance(col_data, dict)
         )
         log_detail(f"Stored category mean payload for {mean_rows} category entries.")
     else:
-        data["category_gene_means"] = None
+        data["category_feature_means_by_modality"][default_modality_name] = None
 
     if int(gene_correlation_top_n) > 0 and embedded_features:
         log_step("Computing gene correlations from category means")
@@ -35634,7 +35663,7 @@ def export_to_html(
         available_mean_count = len((category_gene_means_for_correlations or {}).get("genes") or [])
         if required_gene_count and available_mean_count < required_gene_count:
             category_gene_means_for_correlations = _category_gene_means_from_pseudobulk_de(
-                data.get("pseudobulk_de"),
+                (data.get("pseudobulk_de_by_modality") or {}).get(default_modality_name),
                 embedded_features,
                 required_gene_count,
             )
@@ -35647,14 +35676,17 @@ def export_to_html(
             "using pseudobulk-derived category means; output feeds gene discovery "
             "related-gene suggestions."
         )
-        data["gene_correlations"] = _compute_gene_correlations_from_category_means(
+        data["feature_correlations_by_modality"][default_modality_name] = _compute_gene_correlations_from_category_means(
             category_gene_means_for_correlations,
             embedded_features,
             top_n=int(gene_correlation_top_n),
         )
-        log_detail(f"Stored correlations for {len(data['gene_correlations'])} genes.")
+        log_detail(
+            "Stored correlations for "
+            f"{len(data['feature_correlations_by_modality'].get(default_modality_name) or {})} features."
+        )
     else:
-        data["gene_correlations"] = {}
+        data["feature_correlations_by_modality"][default_modality_name] = {}
 
     resolved_spot_size, used_auto_spot_size = _resolve_spot_size(
         dataset=dataset,
@@ -35793,10 +35825,16 @@ def export_to_html(
             "resolved": {
                 "output_path": str(final_output_path),
                 "feature_manifest_url": feature_manifest_url,
-                "embedded_features": list(embedded_features),
+                "embedded_features_by_modality": embedded_features_by_modality,
                 "requested_features_by_modality": requested_features_by_modality,
-                "embedded_feature_count": len(embedded_features),
-                "available_feature_count": len(data.get("available_features") or []),
+                "embedded_feature_count_by_modality": {
+                    modality_name: len(features or [])
+                    for modality_name, features in embedded_features_by_modality.items()
+                },
+                "available_feature_count_by_modality": {
+                    modality_name: len(features or [])
+                    for modality_name, features in (data.get("features_by_modality") or {}).items()
+                },
                 "available_annotations": list(data.get("available_annotations") or []),
                 "section_metadata": list(data.get("section_metadata") or []),
                 "section_metadata_extra": list(data.get("section_metadata_extra") or []),
@@ -35805,7 +35843,7 @@ def export_to_html(
                 "pseudobulk_modalities": list(selected_pseudobulk_modalities),
                 "pseudobulk_replicate_annotation": data.get("pseudobulk_replicate_annotation"),
                 "pseudobulk_settings": data.get("pseudobulk_settings"),
-                "pathway_settings": data.get("pathway_settings"),
+                "pathway_settings_by_modality": data.get("pathway_settings_by_modality"),
                 "neighbor_stats_annotations": list(neighbor_stats_annotations or []),
                 "interaction_marker_annotations": list(interaction_marker_annotations),
                 "downsample": data.get("downsample"),
@@ -36113,12 +36151,19 @@ def export_to_html(
         log_detail(f"Spot size: {resolved_spot_size:.2f}.")
     log_detail(f"Annotation options: {len(data['available_annotations'])}")
     if embedded_features:
-        log_detail(f"Genes embedded in HTML: {len(data['features_meta'])}")
-        enc = data.get("feature_encodings") or {}
+        default_feature_state = (
+            (data.get("feature_state_by_modality") or {}).get(default_modality_name)
+            or {}
+        )
+        log_detail(
+            "Features embedded in HTML "
+            f"({default_modality_name}): {len(default_feature_state.get('features_meta') or {})}"
+        )
+        enc = default_feature_state.get("feature_encodings") or {}
         if enc:
             n_sparse = sum(1 for v in enc.values() if v == "sparse")
             n_dense = sum(1 for v in enc.values() if v == "dense")
-            log_detail(f"Embedded gene encoding: {n_sparse} sparse, {n_dense} dense.")
+            log_detail(f"Embedded feature encoding: {n_sparse} sparse, {n_dense} dense.")
     if feature_manifest_url:
         if not embedded_features:
             log_detail("Features embedded in HTML: 0; expression is sidecar-only.")

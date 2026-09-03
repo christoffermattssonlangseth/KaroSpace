@@ -2513,6 +2513,20 @@ class SpatialDataset:
 
         pseudobulk_modality_names = _normalize_pseudobulk_modalities(pseudobulk_modalities)
         primary_pseudobulk_modality = pseudobulk_modality_names[0] if pseudobulk_modality_names else None
+        modality_names = list(self.modalities.keys()) or [str(self.default_modality or "rna")]
+        default_modality_name = (
+            str(self.default_modality)
+            if str(self.default_modality) in modality_names
+            else modality_names[0]
+        )
+        features_by_modality = {
+            modality_name: (
+                list(self.modalities[modality_name].feature_names)
+                if self.modalities and modality_name in self.modalities
+                else list(self.var_names)
+            )
+            for modality_name in modality_names
+        }
 
         replicate_override = str(pseudobulk_replicate_annotation or "").strip()
         pseudobulk_replicate_name = replicate_override or str(self.section_key)
@@ -2527,7 +2541,9 @@ class SpatialDataset:
             pseudobulk_simple_constrast_categories,
             requested_pseudobulk_de_annotations,
         )
-        pseudobulk_de_by_modality: Dict[str, Dict[str, Any]] = {}
+        pseudobulk_de_by_modality: Dict[str, Dict[str, Any]] = {
+            modality_name: {} for modality_name in pseudobulk_modality_names
+        }
         companion_pseudobulk_de = companion_analytics.get("pseudobulk_de")
         companion_gene_means = companion_analytics.get("category_gene_means")
         companion_de_method = companion_analytics.get("cluster_de_method")
@@ -2764,7 +2780,9 @@ class SpatialDataset:
         # Compute contact-conditioned interaction markers:
         # for source S and target T, compare source cells contacting T vs source cells not contacting T.
         requested_interaction_marker_annotations = list(interaction_marker_annotations or [])
-        interaction_markers_by_modality: Dict[str, Dict[str, Any]] = {}
+        interaction_markers_by_modality: Dict[str, Dict[str, Any]] = {
+            modality_name: {} for modality_name in pseudobulk_modality_names
+        }
         companion_interaction_markers = companion_analytics.get("interaction_markers")
         if neighbor_graph is not None and requested_interaction_marker_annotations:
             top_targets = int(interaction_markers_top_targets)
@@ -3059,6 +3077,23 @@ class SpatialDataset:
 
         feature_data = self._collect_feature_data(export_genes)
         feature_encodings = self._resolve_feature_encodings(feature_data, feature_encoding, feature_sparse_zero_threshold)
+        embedded_features_by_modality: Dict[str, List[str]] = {
+            modality_name: [] for modality_name in modality_names
+        }
+        embedded_features_by_modality[default_modality_name] = list(feature_data.keys())
+        feature_value_encodings = {
+            feature: "float32" for feature in feature_data
+        }
+        feature_state_by_modality: Dict[str, Dict[str, Any]] = {
+            modality_name: {
+                "features_meta": {},
+                "feature_encodings": {},
+                "feature_value_encodings": {},
+                "sections": {},
+            }
+            for modality_name in modality_names
+        }
+        default_modality_section_features: Dict[str, Dict[str, Dict[str, Any]]] = {}
 
         # Build section data with all color layers
         sections_data = []
@@ -3094,8 +3129,8 @@ class SpatialDataset:
                 }
 
             # Build gene expression values for this section
-            section_genes_dense = {}
-            section_genes_sparse = {}
+            section_features_dense = {}
+            section_features_sparse = {}
             for gene, gdata in feature_data.items():
                 section_vals = gdata["values"][idx]
                 mode = feature_encodings.get(gene, "dense")
@@ -3107,9 +3142,13 @@ class SpatialDataset:
                     b64_encoder=_b64,
                 )
                 if "sparse" in payload:
-                    section_genes_sparse[gene] = payload["sparse"]
+                    section_features_sparse[gene] = payload["sparse"]
                 else:
-                    section_genes_dense[gene] = payload["dense"]
+                    section_features_dense[gene] = payload["dense"]
+            default_modality_section_features[section.section_id] = {
+                "features": section_features_dense,
+                "features_sparse": section_features_sparse,
+            }
 
             section_entry = {
                 "id": section.section_id,
@@ -3125,8 +3164,6 @@ class SpatialDataset:
                 "colors": section_colors,
                 "colors_b64": section_colors_b64,
                 "proportions_b64": section_proportions_b64,
-                "genes": section_genes_dense,
-                "genes_sparse": section_genes_sparse,
                 "bounds": {
                     "xmin": float(section_coords[:, 0].min()) if len(idx) > 0 else 0,
                     "xmax": float(section_coords[:, 0].max()) if len(idx) > 0 else 0,
@@ -3213,13 +3250,27 @@ class SpatialDataset:
                 "vmax": None,
             }
 
-        # Build gene metadata
+        # Build embedded feature metadata for the default modality.
         features_meta = {}
         for gene, gdata in feature_data.items():
             features_meta[gene] = {
                 "vmin": gdata["vmin"],
                 "vmax": gdata["vmax"],
             }
+        feature_state_by_modality[default_modality_name] = {
+            "features_meta": features_meta,
+            "feature_encodings": feature_encodings,
+            "feature_value_encodings": feature_value_encodings,
+            "sections": default_modality_section_features,
+        }
+        marker_features_by_modality = {
+            modality_name: _pseudobulk_de_marker_genes(
+                modality_payload,
+                float(pseudobulk_padj_cutoff),
+                float(pseudobulk_log2fc_cutoff),
+            )
+            for modality_name, modality_payload in pseudobulk_de_by_modality.items()
+        }
 
         return {
             "initial_annotation": annotation,
@@ -3241,28 +3292,62 @@ class SpatialDataset:
                 "embed_top_n_per_comparison": int(pseudobulk_embed_top_n_per_comparison),
             },
             "annotations_meta": annotations_meta,
-            "features_meta": features_meta,
-            "feature_encodings": feature_encodings,
+            "modalities": [
+                {
+                    "name": modality_name,
+                    "label": (
+                        self.modalities[modality_name].label
+                        if self.modalities and modality_name in self.modalities
+                        else modality_name
+                    ),
+                    "value_kind": (
+                        self.modalities[modality_name].value_kind
+                        if self.modalities and modality_name in self.modalities
+                        else "counts"
+                    ),
+                    "n_features": len(features_by_modality[modality_name]),
+                    "is_default": modality_name == default_modality_name,
+                }
+                for modality_name in modality_names
+            ],
+            "default_modality": default_modality_name,
+            "features_by_modality": features_by_modality,
+            "embedded_features_by_modality": embedded_features_by_modality,
+            "feature_state_by_modality": feature_state_by_modality,
+            "requested_features_by_modality": {},
             "metadata_filters": metadata_filters,
             "section_metadata": list(self.section_metadata),
             "section_metadata_extra": list(self.section_metadata_extra),
             "n_sections": len(sections_data),
             "total_cells": sum(s["n_cells"] for s in sections_data),
-            "loaded_features": len(features_meta),
+            "loaded_features_by_modality": {
+                modality_name: len(features)
+                for modality_name, features in embedded_features_by_modality.items()
+            },
             "sections": sections_data,
             "available_annotations": list(annotation_data.keys()) + list(decon_data.keys()),
             "available_deconvolutions": list(decon_data.keys()),
-            "available_features": list(feature_data.keys()),
-            "marker_genes": marker_genes,
-            "pseudobulk_de": pseudobulk_de,
+            "marker_features_by_modality": marker_features_by_modality,
             "pseudobulk_de_by_modality": pseudobulk_de_by_modality,
             "has_umap": umap_coords is not None,
             "umap_bounds": umap_bounds,
             "has_neighbors": neighbor_graph is not None,
             "neighbors_key": neighbor_graph_key,
             "neighbor_stats": neighbor_stats,
-            "interaction_markers": interaction_markers,
             "interaction_markers_by_modality": interaction_markers_by_modality,
+            "category_feature_means_by_modality": {
+                modality_name: None for modality_name in modality_names
+            },
+            "feature_correlations_by_modality": {
+                modality_name: {} for modality_name in modality_names
+            },
+            "spatial_variable_features_by_modality": {
+                modality_name: [] for modality_name in modality_names
+            },
+            "pathway_settings_by_modality": {
+                modality_name: {"available": False, "reason": "not_computed"}
+                for modality_name in modality_names
+            },
             "dispersion_stats": dispersion_stats,
         }
 
