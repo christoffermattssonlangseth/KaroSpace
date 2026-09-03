@@ -35084,12 +35084,92 @@ def export_to_html(
         raise ValueError("feature_value_encoding must be one of: 'uint16', 'uint8'")
     resolved_section_rotations = _resolve_section_rotations(dataset, section_rotations)
 
+    available_modalities = list(getattr(dataset, "modalities", {}).keys())
+    default_modality_name = getattr(dataset, "default_modality", "rna")
+
+    def _normalize_modality_selection(
+        value: Optional[Union[str, Sequence[str]]],
+        *,
+        option_name: str,
+        default_to_all: bool,
+    ) -> List[str]:
+        if not available_modalities:
+            return []
+        default_name = (
+            str(default_modality_name)
+            if default_modality_name in available_modalities
+            else available_modalities[0]
+        )
+        if value is None:
+            return list(available_modalities) if default_to_all else [default_name]
+        if isinstance(value, str):
+            requested = [item.strip() for item in value.split(",") if item.strip()]
+        else:
+            requested = [str(item).strip() for item in value if str(item).strip()]
+        if not requested:
+            return list(available_modalities) if default_to_all else [default_name]
+        if any(item.lower() == "all" for item in requested):
+            return list(available_modalities)
+        selected = list(dict.fromkeys(requested))
+        unknown = [name for name in selected if name not in available_modalities]
+        if unknown:
+            raise ValueError(f"Unknown {option_name}: {unknown}. Available: {available_modalities}")
+        return selected
+
+    selected_modalities = _normalize_modality_selection(
+        modalities,
+        option_name="modalities",
+        default_to_all=True,
+    )
+    if default_modality_name in available_modalities and default_modality_name not in selected_modalities:
+        selected_modalities.insert(0, default_modality_name)
+    extra_modalities = [m for m in selected_modalities if m != default_modality_name]
+    if extra_modalities and feature_storage != "sidecar":
+        log_warning(
+            f"extra modalities {extra_modalities} require feature_storage='sidecar'; "
+            "skipping them in embedded mode."
+        )
+        selected_modalities = [m for m in selected_modalities if m == default_modality_name]
+        extra_modalities = []
+    requested_feature_modalities = list(selected_modalities)
+
+    def _features_for_modality(modality_name: str) -> List[str]:
+        if modality_name in getattr(dataset, "modalities", {}):
+            return list(dataset.modalities[modality_name].feature_names)
+        if modality_name == default_modality_name or not available_modalities:
+            return list(dataset.var_names)
+        return []
+
+    def _resolve_requested_features_by_modality(
+        requested_names: Sequence[str],
+        modality_names: Sequence[str],
+    ) -> Dict[str, List[str]]:
+        if not requested_names:
+            return {}
+        candidate_modalities = [
+            name
+            for name in dict.fromkeys(modality_names)
+            if not available_modalities or name in available_modalities
+        ]
+        if not candidate_modalities:
+            candidate_modalities = [str(default_modality_name or "rna")]
+        feature_sets = {
+            name: set(_features_for_modality(name))
+            for name in candidate_modalities
+        }
+        matched: Dict[str, List[str]] = {name: [] for name in candidate_modalities}
+        for feature in requested_names:
+            for modality_name, feature_set in feature_sets.items():
+                if feature in feature_set:
+                    matched[modality_name].append(feature)
+        return {name: values for name, values in matched.items() if values}
+
     requested_feature_names = _normalize_requested_feature_names(features, features_list)
-    requested_features = [
-        feature
-        for feature in requested_feature_names
-        if feature in dataset.adata.var_names
-    ]
+    requested_features_by_modality = _resolve_requested_features_by_modality(
+        requested_feature_names,
+        requested_feature_modalities,
+    )
+    requested_features = list(requested_features_by_modality.get(default_modality_name, []))
     embedded_features = [] if feature_storage == "sidecar" else list(requested_features)
     effective_pseudobulk_embed_top_n_per_comparison = (
         0 if feature_storage == "sidecar" else int(pseudobulk_embed_top_n_per_comparison)
@@ -35127,38 +35207,6 @@ def export_to_html(
         if token in {"none", "null"}:
             return False
         raise ValueError(f"{name} must be 'auto' or None")
-
-    available_modalities = list(getattr(dataset, "modalities", {}).keys())
-    default_modality_name = getattr(dataset, "default_modality", "rna")
-
-    def _normalize_modality_selection(
-        value: Optional[Union[str, Sequence[str]]],
-        *,
-        option_name: str,
-        default_to_all: bool,
-    ) -> List[str]:
-        if not available_modalities:
-            return []
-        default_name = (
-            str(default_modality_name)
-            if default_modality_name in available_modalities
-            else available_modalities[0]
-        )
-        if value is None:
-            return list(available_modalities) if default_to_all else [default_name]
-        if isinstance(value, str):
-            requested = [item.strip() for item in value.split(",") if item.strip()]
-        else:
-            requested = [str(item).strip() for item in value if str(item).strip()]
-        if not requested:
-            return list(available_modalities) if default_to_all else [default_name]
-        if any(item.lower() == "all" for item in requested):
-            return list(available_modalities)
-        selected = list(dict.fromkeys(requested))
-        unknown = [name for name in selected if name not in available_modalities]
-        if unknown:
-            raise ValueError(f"Unknown {option_name}: {unknown}. Available: {available_modalities}")
-        return selected
 
     pseudobulk_enabled = _analysis_mode_enabled(pseudobulk, "pseudobulk")
     interaction_markers_enabled = _analysis_mode_enabled(interaction_markers, "interaction_markers")
@@ -35271,6 +35319,14 @@ def export_to_html(
         f"Main cells annotation: {annotation}; embedded annotation columns="
         f"{', '.join([annotation, *(cell_annotations or [])]) or 'none'}."
     )
+    if requested_feature_names:
+        requested_match_count = sum(len(values) for values in requested_features_by_modality.values())
+        log_detail(
+            f"Requested features matched across selected modalities: {requested_match_count} "
+            f"match{'es' if requested_match_count != 1 else ''} in "
+            f"{len(requested_features_by_modality)} modalit"
+            f"{'ies' if len(requested_features_by_modality) != 1 else 'y'}."
+        )
     log_detail(
         f"Pseudobulk={'on' if pseudobulk_enabled else 'off'}; "
         f"interaction markers={'on' if interaction_markers_enabled else 'off'}; "
@@ -35506,22 +35562,6 @@ def export_to_html(
         }
         log_warning(f"pathway enrichment failed ({exc}).")
 
-    # Resolve which non-default modalities to export. Only meaningful when sidecar-based.
-    selected_modalities = _normalize_modality_selection(
-        modalities,
-        option_name="modalities",
-        default_to_all=True,
-    )
-    if default_modality_name in available_modalities and default_modality_name not in selected_modalities:
-        selected_modalities.insert(0, default_modality_name)
-    extra_modalities = [m for m in selected_modalities if m != default_modality_name]
-    if extra_modalities and feature_storage != "sidecar":
-        log_warning(
-            f"extra modalities {extra_modalities} require feature_storage='sidecar'; "
-            "skipping them in embedded mode."
-        )
-        extra_modalities = []
-
     if feature_storage == "sidecar":
         assert resolved_feature_manifest_path is not None
         data["available_features"] = list(dataset.var_names)
@@ -35548,6 +35588,7 @@ def export_to_html(
             })
     data["modalities"] = modality_descriptors
     data["features_by_modality"] = features_by_modality
+    data["requested_features_by_modality"] = requested_features_by_modality
     data["default_modality"] = default_modality_name if modality_descriptors else None
 
     if int(spatial_variable_genes_n) > 0:
@@ -35702,6 +35743,7 @@ def export_to_html(
                 "cell_annotations": cell_annotations,
                 "features": requested_feature_names,
                 "features_list": str(features_list) if features_list else None,
+                "requested_features_by_modality": requested_features_by_modality,
                 "feature_encoding": feature_encoding,
                 "feature_value_encoding": feature_value_encoding,
                 "feature_storage": feature_storage,
@@ -35752,6 +35794,7 @@ def export_to_html(
                 "output_path": str(final_output_path),
                 "feature_manifest_url": feature_manifest_url,
                 "embedded_features": list(embedded_features),
+                "requested_features_by_modality": requested_features_by_modality,
                 "embedded_feature_count": len(embedded_features),
                 "available_feature_count": len(data.get("available_features") or []),
                 "available_annotations": list(data.get("available_annotations") or []),

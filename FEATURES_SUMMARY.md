@@ -62,6 +62,7 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 - Gene expression scale controls adjust the visible color range and can be propagated across split gene comparison.
 - Sidecar mode keeps all gene expression vectors outside the HTML and fetches them from nearby sidecar files.
 - Multiple modalities can be selected when exported, for example RNA genes and protein features.
+- Requested `features` / `features-list` names are resolved against all exported modalities, and duplicate names are retained in every selected modality where they exist.
 - Genes not embedded in the HTML can still appear in DE tables or marker lists; sidecar-loadable genes can be fetched on demand.
 
 ## 8. Spatial Selection
@@ -171,6 +172,7 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 - `Compare > Per sample > Simple design` displays category-versus-category pseudobulk DE when exported.
 - Simple design includes raw tables, markers, MA plots, volcano plots, PCA, distance matrix diagnostics, and pathway enrichment.
 - Simple design metrics can be shown as Raw table, Genes, and Samples views.
+- Pseudobulk DE can be exported for selected modalities with `pseudobulk_modalities` / `--pseudobulk-modalities`; the default is the dataset default modality.
 - DE genes are filtered with `padj < cutoff` and `abs(log2FC) >= cutoff`.
 - Genes below the minimum percent-expressed threshold in both compared groups are removed before `DeseqStats`, so they do not enter contrast-level multiple-testing correction.
 - The pseudobulk marker lists are ordered by adjusted p-value then log2FC and can expand from the first displayed rows.
@@ -197,6 +199,7 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 ## 21. Exported Analytics
 
 - Pseudobulk DE uses raw counts grouped by replicate and annotation.
+- Pseudobulk DE and contact-conditioned interaction markers can run on selected modalities rather than always using the default RNA matrix.
 - Pseudobulk samples require at least `pseudobulk_min_cells_per_pseudobulk` cells before entering the shared DESeq2 fit.
 - Category-versus-category contrasts are extracted from a shared fit per annotation column.
 - Balanced-rest contrasts compare one category against the equally weighted mean of retained other categories.
