@@ -1471,14 +1471,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             position: relative;
             align-items: flex-start;
         }}
-        .gene-input-shell {{
+        .feature-input-shell {{
             position: relative;
             min-width: 180px;
         }}
-        .gene-input-shell input[type="text"] {{
+        .feature-input-shell input[type="text"] {{
             width: 180px;
         }}
-        .gene-discovery-panel {{
+        .feature-discovery-panel {{
             position: absolute;
             top: calc(100% + 6px);
             left: 0;
@@ -1495,7 +1495,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             display: none;
             z-index: 40;
         }}
-        .gene-discovery-panel.active {{
+        .feature-discovery-panel.active {{
             display: block;
         }}
         .gene-discovery-header {{
@@ -1929,16 +1929,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             box-shadow: 0 1px 4px rgba(0, 0, 0, 0.14);
         }}
         .visual-annotation-controls,
-        .visual-gene-controls {{
+        .visual-feature-controls {{
             display: inline-flex;
             align-items: center;
             gap: 10px;
             flex-wrap: wrap;
         }}
-        .visual-default-controls.annotation-mode .visual-gene-controls {{
+        .visual-default-controls.annotation-mode .visual-feature-controls {{
             display: none;
         }}
-        .visual-default-controls.gene-mode .visual-annotation-controls {{
+        .visual-default-controls.feature-mode .visual-annotation-controls {{
             display: none;
         }}
         .visual-params-bar.split-mode .visual-default-controls {{
@@ -7183,7 +7183,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         <div class="visual-default-controls annotation-mode" id="visual-default-controls">
             <div class="visual-source-switch" id="visual-source-switch" role="group" aria-label="Default view source">
                 <button class="visual-source-btn active" id="default-source-annotation" type="button" data-default-source="annotation">Annotation</button>
-                <button class="visual-source-btn" id="default-source-gene" type="button" data-default-source="gene">Gene</button>
+                <button class="visual-source-btn" id="default-source-feature" type="button" data-default-source="feature">Feature</button>
+            </div>
+            <div class="control-group visual-feature-namespace-control" id="visual-feature-namespace-control" style="display: none;">
+                <label class="sr-only" for="visual-feature-namespace-select">Feature namespace</label>
+                <select id="visual-feature-namespace-select"></select>
             </div>
             <div class="visual-annotation-controls" id="visual-annotation-controls">
                 <div class="control-group">
@@ -7191,24 +7195,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <select id="annotation-select"></select>
                 </div>
             </div>
-            <div class="visual-gene-controls" id="visual-gene-controls">
-                <div class="control-group" id="modality-control-group" style="display: none;">
-                    <label>Modality:</label>
-                    <select id="modality-select"></select>
-                </div>
+            <div class="visual-feature-controls" id="visual-feature-controls">
                 <div class="control-group gene-control-group">
-                    <label class="sr-only" for="gene-input">Gene</label>
-                    <div class="gene-input-shell" id="gene-input-shell">
-                        <input type="text" id="gene-input" placeholder="e.g. Cd4, Gfap..." list="gene-list" autocomplete="off" spellcheck="false" aria-expanded="false" aria-controls="gene-discovery-panel">
-                        <datalist id="gene-list"></datalist>
-                        <div class="gene-discovery-panel" id="gene-discovery-panel" aria-hidden="true">
+                    <label class="sr-only" for="feature-input">Feature</label>
+                    <div class="feature-input-shell" id="feature-input-shell">
+                        <input type="text" id="feature-input" placeholder="Feature" list="feature-list" autocomplete="off" spellcheck="false" aria-expanded="false" aria-controls="feature-discovery-panel">
+                        <datalist id="feature-list"></datalist>
+                        <div class="feature-discovery-panel" id="feature-discovery-panel" aria-hidden="true">
                             <div class="gene-discovery-header">
-                                <div class="gene-discovery-title">Gene discovery</div>
+                                <div class="gene-discovery-title">Feature discovery</div>
                                 <div class="gene-discovery-actions">
-                                    <button class="gene-panel-btn" id="gene-panel-new" type="button">New panel</button>
+                                    <button class="gene-panel-btn" id="feature-panel-new" type="button">New panel</button>
                                 </div>
                             </div>
-                            <div id="gene-discovery-content"></div>
+                            <div id="feature-discovery-content"></div>
                         </div>
                     </div>
                 </div>
@@ -7220,16 +7220,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 <select id="overview-blend-a-kind"></select>
                 <select id="overview-blend-a-annotation"></select>
                 <select id="overview-blend-a-category"></select>
-                <input type="text" id="overview-blend-a-gene" list="overview-blend-a-gene-list" placeholder="Gene symbol" style="display:none;">
-                <datalist id="overview-blend-a-gene-list"></datalist>
+                <input type="text" id="overview-blend-a-gene" list="overview-blend-a-feature-list" placeholder="Gene symbol" style="display:none;">
+                <datalist id="overview-blend-a-feature-list"></datalist>
             </div>
             <div class="overview-blend-row" id="overview-blend-row-b">
                 <span class="overview-blend-side">B</span>
                 <select id="overview-blend-b-kind"></select>
                 <select id="overview-blend-b-annotation"></select>
                 <select id="overview-blend-b-category"></select>
-                <input type="text" id="overview-blend-b-gene" list="overview-blend-b-gene-list" placeholder="Gene symbol" style="display:none;">
-                <datalist id="overview-blend-b-gene-list"></datalist>
+                <input type="text" id="overview-blend-b-gene" list="overview-blend-b-feature-list" placeholder="Gene symbol" style="display:none;">
+                <datalist id="overview-blend-b-feature-list"></datalist>
             </div>
             <div class="overview-blend-row" id="overview-blend-row-mix">
                 <svg class="overview-blend-icon" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M3 12h18"></path></svg>
@@ -7867,7 +7867,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return uniqueSortedFeatures(getLoadedFeaturesForModality(getVisualModality()));
     }}
     function populateGeneInputDatalist() {{
-        const geneListEl = document.getElementById('gene-list');
+        const geneListEl = document.getElementById('feature-list');
         if (!geneListEl) return;
         const fragment = document.createDocumentFragment();
         for (const feat of getGeneInputFeatureList()) {{
@@ -8044,7 +8044,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
     async function setActiveModality(name) {{
         if (!name || name === getVisualModality()) return;
-        if (!FEATURES_BY_MODALITY[name] && name !== DEFAULT_MODALITY_NAME) {{
+        if (!isModuleModality(name) && !FEATURES_BY_MODALITY[name] && name !== DEFAULT_MODALITY_NAME) {{
             console.warn('Unknown modality:', name);
             return;
         }}
@@ -9607,24 +9607,24 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             step('Find cells by query', ['#selection-query-panel', '#selection-query-toggle', '#insights-panel'], [
                 'Select cells based on annotations, level of gene expression or experiment metadata.'
             ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('selection'); updateSelectionInfo?.(); keepTutorialSelectionQueryPanelOpen(); }}, onNext: () => closeSelectionQueryPanel(), task: 'Cells can be selected by querying the text box rule and clicking the search icon below the text box', requiresQuerySelection: true, combineTargets: true, scroll: false, positionTarget: '#selection-query-panel', placement: 'right', nextLabel: tryIt }}),
-            step('Switch to Gene source', ['#default-source-gene', '#visual-gene-controls'], [
+            step('Switch to Gene source', ['#default-source-feature', '#visual-feature-controls'], [
                 'Gene source changes the grid from categorical annotation colors to gene or feature expression.'
-            ], {{ action: () => safeTutorialClick('#default-source-gene'), nextLabel: tryIt }}),
-            step('Gene discovery panel', '#gene-discovery-panel', [
+            ], {{ action: () => safeTutorialClick('#default-source-feature'), nextLabel: tryIt }}),
+            step('Gene discovery panel', '#feature-discovery-panel', [
                 'Gene discovery helps you search, activate genes, and inspect related gene information.',
                 'Suggestion for gene markers are displayed depending on the selected annotation.',
                 'It can include marker genes, spatial genes, correlations, and module tools depending on the exported payload.'
-            ], {{ action: () => {{ safeTutorialClick('#default-source-gene'); lockTutorialGeneDiscoveryPanel(); setTutorialToolbarPanel(null); document.getElementById('gene-input')?.focus(); }}, positionTarget: '#gene-discovery-panel', placement: 'right', nextLabel: tryIt }}),
-            step('Gene input field', ['#gene-input', '#gene-input-shell'], [
+            ], {{ action: () => {{ safeTutorialClick('#default-source-feature'); lockTutorialGeneDiscoveryPanel(); setTutorialToolbarPanel(null); document.getElementById('feature-input')?.focus(); }}, positionTarget: '#feature-discovery-panel', placement: 'right', nextLabel: tryIt }}),
+            step('Gene input field', ['#feature-input', '#feature-input-shell'], [
                 'The gene input accepts embedded genes and sidecar-loadable genes when sidecar mode is available.'
-            ], {{ action: () => safeTutorialClick('#default-source-gene'), onNext: () => setTutorialSplitGeneDisplay(), nextLabel: tryIt }}),
+            ], {{ action: () => safeTutorialClick('#default-source-feature'), onNext: () => setTutorialSplitGeneDisplay(), nextLabel: tryIt }}),
             step('Gene expression scale', ['#gene-params-panel', '#gene-params-toggle'], [
                 'Modify the default scaling of a gene to highlight its expression. Scaling can be propagated to the other gene in the Split setup to compare gene expression.'
             ], {{ action: () => lockTutorialGeneParamsPanel(), positionTarget: '#gene-params-panel', placement: 'right', prepareDelay: 360, nextLabel: tryIt }}),
-            step('Modality selector', ['#modality-control-group', '#modality-select'], [
+            step('Modality selector', ['#visual-feature-namespace-control', '#visual-feature-namespace-select'], [
                 'If multiple modalities were exported, the modality selector switches the feature namespace.',
                 'For example, RNA genes and protein features can be searched separately.'
-            ], {{ condition: () => Array.isArray(MODALITY_DESCRIPTORS) && MODALITY_DESCRIPTORS.length > 1, action: () => safeTutorialClick('#default-source-gene'), task: 'Switch modality once, then switch back to the one you want.', nextLabel: tryIt }}),
+            ], {{ condition: () => Array.isArray(MODALITY_DESCRIPTORS) && MODALITY_DESCRIPTORS.length > 1, action: () => safeTutorialClick('#default-source-feature'), task: 'Switch modality once, then switch back to the one you want.', nextLabel: tryIt }}),
             step('Open a section modal', ['.section-panel:not(.filtered-out)', '.section-panel', '#grid-stage', '#grid'], [
                 'Clicking a section opens a high-detail modal view for that section.'
             ], {{ action: () => {{ if (typeof closeModal === 'function') closeModal(); }}, task: 'Click the highlighted section to open the modal view.', requiresModalOpen: true, nextLabel: tryIt }}),
@@ -10370,8 +10370,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function ensureTutorialModalityTouched() {{
-        safeTutorialClick('#default-source-gene');
-        const select = document.getElementById('modality-select');
+        safeTutorialClick('#default-source-feature');
+        const select = document.getElementById('visual-feature-namespace-select');
         const options = Array.from(select?.options || []).map(option => option.value).filter(Boolean);
         if (select && options.length > 1) {{
             const original = select.value;
@@ -10721,7 +10721,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
 
             currentGene = null;
-            const geneInput = document.getElementById('gene-input');
+            const geneInput = document.getElementById('feature-input');
             if (geneInput) geneInput.value = '';
             setGeneDiscoveryOpen?.(false);
             geneDiscoveryResults = [];
@@ -10736,9 +10736,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             celltypeTrendTarget = null;
 
             document.getElementById('visual-default-controls')?.classList.add('annotation-mode');
-            document.getElementById('visual-default-controls')?.classList.remove('gene-mode');
+            document.getElementById('visual-default-controls')?.classList.remove('feature-mode');
             document.getElementById('default-source-annotation')?.classList.add('active');
-            document.getElementById('default-source-gene')?.classList.remove('active');
+            document.getElementById('default-source-feature')?.classList.remove('active');
             document.getElementById('grid-side-toolbar')?.classList.remove('visual-open', 'gene-open', 'neighbor-open', 'he-open');
             document.getElementById('visual-params-toggle')?.setAttribute('aria-expanded', 'false');
             document.getElementById('gene-params-toggle')?.setAttribute('aria-expanded', 'false');
@@ -10885,7 +10885,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (document.getElementById('overview-mode-split')?.classList.contains('active')) {{
             safeTutorialClick('#overview-mode-default');
         }}
-        safeTutorialClick(source === 'gene' ? '#default-source-gene' : '#default-source-annotation');
+        safeTutorialClick((source === 'feature' || source === 'gene') ? '#default-source-feature' : '#default-source-annotation');
     }}
 
     function ensureTutorialSplitMode(withGeneSide = false) {{
@@ -10996,7 +10996,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const features = getFeatureDatalistValuesForModality(getVisualModality());
         const firstGene = features[0];
         if (!firstGene) return;
-        const geneInput = document.getElementById('gene-input');
+        const geneInput = document.getElementById('feature-input');
         if (geneInput) geneInput.value = getGeneDisplayLabel(firstGene);
         if (typeof activateViewerGene === 'function') {{
             activateViewerGene(firstGene, {{ showErrors: false }}).catch(error => console.warn('Tutorial first gene selection failed', error));
@@ -11023,7 +11023,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function clearTutorialGeneInput() {{
-        const geneInput = document.getElementById('gene-input');
+        const geneInput = document.getElementById('feature-input');
         if (geneInput) geneInput.value = '';
         geneDiscoveryResults = [];
         geneDiscoveryActiveIndex = -1;
@@ -11031,9 +11031,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         invalidateGeneDensityCaches?.();
         hiddenCategories?.clear?.();
         document.getElementById('visual-default-controls')?.classList.remove('annotation-mode');
-        document.getElementById('visual-default-controls')?.classList.add('gene-mode');
+        document.getElementById('visual-default-controls')?.classList.add('feature-mode');
         document.getElementById('default-source-annotation')?.classList.remove('active');
-        document.getElementById('default-source-gene')?.classList.add('active');
+        document.getElementById('default-source-feature')?.classList.add('active');
         updateExpressionScaleUI?.();
         renderLegend?.('legend');
         renderAllSections?.();
@@ -11067,7 +11067,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function lockTutorialGeneDiscoveryPanel() {{
         tutorialGeneDiscoveryLocked = true;
         clearTutorialGeneInput();
-        document.getElementById('gene-input')?.focus();
+        document.getElementById('feature-input')?.focus();
         setGeneDiscoveryOpen?.(true);
         renderGeneDiscoveryPanel?.();
     }}
@@ -12025,7 +12025,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
 
             if (key === '/') {{
-                const geneInput = document.getElementById('gene-input');
+                const geneInput = document.getElementById('feature-input');
                 if (!geneInput) return;
                 event.preventDefault();
                 geneInput.focus();
@@ -13962,7 +13962,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function setGeneLoadingState(isLoading, message = '') {{
         featureSidecarLoadingMessage = isLoading ? (message || 'Loading gene expression…') : '';
-        const geneInput = document.getElementById('gene-input');
+        const geneInput = document.getElementById('feature-input');
         if (geneInput) {{
             geneInput.disabled = !!isLoading;
             if (isLoading) {{
@@ -14503,8 +14503,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function setGeneDiscoveryOpen(isOpen) {{
         if (!isOpen && tutorialGeneDiscoveryLocked) isOpen = true;
         geneDiscoveryOpen = !!isOpen;
-        const panel = document.getElementById('gene-discovery-panel');
-        const input = document.getElementById('gene-input');
+        const panel = document.getElementById('feature-discovery-panel');
+        const input = document.getElementById('feature-input');
         if (panel) {{
             panel.classList.toggle('active', geneDiscoveryOpen);
             panel.setAttribute('aria-hidden', geneDiscoveryOpen ? 'false' : 'true');
@@ -14592,8 +14592,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function renderGeneDiscoveryPanel() {{
-        const content = document.getElementById('gene-discovery-content');
-        const input = document.getElementById('gene-input');
+        const content = document.getElementById('feature-discovery-content');
+        const input = document.getElementById('feature-input');
         if (!content || !input) return;
 
         const query = String(input.value || '').trim();
@@ -14776,7 +14776,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const rawToken = String(gene || '').trim();
         const token = resolveViewerFeatureToken(rawToken);
         const showErrors = options.showErrors !== false;
-        const geneInput = document.getElementById('gene-input');
+        const geneInput = document.getElementById('feature-input');
 
         if (!rawToken) {{
             currentGene = null;
@@ -14784,9 +14784,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             hiddenCategories.clear();
             if (geneInput) geneInput.value = '';
             document.getElementById('visual-default-controls')?.classList.add('annotation-mode');
-            document.getElementById('visual-default-controls')?.classList.remove('gene-mode');
+            document.getElementById('visual-default-controls')?.classList.remove('feature-mode');
             document.getElementById('default-source-annotation')?.classList.add('active');
-            document.getElementById('default-source-gene')?.classList.remove('active');
+            document.getElementById('default-source-feature')?.classList.remove('active');
             updateExpressionScaleUI();
             renderLegend('legend');
             renderLegend('modal-legend');
@@ -14832,9 +14832,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }});
         if (ok) {{
             document.getElementById('visual-default-controls')?.classList.remove('annotation-mode');
-            document.getElementById('visual-default-controls')?.classList.add('gene-mode');
+            document.getElementById('visual-default-controls')?.classList.add('feature-mode');
             document.getElementById('default-source-annotation')?.classList.remove('active');
-            document.getElementById('default-source-gene')?.classList.add('active');
+            document.getElementById('default-source-feature')?.classList.add('active');
             recordRecentGene(token);
             geneDiscoveryResults = [];
             geneDiscoveryActiveIndex = -1;
@@ -19253,7 +19253,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function getGenePanelSeedToken() {{
         const fromCurrent = resolveCanonicalFeatureName(currentGene);
         if (fromCurrent) return fromCurrent;
-        const geneInput = document.getElementById('gene-input');
+        const geneInput = document.getElementById('feature-input');
         return resolveCanonicalFeatureName(geneInput?.value || '');
     }}
 
@@ -25107,7 +25107,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         geneDenseCache.clear();
         invalidateGeneDensityCaches();
         populateGeneInputDatalist();
-        const geneInput = document.getElementById('gene-input');
+        const geneInput = document.getElementById('feature-input');
         if (geneInput && currentGene) geneInput.value = getGeneDisplayLabel(currentGene);
         renderGeneDiscoveryPanel();
         updateExpressionScaleUI();
@@ -25944,7 +25944,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         selectedNeighborFocus = null;
         const annotationSelect = document.getElementById('annotation-select');
         if (annotationSelect) annotationSelect.value = col;
-        const geneInput = document.getElementById('gene-input');
+        const geneInput = document.getElementById('feature-input');
         if (geneInput) geneInput.value = '';
         (DATA.sections || []).forEach(s => {{ if (s && s._colorCache) s._colorCache = {{}}; }});
         hiddenCategories.clear();
@@ -33789,60 +33789,83 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         const visualDefaultControls = document.getElementById('visual-default-controls');
         const defaultSourceAnnotationBtn = document.getElementById('default-source-annotation');
-        const defaultSourceGeneBtn = document.getElementById('default-source-gene');
+        const defaultSourceGeneBtn = document.getElementById('default-source-feature');
+        const modalityControl = document.getElementById('visual-feature-namespace-control');
+        const modalitySelect = document.getElementById('visual-feature-namespace-select');
+        const getFeatureNamespaceOptions = () => {{
+            const options = MODALITY_DESCRIPTORS.map(desc => ({{
+                value: desc.name,
+                label: desc.label || desc.name,
+            }}));
+            if (Array.isArray(geneModules) && geneModules.length) {{
+                options.push({{ value: MODULE_MODALITY_NAME, label: 'Module' }});
+            }}
+            return options;
+        }};
+        const syncFeatureNamespaceSelect = () => {{
+            if (!modalityControl || !modalitySelect) return;
+            const options = getFeatureNamespaceOptions();
+            const active = getVisualModality();
+            modalitySelect.replaceChildren();
+            options.forEach((entry) => {{
+                const opt = document.createElement('option');
+                opt.value = entry.value;
+                opt.textContent = entry.label;
+                if (entry.value === active) opt.selected = true;
+                modalitySelect.appendChild(opt);
+            }});
+            modalityControl.style.display = options.length > 1 ? '' : 'none';
+        }};
         const setDefaultVisualSource = (source) => {{
-            const mode = source === 'gene' ? 'gene' : 'color';
+            const mode = source === 'feature' ? 'feature' : 'color';
             visualDefaultControls?.classList.toggle('annotation-mode', mode === 'color');
-            visualDefaultControls?.classList.toggle('gene-mode', mode === 'gene');
+            visualDefaultControls?.classList.toggle('feature-mode', mode === 'feature');
             defaultSourceAnnotationBtn?.classList.toggle('active', mode === 'color');
-            defaultSourceGeneBtn?.classList.toggle('active', mode === 'gene');
+            defaultSourceGeneBtn?.classList.toggle('active', mode === 'feature');
+            if (modalityControl) {{
+                const hasMultipleNamespaces = getFeatureNamespaceOptions().length > 1;
+                modalityControl.style.display = mode === 'feature' && hasMultipleNamespaces ? '' : 'none';
+            }}
         }};
         const applyDefaultVisualSource = async (source) => {{
-            const mode = source === 'gene' ? 'gene' : 'color';
+            const mode = source === 'feature' ? 'feature' : 'color';
             setDefaultVisualSource(mode);
             if (mode === 'color') {{
                 await activateViewerGene('', {{ showErrors: false }});
                 return;
             }}
-            const geneInput = document.getElementById('gene-input');
+            const geneInput = document.getElementById('feature-input');
             const requested = resolveCanonicalFeatureName(geneInput?.value || '')
                 || resolveCanonicalFeatureName(currentGene)
                 || '';
             if (!requested) return;
             await activateViewerGene(requested, {{ showErrors: false }});
         }};
-        setDefaultVisualSource(currentGene ? 'gene' : 'annotation');
+        geneModules = loadGeneModules();
+        syncFeatureNamespaceSelect();
+        setDefaultVisualSource(currentGene ? 'feature' : 'annotation');
         defaultSourceAnnotationBtn?.addEventListener('click', () => {{
             applyDefaultVisualSource('annotation').catch(error => console.warn(error));
         }});
         defaultSourceGeneBtn?.addEventListener('click', () => {{
-            applyDefaultVisualSource('gene').catch(error => console.warn(error));
+            applyDefaultVisualSource('feature').catch(error => console.warn(error));
         }});
 
         populateGeneInputDatalist();
 
-        // Modality picker: only render when more than one modality is exported.
-        const modalityControl = document.getElementById('modality-control-group');
-        const modalitySelect = document.getElementById('modality-select');
-        if (modalityControl && modalitySelect && MODALITY_DESCRIPTORS.length > 1) {{
-            for (const desc of MODALITY_DESCRIPTORS) {{
-                const opt = document.createElement('option');
-                opt.value = desc.name;
-                opt.textContent = desc.label || desc.name;
-                if (desc.name === getVisualModality()) opt.selected = true;
-                modalitySelect.appendChild(opt);
-            }}
-            modalityControl.style.display = '';
+        if (modalityControl && modalitySelect) {{
             modalitySelect.addEventListener('change', async (e) => {{
                 const target = e.target.value;
                 await setActiveModality(target);
+                syncFeatureNamespaceSelect();
+                setDefaultVisualSource('feature');
             }});
         }}
 
-        const geneInput = document.getElementById('gene-input');
-        const geneInputShell = document.getElementById('gene-input-shell');
-        const geneDiscoveryPanel = document.getElementById('gene-discovery-panel');
-        const genePanelNew = document.getElementById('gene-panel-new');
+        const geneInput = document.getElementById('feature-input');
+        const geneInputShell = document.getElementById('feature-input-shell');
+        const geneDiscoveryPanel = document.getElementById('feature-discovery-panel');
+        const genePanelNew = document.getElementById('feature-panel-new');
         recentGenes = loadRecentGenes();
         savedGenePanels = loadSavedGenePanels();
         renderGeneDiscoveryPanel();
@@ -34068,7 +34091,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     controls.gene.value = getGeneDisplayLabel(spec.gene);
 
                     // Populate side-specific feature datalist
-                    const listId = `overview-blend-${{side}}-gene-list`;
+                    const listId = `overview-blend-${{side}}-feature-list`;
                     const listEl = document.getElementById(listId);
                     if (listEl) {{
                         const features = getFeatureDatalistValuesForModality(modName);

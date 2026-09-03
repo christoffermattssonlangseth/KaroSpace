@@ -47,3 +47,14 @@ def test_generated_html_has_panel_scoped_modality_state(tmp_path=None):
     assert "pseudobulk:" in html
     assert "interactions:" in html
     assert "let CURRENT_MODALITY" not in html
+
+
+def test_visual_controls_have_feature_namespace_select(tmp_path=None):
+    html = _render_multimodal_html(tmp_path)
+
+    assert 'id="visual-feature-namespace-select"' in html
+    assert 'id="feature-input"' in html
+    assert 'id="feature-list"' in html
+    assert 'id="feature-discovery-panel"' in html
+    assert 'id="gene-input"' not in html
+    assert 'id="modality-select"' not in html
