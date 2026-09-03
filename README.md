@@ -135,7 +135,7 @@ export_to_html(
         "leiden",
         "niche",
     ],
-    features=[                      # Pre-load genes for expression view
+    features=[                      # Pre-load features for expression view; matched across selected modalities
         "Cd4",
         "Cd8a",
         "Gfap",
@@ -150,6 +150,7 @@ export_to_html(
     pseudobulk="auto",           # Use None to disable category pseudobulk DE
     pseudobulk_additional_annotations=["niche"],
     pseudobulk_counts_layer="counts",
+    pseudobulk_modalities=["rna"],  # Use ["all"] or e.g. ["rna", "protein"] to run DE on multiple modalities
     pseudobulk_min_cells_per_pseudobulk=20,
     pseudobulk_min_pct_expressed=0.2,
     pseudobulk_p_adjust_method="fdr_bh",
@@ -238,6 +239,7 @@ karospace your_data.h5ad \
   --pseudobulk auto \
   --pseudobulk-additional-annotations niche \
   --pseudobulk-counts-layer counts \
+  --pseudobulk-modalities rna \
   --pseudobulk-min-cells-per-pseudobulk 20 \
   --pseudobulk-min-pct-expressed 0.2 \
   --pseudobulk-p-adjust-method fdr_bh \
@@ -262,8 +264,8 @@ karospace your_data.h5ad \
 | `--inspect-input` | Read input metadata and exit without building sections, downsampling, exporting HTML, or running analytics | off |
 | `--main-cell-annotation` | Main cell-annotation column shown first in the viewer | `leiden` |
 | `--cell-annotations` | Comma-separated extra cell obs annotation columns to embed as selectable cell annotations | empty |
-| `--features` | Comma-separated features or genes to preload; significant pseudobulk DE genes are embedded automatically up to the per-comparison cap | empty |
-| `--features-list` | Text file with one feature/gene per line; combined with `--features` and deduplicated | empty |
+| `--features` | Comma-separated features or genes to preload. Requested names are matched against every exported `--modalities` namespace, so the same feature name is included in each selected modality where it exists. Significant pseudobulk DE genes are embedded automatically up to the per-comparison cap | empty |
+| `--features-list` | Text file with one feature/gene per line; combined with `--features`, deduplicated, and resolved across selected modalities | empty |
 | `--section-metadata` | Comma-separated obs columns to use as section metadata shown in the visual params bar/filter chips | loader defaults |
 | `--section-metadata-extra` | Comma-separated obs columns to store as section metadata without visual params bar/filter chips | empty |
 | `--metadata-value-order` | JSON object mapping metadata columns to ordered value lists | empty |
@@ -303,6 +305,7 @@ karospace your_data.h5ad \
 | `--pseudobulk-additional-annotations` | Additional annotation columns to analyze when pseudobulk or interaction markers are enabled. `--main-cell-annotation` is included automatically | empty |
 | `--pseudobulk-replicate-annotation` | Obs annotation to use as the biological replicate for pseudobulk analyses; defaults to `--section-key` | `--section-key` |
 | `--pseudobulk-counts-layer` | Raw-count AnnData layer for pseudobulk aggregation; use `None` for `adata.X` | `counts` |
+| `--pseudobulk-modalities` | Comma-separated modalities to run category pseudobulk DE and contact-conditioned interaction markers on. Use `all` for all detected modalities. This is independent of `--modalities`, which controls feature export for the viewer | dataset default modality |
 | `--pseudobulk-simple-constrast-categories` | Categories to report in category-versus-category contrasts. With `--pseudobulk-additional-annotations`, use annotation-specific JSON wrapped in single quotes, such as `'{"cell_type":["Astrocyte","B cell"],"region":["Cortex"]}'`, or a nested list matching `[main-cell-annotation, additional...]` | empty |
 | `--pseudobulk-min-cell-counts` | Exclude cells with fewer than this many total raw counts before pseudobulk aggregation; use `0` to disable | `0` |
 | `--pseudobulk-min-gene-counts` | Exclude genes with fewer than this many total raw pseudobulk counts in the shared DESeq2 fit; use `0` to disable | `0` |
@@ -403,6 +406,8 @@ If the export is downsampled, the visible graph overlay and neighbor-hover contr
 ### Optional pseudobulk category selection
 
 Pseudobulk category DE is precomputed automatically for the initial `main cells annotation` column unless `pseudobulk=None` / `--pseudobulk None` is used, and shown in `Insights → Compare → Per sample → Simple design`. KaroSpace aggregates raw counts by replicate and annotation, keeps replicate × annotation pseudobulk samples with at least `pseudobulk_min_cells_per_pseudobulk` / `--pseudobulk-min-cells-per-pseudobulk` cells, fits one shared `~ replicate + annotation` DESeq2 model per annotation column, then extracts category-versus-category contrasts. It also extracts a balanced-rest contrast for every category: the category minus the equally weighted mean of all other retained annotation categories. Genes that do not reach `pseudobulk_min_pct_expressed` / `--pseudobulk-min-pct-expressed` in at least one compared group are removed from reported DE results, so they do not enter the contrast-level multiple-testing correction applied by KaroSpace. Pairwise PCA/distance diagnostics are generated automatically for selected category pairs.
+
+By default, pseudobulk DE and contact-conditioned interaction markers run on the dataset default modality, usually `rna`. Use `pseudobulk_modalities=["rna", "protein"]` in Python or `--pseudobulk-modalities rna,protein` on the CLI to run those analyses on selected modalities, or use `all` for every detected modality. When multiple pseudobulk modalities are selected, the first selected modality remains available through the legacy `pseudobulk_de` / `interaction_markers` payloads, and all selected results are stored in modality-keyed payloads.
 
 When selecting specific pairwise categories from the command line, wrap listed values in single quotes:
 
