@@ -7739,10 +7739,40 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         || (MODALITY_DESCRIPTORS[0]?.name)
         || 'rna';
     const MODULE_MODALITY_NAME = 'module';
-    let CURRENT_MODALITY = DEFAULT_MODALITY_NAME;
+    const PANEL_MODALITY_STATE = {{
+        visual: DEFAULT_MODALITY_NAME,
+        exploration: DEFAULT_MODALITY_NAME,
+        pseudobulk: DEFAULT_MODALITY_NAME,
+        interactions: DEFAULT_MODALITY_NAME,
+        split: {{
+            a: DEFAULT_MODALITY_NAME,
+            b: DEFAULT_MODALITY_NAME,
+        }},
+    }};
+    function getPanelModality(panelName, fallback = DEFAULT_MODALITY_NAME) {{
+        const key = String(panelName || '').trim();
+        if (!key) return fallback || DEFAULT_MODALITY_NAME || 'rna';
+        if (key === 'split.a') return PANEL_MODALITY_STATE.split?.a || fallback || DEFAULT_MODALITY_NAME || 'rna';
+        if (key === 'split.b') return PANEL_MODALITY_STATE.split?.b || fallback || DEFAULT_MODALITY_NAME || 'rna';
+        return PANEL_MODALITY_STATE[key] || fallback || DEFAULT_MODALITY_NAME || 'rna';
+    }}
+    function setPanelModality(panelName, modality) {{
+        const key = String(panelName || '').trim();
+        const value = String(modality || DEFAULT_MODALITY_NAME || 'rna').trim() || DEFAULT_MODALITY_NAME || 'rna';
+        if (key === 'split.a') PANEL_MODALITY_STATE.split.a = value;
+        else if (key === 'split.b') PANEL_MODALITY_STATE.split.b = value;
+        else if (key) PANEL_MODALITY_STATE[key] = value;
+        return value;
+    }}
+    function getVisualModality() {{
+        return getPanelModality('visual');
+    }}
+    function setVisualModality(modality) {{
+        return setPanelModality('visual', modality);
+    }}
 
     function getActiveModalityDescriptor() {{
-        return MODALITY_DESCRIPTORS.find(d => d && d.name === CURRENT_MODALITY) || null;
+        return MODALITY_DESCRIPTORS.find(d => d && d.name === getVisualModality()) || null;
     }}
     function uniqueSortedFeatures(features) {{
         const seen = new Set();
@@ -7764,11 +7794,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             sections: raw.sections && typeof raw.sections === 'object' ? raw.sections : {{}},
         }};
     }}
-    function normalizeFeatureModalityName(modality = CURRENT_MODALITY) {{
-        const name = String(modality || CURRENT_MODALITY || DEFAULT_MODALITY_NAME || 'rna').trim();
+    function normalizeFeatureModalityName(modality = getVisualModality()) {{
+        const name = String(modality || getVisualModality() || DEFAULT_MODALITY_NAME || 'rna').trim();
         return name || DEFAULT_MODALITY_NAME || 'rna';
     }}
-    function getFeatureState(modality = CURRENT_MODALITY) {{
+    function getFeatureState(modality = getVisualModality()) {{
         const name = normalizeFeatureModalityName(modality);
         if (!FEATURE_STATE_BY_MODALITY[name]) {{
             FEATURE_STATE_BY_MODALITY[name] = normalizeFeatureState(null);
@@ -7777,7 +7807,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         return FEATURE_STATE_BY_MODALITY[name];
     }}
-    function getFeatureSectionPayload(sectionOrId, modality = CURRENT_MODALITY) {{
+    function getFeatureSectionPayload(sectionOrId, modality = getVisualModality()) {{
         const sectionId = typeof sectionOrId === 'string'
             ? sectionOrId
             : String(sectionOrId?.id || '');
@@ -7798,7 +7828,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             features_sparse: payload?.features_sparse || payload?.genes_sparse || {{}},
         }};
     }}
-    function getFeatureSectionList(modality = CURRENT_MODALITY) {{
+    function getFeatureSectionList(modality = getVisualModality()) {{
         return (DATA.sections || []).map((section) => {{
             const payload = getFeatureSectionPayload(section, modality);
             return Object.assign({{}}, section, {{
@@ -7807,11 +7837,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }});
         }});
     }}
-    function getLoadedFeaturesForModality(modality = CURRENT_MODALITY) {{
+    function getLoadedFeaturesForModality(modality = getVisualModality()) {{
         const state = getFeatureState(modality);
         return Object.keys(state.features_meta || {{}}).sort((a, b) => a.localeCompare(b));
     }}
-    function getFeatureCatalog(modality = CURRENT_MODALITY) {{
+    function getFeatureCatalog(modality = getVisualModality()) {{
         if (isModuleModality(modality)) return uniqueSortedFeatures(getGeneModuleDatalistValues());
         const modalityFeatures = FEATURES_BY_MODALITY?.[modality];
         if (Array.isArray(modalityFeatures) && modalityFeatures.length) {{
@@ -7819,11 +7849,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         return getLoadedFeaturesForModality(modality);
     }}
-    function getAvailableFeaturesForModality(modality = CURRENT_MODALITY) {{
+    function getAvailableFeaturesForModality(modality = getVisualModality()) {{
         return getFeatureCatalog(modality);
     }}
     function getActiveFeatureList() {{
-        return getFeatureCatalog(CURRENT_MODALITY);
+        return getFeatureCatalog(getVisualModality());
     }}
     function isModuleModality(modality) {{
         return String(modality || '').trim().toLowerCase() === MODULE_MODALITY_NAME;
@@ -7834,7 +7864,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return modDesc?.label || (modality === 'gene' ? 'Gene' : String(modality || 'Gene'));
     }}
     function getGeneInputFeatureList() {{
-        return uniqueSortedFeatures(getLoadedFeaturesForModality(CURRENT_MODALITY));
+        return uniqueSortedFeatures(getLoadedFeaturesForModality(getVisualModality()));
     }}
     function populateGeneInputDatalist() {{
         const geneListEl = document.getElementById('gene-list');
@@ -7848,7 +7878,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         geneListEl.replaceChildren(fragment);
         refreshLoadedGeneFilterDropdowns();
     }}
-    function getEmbeddedFeatureSet(modality = CURRENT_MODALITY) {{
+    function getEmbeddedFeatureSet(modality = getVisualModality()) {{
         const embeddedByModality = DATA.embedded_features_by_modality && typeof DATA.embedded_features_by_modality === 'object'
             ? DATA.embedded_features_by_modality
             : {{}};
@@ -7857,14 +7887,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             : getLoadedFeaturesForModality(modality);
         return new Set(embedded.map(feature => String(feature)));
     }}
-    function isEmbeddedViewerFeature(feature, modality = CURRENT_MODALITY) {{
+    function isEmbeddedViewerFeature(feature, modality = getVisualModality()) {{
         const raw = String(feature || '').trim();
         if (!raw) return false;
         const canonical = resolveCanonicalFeatureName(raw, modality);
         const embedded = getEmbeddedFeatureSet(modality);
         return embedded.has(raw) || (!!canonical && embedded.has(canonical));
     }}
-    function isSidecarViewerFeature(feature, modality = CURRENT_MODALITY) {{
+    function isSidecarViewerFeature(feature, modality = getVisualModality()) {{
         if (!DATA.feature_manifest_url) return false;
         const raw = String(feature || '').trim();
         if (!raw) return false;
@@ -7872,7 +7902,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const available = new Set(getFeatureCatalog(modality).map(g => String(g)));
         return available.has(raw) || (!!canonical && available.has(canonical));
     }}
-    function isViewerFeatureLoadable(feature, modality = CURRENT_MODALITY) {{
+    function isViewerFeatureLoadable(feature, modality = getVisualModality()) {{
         return isEmbeddedViewerFeature(feature, modality) || isSidecarViewerFeature(feature, modality);
     }}
     function getCategoryVsRestGenes(annotationCol = explorationColorCol || currentAnnotation || '') {{
@@ -7931,7 +7961,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const value = String(document.getElementById('marker-gene-search')?.value || '').trim();
         return value ? (resolveCanonicalFeatureName(value) || value) : '';
     }}
-    function getFeatureDatalistValuesForModality(modality = CURRENT_MODALITY) {{
+    function getFeatureDatalistValuesForModality(modality = getVisualModality()) {{
         if (isModuleModality(modality)) return uniqueSortedFeatures(getGeneModuleDatalistValues());
         const base = getLoadedFeaturesForModality(modality);
         return uniqueSortedFeatures(base);
@@ -7942,7 +7972,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     const FEATURE_INDEX_BY_MODALITY = new Map();
-    function buildFeatureIndex(modality = CURRENT_MODALITY) {{
+    function buildFeatureIndex(modality = getVisualModality()) {{
         const name = normalizeFeatureModalityName(modality);
         const catalog = getFeatureCatalog(name);
         return {{
@@ -7950,7 +7980,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             byLower: new Map(catalog.map(feature => [String(feature).toLowerCase(), feature])),
         }};
     }}
-    function getFeatureIndex(modality = CURRENT_MODALITY) {{
+    function getFeatureIndex(modality = getVisualModality()) {{
         const name = normalizeFeatureModalityName(modality);
         if (!FEATURE_INDEX_BY_MODALITY.has(name)) {{
             FEATURE_INDEX_BY_MODALITY.set(name, buildFeatureIndex(name));
@@ -7965,10 +7995,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
     }}
     function rebuildActiveFeatureIndex() {{
-        rebuildFeatureIndex(CURRENT_MODALITY);
+        rebuildFeatureIndex(getVisualModality());
     }}
     function getActiveFeatureSet() {{
-        return getFeatureIndex(CURRENT_MODALITY).exact;
+        return getFeatureIndex(getVisualModality()).exact;
     }}
 
     function _snapshotModalityFeatureState(name) {{
@@ -8007,20 +8037,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function getActiveModalityManifestEntry(manifest) {{
         if (!manifest) return null;
         const map = manifest.modalities;
-        if (map && typeof map === 'object' && map[CURRENT_MODALITY]) return map[CURRENT_MODALITY];
+        if (map && typeof map === 'object' && map[getVisualModality()]) return map[getVisualModality()];
         // Legacy v2/v3 manifests have no modalities map; only valid for default modality.
-        if (CURRENT_MODALITY === DEFAULT_MODALITY_NAME) return manifest;
+        if (getVisualModality() === DEFAULT_MODALITY_NAME) return manifest;
         return null;
     }}
     async function setActiveModality(name) {{
-        if (!name || name === CURRENT_MODALITY) return;
+        if (!name || name === getVisualModality()) return;
         if (!FEATURES_BY_MODALITY[name] && name !== DEFAULT_MODALITY_NAME) {{
             console.warn('Unknown modality:', name);
             return;
         }}
-        _snapshotModalityFeatureState(CURRENT_MODALITY);
-        CURRENT_MODALITY = name;
-        _restoreModalityFeatureState(CURRENT_MODALITY);
+        _snapshotModalityFeatureState(getVisualModality());
+        setVisualModality(name);
+        _restoreModalityFeatureState(getVisualModality());
         rebuildActiveFeatureIndex();
         populateGeneInputDatalist();
         // Clear any active gene selection so cells don't render with a feature
@@ -8032,7 +8062,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             try {{ renderGeneDiscoveryPanel(); }} catch (e) {{}}
         }}
     }}
-    _restoreModalityFeatureState(CURRENT_MODALITY);
+    _restoreModalityFeatureState(getVisualModality());
 
     const USER_AGENT = navigator.userAgent || '';
     const IS_SAFARI = /Safari/i.test(USER_AGENT) &&
@@ -10316,7 +10346,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (typeof openInsightsMode === 'function') openInsightsMode('exploration');
         if (typeof setInsightsMode === 'function') setInsightsMode('module');
         if (!geneModuleDraftGenes.length) {{
-            const genes = (typeof getGeneInputFeatureList === 'function' ? getGeneInputFeatureList() : getFeatureDatalistValuesForModality(CURRENT_MODALITY))
+            const genes = (typeof getGeneInputFeatureList === 'function' ? getGeneInputFeatureList() : getFeatureDatalistValuesForModality(getVisualModality()))
                 .map(gene => resolveCanonicalFeatureName(gene) || gene)
                 .filter(Boolean);
             geneModuleDraftGenes = [...new Set(genes)].slice(0, 2);
@@ -10686,7 +10716,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             overviewBlendGeneScaleOverrides = {{ a: null, b: null }};
             safeTutorialClick('#overview-mode-default');
 
-            if (CURRENT_MODALITY !== DEFAULT_MODALITY_NAME && typeof setActiveModality === 'function') {{
+            if (getVisualModality() !== DEFAULT_MODALITY_NAME && typeof setActiveModality === 'function') {{
                 setActiveModality(DEFAULT_MODALITY_NAME).catch(error => console.warn('Tutorial modality reset failed', error));
             }}
 
@@ -10891,7 +10921,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const modalityNames = MODALITY_DESCRIPTORS.map(m => m.name).filter(Boolean);
         if (!modalityNames.length && getLoadedFeaturesForModality('gene').length) return 'gene';
         const preferred = [
-            CURRENT_MODALITY,
+            getVisualModality(),
             DEFAULT_MODALITY_NAME,
             ...modalityNames.filter(name => String(name).toLowerCase() === 'rna'),
             ...modalityNames,
@@ -10963,7 +10993,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function ensureTutorialFirstGeneSelected() {{
-        const features = getFeatureDatalistValuesForModality(CURRENT_MODALITY);
+        const features = getFeatureDatalistValuesForModality(getVisualModality());
         const firstGene = features[0];
         if (!firstGene) return;
         const geneInput = document.getElementById('gene-input');
@@ -13224,7 +13254,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
             return {{ vmin, vmax }};
         }}
-        const targetModality = modality || CURRENT_MODALITY;
+        const targetModality = modality || getVisualModality();
         const base = getFeatureState(targetModality).features_meta?.[gene] || {{}};
         
         const autoScale = geneScaleAuto[gene];
@@ -13340,8 +13370,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function computeGenePercentiles(gene, pmin = GENE_SCALE_PMIN, pmax = GENE_SCALE_PMAX, modality = null) {{
         if (getGeneModuleByToken(gene)) return {{ vmin: 0, vmax: 1, pmin, pmax }};
-        const targetModality = modality || CURRENT_MODALITY;
-        const isCurrent = targetModality === CURRENT_MODALITY;
+        const targetModality = modality || getVisualModality();
+        const isCurrent = targetModality === getVisualModality();
         
         let sectionsSource = isCurrent ? (DATA.sections || []) : getFeatureSectionList(targetModality);
 
@@ -13810,9 +13840,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const out = new Float32Array(n);
             const counts = new Uint16Array(n);
             module.genes.forEach((moduleGene) => {{
-                const vals = getSectionGeneValues(section, moduleGene, CURRENT_MODALITY);
+                const vals = getSectionGeneValues(section, moduleGene, getVisualModality());
                 if (!vals) return;
-                const scale = getGeneScaleRange(moduleGene, CURRENT_MODALITY);
+                const scale = getGeneScaleRange(moduleGene, getVisualModality());
                 const denom = Math.max(1e-12, scale.vmax - scale.vmin);
                 const m = Math.min(n, vals.length);
                 for (let i = 0; i < m; i++) {{
@@ -13828,8 +13858,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             geneDenseCache.set(key, out);
             return out;
         }}
-        const targetModality = modality || CURRENT_MODALITY;
-        const isCurrent = targetModality === CURRENT_MODALITY;
+        const targetModality = modality || getVisualModality();
+        const isCurrent = targetModality === getVisualModality();
         
         const sectionPayload = getFeatureSectionPayload(section, targetModality);
         const sectionSource = isCurrent
@@ -13946,8 +13976,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function hydrateGeneFromFeatureSidecar(gene, auxData, modality = null) {{
-        const targetModality = modality || CURRENT_MODALITY;
-        const isCurrent = targetModality === CURRENT_MODALITY;
+        const targetModality = modality || getVisualModality();
+        const isCurrent = targetModality === getVisualModality();
         
         const geneEntry = auxData?.features?.[gene];
         const manifest = featureSidecarManifest;
@@ -14247,8 +14277,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function hydrateGeneFromBinary(gene, geneEntry, modality = null) {{
-        const targetModality = modality || CURRENT_MODALITY;
-        const isCurrent = targetModality === CURRENT_MODALITY;
+        const targetModality = modality || getVisualModality();
+        const isCurrent = targetModality === getVisualModality();
         
         const manifest = featureSidecarManifest;
         const map = manifest?.modalities;
@@ -14397,8 +14427,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     async function ensureFeatureAvailable(feature, options = {{}}) {{
         const token = String(feature || '').trim();
         const showErrors = options.showErrors !== false;
-        const targetModality = options.modality || CURRENT_MODALITY;
-        const isCurrent = targetModality === CURRENT_MODALITY;
+        const targetModality = options.modality || getVisualModality();
+        const isCurrent = targetModality === getVisualModality();
 
         if (!token) return false;
         const module = getGeneModuleByToken(token);
@@ -14882,7 +14912,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!currentGene) return null;
         return {{
             gene: currentGene,
-            modality: getGeneModuleByToken(currentGene) ? MODULE_MODALITY_NAME : CURRENT_MODALITY,
+            modality: getGeneModuleByToken(currentGene) ? MODULE_MODALITY_NAME : getVisualModality(),
             side: null,
         }};
     }}
@@ -15289,7 +15319,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return {{ a, b }};
     }}
 
-    function requestOverviewBlendGene(gene, modality = CURRENT_MODALITY) {{
+    function requestOverviewBlendGene(gene, modality = getVisualModality()) {{
         const token = String(gene || '').trim();
         const key = `${{modality}}::${{token}}`;
         if (!token || isModuleModality(modality) || isFeatureLoadedForModality(token, modality) || overviewBlendGeneLoads.has(key)) return;
@@ -18427,15 +18457,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
     }}
 
-    function resolveCanonicalFeatureName(token, modality = CURRENT_MODALITY) {{
+    function resolveCanonicalFeatureName(token, modality = getVisualModality()) {{
         const text = String(token || '').trim();
         if (!text) return '';
-        const index = getFeatureIndex(typeof modality === 'string' ? modality : CURRENT_MODALITY);
+        const index = getFeatureIndex(typeof modality === 'string' ? modality : getVisualModality());
         if (index.exact.has(text)) return text;
         return index.byLower.get(text.toLowerCase()) || '';
     }}
 
-    function resolveFeatureTokenForModality(value, modality = CURRENT_MODALITY) {{
+    function resolveFeatureTokenForModality(value, modality = getVisualModality()) {{
         if (isModuleModality(modality)) return resolveGeneModuleToken(value);
         return resolveCanonicalFeatureName(value, modality);
     }}
@@ -18449,7 +18479,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return resolveCanonicalFeatureName(text);
     }}
 
-    function isFeatureLoadedForModality(feature, modality = CURRENT_MODALITY) {{
+    function isFeatureLoadedForModality(feature, modality = getVisualModality()) {{
         const token = String(feature || '').trim();
         if (!token) return false;
         if (isModuleModality(modality)) return !!getGeneModuleByToken(token);
@@ -33799,7 +33829,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const opt = document.createElement('option');
                 opt.value = desc.name;
                 opt.textContent = desc.label || desc.name;
-                if (desc.name === CURRENT_MODALITY) opt.selected = true;
+                if (desc.name === getVisualModality()) opt.selected = true;
                 modalitySelect.appendChild(opt);
             }}
             modalityControl.style.display = '';

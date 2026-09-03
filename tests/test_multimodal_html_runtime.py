@@ -36,3 +36,14 @@ def test_generated_html_uses_modality_scoped_feature_helpers(tmp_path=None):
     assert "function buildFeatureIndex(modality" in html
     assert "AVAILABLE_GENE_SET" not in html
     assert "resolveCanonicalGeneName" not in html
+
+
+def test_generated_html_has_panel_scoped_modality_state(tmp_path=None):
+    html = _render_multimodal_html(tmp_path)
+
+    assert "const PANEL_MODALITY_STATE" in html
+    assert "visual:" in html
+    assert "exploration:" in html
+    assert "pseudobulk:" in html
+    assert "interactions:" in html
+    assert "let CURRENT_MODALITY" not in html
