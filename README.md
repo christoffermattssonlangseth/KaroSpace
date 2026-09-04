@@ -268,7 +268,7 @@ karospace your_data.h5ad \
 | `--cell-annotations` | Comma-separated extra cell obs annotation columns to embed as selectable cell annotations | empty |
 | `--features` | Comma-separated features or genes to preload. Requested names are matched against every exported `--modalities` namespace, so the same feature name is included in each selected modality where it exists. Significant pseudobulk DE features are embedded automatically up to the per-comparison cap | empty |
 | `--features-list` | Text file with one feature/gene per line; combined with `--features`, deduplicated, and resolved across selected modalities | empty |
-| `--section-metadata` | Comma-separated obs columns to use as section metadata shown in the visual params bar/filter chips | loader defaults |
+| `--section-metadata` | Comma-separated obs columns to use as section metadata shown in the visual params bar/filter chips | empty |
 | `--section-metadata-extra` | Comma-separated obs columns to store as section metadata without visual params bar/filter chips | empty |
 | `--metadata-value-order` | JSON object mapping metadata columns to ordered value lists | empty |
 | `--metadata-max-columns` | Limit metadata columns used, preserving order | empty |
@@ -373,7 +373,7 @@ a different target key.
 
 ### Optional metadata
 
-Use `section_metadata=[...]` / `--section-metadata ...` for section-level obs columns that should appear in the visual params bar and filter chips. Use `section_metadata_extra=[...]` / `--section-metadata-extra ...` for section-level metadata that should be stored in the viewer payload but not shown as filter chips.
+Use `section_metadata=[...]` / `--section-metadata ...` for section-level obs columns that should appear in the visual params bar and filter chips. If omitted, no section metadata columns are added by default. Use `section_metadata_extra=[...]` / `--section-metadata-extra ...` for section-level metadata that should be stored in the viewer payload but not shown as filter chips.
 
 - `course` — Experimental phase (e.g., `"naive"`, `"peak_I"`); sections are outlined by this column when `outlineby="course"` / `--outlineby course` is used
 - `region`, `condition`, `timepoint` — Typical section metadata shown as filter chips

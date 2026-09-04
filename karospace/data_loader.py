@@ -3700,7 +3700,8 @@ def load_spatial_data(
     section_order : list, optional
         Custom order for sections
     section_metadata : list, optional
-        Obs columns to use for section metadata and visual filter chips.
+        Obs columns to use for section metadata and visual filter chips. If not
+        provided, no section metadata columns are requested.
     section_metadata_extra : list, optional
         Additional obs columns to store as section metadata without visual filter chips.
     metadata_value_order : dict, optional
@@ -3778,16 +3779,25 @@ def load_spatial_data(
         return list(dict.fromkeys(cleaned))
 
     # Determine section metadata columns.
-    if section_metadata is None:
-        section_metadata = ["course", "region", "condition", "timepoint", "last_score", "last_day"]
-    else:
-        section_metadata = _clean_column_list(section_metadata)
-    section_metadata_extra = _clean_column_list(section_metadata_extra)
+    requested_section_metadata = _clean_column_list(section_metadata)
+    requested_section_metadata_extra = _clean_column_list(section_metadata_extra)
+    section_metadata = [
+        col for col in requested_section_metadata
+        if col in adata.obs.columns
+    ]
+    section_metadata_extra = [
+        col for col in requested_section_metadata_extra
+        if col in adata.obs.columns
+    ]
     if metadata_max_columns is not None:
         if metadata_max_columns < 0:
             raise ValueError("metadata_max_columns must be >= 0")
         section_metadata = section_metadata[:metadata_max_columns]
     section_metadata_columns = list(dict.fromkeys([*section_metadata, *section_metadata_extra]))
+    missing_section_metadata_columns = [
+        col for col in dict.fromkeys([*requested_section_metadata, *requested_section_metadata_extra])
+        if col not in adata.obs.columns
+    ]
     if section_metadata_columns:
         log_detail(
             "Section metadata columns: "
@@ -3796,6 +3806,18 @@ def load_spatial_data(
                 f" ({len(section_metadata)} shown in the visual params bar; "
                 f"{len(section_metadata_extra)} stored as section-only metadata)."
             )
+        )
+        if missing_section_metadata_columns:
+            log_warning(
+                "Section metadata columns not found in obs and skipped: "
+                + ", ".join(missing_section_metadata_columns),
+                level=1,
+            )
+    elif missing_section_metadata_columns:
+        log_warning(
+            "No requested section metadata columns were found in obs; skipped: "
+            + ", ".join(missing_section_metadata_columns),
+            level=1,
         )
     else:
         log_detail("No section metadata columns were requested.")

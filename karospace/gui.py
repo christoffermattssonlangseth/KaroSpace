@@ -91,7 +91,7 @@ Core Options
 
 Dataset Loading Options
 - Metadata section: Comma/newline-separated obs columns used as section metadata/filter chips.
-  Empty uses defaults (course, region, condition, timepoint, ...).
+  Empty disables section metadata/filter chips.
 - Metadata max columns: Empty or integer >= 0.
 - Metadata value order (JSON): Dict mapping metadata column -> ordered values.
   Example:
@@ -279,11 +279,11 @@ class KaroSpaceExportGUI:
         self.section_key = tk.StringVar(value="sample_id")
         self.spatial_key = tk.StringVar(value="spatial")
         self.annotation = tk.StringVar(value="leiden")
-        self.outline_by = tk.StringVar(value="condition")
+        self.outline_by = tk.StringVar(value="")
         self.title = tk.StringVar(value="KaroSpace")
-        self.section_metadata = tk.StringVar(value="condition")
+        self.section_metadata = tk.StringVar(value="")
         self.metadata_max_columns = tk.StringVar(value="")
-        self.metadata_labels = tk.StringVar(value='{\n  "condition": "Condition"\n}')
+        self.metadata_labels = tk.StringVar(value="{}")
         self.min_panel_size = tk.StringVar(value="150")
         self.spot_size = tk.StringVar(value="auto")
         self.downsample = tk.StringVar(value="")
@@ -854,7 +854,7 @@ class KaroSpaceExportGUI:
             "title": "KaroSpace",
             "section_key": "sample_id",
             "spatial_key": "spatial",
-            "outline_by": "condition",
+            "outline_by": "",
             "spot_size": "auto",
             "feature_encoding": "auto",
             "feature_storage": "embedded",
@@ -956,14 +956,14 @@ class KaroSpaceExportGUI:
         else:
             self.section_key.set("sample_id")
             self.annotation.set("leiden")
-            self.outline_by.set("condition")
+            self.outline_by.set("")
             self.title.set("KaroSpace")
             self.min_panel_size.set("150")
             self.downsample.set("")
-            self.section_metadata.set("condition")
+            self.section_metadata.set("")
             self.metadata_max_columns.set("")
-            self._set_text_widget(self.metadata_value_order_text, '{\n  "condition": ["control", "treated"]\n}')
-            self._merge_json_text_widget(self.metadata_labels_text, '{\n  "condition": "Condition"\n}')
+            self._set_text_widget(self.metadata_value_order_text, "{}")
+            self._set_text_widget(self.metadata_labels_text, "{}")
 
             self.cell_annotations_editor.set_items(["leiden_1", "leiden_2", "gmm_mana_10"])
             self.genes_editor.set_items(["Cd4", "Cd8a", "Gfap", "Mki67"])

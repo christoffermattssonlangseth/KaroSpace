@@ -158,7 +158,7 @@ def _run_export_cli(argv=None):
         dest="section_metadata",
         help=(
             "Comma-separated obs columns to use as section metadata and visual filter chips "
-            "(e.g. strain,region,Batch,Slide). Empty uses loader defaults."
+            "(e.g. strain,region,Batch,Slide). Empty disables section metadata."
         ),
     )
     metadata_args.add_argument(
