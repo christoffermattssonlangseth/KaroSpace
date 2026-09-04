@@ -4775,6 +4775,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             line-height: 1.35;
         }}
         .genes-warning + .genes-warning {{ margin-top: -2px; }}
+        .marker-fallback-warning {{
+            margin: 4px 0 6px;
+            padding: 7px 9px;
+            border: 1px solid color-mix(in srgb, var(--warning-border) 80%, #b45309);
+            border-left: 3px solid #b45309;
+            border-radius: 6px;
+            background: var(--warning-bg);
+            color: var(--warning-text);
+            font-size: 10px;
+            line-height: 1.4;
+        }}
+        .marker-fallback-warning strong {{ display: block; margin-bottom: 2px; }}
         .genes-warning .agg-chip {{
             margin-left: 4px;
             color: var(--chip-text);
@@ -7744,6 +7756,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function getActiveModalityDescriptor() {{
         return MODALITY_DESCRIPTORS.find(d => d && d.name === CURRENT_MODALITY) || null;
     }}
+    function updateGeneInputPlaceholder() {{
+        const input = document.getElementById('gene-input');
+        if (!input) return;
+        // Default (RNA) modality keeps the familiar gene example placeholder.
+        if (CURRENT_MODALITY === DEFAULT_MODALITY_NAME) {{
+            input.placeholder = 'e.g. Cd4, Gfap...';
+            return;
+        }}
+        const feats = Array.isArray(FEATURES_BY_MODALITY[CURRENT_MODALITY])
+            ? FEATURES_BY_MODALITY[CURRENT_MODALITY]
+            : [];
+        const examples = feats.slice(0, 2).join(', ');
+        input.placeholder = examples ? `e.g. ${{examples}}...` : 'Type a feature name...';
+    }}
     function getLoadedFeaturesForModality(modality = CURRENT_MODALITY) {{
         const meta = (modality === CURRENT_MODALITY || (modality === 'gene' && CURRENT_MODALITY === 'rna'))
             ? DATA.features_meta
@@ -7955,15 +7981,40 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             console.warn('Unknown modality:', name);
             return;
         }}
+        // Remember whether the user was viewing a feature. Switching modality
+        // clears the specific gene (it may not exist in the new modality), but
+        // it should NOT drop the user back to annotation coloring — they picked
+        // a modality precisely to browse its features.
+        const wasFeatureMode = document.getElementById('default-source-gene')
+            ?.classList.contains('active') || false;
         _snapshotModalityGeneState(CURRENT_MODALITY);
         CURRENT_MODALITY = name;
         _restoreModalityGeneState(CURRENT_MODALITY);
         rebuildActiveFeatureIndex();
         populateGeneInputDatalist();
+        updateGeneInputPlaceholder();
         // Clear any active gene selection so cells don't render with a feature
         // that doesn't exist in the new modality.
         if (typeof activateViewerGene === 'function') {{
             try {{ await activateViewerGene(''); }} catch (e) {{ console.warn(e); }}
+        }}
+        // activateViewerGene('') forces the visual source back to annotation. If
+        // the user was in feature mode, restore it so they land ready to pick a
+        // channel in the new modality instead of collapsing to annotation.
+        if (wasFeatureMode) {{
+            const controls = document.getElementById('visual-default-controls');
+            controls?.classList.remove('annotation-mode');
+            controls?.classList.add('gene-mode');
+            document.getElementById('default-source-annotation')?.classList.remove('active');
+            document.getElementById('default-source-gene')?.classList.add('active');
+            const geneInput = document.getElementById('gene-input');
+            if (geneInput) {{
+                geneInput.value = '';
+                try {{ geneInput.focus(); }} catch (e) {{}}
+            }}
+            if (typeof setGeneDiscoveryOpen === 'function') {{
+                try {{ setGeneDiscoveryOpen(true); }} catch (e) {{}}
+            }}
         }}
         if (typeof renderGeneDiscoveryPanel === 'function') {{
             try {{ renderGeneDiscoveryPanel(); }} catch (e) {{}}
@@ -14558,6 +14609,33 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
         }}
 
+        // For a non-default modality with a small, enumerable feature set (e.g.
+        // a 16-plex protein panel), list every channel so the user can see what
+        // is available and click to load it — DE/marker suggestions don't cover
+        // non-RNA modalities, so this is the primary way to browse them.
+        const activeModalityFeatures = Array.isArray(FEATURES_BY_MODALITY[CURRENT_MODALITY])
+            ? FEATURES_BY_MODALITY[CURRENT_MODALITY]
+            : [];
+        if (
+            CURRENT_MODALITY !== DEFAULT_MODALITY_NAME &&
+            activeModalityFeatures.length &&
+            activeModalityFeatures.length <= 200
+        ) {{
+            const modLabel = getActiveModalityDescriptor()?.label || CURRENT_MODALITY;
+            const channelRows = `<div class="gene-token-grid">${{activeModalityFeatures.map((feat) =>
+                renderGeneTokenButton(feat, {{
+                    isActive: feat === currentGene,
+                    title: `Load ${{escapeHtml(modLabel)}} channel into the viewer`,
+                }})
+            ).join('')}}</div>`;
+            sections.push(`
+                <div class="gene-discovery-section">
+                    <div class="gene-discovery-label">${{escapeHtml(modLabel)}} channels (${{activeModalityFeatures.length}})</div>
+                    ${{channelRows}}
+                </div>
+            `);
+        }}
+
         const recentRows = recentGenes.length
             ? `<div class="gene-token-grid">${{recentGenes.map((gene) => renderGeneTokenButton(gene, {{
                 isActive: gene === currentGene,
@@ -19363,6 +19441,55 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const matchedRawKey = Object.keys(byColor).find(k => String(k).toLowerCase() === rawKey.toLowerCase());
         if (matchedRawKey && Array.isArray(byColor[matchedRawKey])) return byColor[matchedRawKey];
         return [];
+    }}
+
+    // Exploratory cell-level markers, computed only for clusters that pseudobulk
+    // DE could not test (confined to a single replicate/section). These carry NO
+    // biological replication, so they are surfaced separately with an explicit
+    // warning and never mixed into the pseudobulk DE token list.
+    function getCellLevelFallbackMarkers(annotationCol, category) {{
+        if (!annotationCol || category === null || category === undefined || category === BLEND_ALL_CATEGORIES) return [];
+        const byColor = (DATA.marker_genes_cell_level || {{}})[annotationCol];
+        if (!byColor || typeof byColor !== 'object') return [];
+        const rawCategory = resolveRawCategoryValue(annotationCol, category);
+        for (const key of [category, rawCategory, String(category), String(rawCategory)]) {{
+            if (Array.isArray(byColor[key])) return byColor[key];
+        }}
+        const catKey = String(category).toLowerCase();
+        const matched = Object.keys(byColor).find(k => String(k).toLowerCase() === catKey);
+        return (matched && Array.isArray(byColor[matched])) ? byColor[matched] : [];
+    }}
+
+    function renderCellLevelFallbackMarkers(annotationCol, category) {{
+        const genes = getCellLevelFallbackMarkers(annotationCol, category);
+        if (!genes.length) {{
+            return '<div class="marker-empty">No pseudobulk DE genes found.</div>';
+        }}
+        const method = String(DATA.marker_genes_cell_level_method || 'cell-level');
+        const methodLabel = method === 'wilcoxon' ? 'Wilcoxon rank-sum' : method;
+        const tokens = genes.map((gene) => {{
+            const loadable = isViewerGeneLoadable(gene);
+            const canonical = resolveCanonicalGeneName(gene);
+            return renderGeneTokenButton(gene, {{
+                allowUnknown: true,
+                disableActivation: !loadable,
+                isActive: loadable && !!canonical && canonical === currentGene,
+                showMeta: false,
+                title: loadable
+                    ? 'Exploratory cell-level marker (NOT replicated DE) — click to view expression'
+                    : 'Exploratory cell-level marker (NOT replicated DE)',
+            }});
+        }}).join('');
+        return `
+            <div class="marker-fallback-warning">
+                <strong>&#9888; Cell-level markers &mdash; NOT differential expression.</strong>
+                This cluster sits in a single section, so replicated pseudobulk DE could not run.
+                The genes below come from a cell-level ${{escapeHtml(methodLabel)}} one-vs-rest test that
+                treats individual cells as replicates (statistical double-dipping). Treat them as
+                exploratory hints only &mdash; do not report them as differentially expressed.
+            </div>
+            <div class="gene-token-grid">${{tokens}}</div>
+        `;
     }}
 
     function getAvailableComparisonColors() {{
@@ -26999,8 +27126,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 }});
                 if (!hasMatch) return '';
             }}
-            const geneButtons = genes.length
-                ? genes.map((entry) => {{
+            const bodyHtml = genes.length
+                ? `<div class="gene-token-grid">${{genes.map((entry) => {{
                     const loadable = isViewerGeneLoadable(entry.raw);
                     return renderGeneTokenButton(entry.raw, {{
                         allowUnknown: true,
@@ -27012,13 +27139,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                             ? 'Load pseudobulk DE gene into the viewer'
                             : 'This category-vs-balanced-rest gene is not available for expression viewing',
                     }});
-                }}).join('')
-                : '<div class="marker-empty">No pseudobulk DE genes found.</div>';
+                }}).join('')}}</div>`
+                : renderCellLevelFallbackMarkers(markerColorCol, key);
             const isSpotlit = linkedSpotlightEnabled && spotlightPinnedCategory === key;
             return `
                 <div class="marker-group">
                     <div class="marker-group-title${{isSpotlit ? ' is-spotlit' : ''}}" data-marker-category="${{escapeHtml(key)}}" title="Click to color the map by this annotation and highlight this cluster">${{renderAggCategoryChip(markerColorCol, key, catIdx)}}</div>
-                    <div class="gene-token-grid">${{geneButtons}}</div>
+                    ${{bodyHtml}}
                 </div>
             `;
         }}).filter(Boolean);
@@ -33749,6 +33876,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 modalitySelect.appendChild(opt);
             }}
             modalityControl.style.display = '';
+            // With >1 modality the color-source toggle's "Gene" wording is
+            // misleading (a protein channel isn't a gene). Use the neutral
+            // "Feature" label; the Modality dropdown disambiguates RNA vs protein.
+            const featureSourceBtn = document.getElementById('default-source-gene');
+            if (featureSourceBtn) featureSourceBtn.textContent = 'Feature';
+            const geneSrLabel = document.querySelector('label.sr-only[for="gene-input"]');
+            if (geneSrLabel) geneSrLabel.textContent = 'Feature';
+            updateGeneInputPlaceholder();
             modalitySelect.addEventListener('change', async (e) => {{
                 const target = e.target.value;
                 await setActiveModality(target);
