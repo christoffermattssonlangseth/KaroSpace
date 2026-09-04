@@ -930,6 +930,17 @@ def _serialize_embedded_viewer_data(data: Mapping[str, object]) -> Tuple[str, st
                         )
                     append_fragment(section_index, key, child_value, child_key=child_key)
                 continue
+            if key == "edges_b64":
+                append_fragment(section_index, key, None)
+                section_label = section.get("id", section_index)
+                log_warning(
+                    "Skipping exported neighbor graph for section "
+                    f"{section_label!r}: serialized edges exceed "
+                    f"{EMBEDDED_VIEWER_DATA_SINGLE_SCRIPT_MAX_CHARS // (1024 * 1024)} MB. "
+                    "Spatial coordinates, annotations, and precomputed neighbor summaries remain available.",
+                    level=1,
+                )
+                continue
             raise ValueError(
                 "large viewer export contains a section field that exceeds "
                 f"{EMBEDDED_VIEWER_DATA_SINGLE_SCRIPT_MAX_CHARS // (1024 * 1024)} MB: "
