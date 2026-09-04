@@ -3054,6 +3054,150 @@ class SpatialDataset:
             float(pseudobulk_padj_cutoff),
             float(pseudobulk_log2fc_cutoff),
         )
+
+        def _cell_level_fallback_markers(
+            pseudobulk_markers,
+            annotation_cols,
+            *,
+            replicate_col,
+            min_cells,
+            top_n=25,
+            padj_cutoff=0.05,
+            method="wilcoxon",
+        ):
+            """One-vs-rest CELL-LEVEL markers, computed ONLY for categories that
+            pseudobulk DE could not test because they sit in a single replicate.
+
+            No biological replication underlies these numbers — every cell is
+            treated as an independent replicate (statistical double-dipping), so
+            they are exploratory only and the viewer labels them very explicitly.
+            Returns {annotation_col: {category: [gene, ...]}} for eligible
+            categories only (missing from pseudobulk AND present in < 2 replicates
+            with >= min_cells cells, so pseudobulk genuinely could not run).
+            """
+            from scipy.stats import rankdata, norm
+
+            obs = self.adata.obs
+            if replicate_col not in obs.columns:
+                return {}
+            sections = obs[replicate_col].astype(str).to_numpy()
+            var_names = list(self.adata.var_names)
+            n_genes = len(var_names)
+            n_cells = int(self.adata.n_obs)
+            X = self.adata.X
+            is_sparse = sp.issparse(X)
+
+            groups = []  # (col, category_label, cell_mask)
+            for col in annotation_cols:
+                meta = annotation_data.get(col)
+                if not meta or meta.get("is_continuous"):
+                    continue
+                vals = meta["values"]
+                cats = meta["categories"]
+                existing = pseudobulk_markers.get(col, {}) or {}
+                for code, cat in enumerate(cats):
+                    cat_key = str(cat)
+                    if existing.get(cat_key):
+                        continue  # pseudobulk already produced markers here
+                    mask = np.isfinite(vals) & (vals == code)
+                    n_in = int(mask.sum())
+                    if n_in < int(min_cells) or n_in >= n_cells:
+                        continue
+                    _, counts = np.unique(sections[mask], return_counts=True)
+                    if int((counts >= int(min_cells)).sum()) >= 2:
+                        continue  # >= 2 replicates: pseudobulk could run; empty is a real negative
+                    groups.append((col, cat_key, mask))
+            if not groups:
+                return {}
+
+            n_groups = len(groups)
+            z_stat = np.zeros((n_groups, n_genes))
+            mean_in = np.zeros((n_groups, n_genes))
+            mean_out = np.zeros((n_groups, n_genes))
+            n_in_arr = np.array([int(m.sum()) for (_, _, m) in groups])
+
+            chunk = 512
+            for start in range(0, n_genes, chunk):
+                stop = min(start + chunk, n_genes)
+                block = X[:, start:stop]
+                dense = np.asarray(
+                    block.toarray() if is_sparse else block, dtype=np.float64
+                )
+                width = dense.shape[1]
+                ranks = np.empty_like(dense)
+                tie_term = np.zeros(width)
+                for j in range(width):
+                    ranks[:, j] = rankdata(dense[:, j])
+                    _, cnt = np.unique(dense[:, j], return_counts=True)
+                    cnt = cnt.astype(np.float64)
+                    tie_term[j] = float(np.sum(cnt ** 3 - cnt))
+                for gi, (_, _, mask) in enumerate(groups):
+                    n1 = int(n_in_arr[gi])
+                    n2 = n_cells - n1
+                    mean_in[gi, start:stop] = dense[mask].mean(axis=0)
+                    mean_out[gi, start:stop] = dense[~mask].mean(axis=0)
+                    if n1 <= 0 or n2 <= 0:
+                        continue
+                    r1 = ranks[mask].sum(axis=0)
+                    u_stat = r1 - n1 * (n1 + 1) / 2.0
+                    mu = n1 * n2 / 2.0
+                    var = (n1 * n2 / 12.0) * (
+                        (n_cells + 1) - tie_term / (n_cells * (n_cells - 1))
+                    )
+                    sigma = np.sqrt(np.maximum(var, 1e-12))
+                    z_stat[gi, start:stop] = (u_stat - mu) / sigma
+
+            def _bh(pvals):
+                p = np.asarray(pvals, dtype=np.float64)
+                n = p.size
+                if n == 0:
+                    return p
+                order = np.argsort(p)
+                ranked = p[order] * n / (np.arange(n) + 1)
+                ranked = np.minimum.accumulate(ranked[::-1])[::-1]
+                out = np.empty(n)
+                out[order] = np.clip(ranked, 0.0, 1.0)
+                return out
+
+            results = {}
+            for gi, (col, cat_key, _) in enumerate(groups):
+                z = z_stat[gi]
+                pvals = norm.sf(z)  # one-sided: up-regulated in this category
+                padj = _bh(pvals)
+                keep = (
+                    (mean_in[gi] > mean_out[gi])
+                    & (padj < float(padj_cutoff))
+                    & np.isfinite(z)
+                )
+                idx = np.flatnonzero(keep)
+                if idx.size == 0:
+                    continue
+                idx = idx[np.argsort(z[idx])[::-1]][: int(top_n)]
+                results.setdefault(col, {})[cat_key] = [var_names[i] for i in idx]
+            return results
+
+        cell_level_marker_method = "wilcoxon"
+        marker_genes_cell_level = {}
+        try:
+            marker_genes_cell_level = _cell_level_fallback_markers(
+                marker_genes,
+                requested_pseudobulk_de_annotations,
+                replicate_col=pseudobulk_replicate_name,
+                min_cells=int(pseudobulk_min_cells_per_pseudobulk),
+                padj_cutoff=float(pseudobulk_padj_cutoff),
+                method=cell_level_marker_method,
+            )
+        except Exception as exc:  # never let the fallback break an export
+            log_warning(f"Cell-level fallback markers skipped: {exc}", level=1)
+        if marker_genes_cell_level:
+            total = sum(len(v) for v in marker_genes_cell_level.values())
+            log_detail(
+                f"Cell-level fallback markers computed for {total} single-replicate "
+                f"categor{'ies' if total != 1 else 'y'} "
+                f"(exploratory; no biological replication).",
+                level=1,
+            )
+
         pseudobulk_de = _drop_legacy_logfoldchanges(pseudobulk_de)
         interaction_markers = _drop_legacy_logfoldchanges(interaction_markers)
 
@@ -3254,6 +3398,8 @@ class SpatialDataset:
             "available_deconvolutions": list(decon_data.keys()),
             "available_features": list(feature_data.keys()),
             "marker_genes": marker_genes,
+            "marker_genes_cell_level": marker_genes_cell_level,
+            "marker_genes_cell_level_method": cell_level_marker_method,
             "pseudobulk_de": pseudobulk_de,
             "pseudobulk_de_by_modality": pseudobulk_de_by_modality,
             "has_umap": umap_coords is not None,
