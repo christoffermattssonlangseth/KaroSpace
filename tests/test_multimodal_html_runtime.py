@@ -39,6 +39,20 @@ def test_generated_html_uses_modality_scoped_feature_helpers(tmp_path=None):
     assert "resolveCanonicalGeneName" not in html
 
 
+def test_generated_html_drops_removed_legacy_paths(tmp_path=None):
+    html = _render_multimodal_html(tmp_path)
+
+    assert "renderLegacyGroupDE" not in html
+    assert "computeCellSetDEAsync" not in html
+    assert "function computeCellSetDE(" not in html
+    assert "section.he_image)" not in html
+    assert "section.he_image " not in html
+    assert "logfoldchanges" not in html
+    assert "karospace-feature-sidecar-manifest-v3" not in html
+    assert "targetModality === DEFAULT_MODALITY_NAME ? manifest : null" not in html
+    assert "manifest.section_order" not in html
+
+
 def test_generated_html_has_panel_scoped_modality_state(tmp_path=None):
     html = _render_multimodal_html(tmp_path)
 
@@ -46,7 +60,6 @@ def test_generated_html_has_panel_scoped_modality_state(tmp_path=None):
     assert "visual:" in html
     assert "exploration:" in html
     assert "module:" in html
-    assert "pseudobulk:" in html
     assert "interactions:" in html
     assert "let CURRENT_MODALITY" not in html
 
@@ -111,12 +124,29 @@ def test_feature_module_changes_refresh_visual_namespace_controls(tmp_path=None)
     assert "setSelectOptions(select, options, selected);" in html
 
 
-def test_feature_dropdowns_use_full_modality_catalog(tmp_path=None):
+def test_feature_dropdowns_use_full_catalog_only_with_sidecar(tmp_path=None):
     html = _render_multimodal_html(tmp_path)
 
-    assert "const base = getFeatureCatalog(modality);" in html
-    assert "const base = getLoadedFeaturesForModality(modality);" not in html
+    assert "const base = DATA.feature_manifest_url" in html
+    assert "? getFeatureCatalog(modality)" in html
+    assert ": getLoadedFeaturesForModality(modality);" in html
     assert '"rna_b"' in html
+
+
+def test_marker_search_datalist_uses_embedded_features_only(tmp_path=None):
+    html = _render_multimodal_html(tmp_path)
+
+    assert "function getEmbeddedFeatureDatalistValuesForModality" in html
+    assert "if (subtab === 'distribution') return embedded;" in html
+    assert "subtab === 'means'" in html
+    assert "getPseudobulkMeanFeatureNames(explorationColorCol || currentAnnotation || '', modality)" in html
+
+
+def test_marker_search_does_not_mutate_visual_feature_controls(tmp_path=None):
+    html = _render_multimodal_html(tmp_path)
+
+    assert "Marker search filters Insights panels only." in html
+    assert "if (isViewerFeatureLoadable(gene, modality))" not in html
 
 
 def test_split_controls_have_independent_feature_namespaces(tmp_path=None):
@@ -163,17 +193,33 @@ def test_compare_group_de_uses_exploration_modality(tmp_path=None):
 def test_selection_comparison_reruns_when_focused_modality_changes(tmp_path=None):
     html = _render_multimodal_html(tmp_path)
 
-    assert "const key = `${getExplorationModality()}:${groupB === null ? 'all' : 'region-b'}:${selectionRevision}:${selectionWelchRevision}`;" in html
+    assert "return `${getExplorationModality()}:${groupB === null ? 'all' : 'region-b'}:${selectionRevision}:${selectionWelchRevision}`;" in html
     assert "const shouldRerunSelectionComparison = selectionWelchRunRequested && selectedCells.size > 0;" in html
-    assert "selectionWelchRunRequested = shouldRerunSelectionComparison;" in html
-    assert "selectionWelchButtonHidden = shouldRerunSelectionComparison;" in html
+    assert "resetSelectionWelchState({ keepRequested: shouldRerunSelectionComparison });" in html
     assert "updateSelectionInfo?.();" in html
+    assert "await runSelectionWelchComparison();" in html
 
 
-def test_compare_pseudobulk_has_modality_selector(tmp_path=None):
+def test_selection_comparison_uses_full_sidecar_features(tmp_path=None):
     html = _render_multimodal_html(tmp_path)
 
-    assert 'id="pseudobulk-de-modality-select"' in html
+    assert "async function runSelectionWelchComparison()" in html
+    assert "const fullResult = await runFullCellSetDE(cellSetA, cellSetB, {" in html
+    assert "if (shouldRunFullSidecarDE(targetModality))" in html
+    assert "selectionWelchCache.set(key, normalized);" in html
+    assert "const selectionWelchResult = getCachedSelectionWelchResult(selectedCells, compareAllCells ? null : selectedCellsB);" in html
+    assert "const cachedResult = getCachedSelectionWelchResult(selectedCells, compareAllCells ? null : selectedCellsB);" in html
+    assert "Scanning all ${getModalityDisplayLabel(resultModality)} features from the sidecar." in html
+    assert "Full sidecar comparison across ${Number(selectionWelchResult.totalGeneCount || 0).toLocaleString()} ${getModalityDisplayLabel(resultModality)} features." in html
+
+
+def test_compare_pseudobulk_follows_exploration_controls(tmp_path=None):
+    html = _render_multimodal_html(tmp_path)
+
+    assert 'id="pseudobulk-de-modality-select"' not in html
+    assert 'id="pseudobulk-de-annotation"' not in html
+    assert "return getExplorationModality();" in html
+    assert "function setPseudobulkPanelModality" not in html
     assert "getPseudobulkDEPayloadForModality" in html
     assert "(DATA.pseudobulk_de || {})" not in html
 
@@ -193,8 +239,15 @@ def test_html_copy_has_no_generic_gene_labels(tmp_path=None):
     assert "Marker features" in html
     assert "Spatial features" in html
     assert "Pseudobulk feature differential analysis" in html
+    assert "Features in selection" in html
+    assert "Feature values - annotation A vs annotation B" in html
     assert "No features matched" in html
     assert "No genes matched" not in html
+    assert "Gene symbol" not in html
+    assert "Genes in selection" not in html
+    assert "Gene expression" not in html
+    assert "Sidecar gene loading" not in html
+    assert "No genes are currently loaded" not in html
 
 
 def test_download_filenames_include_modality(tmp_path=None):

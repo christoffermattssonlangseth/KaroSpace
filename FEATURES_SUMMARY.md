@@ -107,7 +107,7 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 - Insights is the workspace for selected cells, regions, modules, and built-in analysis panels.
 - Selection mode shows compact summaries for active lasso, UMAP, or cell search selections.
 - Region mode stores, selects, groups, imports, exports, recolors, and deletes user-created spatial regions or cell sets.
-- Module mode creates gene modules and displays module scores like expression layers.
+- Module mode creates feature modules and displays module scores like feature layers.
 - Exploration mode contains the Visualization menu tree and the built-in analysis panels.
 
 ## 13. Selection Workflow
@@ -115,8 +115,8 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 - The Selection summary reports active selected cells by section and main annotation.
 - Find More opens the full `Compare > Per cell > Selections` workflow.
 - Selection marker features are calculated from selected cells using a two-sided Welch test.
-- The selection comparison panel displays composition and expression summaries.
-- Expression summaries show mean value and percent detected for displayed features.
+- The selection comparison panel displays composition and feature-value summaries.
+- Feature-value summaries show mean value and percent detected for displayed features.
 
 ## 14. Region Workflow
 
@@ -131,8 +131,8 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 
 ## 15. Module Workflow
 
-- The module panel has a gene picker.
-- Creating a module scales each gene and computes an average module score.
+- The module panel has a feature picker.
+- Creating a module scales each feature and computes an average module score.
 - Module scores can be loaded into the spatial viewer like feature layers.
 - Module definitions can be imported or exported as JSON.
 
@@ -182,7 +182,7 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 - Pathway Enrichment displays ORA pathways and GSEA enrichment in a separate panel for gene-compatible modalities.
 - ORA uses significant DE genes favoring the selected annotation.
 - ORA is shown as a dot plot with GeneRatio on x, pathway labels on y, dot size as gene count, fill color as `-log10(adjusted p-value)`, and border color indicating adjusted p-value threshold.
-- GSEA uses the retained ranked gene list after model and expression-percent filtering.
+- GSEA uses the retained ranked gene list after model and percent-detected filtering.
 - GSEA profiles can be selected from a pathway dropdown and are displayed as enrichment-profile plots with hits and ranked-metric context.
 - ORA and GSEA sections can switch between plot and raw table and include download buttons.
 - `Compare > Relationships` shows how categories from two annotations map to each other, with controls to select the second annotation, swap direction, and export the correspondence table.
@@ -209,7 +209,7 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 - Balanced-rest contrasts compare one category against the equally weighted mean of retained other categories.
 - Pairwise PCA and distance diagnostics are generated for selected pseudobulk comparisons.
 - ORA and GSEA are computed after Simple design pseudobulk DE and feed the Pathway Enrichment panel.
-- Spatially variable features are computed with Moran's I per selected modality for up to `spatial_variable_genes_n` variable features on the full input cell set.
+- Spatially variable features are computed with Moran's I per selected modality for up to `spatial_variable_features_n` variable features on the full input cell set.
 - Category feature means are derived from pseudobulk DE feature summaries and feed per-sample/category distribution panels.
 - Feature correlations are computed from category means and feed related-feature suggestions.
 - Full-cell spatial dispersion is computed before HTML downsampling for the main cell annotation and requested `cell_annotations`.

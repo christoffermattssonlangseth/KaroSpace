@@ -1,16 +1,13 @@
 """
-Data loading utilities for spatial transcriptomics data.
+Data loading utilities for spatial and multimodal data.
 
-Handles loading h5ad files with scanpy and extracting spatial coordinates,
-gene expression, and metadata for visualization.
+Handles loading h5ad files and extracting spatial coordinates, feature values,
+and metadata for visualization.
 """
 
 import json
 import os
 import re
-import shutil
-import tempfile
-from copy import deepcopy
 from dataclasses import dataclass, field
 from itertools import combinations, product
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
@@ -26,23 +23,13 @@ from scipy.sparse import issparse
 from .console import log_detail, log_step, log_warning
 
 
-sc = ad  # Compatibility alias; this module only needs AnnData/read_h5ad, not Scanpy.
 COMPANION_ANALYTICS_STORAGE = "json-string-v1"
 COMPANION_ANALYTICS_JSON_FIELDS = {
-    # KaroSpaceCompanion emits cell-level cluster DE under "cluster_de_json"
-    # (t-test / Wilcoxon — the same paradigm as the Python single-sample Welch
-    # fallback), so map it onto the viewer's pseudobulk_de channel; the viewer
-    # derives per-cluster marker genes from this. A future Companion may emit
-    # "pseudobulk_de_json" directly, so support both — the explicit pseudobulk
-    # key is listed last and wins if a file carries both.
-    "cluster_de_json": "pseudobulk_de",
     "pseudobulk_de_json": "pseudobulk_de",
     "neighbor_stats_json": "neighbor_stats",
     "interaction_markers_json": "interaction_markers",
     "gene_correlations_json": "gene_correlations",
     "spatial_variable_genes_json": "spatial_variable_genes",
-    # Companion writes the per-cluster mean matrix as "cluster_gene_means_json".
-    "cluster_gene_means_json": "category_gene_means",
 }
 
 
@@ -479,152 +466,9 @@ def _compute_positive_fraction(
     return out
 
 
-def _format_h5ad_removed_paths(paths: List[str], limit: int = 8) -> str:
-    if len(paths) <= limit:
-        return ", ".join(paths)
-    return ", ".join(paths[:limit]) + f", ... ({len(paths) - limit} more)"
-
-
-def _h5ad_attr_text(value: Any) -> str:
-    if isinstance(value, bytes):
-        return value.decode("utf-8", "replace")
-    if isinstance(value, np.bytes_):
-        return value.item().decode("utf-8", "replace")
-    return str(value)
-
-
-def _copy_h5ad_for_repair(src_path: str) -> str:
-    fd, tmp_path = tempfile.mkstemp(suffix=".h5ad")
-    os.close(fd)
-    shutil.copy2(src_path, tmp_path)
-    return tmp_path
-
-
-def _strip_null_encoded_h5ad_entries(src_path: str) -> Tuple[str, List[str]]:
-    """Copy an h5ad file and remove null-encoded optional metadata entries."""
-    import h5py
-
-    tmp_path = _copy_h5ad_for_repair(src_path)
-
-    removed_paths: List[str] = []
-    with h5py.File(tmp_path, "r+") as handle:
-        if "uns" not in handle:
-            return tmp_path, removed_paths
-
-        def _walk(group, prefix: str = "") -> None:
-            for key in list(group.keys()):
-                obj = group[key]
-                path = f"{prefix}/{key}" if prefix else f"/{key}"
-                if _h5ad_attr_text(obj.attrs.get("encoding-type", "")).lower() == "null":
-                    removed_paths.append(path)
-                    del group[key]
-                    continue
-                if isinstance(obj, h5py.Group):
-                    _walk(obj, path)
-
-        _walk(handle["uns"], "/uns")
-
-    return tmp_path, removed_paths
-
-
-def _strip_optional_uns_h5ad_entries(src_path: str) -> Tuple[str, List[str]]:
-    """Copy an h5ad file and clear optional ``uns`` metadata for legacy read retries."""
-    import h5py
-
-    tmp_path = _copy_h5ad_for_repair(src_path)
-
-    removed_paths: List[str] = []
-    with h5py.File(tmp_path, "r+") as handle:
-        if "uns" not in handle:
-            return tmp_path, removed_paths
-
-        removed_paths = [f"/uns/{key}" for key in handle["uns"].keys()]
-        del handle["uns"]
-        uns = handle.create_group("uns")
-        uns.attrs["encoding-type"] = "dict"
-        uns.attrs["encoding-version"] = "0.1.0"
-
-    return tmp_path, removed_paths
-
-
-def _is_h5ad_encoding_error(exc: Exception) -> bool:
-    messages = []
-    current: Optional[BaseException] = exc
-    while current is not None:
-        messages.append(str(current))
-        current = current.__cause__ or current.__context__
-    text = "\n".join(messages)
-    return any(
-        needle in text
-        for needle in (
-            "No read method registered for IOSpec",
-            "IOSpec(",
-            "encoding_type=",
-            "encoding-type",
-        )
-    )
-
-
-def _read_h5ad_with_fallback(path: str) -> sc.AnnData:
-    """Read h5ad, retrying with legacy optional metadata stripped if needed."""
-    try:
-        return sc.read_h5ad(path)
-    except PermissionError as exc:
-        message = f"Unable to read h5ad file: {path}."
-        if str(path).startswith("/Volumes/"):
-            message += (
-                " macOS denied access to the mounted volume. Grant your terminal or IDE access "
-                "to external/removable volumes or Full Disk Access, or copy the file to a local "
-                "path such as ~/Downloads and retry."
-            )
-        else:
-            message += (
-                " The OS denied access. Check file permissions for the current process or copy "
-                "the file to a readable local path and retry."
-            )
-        raise PermissionError(message) from exc
-    except Exception as exc:
-        if not _is_h5ad_encoding_error(exc):
-            raise
-
-        repair_attempts = []
-        if "encoding_type='null'" in str(exc) or 'encoding_type="null"' in str(exc):
-            repair_attempts.append(
-                (
-                    "unsupported null-encoded H5AD metadata",
-                    _strip_null_encoded_h5ad_entries,
-                    "null metadata field(s)",
-                )
-            )
-        repair_attempts.append(
-            (
-                "legacy H5AD optional metadata encoding",
-                _strip_optional_uns_h5ad_entries,
-                "optional uns entry/entries",
-            )
-        )
-
-        for description, repair, label in repair_attempts:
-            temp_path = None
-            try:
-                temp_path, removed_paths = repair(path)
-                if not removed_paths:
-                    continue
-                print(f"  Detected {description}; retrying with a sanitized temporary copy...")
-                print(f"  Removed {len(removed_paths)} {label}: {_format_h5ad_removed_paths(removed_paths)}")
-                return sc.read_h5ad(temp_path)
-            except Exception:
-                continue
-            finally:
-                if temp_path and os.path.exists(temp_path):
-                    os.remove(temp_path)
-
-        raise
-
-
 def _looks_like_spatialdata(obj: Any) -> bool:
     """Return whether ``obj`` behaves like a SpatialData container."""
-    return hasattr(obj, "tables") and not isinstance(obj, sc.AnnData)
+    return hasattr(obj, "tables") and not isinstance(obj, ad.AnnData)
 
 
 def _read_spatialdata_zarr(path: str) -> Any:
@@ -677,7 +521,7 @@ def _select_spatialdata_table_key(
 def _coerce_spatialdata_table(
     sdata: Any,
     spatialdata_table: Optional[str] = None,
-) -> Tuple[sc.AnnData, str]:
+) -> Tuple[ad.AnnData, str]:
     tables = getattr(sdata, "tables", None)
     if tables is None or not hasattr(tables, "keys"):
         raise ValueError("SpatialData input does not expose a tables mapping.")
@@ -686,7 +530,7 @@ def _coerce_spatialdata_table(
     chosen_key = _select_spatialdata_table_key(table_keys, spatialdata_table)
 
     table = tables[chosen_key]
-    if not isinstance(table, sc.AnnData):
+    if not isinstance(table, ad.AnnData):
         if hasattr(table, "to_adata"):
             table = table.to_adata()
         else:
@@ -699,7 +543,7 @@ def _coerce_spatialdata_table(
 def _read_spatialdata_zarr_table_direct(
     path: str,
     spatialdata_table: Optional[str] = None,
-) -> Tuple[sc.AnnData, Optional[str]]:
+) -> Tuple[ad.AnnData, Optional[str]]:
     """Read an AnnData table from a SpatialData Zarr store without loading images."""
     path_obj = os.fspath(path)
     tables_dir = os.path.join(path_obj, "tables")
@@ -711,14 +555,14 @@ def _read_spatialdata_zarr_table_direct(
         ]
         chosen_key = _select_spatialdata_table_key(table_keys, spatialdata_table)
         table_path = os.path.join(tables_dir, str(chosen_key))
-        return sc.read_zarr(table_path), str(chosen_key)
+        return ad.read_zarr(table_path), str(chosen_key)
 
     if spatialdata_table:
         raise ValueError(
             f"SpatialData table '{spatialdata_table}' was requested, but {path} "
             "does not contain a SpatialData 'tables' directory."
         )
-    return sc.read_zarr(path_obj), None
+    return ad.read_zarr(path_obj), None
 
 
 def _compact_exception_message(exc: Exception, limit: int = 260) -> str:
@@ -731,8 +575,8 @@ def _compact_exception_message(exc: Exception, limit: int = 260) -> str:
 def _coerce_input_to_anndata(
     data: Any,
     spatialdata_table: Optional[str] = None,
-) -> Tuple[sc.AnnData, str, Optional[str]]:
-    if isinstance(data, sc.AnnData):
+) -> Tuple[ad.AnnData, str, Optional[str]]:
+    if isinstance(data, ad.AnnData):
         return data, "AnnData object", None
 
     if _looks_like_spatialdata(data):
@@ -766,7 +610,7 @@ def _coerce_input_to_anndata(
                     level=1,
                 )
                 return adata, f"SpatialData store {path}{table_label}", table_key
-        return _read_h5ad_with_fallback(path), path, None
+        return ad.read_h5ad(path), path, None
 
     raise TypeError(
         "Input must be a path to an .h5ad file, a SpatialData .zarr store, "
@@ -787,7 +631,7 @@ def _normalize_spatialdata_region_list(value: Any) -> List[str]:
     return [str(value)]
 
 
-def _get_spatialdata_attrs(adata: sc.AnnData) -> Dict[str, Any]:
+def _get_spatialdata_attrs(adata: ad.AnnData) -> Dict[str, Any]:
     attrs = adata.uns.get("spatialdata_attrs", {})
     if hasattr(attrs, "get"):
         return attrs
@@ -798,7 +642,7 @@ def _get_spatialdata_attrs(adata: sc.AnnData) -> Dict[str, Any]:
 
 
 def _resolve_section_key_for_spatialdata(
-    adata: sc.AnnData,
+    adata: ad.AnnData,
     section_key: str,
     spatialdata_table_key: Optional[str],
 ) -> str:
@@ -845,6 +689,18 @@ def inspect_input_file(data: Any, spatialdata_table: Optional[str] = None) -> Di
     """
     max_examples = 10
     adata, source_label, table_key = _coerce_input_to_anndata(data, spatialdata_table)
+    modalities = _detect_modalities(adata)
+    default_modality = "rna" if "rna" in modalities else (next(iter(modalities)) if modalities else "rna")
+    feature_modalities = [
+        {
+            "name": name,
+            "label": modality.label or name,
+            "value_kind": modality.value_kind,
+            "n_features": len(modality.feature_names),
+            "is_default": name == default_modality,
+        }
+        for name, modality in modalities.items()
+    ]
     metadata: List[Dict[str, Any]] = []
     for column in adata.obs.columns:
         series = adata.obs[column]
@@ -873,6 +729,7 @@ def inspect_input_file(data: Any, spatialdata_table: Optional[str] = None) -> Di
         "spatialdata_table": table_key,
         "n_cells": int(adata.n_obs),
         "n_genes": int(adata.n_vars),
+        "feature_modalities": feature_modalities,
         "metadata": metadata,
     }
 
@@ -951,13 +808,6 @@ def _load_companion_analytics(adata) -> Dict[str, Any]:
     analytics: Dict[str, Any] = {}
     if "analytics_columns" in companion:
         analytics["analytics_columns"] = _normalize_uns_text_list(companion.get("analytics_columns"))
-    # Plain string scalar (not JSON): the cell-level DE method Companion used
-    # ("ttest" / "wilcoxon"). Used to tag reused cluster DE so the viewer badge
-    # labels it as cell-level markers rather than a DESeq2 pseudobulk result.
-    if "analytics_cluster_de_method" in companion:
-        analytics["cluster_de_method"] = _normalize_uns_text(
-            companion.get("analytics_cluster_de_method")
-        )
 
     for uns_key, analytics_key in COMPANION_ANALYTICS_JSON_FIELDS.items():
         if uns_key not in companion:
@@ -976,105 +826,6 @@ def _load_companion_analytics(adata) -> Dict[str, Any]:
     return analytics
 
 
-def _companion_de_source_tag(method: Optional[str]) -> str:
-    """Map Companion's DE-method scalar to a viewer badge source tag."""
-    normalized = str(method or "").strip().lower().replace("-", "").replace("_", "")
-    if normalized == "wilcoxon":
-        return "companion_wilcoxon"
-    # Companion's default (and TTest enum) is a cell-level Welch t-test.
-    return "companion_ttest"
-
-
-def _backfill_companion_pseudobulk_summary(
-    payload: Any,
-    annotation_key: str,
-    companion_gene_means: Any,
-    method: Optional[str],
-) -> Any:
-    """Give a reused Companion cluster-DE payload the _summary the viewer expects.
-
-    Companion emits cell-level t-test / Wilcoxon DE (no ``_summary``, no method
-    tag) and stores per-cluster means in a separate ``cluster_gene_means_json``
-    field. Stitch the two together so (a) the DE-method badge labels these as
-    cell-level markers instead of defaulting to the DESeq2 label, and (b) the
-    category-means / category-vs-rest panels render. Idempotent: a future
-    Companion that already writes ``_summary.category_gene_means`` is left alone
-    apart from ensuring a source tag.
-    """
-    if not isinstance(payload, dict):
-        return payload
-    source_tag = _companion_de_source_tag(method)
-
-    existing_summary = payload.get("_summary")
-    if isinstance(existing_summary, dict) and isinstance(
-        existing_summary.get("category_gene_means"), dict
-    ):
-        existing_summary["category_gene_means"].setdefault("source", source_tag)
-        existing_summary.setdefault("source", source_tag)
-        return payload
-
-    # Per-category cell counts aren't in cluster_gene_means_json; recover them
-    # from any contrast leaf's n_source (source category == that leaf's source).
-    n_cells: Dict[str, int] = {}
-    for source_cat, refs in payload.items():
-        if str(source_cat).startswith("_") or not isinstance(refs, dict):
-            continue
-        for ref_result in refs.values():
-            if isinstance(ref_result, dict) and ref_result.get("n_source") is not None:
-                try:
-                    n_cells[str(source_cat)] = int(ref_result["n_source"])
-                except (TypeError, ValueError):
-                    pass
-                break
-
-    category_gene_means = None
-    if isinstance(companion_gene_means, dict):
-        columns = companion_gene_means.get("columns")
-        column = columns.get(annotation_key) if isinstance(columns, dict) else None
-        if isinstance(column, dict):
-            category_gene_means = {
-                "genes": list(companion_gene_means.get("genes") or []),
-                "categories": list(column.get("categories") or []),
-                "means": dict(column.get("means") or {}),
-                "background": list(column.get("background") or []),
-                "n_cells": n_cells,
-                "source": source_tag,
-            }
-
-    summary = dict(existing_summary) if isinstance(existing_summary, dict) else {}
-    if category_gene_means is not None:
-        summary["category_gene_means"] = category_gene_means
-    summary.setdefault("source", source_tag)
-    payload["_summary"] = summary
-    return payload
-
-
-def _strip_category_pseudobulk_sample_diagnostics(payload: Any) -> Any:
-    """Drop legacy all-category PCA/distance diagnostics from category DE payloads.
-
-    Pairwise diagnostics live under ``_summary.pair_diagnostics`` and are kept.
-    Contact-marker diagnostics are handled separately in the interaction marker
-    payload.
-    """
-    if not isinstance(payload, dict):
-        return payload
-    cleaned = deepcopy(payload)
-
-    def _walk(node: Any) -> None:
-        if not isinstance(node, dict):
-            return
-        node.pop("pseudobulk_samples", None)
-        for value in node.values():
-            if isinstance(value, dict):
-                _walk(value)
-            elif isinstance(value, list):
-                for item in value:
-                    _walk(item)
-
-    _walk(cleaned)
-    return cleaned
-
-
 def _compact_json_float(value: Any, significant_digits: int = 6) -> Optional[float]:
     try:
         val = float(value)
@@ -1084,30 +835,6 @@ def _compact_json_float(value: Any, significant_digits: int = 6) -> Optional[flo
         return None
     digits = max(1, int(significant_digits))
     return float(f"{val:.{digits}g}")
-
-
-def _drop_legacy_logfoldchanges(payload: Any) -> Any:
-    """Remove legacy logfoldchanges keys and compact floats before viewer serialization."""
-    if not isinstance(payload, dict):
-        return payload
-
-    def _walk(node: Any) -> Any:
-        if isinstance(node, dict):
-            if "logfoldchanges" in node:
-                if "log2foldchanges" not in node:
-                    node["log2foldchanges"] = node.get("logfoldchanges")
-                node.pop("logfoldchanges", None)
-            for key, value in list(node.items()):
-                node[key] = _walk(value)
-            return node
-        elif isinstance(node, list):
-            return [_walk(item) for item in node]
-        if isinstance(node, (float, np.floating)):
-            return _compact_json_float(node, 6)
-        return node
-
-    _walk(payload)
-    return payload
 
 
 def _select_top_variable_features(adata: Any, n: int) -> List[str]:
@@ -1123,14 +850,28 @@ def _select_top_variable_features(adata: Any, n: int) -> List[str]:
     return [str(adata.var_names[i]) for i in top_idx]
 
 
-def _compute_morans_i_for_features(adata: Any, features: List[str], n_features: int = 200) -> list:
+def _compute_morans_i_for_features(
+    adata: Any,
+    features: List[str],
+    n_features: int = 200,
+    *,
+    modality_name: Optional[str] = None,
+) -> list:
     """Compute Moran's I spatial autocorrelation for the top variable features."""
     W = None
-    for key in ("spatial_connectivities", "connectivities", "neighbors", "neighbor_graph"):
+    graph_keys = ("spatial_connectivities", "connectivities", "neighbors", "neighbor_graph")
+    for key in graph_keys:
         if key in adata.obsp:
             W = adata.obsp[key]
             break
     if W is None:
+        modality_label = f" for modality '{modality_name}'" if modality_name else ""
+        log_warning(
+            "Spatially variable feature calculation skipped"
+            f"{modality_label}: no spatial graph found in adata.obsp "
+            f"(looked for {', '.join(graph_keys)}).",
+            level=1,
+        )
         return []
 
     if not sp.issparse(W):
@@ -1329,7 +1070,7 @@ class Modality:
 @dataclass
 class SpatialDataset:
     """Container for spatial transcriptomics dataset."""
-    adata: sc.AnnData
+    adata: ad.AnnData
     sections: List[SectionData]
     section_key: str
     obs_columns: List[str]
@@ -1387,7 +1128,7 @@ class SpatialDataset:
         modality: Optional[str] = None,
     ) -> Tuple[np.ndarray, bool, Optional[List[str]]]:
         """
-        Get annotation or gene values for all cells.
+        Get annotation or feature values for all cells.
 
         Parameters
         ----------
@@ -2022,7 +1763,7 @@ class SpatialDataset:
             Exclude cells below this total raw-count threshold before pseudobulk
             aggregation. Zero disables filtering.
         pseudobulk_min_gene_counts : int
-            Exclude genes below this total raw pseudobulk-count threshold in the
+            Exclude features below this total raw pseudobulk-count threshold in the
             shared DESeq2 fit. Zero disables filtering.
         pseudobulk_min_cells_per_pseudobulk : int
             Minimum cells required in each replicate x annotation pseudobulk
@@ -2032,7 +1773,7 @@ class SpatialDataset:
             contrast.
             Pseudobulk DE always requires at least two replicates.
         pseudobulk_min_pct_expressed : float
-            Minimum fraction of cells expressing a gene required in at least one
+            Minimum fraction of cells with a positive feature value required in at least one
             compared group before DE results are reported. Values > 1 are interpreted
             as percentages.
         pseudobulk_p_adjust_method : str
@@ -2048,9 +1789,9 @@ class SpatialDataset:
             maximum number of parallel shared-fit contrasts. Must be at least
             one.
         pseudobulk_embed_top_n_per_comparison : int
-            Maximum significant DE genes to auto-embed per category or contact
-            comparison in embedded mode. Ignored in sidecar mode, where all gene
-            expression vectors are written to the sidecar.
+            Maximum significant DE features to auto-embed per category or contact
+            comparison in embedded mode. Ignored in sidecar mode, where all feature
+            vectors are written to the sidecar.
         interaction_marker_annotations : list, optional
             Internal list of obs columns to compute contact-conditioned
             pseudobulk interaction markers for. Empty/None disables them.
@@ -2063,7 +1804,7 @@ class SpatialDataset:
         interaction_markers_top_targets : int
             Number of target categories to evaluate per source (ranked by z-score or edge count).
         interaction_markers_top_genes : int
-            Number of top genes to keep per source-target interaction.
+            Number of top features to keep per source-target interaction.
         interaction_markers_min_cells : int
             Minimum cells required per replicate in both contact+ and contact-
             pseudobulk samples.
@@ -2599,7 +2340,7 @@ class SpatialDataset:
                 )
             return rows or None
 
-        def _compute_full_dispersion_stats(log_as_neighbor_child: bool = False) -> Dict[str, List[Dict[str, Any]]]:
+        def _compute_full_dispersion_stats() -> Dict[str, List[Dict[str, Any]]]:
             dispersion: Dict[str, List[Dict[str, Any]]] = {}
             candidates: Dict[str, Tuple[List[str], np.ndarray]] = {}
             for col, cdata in annotation_data.items():
@@ -2615,7 +2356,7 @@ class SpatialDataset:
                 f"Computing full-cell spatial dispersion for {len(candidates)} annotation"
                 f"{'s' if len(candidates) != 1 else ''}; output feeds Neighbors > Dispersion."
             )
-            log_detail(message, level=1)
+            log_step(message)
             for annotation_col, (cats, labels) in candidates.items():
                 rows = _compute_full_dispersion_for_labels(
                     categories=cats,
@@ -2627,7 +2368,7 @@ class SpatialDataset:
                     log_detail(
                         f"{annotation_col}: stored dispersion rows for {len(rows)} categor"
                         f"{'ies' if len(rows) != 1 else 'y'}.",
-                        level=2,
+                        level=1,
                     )
             return dispersion
 
@@ -2672,7 +2413,7 @@ class SpatialDataset:
             if var.shape[0] != int(mod.matrix.shape[1]):
                 var = pd.DataFrame(index=[str(i) for i in range(int(mod.matrix.shape[1]))])
             var.index = var.index.map(str)
-            mod_adata = sc.AnnData(X=mod.matrix, obs=self.adata.obs.copy(), var=var)
+            mod_adata = ad.AnnData(X=mod.matrix, obs=self.adata.obs.copy(), var=var)
             for layer_name, layer_matrix in (mod.layers or {}).items():
                 if getattr(layer_matrix, "shape", None) == mod.matrix.shape:
                     mod_adata.layers[str(layer_name)] = layer_matrix
@@ -2700,10 +2441,121 @@ class SpatialDataset:
             )
             for modality_name in modality_names
         }
+        embedded_feature_names = [
+            str(feature)
+            for feature in (features or [])
+            if str(feature)
+        ]
+        analytics_requested_feature_names = [
+            str(feature)
+            for feature in (analytics_features if analytics_features is not None else (features or []))
+            if str(feature)
+        ]
+        feature_sets_by_modality = {
+            modality_name: set(features_by_modality.get(modality_name) or [])
+            for modality_name in modality_names
+        }
+        embedded_requested_features_by_modality = {
+            modality_name: [
+                feature
+                for feature in embedded_feature_names
+                if feature in feature_sets_by_modality.get(modality_name, set())
+            ]
+            for modality_name in modality_names
+        }
+        requested_features_by_modality = {
+            modality_name: [
+                feature
+                for feature in analytics_requested_feature_names
+                if feature in feature_sets_by_modality.get(modality_name, set())
+            ]
+            for modality_name in modality_names
+        }
         if analytics_modalities is None:
             analytics_modality_names = list(modality_names)
         else:
             analytics_modality_names = [str(name) for name in analytics_modalities if str(name) in modality_names]
+
+        def _significant_de_genes(
+            payload: Any,
+            padj_threshold: float,
+            log2fc_threshold: float,
+            *,
+            exclude_category_vs_rest: bool = False,
+            limit_per_comparison: int = 20,
+        ) -> List[str]:
+            found: List[str] = []
+            limit = int(limit_per_comparison)
+            if limit == 0:
+                return found
+
+            def _walk(node: Any, key: Optional[str] = None) -> None:
+                if not isinstance(node, dict):
+                    return
+                if exclude_category_vs_rest and key == "__rest__":
+                    return
+                genes_list = node.get("genes")
+                padj_list = node.get("pvals_adj")
+                log2fc_list = node.get("log2foldchanges")
+                if (
+                    isinstance(genes_list, list)
+                    and isinstance(padj_list, list)
+                    and isinstance(log2fc_list, list)
+                ):
+                    ranked = []
+                    for idx, (gene, padj, log2fc) in enumerate(zip(genes_list, padj_list, log2fc_list)):
+                        try:
+                            padj_value = float(padj)
+                            log2fc_value = float(log2fc)
+                        except (TypeError, ValueError):
+                            continue
+                        if (
+                            np.isfinite(padj_value)
+                            and np.isfinite(log2fc_value)
+                            and padj_value < padj_threshold
+                            and abs(log2fc_value) >= log2fc_threshold
+                        ):
+                            ranked.append((padj_value, -abs(log2fc_value), idx, str(gene)))
+                    ranked.sort(key=lambda item: (item[0], item[1], item[2], item[3]))
+                    if limit > 0:
+                        ranked = ranked[:limit]
+                    found.extend(gene for *_score, gene in ranked)
+                for child_key, value in node.items():
+                    if isinstance(value, dict):
+                        _walk(value, str(child_key))
+
+            _walk(payload)
+            return found
+
+        def _html_embedded_feature_candidates_for_modality(
+            modality_name: str,
+            pseudobulk_payload: Optional[Mapping[str, Any]] = None,
+            interaction_payload: Optional[Mapping[str, Any]] = None,
+        ) -> List[str]:
+            available = feature_sets_by_modality.get(modality_name, set())
+            requested = list(embedded_requested_features_by_modality.get(modality_name) or [])
+            auto_features: List[str] = []
+            auto_features.extend(
+                _significant_de_genes(
+                    pseudobulk_payload or {},
+                    float(pseudobulk_padj_cutoff),
+                    float(pseudobulk_log2fc_cutoff),
+                    limit_per_comparison=int(pseudobulk_embed_top_n_per_comparison),
+                )
+            )
+            auto_features.extend(
+                _significant_de_genes(
+                    interaction_payload or {},
+                    float(pseudobulk_padj_cutoff),
+                    float(pseudobulk_log2fc_cutoff),
+                    limit_per_comparison=int(pseudobulk_embed_top_n_per_comparison),
+                )
+            )
+            return [
+                feature
+                for feature in dict.fromkeys([*requested, *auto_features])
+                if feature in available
+            ]
 
         replicate_override = str(pseudobulk_replicate_annotation or "").strip()
         pseudobulk_replicate_name = replicate_override or str(self.section_key)
@@ -2722,8 +2574,6 @@ class SpatialDataset:
             modality_name: {} for modality_name in pseudobulk_modality_names
         }
         companion_pseudobulk_de = companion_analytics.get("pseudobulk_de")
-        companion_gene_means = companion_analytics.get("category_gene_means")
-        companion_de_method = companion_analytics.get("cluster_de_method")
         if requested_pseudobulk_de_annotations:
             pseudobulk_min_cells_n = int(pseudobulk_min_cells_per_pseudobulk)
             pseudobulk_min_cell_counts_n = int(pseudobulk_min_cell_counts)
@@ -2783,19 +2633,7 @@ class SpatialDataset:
                             f"{'s' if len(reused_pseudobulk_de_annotations) != 1 else ''}."
                         )
                         for annotation_key in reused_pseudobulk_de_annotations:
-                            reused_payload = _strip_category_pseudobulk_sample_diagnostics(
-                                companion_pseudobulk_de[annotation_key]
-                            )
-                            # Companion cluster DE lacks _summary and a method tag;
-                            # stitch in per-cluster means + a cell-level source tag so
-                            # the badge/category panels render correctly.
-                            reused_payload = _backfill_companion_pseudobulk_summary(
-                                reused_payload,
-                                annotation_key,
-                                companion_gene_means,
-                                companion_de_method,
-                            )
-                            modality_pseudobulk_de[annotation_key] = reused_payload
+                            modality_pseudobulk_de[annotation_key] = companion_pseudobulk_de[annotation_key]
                     pending_pseudobulk_de_annotations = [
                         annotation_key
                         for annotation_key in pending_pseudobulk_de_annotations
@@ -2873,6 +2711,17 @@ class SpatialDataset:
                         n_cpus=max(1, int(pseudobulk_n_cpus)),
                     )
                     if annotation_results:
+                        embedded_feature_count = len(
+                            _html_embedded_feature_candidates_for_modality(
+                                modality_name,
+                                {annotation_key: annotation_results},
+                            )
+                        )
+                        log_detail(
+                            f"Features selected for HTML embedding for modality "
+                            f"{modality_name}: {embedded_feature_count:,}.",
+                            level=2,
+                        )
                         modality_pseudobulk_de[annotation_key] = annotation_results
                     elif not sample_metadata_model:
                         # Pseudobulk DESeq2 needs >= 2 biological replicates. When it
@@ -2934,16 +2783,18 @@ class SpatialDataset:
             for annotation_key in requested_neighbor_stats_annotations
             if annotation_key not in neighbor_stats
         ]
-        printed_neighbor_stats_header = False
         if neighbor_graph is not None and pending_neighbor_stats_annotations:
+            log_step(
+                f"Computing neighbor composition stats for {len(pending_neighbor_stats_annotations)} "
+                f"annotation column{'s' if len(pending_neighbor_stats_annotations) != 1 else ''}; "
+                "output feeds Neighbors > Enrichment and Neighbors > Interactions."
+            )
             for annotation_key in pending_neighbor_stats_annotations:
-                log_step(f"Neighbor stats: annotation column {annotation_key}")
+                log_step(f"Neighbor stats: annotation column {annotation_key}", level=1)
                 log_detail(
-                    "Computing observed neighbor composition; output feeds Neighbors > Enrichment "
-                    "and Neighbors > Interactions.",
-                    level=1,
+                    "Computing observed neighbor composition.",
+                    level=2,
                 )
-                printed_neighbor_stats_header = True
                 entry, context = _prepare_neighbor_stats_annotations(annotation_key)
                 if entry is None or context is None:
                     continue
@@ -2951,7 +2802,7 @@ class SpatialDataset:
                 neighbor_stats_context[annotation_key] = context
                 log_detail(
                     f"Stored neighbor matrix for {len(entry.get('categories') or [])} categories.",
-                    level=1,
+                    level=2,
                 )
 
         # Compute contact-conditioned interaction markers:
@@ -3084,62 +2935,7 @@ class SpatialDataset:
             else {}
         )
 
-        dispersion_stats = _compute_full_dispersion_stats(
-            log_as_neighbor_child=printed_neighbor_stats_header
-        )
-
-        def _significant_de_genes(
-            payload: Any,
-            padj_threshold: float,
-            log2fc_threshold: float,
-            *,
-            exclude_category_vs_rest: bool = False,
-            limit_per_comparison: int = 20,
-        ) -> List[str]:
-            found: List[str] = []
-            limit = int(limit_per_comparison)
-            if limit == 0:
-                return found
-
-            def _walk(node: Any, key: Optional[str] = None) -> None:
-                if not isinstance(node, dict):
-                    return
-                if exclude_category_vs_rest and key == "__rest__":
-                    return
-                genes_list = node.get("genes")
-                padj_list = node.get("pvals_adj")
-                log2fc_list = node.get("log2foldchanges")
-                if not isinstance(log2fc_list, list):
-                    log2fc_list = node.get("logfoldchanges")
-                if (
-                    isinstance(genes_list, list)
-                    and isinstance(padj_list, list)
-                    and isinstance(log2fc_list, list)
-                ):
-                    ranked = []
-                    for idx, (gene, padj, log2fc) in enumerate(zip(genes_list, padj_list, log2fc_list)):
-                        try:
-                            padj_value = float(padj)
-                            log2fc_value = float(log2fc)
-                        except (TypeError, ValueError):
-                            continue
-                        if (
-                            np.isfinite(padj_value)
-                            and np.isfinite(log2fc_value)
-                            and padj_value < padj_threshold
-                            and abs(log2fc_value) >= log2fc_threshold
-                        ):
-                            ranked.append((padj_value, -abs(log2fc_value), idx, str(gene)))
-                    ranked.sort(key=lambda item: (item[0], item[1], item[2], item[3]))
-                    if limit > 0:
-                        ranked = ranked[:limit]
-                    found.extend(gene for *_score, gene in ranked)
-                for child_key, value in node.items():
-                    if isinstance(value, dict):
-                        _walk(value, str(child_key))
-
-            _walk(payload)
-            return found
+        dispersion_stats = _compute_full_dispersion_stats()
 
         def _pseudobulk_de_marker_genes(
             payload: Any,
@@ -3172,7 +2968,7 @@ class SpatialDataset:
                             continue
                         genes_list = result.get("genes")
                         padj_list = result.get("pvals_adj")
-                        log2fc_list = result.get("log2foldchanges") or result.get("logfoldchanges")
+                        log2fc_list = result.get("log2foldchanges")
                         if (
                             not isinstance(genes_list, list)
                             or not isinstance(padj_list, list)
@@ -3208,37 +3004,31 @@ class SpatialDataset:
                     markers[str(color_name)] = color_markers
             return markers
 
-        requested_features = list(features or [])
         de_embed_limit = int(pseudobulk_embed_top_n_per_comparison)
-        de_gene_candidates = []
-        de_gene_candidates.extend(
-            _significant_de_genes(
+        de_gene_candidates = list(dict.fromkeys([
+            *_significant_de_genes(
                 pseudobulk_de,
                 float(pseudobulk_padj_cutoff),
                 float(pseudobulk_log2fc_cutoff),
                 limit_per_comparison=de_embed_limit,
-            )
-        )
-        de_gene_candidates.extend(
-            _significant_de_genes(
+            ),
+            *_significant_de_genes(
                 interaction_markers,
                 float(pseudobulk_padj_cutoff),
                 float(pseudobulk_log2fc_cutoff),
                 limit_per_comparison=de_embed_limit,
-            )
-        )
-        export_genes = list(
-            dict.fromkeys(
-                gene
-                for gene in [*requested_features, *de_gene_candidates]
-                if gene in self.adata.var_names
-            )
+            ),
+        ]))
+        export_genes = _html_embedded_feature_candidates_for_modality(
+            default_modality_name,
+            pseudobulk_de,
+            interaction_markers,
         )
         if de_gene_candidates:
-            log_step("Preparing expression viewer gene payload")
+            log_step("Preparing viewer feature payload")
             log_detail(
-                f"Embedding {len(export_genes)} requested/significant DE gene"
-                f"{'s' if len(export_genes) != 1 else ''} in the HTML expression viewer "
+                f"Embedding {len(export_genes)} requested/significant DE feature"
+                f"{'s' if len(export_genes) != 1 else ''} in the HTML feature viewer "
                 f"(padj < {float(pseudobulk_padj_cutoff):g}, "
                 f"|log2FC| >= {float(pseudobulk_log2fc_cutoff):g}; "
                 f"automatic cap={de_embed_limit} per comparison).",
@@ -3249,9 +3039,6 @@ class SpatialDataset:
             float(pseudobulk_padj_cutoff),
             float(pseudobulk_log2fc_cutoff),
         )
-        pseudobulk_de = _drop_legacy_logfoldchanges(pseudobulk_de)
-        interaction_markers = _drop_legacy_logfoldchanges(interaction_markers)
-
         feature_data = self._collect_feature_data(export_genes)
         feature_encodings = self._resolve_feature_encodings(feature_data, feature_encoding, feature_sparse_zero_threshold)
         embedded_features_by_modality: Dict[str, List[str]] = {
@@ -3305,7 +3092,7 @@ class SpatialDataset:
                     "b64": _b64(np.ascontiguousarray(sec_matrix, dtype="<f4")),
                 }
 
-            # Build gene expression values for this section
+            # Build feature values for this section
             section_features_dense = {}
             section_features_sparse = {}
             for gene, gdata in feature_data.items():
@@ -3440,6 +3227,64 @@ class SpatialDataset:
             "feature_value_encodings": feature_value_encodings,
             "sections": default_modality_section_features,
         }
+        for modality_name in modality_names:
+            if modality_name == default_modality_name:
+                continue
+            modality_requested_features = _html_embedded_feature_candidates_for_modality(
+                modality_name,
+                pseudobulk_de_by_modality.get(modality_name),
+                interaction_markers_by_modality.get(modality_name),
+            )
+            if not modality_requested_features:
+                continue
+            modality_feature_data = self._collect_feature_data(
+                modality_requested_features,
+                modality=modality_name,
+            )
+            modality_feature_encodings = self._resolve_feature_encodings(
+                modality_feature_data,
+                feature_encoding,
+                feature_sparse_zero_threshold,
+            )
+            modality_feature_value_encodings = {
+                feature: "float32" for feature in modality_feature_data
+            }
+            modality_section_features: Dict[str, Dict[str, Dict[str, Any]]] = {}
+            for section in self.sections:
+                idx = export_section_indices[section.section_id]
+                section_features_dense = {}
+                section_features_sparse = {}
+                for feature, fdata in modality_feature_data.items():
+                    section_vals = fdata["values"][idx]
+                    mode = modality_feature_encodings.get(feature, "dense")
+                    payload = self._serialize_feature_section_values(
+                        section_vals=np.asarray(section_vals),
+                        mode=mode,
+                        feature_sparse_pack=feature_sparse_pack,
+                        feature_sparse_pack_min_nnz=feature_sparse_pack_min_nnz,
+                        b64_encoder=_b64,
+                    )
+                    if "sparse" in payload:
+                        section_features_sparse[feature] = payload["sparse"]
+                    else:
+                        section_features_dense[feature] = payload["dense"]
+                modality_section_features[section.section_id] = {
+                    "features": section_features_dense,
+                    "features_sparse": section_features_sparse,
+                }
+            embedded_features_by_modality[modality_name] = list(modality_feature_data.keys())
+            feature_state_by_modality[modality_name] = {
+                "features_meta": {
+                    feature: {
+                        "vmin": fdata["vmin"],
+                        "vmax": fdata["vmax"],
+                    }
+                    for feature, fdata in modality_feature_data.items()
+                },
+                "feature_encodings": modality_feature_encodings,
+                "feature_value_encodings": modality_feature_value_encodings,
+                "sections": modality_section_features,
+            }
         marker_features_by_modality = {
             modality_name: _pseudobulk_de_marker_genes(
                 modality_payload,
@@ -3447,19 +3292,6 @@ class SpatialDataset:
                 float(pseudobulk_log2fc_cutoff),
             )
             for modality_name, modality_payload in pseudobulk_de_by_modality.items()
-        }
-        requested_feature_names = [
-            str(feature)
-            for feature in (analytics_features if analytics_features is not None else (features or []))
-            if str(feature)
-        ]
-        requested_features_by_modality = {
-            modality_name: [
-                feature
-                for feature in requested_feature_names
-                if feature in set(features_by_modality.get(modality_name) or [])
-            ]
-            for modality_name in modality_names
         }
 
         def _flatten_marker_features(payload: Any) -> List[str]:
@@ -3528,6 +3360,7 @@ class SpatialDataset:
                     modality_adata,
                     list(features_by_modality.get(modality_name) or []),
                     n_features=int(spatial_variable_genes_n),
+                    modality_name=modality_name,
                 )
 
         return {
@@ -3629,7 +3462,7 @@ def _coerce_modality_var(uns_var: Any, expected_rows: int) -> Optional[pd.DataFr
     return df
 
 
-def _detect_modalities(adata: sc.AnnData) -> Dict[str, Modality]:
+def _detect_modalities(adata: ad.AnnData) -> Dict[str, Modality]:
     modalities: Dict[str, Modality] = {}
     rna_var = adata.var.copy()
     rna_layers: Dict[str, Any] = {}
@@ -3722,7 +3555,7 @@ def load_spatial_data(
     """
     adata, source_label, spatialdata_table_key = _coerce_input_to_anndata(path, spatialdata_table)
     log_step(f"Loading input data from {source_label}")
-    log_detail(f"Loaded AnnData table with {adata.n_obs:,} cells x {adata.n_vars:,} genes.")
+    log_detail(f"Loaded AnnData table with {adata.n_obs:,} cells x {adata.n_vars:,} features.")
 
     section_key = _resolve_section_key_for_spatialdata(adata, section_key, spatialdata_table_key)
 

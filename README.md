@@ -21,10 +21,10 @@ Visit [KaroSpace Website](https://karospace.se/).
 - [x] **Region-to-region comparison** — Compare saved regions directly in the viewer, export JSON/CSV reports, and search top hits
 - [x] **Cell search** — Select cells with query syntax based on annotations, features, or section metadata, then reuse the selection in summaries and comparisons
 - [x] **Split screen** — Compare two variables side-by-side in the modal (`Annotation`, a selected feature modality, or `Module`)
-- [x] **Gene modules** — Build custom gene sets, compute averaged module scores, display them like expression layers, and import/export module definitions
+- [x] **Feature modules** — Build custom feature sets, compute averaged module scores, display them like feature layers, and import/export module definitions
 - [x] **Legend controls** — Toggle/hide categories and spotlight one class across grid and UMAP
 - [x] **Feature exploration** — Search within a selected modality, inspect value distributions, review marker features, spatial features, category means, and related-feature suggestions
-- [x] **Per cell comparison** — Live comparison of cell selections or regions with table and graphs visualization (Welch test scores, log2FC, mean, expression percentage)
+- [x] **Per cell comparison** — Live comparison of cell selections or regions with table and graph visualization (Welch test scores, log2FC, mean, percent detected)
 - [x] **Per sample comparison** — Precomputed pseudobulk differential feature analysis using DESeq2 (PCA, distance matrices, volcano plots) with pathway enrichment for gene-compatible modalities.
 - [x] **Neighbor graph tools** — Graph overlay, hover rings (1–3 hops), enrichment, interactions, and dispersion summaries when `adata.obsp` contains a spatial graph
 - [x] **Quality-of-life controls** — Hideable toolbar, screenshots, light/dark theme toggle, buttons explanation, keyboard shortcuts, and adjustable spot size
@@ -135,12 +135,12 @@ export_to_html(
         "leiden",
         "niche",
     ],
-    features=[                      # Pre-load features for expression view; matched across selected modalities
+    features=[                      # Pre-load features for visualization; matched across selected modalities
         "Cd4",
         "Cd8a",
         "Gfap",
     ],
-    features_list=None,             # Optional text file with one feature/gene per line
+    features_list=None,             # Optional text file with one feature per line
     feature_encoding="auto",        # "auto" | "dense" | "sparse"
     feature_storage="embedded",     # "embedded" | "sidecar"
     feature_manifest_path=None,          # Optional manifest path; defaults to viewer.features.json
@@ -266,8 +266,8 @@ karospace your_data.h5ad \
 | `--inspect-input` | Read input metadata and exit without building sections, downsampling, exporting HTML, or running analytics | off |
 | `--main-cell-annotation` | Main cell-annotation column shown first in the viewer | `leiden` |
 | `--cell-annotations` | Comma-separated extra cell obs annotation columns to embed as selectable cell annotations | empty |
-| `--features` | Comma-separated features or genes to preload. Requested names are matched against every exported `--modalities` namespace, so the same feature name is included in each selected modality where it exists. Significant pseudobulk DE features are embedded automatically up to the per-comparison cap | empty |
-| `--features-list` | Text file with one feature/gene per line; combined with `--features`, deduplicated, and resolved across selected modalities | empty |
+| `--features` | Comma-separated features to preload. Requested names are matched against every exported `--modalities` namespace, so the same feature name is included in each selected modality where it exists. Significant pseudobulk DE features are embedded automatically up to the per-comparison cap | empty |
+| `--features-list` | Text file with one feature per line; combined with `--features`, deduplicated, and resolved across selected modalities | empty |
 | `--section-metadata` | Comma-separated obs columns to use as section metadata shown in the visual params bar/filter chips | empty |
 | `--section-metadata-extra` | Comma-separated obs columns to store as section metadata without visual params bar/filter chips | empty |
 | `--metadata-value-order` | JSON object mapping metadata columns to ordered value lists | empty |
@@ -300,7 +300,7 @@ karospace your_data.h5ad \
 | `--neighbor-stats-seed` | Random seed for neighbor enrichment permutations | `0` |
 | `--interaction-markers` | Contact-conditioned pseudobulk marker mode (`auto`, `None`) | `auto` |
 | `--interaction-markers-top-targets` | Target categories evaluated per source for contact-conditioned markers | `5` |
-| `--interaction-markers-top-genes` | Top DE features kept per source-target interaction | `20` |
+| `--interaction-markers-top-features` | Top DE features kept per source-target interaction | `20` |
 | `--interaction-markers-min-cells` | Minimum cells per replicate contact+ and contact- pseudobulk sample | `30` |
 | `--interaction-markers-min-neighbors` | Minimum target neighbors to classify contact+ source cells | `1` |
 | `--pseudobulk` | Category pseudobulk DE mode (`auto`, `None`) | `auto` |
@@ -310,7 +310,7 @@ karospace your_data.h5ad \
 | `--pseudobulk-modalities` | Comma-separated modalities to run category pseudobulk DE and contact-conditioned interaction markers on. Use `all` for all detected modalities. This is independent of `--modalities`, which controls feature export for the viewer | dataset default modality |
 | `--pseudobulk-simple-constrast-categories` | Categories to report in category-versus-category contrasts. With `--pseudobulk-additional-annotations`, use annotation-specific JSON wrapped in single quotes, such as `'{"cell_type":["Astrocyte","B cell"],"region":["Cortex"]}'`, or a nested list matching `[main-cell-annotation, additional...]` | empty |
 | `--pseudobulk-min-cell-counts` | Exclude cells with fewer than this many total raw counts before pseudobulk aggregation; use `0` to disable | `0` |
-| `--pseudobulk-min-gene-counts` | Exclude features with fewer than this many total raw pseudobulk counts in the shared DESeq2 fit; use `0` to disable | `0` |
+| `--pseudobulk-min-feature-counts` | Exclude features with fewer than this many total raw pseudobulk counts in the shared DESeq2 fit; use `0` to disable | `0` |
 | `--pseudobulk-min-cells-per-pseudobulk` | Minimum cells required in each replicate × annotation pseudobulk sample before it can enter the shared DESeq2 fit | `20` |
 | `--pseudobulk-min-replicates` | Minimum paired replicates required for each reported contrast | `2` |
 | `--pseudobulk-min-pct-expressed` | Minimum fraction of cells with nonzero feature values required in at least one compared group before DE results are reported; values >1 are interpreted as percentages | `0` |
@@ -326,13 +326,15 @@ karospace your_data.h5ad \
 | `--pathway-min-overlap` | Minimum pathway/query gene overlap for ORA/GSEA reporting | `3` |
 | `--pathway-gsea-permutations` | Permutations for compact preranked GSEA p-values | `100` |
 | `--section-rotations` | Comma-separated `section_id:angle` pairs | empty |
-| `--gene-correlation-top-n` | Correlated features shown per embedded feature in discovery panel | `5` |
-| `--category-means-n-genes` | Maximum embedded pseudobulk-DE features used for category mean summaries; use `0` to disable | `500` |
-| `--spatial-variable-genes-n` | Top variable features scored with Moran's I; use `0` to disable | `20` |
+| `--feature-correlation-top-n` | Correlated features shown per embedded feature in discovery panel | `5` |
+| `--category-means-n-features` | Maximum embedded pseudobulk-DE features used for category mean summaries; use `0` to disable | `500` |
+| `--spatial-variable-features-n` | Top variable features scored with Moran's I; use `0` to disable | `20` |
 | `--deconvolutions` | JSON object mapping deconvolution labels to obs/obsm keys | empty |
 | `--section-images` | JSON object mapping section IDs to image paths/specs | empty |
 | `--section-images-max-px` | Maximum image dimension when embedding section images | `4096` |
 | `--scalebar-unit` | Unit label for the scalebar | `μm` |
+
+Legacy gene-named aliases for feature-count options are still accepted for existing scripts, but new commands should use the feature-named options above.
 
 > [!NOTE]
 > See [FEATURES_SUMMARY.md](FEATURES_SUMMARY.md) for a guided overview of the main HTML viewer features.

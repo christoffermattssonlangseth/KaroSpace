@@ -1155,11 +1155,11 @@ def _format_result(
     return result
 
 
-def _count_threshold_passing_genes(result: Dict[str, Any]) -> int:
+def _count_threshold_passing_genes(result: Dict[str, Any], *, direction: str = "absolute") -> int:
     """Count DE genes satisfying the result's display/embed thresholds."""
     if not result or result.get("available") is False:
         return 0
-    log2fc = result.get("log2foldchanges") or result.get("logfoldchanges") or []
+    log2fc = result.get("log2foldchanges") or []
     padj = result.get("pvals_adj") or []
     try:
         padj_cutoff = float(result.get("padj_cutoff", 0.05))
@@ -1169,11 +1169,35 @@ def _count_threshold_passing_genes(result: Dict[str, Any]) -> int:
     count = 0
     for value, adjusted in zip(log2fc, padj):
         try:
-            if float(adjusted) < padj_cutoff and abs(float(value)) >= log2fc_cutoff:
+            log2fc_value = float(value)
+            if direction == "positive":
+                passes_log2fc = log2fc_value >= log2fc_cutoff
+            else:
+                passes_log2fc = abs(log2fc_value) >= log2fc_cutoff
+            if float(adjusted) < padj_cutoff and passes_log2fc:
                 count += 1
         except (TypeError, ValueError):
             continue
     return count
+
+
+def _format_threshold_passing_log(
+    result: Dict[str, Any],
+    *,
+    padj_cutoff: float,
+    log2fc_cutoff: float,
+    direction: str = "absolute",
+) -> str:
+    count = _count_threshold_passing_genes(result, direction=direction)
+    log2fc_clause = (
+        f"log2FC >= {float(log2fc_cutoff):g}"
+        if direction == "positive"
+        else f"|log2FC| >= {float(log2fc_cutoff):g}"
+    )
+    return (
+        f"{count} genes pass the DE thresholds "
+        f"(padj < {float(padj_cutoff):g} and {log2fc_clause})"
+    )
 
 
 def _truncate_gene_result(result: Dict[str, Any], top_n: int) -> Dict[str, Any]:
@@ -1190,7 +1214,6 @@ def _truncate_gene_result(result: Dict[str, Any], top_n: int) -> Dict[str, Any]:
         "pct_reference",
         "base_mean",
     ]
-    result.pop("logfoldchanges", None)
     for field in fields:
         if isinstance(result.get(field), list):
             result[field] = result[field][:n]
@@ -1426,7 +1449,7 @@ def compute_pseudobulk_interaction_markers(
                 log_step(
                     f"{source_name} -> {target_name}: skipped, insufficient paired replicates "
                     f"({len(paired_reps)}; need >= {required_min_replicates})",
-                    level=3,
+                    level=2,
                 )
                 source_result[target_name] = _empty_interaction_result(
                     "insufficient_replicates",
@@ -1493,7 +1516,7 @@ def compute_pseudobulk_interaction_markers(
                     f"{'s' if len(paired_reps) != 1 else ''}, "
                     f"{pair_counts.shape[0]} pseudobulk samples, "
                     f"{pair_counts.shape[1]} genes)",
-                    level=3,
+                    level=2,
                 )
                 sample_diagnostics = _compute_pseudobulk_sample_diagnostics(pair_counts, pair_meta)
                 pair_result = _fit_deseq2_pair(
@@ -1533,10 +1556,10 @@ def compute_pseudobulk_interaction_markers(
                 log_detail(
                     f"Stored top {min(top_genes, len(formatted.get('genes') or []))} marker genes "
                     "plus diagnostics for this source-target interaction.",
-                    level=4,
+                    level=3,
                 )
             except Exception as exc:
-                log_step(f"{source_name} -> {target_name}: failed ({exc})", level=3)
+                log_step(f"{source_name} -> {target_name}: failed ({exc})", level=2)
                 source_result[target_name] = _empty_interaction_result(
                     "de_failed",
                     n_contact=n_pos,
@@ -1881,9 +1904,12 @@ def compute_pseudobulk_sample_metadata_de(
                 level=4,
             )
         log_detail(
-            f"{_count_threshold_passing_genes(formatted)} "
-            f"genes pass the DE thresholds (padj < {float(padj_cutoff):g} "
-            f"and |log2FC| >= {float(log2fc_cutoff):g})",
+            _format_threshold_passing_log(
+                formatted,
+                padj_cutoff=padj_cutoff,
+                log2fc_cutoff=log2fc_cutoff,
+                direction="positive",
+            ),
             level=4,
         )
 
@@ -2527,10 +2553,14 @@ def _compute_pseudobulk_group_de_shared(
                 f"of {prefilter_count} fitted genes for reported DE results",
                 level=4,
             )
+        direction = "positive" if formatted.get("contrast_type") == "balanced_rest" else "absolute"
         log_detail(
-            f"{_count_threshold_passing_genes(formatted)} "
-            f"genes pass the DE thresholds (padj < {float(padj_cutoff):g} "
-            f"and |log2FC| >= {float(log2fc_cutoff):g})",
+            _format_threshold_passing_log(
+                formatted,
+                padj_cutoff=padj_cutoff,
+                log2fc_cutoff=log2fc_cutoff,
+                direction=direction,
+            ),
             level=4,
         )
 

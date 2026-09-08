@@ -179,8 +179,7 @@ def _embed_section_images(data: dict, section_images: Dict[str, object], max_px:
     """Read image files, downsample if needed, and embed as base64 data URLs.
 
     Each section may carry one or more named overlay layers (e.g. DAPI + H&E),
-    embedded into ``section["he_images"]`` as ``[{"name", "url"}, ...]``. The
-    first layer is also mirrored to the legacy ``section["he_image"]`` field.
+    embedded into ``section["he_images"]`` as ``[{"name", "url"}, ...]``.
     """
     import io
     try:
@@ -219,7 +218,6 @@ def _embed_section_images(data: dict, section_images: Dict[str, object], max_px:
             )
         if embedded:
             section_by_id[section_id]["he_images"] = embedded
-            section_by_id[section_id]["he_image"] = embedded[0]["url"]
 
 
 FEATURE_SIDECAR_SHARD_SIZE = 256
@@ -328,11 +326,11 @@ def _binary_payload_kind_from_sections(section_entries: Mapping[str, dict]) -> i
 
 def _build_binary_feature_payload(
     *,
-    gene_entry: Mapping[str, object],
+    feature_entry: Mapping[str, object],
     section_order: List[str],
     section_cell_counts: Mapping[str, int],
 ) -> Tuple[int, bytes]:
-    section_entries = gene_entry.get("sections") or {}
+    section_entries = feature_entry.get("sections") or {}
     payload_kind = _binary_payload_kind_from_sections(section_entries)
     chunks: List[bytes] = [struct.pack("<I", len(section_order))]
 
@@ -399,15 +397,15 @@ def _write_binary_feature_shard(
     payload_blobs: List[Tuple[bytes, int, bytes]] = []
     index_size = 0
 
-    for gene in shard_features:
-        gene_name_bytes = str(gene).encode("utf-8")
+    for feature in shard_features:
+        feature_name_bytes = str(feature).encode("utf-8")
         payload_kind, payload_bytes = _build_binary_feature_payload(
-            gene_entry=features_payload.get(gene) or {},
+            feature_entry=features_payload.get(feature) or {},
             section_order=section_order,
             section_cell_counts=section_cell_counts,
         )
-        payload_blobs.append((gene_name_bytes, payload_kind, payload_bytes))
-        index_size += 2 + len(gene_name_bytes) + 1 + 1 + 8 + 8
+        payload_blobs.append((feature_name_bytes, payload_kind, payload_bytes))
+        index_size += 2 + len(feature_name_bytes) + 1 + 1 + 8 + 8
 
     header = struct.pack(
         "<4sHHII",
@@ -422,9 +420,9 @@ def _write_binary_feature_shard(
     out.extend(header)
 
     current_offset = payload_offset
-    for gene_name_bytes, payload_kind, payload_bytes in payload_blobs:
-        out.extend(struct.pack("<H", len(gene_name_bytes)))
-        out.extend(gene_name_bytes)
+    for feature_name_bytes, payload_kind, payload_bytes in payload_blobs:
+        out.extend(struct.pack("<H", len(feature_name_bytes)))
+        out.extend(feature_name_bytes)
         out.extend(struct.pack("<BBQQ", payload_kind, 0, current_offset, len(payload_bytes)))
         current_offset += len(payload_bytes)
 
@@ -551,16 +549,15 @@ def _write_karospace_package_loader(
 
 
 def _validate_feature_sidecar_manifest_payload(payload: dict, path: Union[str, Path]) -> None:
-    supported_formats = {
-        "karospace-feature-sidecar-manifest-v3",
-        "karospace-feature-sidecar-manifest-v4",
-    }
     manifest_format = payload.get("format") if isinstance(payload, dict) else None
-    if manifest_format not in supported_formats:
+    if manifest_format != "karospace-feature-sidecar-manifest-v4":
         raise ValueError(
             f"unsupported feature sidecar manifest format in {path}: "
-            f"{manifest_format!r}; expected one of {sorted(supported_formats)}"
+            f"{manifest_format!r}; expected 'karospace-feature-sidecar-manifest-v4'"
         )
+    modalities = payload.get("modalities") if isinstance(payload, dict) else None
+    if not isinstance(modalities, dict) or not modalities:
+        raise ValueError(f"feature sidecar manifest in {path} is missing modalities")
 
 
 def _extract_embedded_viewer_data(html_text: str) -> dict:
@@ -916,7 +913,7 @@ def _serialize_embedded_viewer_data(data: Mapping[str, object]) -> Tuple[str, st
                 append_fragment(section_index, key, value)
                 continue
             if isinstance(value, dict):
-                # Dense dictionaries (for example encoded annotations or genes)
+                # Dense dictionaries (for example encoded annotations or features)
                 # can themselves be large; split their entries as well.
                 append_fragment(section_index, key, {})
                 for child_key, child_value in value.items():
@@ -6940,7 +6937,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                             <div class="button-help-item"><div class="button-help-icons" aria-label="Zoom and rotate"><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9"></path><path d="M21 3v6h-6"></path></svg></span></div><div class="button-help-text">Changes magnification, fits modal/network views, or rotates sections and overlays.</div></div>
                             <div class="button-help-item"><div class="button-help-icons" aria-label="Neighbors and image overlay"><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true" data-icon="waypoints"><circle cx="12" cy="4.5" r="2.5"></circle><circle cx="4.5" cy="12" r="2.5"></circle><circle cx="19.5" cy="12" r="2.5"></circle><circle cx="12" cy="19.5" r="2.5"></circle><path d="m10.2 6.3-3.9 3.9"></path><path d="m13.8 6.3 3.9 3.9"></path><path d="M7 12h10"></path><path d="m10.2 17.7-3.9-3.9"></path><path d="m13.8 17.7 3.9-3.9"></path></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"></rect><circle cx="9" cy="9" r="2"></circle><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"></path></svg></span></div><div class="button-help-text">Toggles spatial neighbor graph tools or opens image overlay controls such as H&amp;E/DAPI.</div></div>
                             <div class="button-help-item"><div class="button-help-icons" aria-label="Annotations"><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg></span><span class="button-help-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M16 8.9V7H8l4 5-4 5h8v-1.9"></path></svg></span></div><div class="button-help-text">Creates, groups, imports, exports, loads, or deletes user-created spatial annotations and feature modules.</div></div>
-                            <div class="button-help-item"><div class="button-help-icons" aria-label="Plot and table modes"><span class="button-help-icon"><svg class="lucide lucide-chart-candlestick" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5v4"></path><rect x="7" y="9" width="4" height="6" rx="1"></rect><path d="M9 15v2"></path><path d="M17 3v2"></path><rect x="15" y="5" width="4" height="8" rx="1"></rect><path d="M17 13v3"></path><path d="M3 3v16a2 2 0 0 0 2 2h16"></path></svg></span><span class="button-help-icon"><svg class="lucide lucide-list-sort-descending" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 12H3"></path><path d="M3 5h18"></path><path d="M9 19H3"></path></svg></span></div><div class="button-help-text">Switches analysis sections between plot, graph, list, raw table, genes, samples, ORA, or GSEA views.</div></div>
+                            <div class="button-help-item"><div class="button-help-icons" aria-label="Plot and table modes"><span class="button-help-icon"><svg class="lucide lucide-chart-candlestick" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5v4"></path><rect x="7" y="9" width="4" height="6" rx="1"></rect><path d="M9 15v2"></path><path d="M17 3v2"></path><rect x="15" y="5" width="4" height="8" rx="1"></rect><path d="M17 13v3"></path><path d="M3 3v16a2 2 0 0 0 2 2h16"></path></svg></span><span class="button-help-icon"><svg class="lucide lucide-list-sort-descending" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 12H3"></path><path d="M3 5h18"></path><path d="M9 19H3"></path></svg></span></div><div class="button-help-text">Switches analysis sections between plot, graph, list, raw table, features, samples, ORA, or GSEA views.</div></div>
                             <div class="button-help-item"><div class="button-help-icons" aria-label="Calculation info"><span class="button-help-icon button-help-calc">!</span></div><div class="button-help-text">Explains how the displayed metric, plot, or analysis section was generated.</div></div>
                         </div>
                     </div>
@@ -6975,7 +6972,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         </div>
                     </div>
                 </div>
-                <button class="icon-btn" id="save-session-btn" type="button" title="Save current viewer state (rotations, annotation or gene view, hidden categories, spotlight, samples view) to a JSON file" aria-label="Save session">
+                <button class="icon-btn" id="save-session-btn" type="button" title="Save current viewer state (rotations, annotation or feature view, hidden categories, spotlight, samples view) to a JSON file" aria-label="Save session">
                     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path></svg>
                 </button>
                 <button class="icon-btn" id="load-session-btn" type="button" title="Load a previously saved session JSON file" aria-label="Load session">
@@ -7050,7 +7047,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 <select id="overview-blend-a-namespace" style="display:none;"></select>
                 <select id="overview-blend-a-annotation"></select>
                 <select id="overview-blend-a-category"></select>
-                <input type="text" id="overview-blend-a-gene" list="overview-blend-a-feature-list" placeholder="Gene symbol" style="display:none;">
+                <input type="text" id="overview-blend-a-gene" list="overview-blend-a-feature-list" placeholder="Feature" style="display:none;">
                 <datalist id="overview-blend-a-feature-list"></datalist>
             </div>
             <div class="overview-blend-row" id="overview-blend-row-b">
@@ -7059,7 +7056,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 <select id="overview-blend-b-namespace" style="display:none;"></select>
                 <select id="overview-blend-b-annotation"></select>
                 <select id="overview-blend-b-category"></select>
-                <input type="text" id="overview-blend-b-gene" list="overview-blend-b-feature-list" placeholder="Gene symbol" style="display:none;">
+                <input type="text" id="overview-blend-b-gene" list="overview-blend-b-feature-list" placeholder="Feature" style="display:none;">
                 <datalist id="overview-blend-b-feature-list"></datalist>
             </div>
             <div class="overview-blend-row" id="overview-blend-row-mix">
@@ -7402,9 +7399,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <canvas class="modal-canvas" id="modal-canvas"></canvas>
                     <div class="modal-gene-panel" id="modal-gene-panel" aria-hidden="true">
                         <div class="modal-gene-panel-header">
-                            <div class="modal-gene-panel-title">Genes in selection</div>
+                            <div class="modal-gene-panel-title">Features in selection</div>
                             <div class="modal-gene-panel-count" id="modal-gene-panel-count">0 cells</div>
-                            <button class="modal-gene-panel-close" id="modal-gene-panel-close" type="button" aria-label="Dismiss selection genes">×</button>
+                            <button class="modal-gene-panel-close" id="modal-gene-panel-close" type="button" aria-label="Dismiss selection features">×</button>
                         </div>
                         <div class="modal-gene-panel-body" id="modal-gene-panel-body"></div>
                     </div>
@@ -7555,7 +7552,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     const METADATA_LABELS = {metadata_labels_json};
     const OUTLINE_BY = {outline_by_json};
     const VIEWER_INFO_HTML = {viewer_info_html_json};
-    // Modality registry — RNA-only datasets keep an empty registry so legacy paths run unchanged.
+    // Modality registry for feature namespaces.
     const MODALITY_DESCRIPTORS = Array.isArray(DATA.modalities) ? DATA.modalities : [];
     const FEATURES_BY_MODALITY = (DATA.features_by_modality && typeof DATA.features_by_modality === 'object')
         ? DATA.features_by_modality
@@ -7568,13 +7565,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         || (MODALITY_DESCRIPTORS[0]?.name)
         || 'rna';
     const MODULE_MODALITY_NAME = 'module';
-	    const PANEL_MODALITY_STATE = {{
-	        visual: DEFAULT_MODALITY_NAME,
-	        exploration: DEFAULT_MODALITY_NAME,
-	        module: DEFAULT_MODALITY_NAME,
-	        pseudobulk: DEFAULT_MODALITY_NAME,
-	        interactions: DEFAULT_MODALITY_NAME,
-	        split: {{
+    const PANEL_MODALITY_STATE = {{
+        visual: DEFAULT_MODALITY_NAME,
+        exploration: DEFAULT_MODALITY_NAME,
+        module: DEFAULT_MODALITY_NAME,
+        interactions: DEFAULT_MODALITY_NAME,
+        split: {{
             a: DEFAULT_MODALITY_NAME,
             b: DEFAULT_MODALITY_NAME,
         }},
@@ -7691,7 +7687,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function getModalityDisplayLabel(modality) {{
         if (isModuleModality(modality)) return 'Module';
         const modDesc = MODALITY_DESCRIPTORS.find(m => m.name === modality);
-        return modDesc?.label || (modality === 'gene' ? 'Gene' : String(modality || 'Gene'));
+        return modDesc?.label || String(modality || 'Feature');
     }}
     function getGeneInputFeatureList() {{
         return getFeatureDatalistValuesForModality(getVisualModality());
@@ -7744,20 +7740,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function getExplorationModality() {{
         return getPanelModality('exploration');
     }}
-	    function setExplorationModality(modality) {{
-	        return setPanelModality('exploration', modality);
-	    }}
-	    function getModuleBuilderModality() {{
-	        return getPanelModality('module');
-	    }}
-	    function setModuleBuilderModality(modality) {{
-	        return setPanelModality('module', modality);
-	    }}
-	    function getPseudobulkPanelModality() {{
-	        return getPanelModality('pseudobulk');
-	    }}
-    function setPseudobulkPanelModality(modality) {{
-        return setPanelModality('pseudobulk', modality);
+    function setExplorationModality(modality) {{
+        return setPanelModality('exploration', modality);
+    }}
+    function getModuleBuilderModality() {{
+        return getPanelModality('module');
+    }}
+    function setModuleBuilderModality(modality) {{
+        return setPanelModality('module', modality);
+    }}
+    function getPseudobulkPanelModality() {{
+        return getExplorationModality();
     }}
     function getInteractionsModality() {{
         return getPanelModality('interactions');
@@ -7803,14 +7796,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             .filter(Boolean);
         return uniqueSortedFeatures([...registryNames, ...Object.keys(root)])
             .filter((modality) => modalityHasPseudobulkDE(modality));
-    }}
-    function ensurePseudobulkPanelModality() {{
-        const available = getPseudobulkDEModalities();
-        const current = getPseudobulkPanelModality();
-        if (available.length && !available.includes(current)) {{
-            return setPseudobulkPanelModality(available[0]);
-        }}
-        return current;
     }}
     function getExplorationMarkerFeaturesPayload(modality = getExplorationModality()) {{
         return getModalityPayload('marker_features_by_modality', modality) || {{}};
@@ -7869,12 +7854,39 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }});
         return uniqueSortedFeatures(genes);
     }}
-    function getInsightsGeneSearchValues(modality = getExplorationModality()) {{
-        const embedded = getFeatureDatalistValuesForModality(modality);
+    function getPseudobulkMeanFeatureNames(annotationCol = explorationColorCol || currentAnnotation || '', modality = getExplorationModality()) {{
+        const pseudobulkKey = getPseudobulkDEColorKey(annotationCol, modality);
+        const summary = getExplorationPseudobulkDEPayload(modality)[pseudobulkKey]?._summary?.category_gene_means;
+        const summaryGenes = Array.isArray(summary?.genes) && summary?.means
+            ? summary.genes.map(gene => String(gene))
+            : [];
+        if (summaryGenes.length) return uniqueSortedFeatures(summaryGenes);
+        const data = getExplorationCategoryFeatureMeansPayload(modality);
+        const genes = Array.isArray(data?.genes) ? data.genes.map(gene => String(gene)) : [];
+        const column = data?.columns?.[annotationCol];
+        return genes.length && column?.means ? uniqueSortedFeatures(genes) : [];
+    }}
+    function getEmbeddedFeatureDatalistValuesForModality(modality = getExplorationModality()) {{
+        if (isModuleModality(modality)) return uniqueSortedFeatures(getGeneModuleDatalistValues());
+        const embeddedByModality = DATA.embedded_features_by_modality && typeof DATA.embedded_features_by_modality === 'object'
+            ? DATA.embedded_features_by_modality
+            : {{}};
+        const embedded = Array.isArray(embeddedByModality[modality])
+            ? embeddedByModality[modality]
+            : getLoadedFeaturesForModality(modality);
+        return uniqueSortedFeatures(embedded);
+    }}
+    function getInsightsGeneSearchValues(modality = getExplorationModality(), subtab = insightsGenesTab) {{
+        const embedded = getEmbeddedFeatureDatalistValuesForModality(modality);
+        if (subtab === 'distribution') return embedded;
         const embeddedSet = new Set(embedded);
-        const categoryVsRest = getCategoryVsRestGenes(explorationColorCol || currentAnnotation || '', modality)
-            .filter(gene => !embeddedSet.has(gene));
-        return uniqueSortedFeatures([...embedded, ...categoryVsRest]);
+        const extraFeatures = subtab === 'means'
+            ? getPseudobulkMeanFeatureNames(explorationColorCol || currentAnnotation || '', modality)
+            : getCategoryVsRestGenes(explorationColorCol || currentAnnotation || '', modality);
+        return uniqueSortedFeatures([
+            ...embedded,
+            ...extraFeatures.filter(feature => !embeddedSet.has(feature)),
+        ]);
     }}
     function renderInsightsGeneSearchDatalistOptions() {{
         const modality = getExplorationModality();
@@ -7892,7 +7904,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
     function getFeatureDatalistValuesForModality(modality = getVisualModality()) {{
         if (isModuleModality(modality)) return uniqueSortedFeatures(getGeneModuleDatalistValues());
-        const base = getFeatureCatalog(modality);
+        const base = DATA.feature_manifest_url
+            ? getFeatureCatalog(modality)
+            : getLoadedFeaturesForModality(modality);
         return uniqueSortedFeatures(base);
     }}
     function isActiveModalityIntensity() {{
@@ -7963,21 +7977,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             s.genes_sparse = payload.features_sparse || payload.genes_sparse || {{}};
         }});
     }}
-    function getActiveModalityManifestEntry(manifest) {{
-        if (!manifest) return null;
-        const map = manifest.modalities;
-        if (map && typeof map === 'object' && map[getVisualModality()]) return map[getVisualModality()];
-        // Legacy v2/v3 manifests have no modalities map; only valid for default modality.
-        if (getVisualModality() === DEFAULT_MODALITY_NAME) return manifest;
-        return null;
-    }}
     function getFeatureSidecarManifestEntryForModality(manifest, modality = getVisualModality()) {{
         if (!manifest) return null;
         const name = normalizeFeatureModalityName(modality);
         const map = manifest.modalities;
         if (map && typeof map === 'object' && map[name]) return map[name];
-        // Legacy v2/v3 manifests have no modalities map; only valid for default modality.
-        if (name === DEFAULT_MODALITY_NAME) return manifest;
         return null;
     }}
     async function setActiveModality(name) {{
@@ -8342,13 +8346,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             formula: 'count(category) = number of selected cells with category'
         }},
         selection_expression: {{
-            title: 'Selection expression',
-            body: 'Features are selected by a two-sided Welch test. The top positive and negative Welch T scores are displayed after the minimum-expression threshold. The value at the bar end is the mean feature value followed by the percentage of cells above zero. The factor is mean A divided by mean B.',
+            title: 'Selection feature values',
+            body: 'Features are selected by a two-sided Welch test. The top positive and negative Welch T scores are displayed after the minimum-detection threshold. The value at the bar end is the mean feature value followed by the percentage of cells above zero. The factor is mean A divided by mean B.',
             formula: 'Welch T = (mean A - mean B) / sqrt(variance A / n A + variance B / n B); the highest positive and lowest negative T scores are used; factor = mean A / mean B'
         }},
         region_expression: {{
-            title: 'Region expression',
-            body: 'Features are selected by a two-sided Welch test between Region A and Region B. The top positive and negative Welch T scores are retained after the minimum-expression threshold. Bar-end values show mean feature value and the percentage of cells above zero; the factor is mean A divided by mean B.',
+            title: 'Region feature values',
+            body: 'Features are selected by a two-sided Welch test between Region A and Region B. The top positive and negative Welch T scores are retained after the minimum-detection threshold. Bar-end values show mean feature value and the percentage of cells above zero; the factor is mean A divided by mean B.',
             formula: 'Welch T = (mean A - mean B) / sqrt(variance A / n A + variance B / n B); factor = mean A / mean B; log2FC = log2(mean A / mean B)'
         }},
         selection_compare: {{
@@ -8374,32 +8378,32 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         de_genes: {{
             title: 'Marker features',
             body: 'Differential analysis uses one shared fit model across replicate and annotation, while statistical tests are calculated category-versus-category. Features not detected in a minimal percentage of cells in at least one category are removed from reported DE results. Model and statistical tests are calculated using DESeq2 and multiple testing correction is applied to the retained result features using your method of choice. The table values report log2 fold-change, p-values, adjusted p-values, DESeq2 score and rank, base_mean, and percent detected. Marker features are ordered by adjusted pvalue then log2FC.',
-            formula: 'fit model: ~ replicate + annotation; reported gene filter: max(% expressed in A, % expressed in B) >= min_pct; statistical test: DESeq2 category A vs category B; padj: retained p-values adjusted with the selected correction method; marker order: padj ascending, then log2FC'
+            formula: 'fit model: ~ replicate + annotation; reported feature filter: max(% detected in A, % detected in B) >= min_pct; statistical test: DESeq2 category A vs category B; padj: retained p-values adjusted with the selected correction method; marker order: padj ascending, then log2FC'
         }},
         pseudobulk_simple_de_section: {{
             title: 'Pseudobulk differential analysis',
             body: 'This section is based on the selected Simple design category-vs-category pseudobulk DESeq2 contrast. Cells are grouped by biological replicate and annotation, raw counts are summed into pseudobulk samples, and a shared DESeq2 model is fit for the annotation. The selected Annotation A and Annotation B are then extracted as a pairwise contrast. Features shown as DE pass the minimum percent-detected result filter, then pass the adjusted p-value and absolute log2FC thresholds.',
-            formula: 'model = ~ replicate + annotation; retained genes: max(% expressing cells in A, B) >= min_pct after DESeq2 statistics; DE genes: padj < padj_cutoff and |log2FC| >= log2fc_cutoff'
+            formula: 'model = ~ replicate + annotation; retained features: max(% detected cells in A, B) >= min_pct after DESeq2 statistics; DE features: padj < padj_cutoff and |log2FC| >= log2fc_cutoff'
         }},
         pseudobulk_simple_de_table: {{
-            title: 'Differential expression table',
+            title: 'Differential feature table',
             body: 'The table lists features from the selected Annotation A versus Annotation B contrast that pass the current DE thresholds. Rows are sorted by adjusted p-value, then p-value and log2FC. Feature buttons are disabled only when that feature vector is not available in the HTML or sidecar.',
             formula: 'displayed rows: padj < padj_cutoff and |log2FC| >= log2fc_cutoff; row direction/color follows sign(log2FC)'
         }},
         pseudobulk_ma_plot: {{
             title: 'MA plot',
-            body: 'The MA plot uses every gene returned for the fitted pairwise contrast. The x-axis is DESeq2 baseMean and the y-axis is log2FC for Annotation A versus Annotation B. Red points have adjusted p-value below 0.1; grey points do not.',
+            body: 'The MA plot uses every feature returned for the fitted pairwise contrast. The x-axis is DESeq2 baseMean and the y-axis is log2FC for Annotation A versus Annotation B. Red points have adjusted p-value below 0.1; grey points do not.',
             formula: 'x = baseMean; y = log2FC(A/B); red if padj < 0.1, grey if padj >= 0.1'
         }},
         pseudobulk_volcano_plot: {{
             title: 'Volcano plot',
-            body: 'The volcano plot uses every gene returned for the fitted pairwise contrast. The x-axis is log2FC and the y-axis is -log10 adjusted p-value. Grey points fail either the adjusted p-value or log2FC threshold. Colored points pass both thresholds; positive log2FC is colored as Annotation A and negative log2FC as Annotation B.',
+            body: 'The volcano plot uses every feature returned for the fitted pairwise contrast. The x-axis is log2FC and the y-axis is -log10 adjusted p-value. Grey points fail either the adjusted p-value or log2FC threshold. Colored points pass both thresholds; positive log2FC is colored as Annotation A and negative log2FC is colored as Annotation B.',
             formula: 'x = log2FC(A/B); y = -log10(padj); colored if padj < padj_cutoff and |log2FC| >= log2fc_cutoff'
         }},
         pseudobulk_pca_plot: {{
             title: 'Pseudobulk PCA',
-            body: 'The PCA is a sample-level diagnostic. Each point is a pseudobulk sample built from one replicate and one annotation category. Coordinates are computed from log1p CPM values for variable genes retained for the pseudobulk diagnostic. Point color follows the selected annotation category.',
-            formula: 'pseudobulk sample = summed raw counts per replicate-category; PCA input = log1p(CPM) on diagnostic variable genes'
+            body: 'The PCA is a sample-level diagnostic. Each point is a pseudobulk sample built from one replicate and one annotation category. Coordinates are computed from log1p CPM values for variable features retained for the pseudobulk diagnostic. Point color follows the selected annotation category.',
+            formula: 'pseudobulk sample = summed raw counts per replicate-category; PCA input = log1p(CPM) on diagnostic variable features'
         }},
         pseudobulk_distance_matrix: {{
             title: 'Pseudobulk distance matrix',
@@ -8424,7 +8428,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         de_heatmap: {{
             title: 'DE heatmap',
             body: 'Tiles use aggregation of feature counts per category/replicate and calculate the mean of each category across replicates, then z-score against the full DE heatmap table before applying the visible feature filter. Features are selected if found DE versus the balanced rest. A star marks features found DE versus the balanced rest.',
-            formula: 'category mean = mean over replicates of (category gene counts / category cells); z = (category mean - full table mean) / full table SD'
+            formula: 'category mean = mean over replicates of (category feature counts / category cells); z = (category mean - full table mean) / full table SD'
         }},
         spatial_moran: {{
             title: 'Spatial Moran index',
@@ -8433,7 +8437,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }},
         distribution: {{
             title: 'Feature distribution',
-            body: 'List of values and figures are computed from per-cell expression values in each Exploration annotation category. Selection can be restricted to subcategories',
+            body: 'List of values and figures are computed from per-cell feature values in each Exploration annotation category. Selection can be restricted to subcategories',
             formula: 'mean = sum(values) / n; Q1/Q3 = 25th/75th percentile; % Expr = 100 * cells with value > 0 / n'
         }},
         means: {{
@@ -8442,7 +8446,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             formula: 'category mean = mean over samples of (sample category counts / sample category cells); background = mean over samples of (sample total counts / sample total cells); delta = category mean - background'
         }},
         group_de: {{
-            title: 'Annotation expression',
+            title: 'Annotation feature values',
             body: 'Features are selected by a two-sided Welch test between Annotation A and Annotation B. The top positive and negative Welch T scores are retained after the minimum-detection threshold. Bar-end values show mean feature value and the percentage of cells above zero; the factor is mean A divided by mean B.',
             formula: 'Welch T = (mean A - mean B) / sqrt(variance A / n A + variance B / n B); factor = mean A / mean B; log2FC = log2(mean A / mean B)'
         }},
@@ -8812,6 +8816,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let selectionWelchRunRequested = false;
     let selectionWelchRunning = false;
     let selectionWelchButtonHidden = false;
+    let selectionWelchRunToken = 0;
+    let selectionWelchFullRun = null;
     const selectionWelchCache = new Map();
     let selectionComparisonLegendExpanded = false;
     const MAX_SELECTION_QUERY_MATCHES = 150000;
@@ -8929,11 +8935,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         img.src = url;
     }}
 
-    // Auto-load any images embedded at export time: a multi-layer `he_images`
-    // list ([{{name, url}}, ...]) or a single legacy `he_image` data URL.
+    // Auto-load any images embedded at export time as a multi-layer `he_images`
+    // list ([{{name, url}}, ...]).
     (DATA.sections || []).forEach((section) => {{
-        let imgs = Array.isArray(section.he_images) ? section.he_images : null;
-        if (!imgs && section.he_image) imgs = [{{ name: 'Image', url: section.he_image }}];
+        const imgs = Array.isArray(section.he_images) ? section.he_images : null;
         if (!imgs) return;
         imgs.forEach((entry, i) => {{
             const url = entry && (entry.url || entry.data);
@@ -8952,8 +8957,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function getOverlayLayerNames() {{
         const names = [], seen = new Set();
         (DATA.sections || []).forEach((section) => {{
-            let imgs = Array.isArray(section.he_images) ? section.he_images : null;
-            if (!imgs && section.he_image) imgs = [{{ name: 'Image' }}];
+            const imgs = Array.isArray(section.he_images) ? section.he_images : null;
             (imgs || []).forEach((entry, i) => {{
                 const name = (entry && entry.name) || `Image ${{i + 1}}`;
                 if (!seen.has(name)) {{ seen.add(name); names.push(name); }}
@@ -9375,7 +9379,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }};
         const rawSteps = [
             step('Welcome the KaroSpace', ['#grid-stage', '#grid', '.main-container'], [
-                'KaroSpace is a self-contained spatial viewer. The central grid is where you inspect sections, while the surrounding controls change color, expression, filters, and analysis panels. Click next or use your arrow keys to continue'
+                'KaroSpace is a self-contained spatial viewer. The central grid is where you inspect sections, while the surrounding controls change color, feature values, filters, and analysis panels. Click next or use your arrow keys to continue'
             ], {{ nextLabel: tryIt, scroll: false }}),
             step('Section filter bar', ['#filter-bar', '#visual-params-bar'], [
                 'The filter bar contains section-level metadata filters when they were exported.',
@@ -9395,7 +9399,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'The theme button switches between light and dark mode.'
             ], {{ nextLabel: tryIt }}),
             step('Current viewer status', ['#stats-text', '.stats'], [
-                'The status text summarizes how many sections, cells and genes are currently visible.',
+                'The status text summarizes how many sections, cells and features are currently visible.',
                 'It updates when filters, hidden sections, or some display choices change.'
             ], {{ nextLabel: tryIt }}),
             step('Screenshot menu', ['#screenshot-menu-wrap', '#screenshot-btn'], [
@@ -9472,15 +9476,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ], {{ action: () => {{ if (typeof closeModal === 'function') closeModal(); if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); }}, nextLabel: tryIt }}),
             step('Insights Selection mode', ['#insights-mode-selection', '#insights-selection-panel'], [
                 'Selection contains the compact summary for cells selected by lasso, UMAP lasso, or query.',
-                'It shows selected-cell composition and expression context before you open the full comparison tools.'
+                'It shows selected-cell composition and feature-value context before you open the full comparison tools.'
             ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('selection'); updateSelectionInfo?.(); }}, nextLabel: tryIt }}),
             step('Insights Region mode', ['#insights-mode-region', '#region-section'], [
                 'Region stores manual spatial annotations created from selections.',
                 'Use it to organize, group, compare, export, or reuse drawn regions.'
             ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); if (typeof setInsightsMode === 'function') setInsightsMode('region'); }}, nextLabel: tryIt }}),
             step('Insights Module mode', ['#insights-mode-module', '#insights-module-panel'], [
-                'The module area combines feature values to visualize associated genes or pathways.',
-                'Use it for signatures, custom marker lists, or repeated gene-set review.'
+                'The module area combines feature values to visualize associated features or pathways.',
+                'Use it for signatures, custom marker lists, or repeated feature-set review.'
             ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); if (typeof setInsightsMode === 'function') setInsightsMode('module'); }}, nextLabel: tryIt }}),
             step('Insights Exploration mode', ['#insights-mode-exploration', '#insights-exploration-panel'], [
                 'Exploration is the main navigation mode for built-in summaries.',
@@ -9552,6 +9556,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             step('Switch to Feature source', ['#default-source-feature', '#visual-feature-controls'], [
                 'Feature source changes the grid from categorical annotation colors to feature values.'
             ], {{ action: () => safeTutorialClick('#default-source-feature'), nextLabel: tryIt }}),
+            step('Modality selector', ['#visual-feature-namespace-control', '#visual-feature-namespace-select'], [
+                'If multiple modalities were exported, the modality selector switches the feature namespace.',
+                'For example, RNA genes and protein features can be searched separately.'
+            ], {{ condition: () => Array.isArray(MODALITY_DESCRIPTORS) && MODALITY_DESCRIPTORS.length > 1, action: () => safeTutorialClick('#default-source-feature'), nextLabel: tryIt }}),
             step('Feature discovery panel', '#feature-discovery-panel', [
                 'Feature discovery helps you search, activate features, and inspect related feature information.',
                 'Marker feature suggestions are displayed depending on the selected annotation.',
@@ -9563,10 +9571,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             step('Feature value scale', ['#gene-params-panel', '#gene-params-toggle'], [
                 'Modify the default scaling of a feature to highlight its values. Scaling can be propagated to the other feature in the Split setup to compare feature values.'
             ], {{ action: () => lockTutorialGeneParamsPanel(), positionTarget: '#gene-params-panel', placement: 'right', prepareDelay: 360, nextLabel: tryIt }}),
-            step('Modality selector', ['#visual-feature-namespace-control', '#visual-feature-namespace-select'], [
-                'If multiple modalities were exported, the modality selector switches the feature namespace.',
-                'For example, RNA genes and protein features can be searched separately.'
-            ], {{ condition: () => Array.isArray(MODALITY_DESCRIPTORS) && MODALITY_DESCRIPTORS.length > 1, action: () => safeTutorialClick('#default-source-feature'), task: 'Switch modality once, then switch back to the one you want.', nextLabel: tryIt }}),
             step('Open a section modal', ['.section-panel:not(.filtered-out)', '.section-panel', '#grid-stage', '#grid'], [
                 'Clicking a section opens a high-detail modal view for that section.'
             ], {{ action: () => {{ if (typeof closeModal === 'function') closeModal(); }}, task: 'Click the highlighted section to open the modal view.', requiresModalOpen: true, nextLabel: tryIt }}),
@@ -9605,7 +9609,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ], {{ action: () => {{ tutorialModuleCreateClicked = false; if (typeof setInsightsMode === 'function') setInsightsMode('module'); }}, task: 'The sum button will create the module list.', requiresModuleCreateClicked: true, targetAfterGateSatisfied: ['#gene-module-create', '.gene-module-card'], combineTargetsAfterGateSatisfied: true, positionTarget: '#insights-panel', placement: 'left', nextLabel: tryIt }}),
             step('Load module score', ['[data-gene-module-load]', '#insights-module-panel'], [
                 'The load button activates a module score in the spatial viewer.',
-	                'Module scores are computed from the selected module features and displayed like an expression layer.'
+	                'Module scores are computed from the selected module features and displayed like a feature layer.'
             ], {{ action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('module'); }}, nextLabel: tryIt }}),
             step('Module export', '#gene-module-download', [
                 'Export downloads module definitions as a JSON file.'
@@ -9621,7 +9625,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); }}, onNext: () => {{ const tree = document.querySelector('[data-insights-tree]'); if (!tree?.classList.contains('is-open')) safeTutorialClick('[data-insights-tree-root]'); }}, nextLabel: tryIt }}),
             step('Visualization menu options', ['.insights-tree-panel-content', '[data-insights-tree]'], [
                 'The menu options open Overview, Features, Compare, and Neighbors panels.',
-                'Overview summarizes section composition and metadata trends; Features focuses marker, spatial, distribution, and mean-expression feature views; Compare contains selection, region, annotation, pseudobulk, and relationship comparisons; Neighbors contains spatial adjacency, interaction, and dispersion analyses.'
+                'Overview summarizes section composition and metadata trends; Features focuses marker, spatial, distribution, and mean-value feature views; Compare contains selection, region, annotation, pseudobulk, and relationship comparisons; Neighbors contains spatial adjacency, interaction, and dispersion analyses.'
             ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); const tree = document.querySelector('[data-insights-tree]'); if (!tree?.classList.contains('is-open')) safeTutorialClick('[data-insights-tree-root]'); }}, nextLabel: tryIt }}),
             step('Open Overview > Summary', '[data-insights-tree-leaf="summary"][data-insights-tree-parent="overview"]', [
                 'Open Visualization, then Overview, then Summary to inspect annotation composition across section metadata.',
@@ -9652,7 +9656,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ], {{ action: () => openTutorialVisualizationLeafMenu('genes', 'de-genes'), task: 'Click Markers in the Features options.', nextLabel: tryIt }}),
             step('Features Markers panel', ['#marker-genes', '#genes-tab-de-genes-content'], [
                 'The marker panel lists pseudobulk-derived marker features by category when available.',
-                'Features that were not embedded may be shown but disabled for direct expression viewing.'
+                'Features that were not embedded may be shown but disabled for direct feature-value viewing.'
             ], {{ action: () => openTutorialInsightsPanel('genes', 'de-genes'), nextLabel: tryIt }}),
             step('Features Markers view switch', '[data-gene-subtab-toggle="de-genes"]', [
                 'The marker view switch changes between a compact feature list and a heatmap.'
@@ -9675,7 +9679,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'Enter or select a feature in the Search control.'
             ], {{ action: () => openTutorialInsightsPanel('genes', 'distribution'), task: 'Enter or select a feature in Search.', requiresInsightsGeneSelected: true, nextLabel: tryIt }}),
             step('Features Distribution per cell panel', ['#gene-distribution-panel', '#genes-tab-distribution-content'], [
-                'The distribution panel summarizes expression distributions across categories.'
+                'The distribution panel summarizes feature-value distributions across categories.'
             ], {{ action: () => {{ openTutorialInsightsPanel('genes', 'distribution'); ensureTutorialInsightsGeneSelected(); }}, nextLabel: tryIt }}),
             step('Features Distribution per cell controls', '#gene-distribution-panel .pseudobulk-de-controls', [
                 'These controls restrict the per-cell distribution to a selected annotation or sample-metadata group.'
@@ -9691,7 +9695,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'Enter or select a feature in the Search control before inspecting the per-sample means panel.'
             ], {{ action: () => openTutorialInsightsPanel('genes', 'means'), task: 'Enter or select a feature in Search.', requiresInsightsGeneSelected: true, nextLabel: tryIt }}),
             step('Features Distribution per sample panel', ['#pseudobulk-gene-means', '#genes-tab-means-content'], [
-                'The means panel uses pseudobulk mean per category to compare expression across categories.'
+                'The means panel uses pseudobulk mean per category to compare feature values across categories.'
             ], {{ action: () => {{ openTutorialInsightsPanel('genes', 'means'); ensureTutorialInsightsGeneSelected(); }}, nextLabel: tryIt }}),
             step('Features Distribution per sample view switch', '.samples-view-toggle[data-gene-subtab-toggle="means"]', [
                 'The per-sample means view can switch between category means and a barplot.'
@@ -9756,11 +9760,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'The Enrichment switch changes between table, network, and chord views.'
             ], {{ action: () => openTutorialInsightsPanel('neighbors', 'enrichment'), nextLabel: tryIt }}),
             step('Open Neighbors > Interactions', '[data-insights-tree-leaf="interactions"][data-insights-tree-parent="neighbors"]', [
-                'Open Visualization, then Neighbors, then Interactions to inspect contact-conditioned marker genes.'
+                'Open Visualization, then Neighbors, then Interactions to inspect contact-conditioned marker features.'
             ], {{ action: () => openTutorialVisualizationLeafMenu('neighbors', 'interactions'), task: 'Click Interactions in Neighbors.', nextLabel: tryIt }}),
             step('Neighbors Interactions panel', ['#neighbors-tab-interactions-content', '#interaction-browser'], [
                 'Interactions compares source cells based on which target categories they touch.',
-                'Use it to inspect marker genes associated with local neighborhood context when interaction markers were exported.'
+                'Use it to inspect marker features associated with local neighborhood context when interaction markers were exported.'
             ], {{ action: () => {{ openTutorialInsightsPanel('neighbors', 'interactions'); scrollTutorialInsightsPanelTop('#neighbors-tab-interactions-content'); }}, scroll: false, prepareDelay: 140, nextLabel: tryIt }}),
             step('Neighbors Interactions controls', ['#interaction-source', '#interaction-search'], [
                 'The Interactions controls choose the source category and filter target names.'
@@ -10069,10 +10073,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             : (randomArea?.polygon?.length ? randomArea.polygon : buildAnnotationPolygonFromSelectedCells(section, indices));
         if (options.regionB) {{
             selectedCellsB = cells;
-            selectionWelchRevision += 1;
-            selectionWelchCache.clear();
-            selectionWelchRunRequested = false;
-            selectionWelchButtonHidden = false;
+            resetSelectionWelchState();
             selectedAnnotationBId = null;
             selectedLassoPathB = source === 'umap' ? getTutorialUmapPolygon(section, indices) : [];
             selectedCellsBFromGridLasso = source === 'grid';
@@ -11595,9 +11596,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         else if (blocked && step?.requiresModalOpen) next.title = 'Click the highlighted section to open the modal view';
         else if (blocked && step?.requiresSelectionFindMoreClicked) next.title = 'Click Find More to continue';
         else if (blocked && step?.requiresSelectionMarkersClicked) next.title = 'Click the marker search icon to continue';
-        else if (blocked && step?.requiresModuleDraftGene) next.title = 'Select at least one gene to continue';
+        else if (blocked && step?.requiresModuleDraftGene) next.title = 'Select at least one feature to continue';
         else if (blocked && step?.requiresModuleCreateClicked) next.title = 'Click the module sum button to continue';
-        else if (blocked && step?.requiresInsightsGeneSelected) next.title = 'Enter or select a gene to continue';
+        else if (blocked && step?.requiresInsightsGeneSelected) next.title = 'Enter or select a feature to continue';
         else if (blocked && getTutorialInsightsLeafTarget(step)) next.title = 'Click the highlighted menu option to continue';
         else next.removeAttribute('title');
         if (!blocked && step?.autoNextWhenGateSatisfied && !step?.storyMode) {{
@@ -13924,12 +13925,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         
         const geneEntry = auxData?.features?.[gene];
         const manifest = featureSidecarManifest;
-        const map = manifest?.modalities;
-        const modalityEntry = (map && map[targetModality]) ? map[targetModality] : (targetModality === DEFAULT_MODALITY_NAME ? manifest : null);
+        const modalityEntry = getFeatureSidecarManifestEntryForModality(manifest, targetModality);
 
         const geneMeta = auxData?.features_meta?.[gene]
-            || modalityEntry?.features_meta?.[gene]
-            || manifest?.features_meta?.[gene];
+            || modalityEntry?.features_meta?.[gene];
         if (!geneEntry || !geneMeta) return false;
 
         const targetState = getFeatureState(targetModality);
@@ -13940,14 +13939,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         targetManifest.features_meta[gene] = geneMeta;
         const encoding = auxData?.feature_encodings?.[gene]
-            || modalityEntry?.feature_encodings?.[gene]
-            || manifest?.feature_encodings?.[gene];
+            || modalityEntry?.feature_encodings?.[gene];
         if (encoding) {{
             targetManifest.feature_encodings[gene] = encoding;
         }}
         const valueEncoding = auxData?.feature_value_encodings?.[gene]
-            || modalityEntry?.feature_value_encodings?.[gene]
-            || manifest?.feature_value_encodings?.[gene];
+            || modalityEntry?.feature_value_encodings?.[gene];
         if (valueEncoding) {{
             targetManifest.feature_value_encodings[gene] = valueEncoding;
         }}
@@ -14139,7 +14136,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             throw new Error('Binary feature sidecar manifest is missing section_order');
         }}
         if (buffer.byteLength < 4) {{
-            throw new Error('Binary gene payload is truncated');
+            throw new Error('Binary feature payload is truncated');
         }}
         const view = new DataView(buffer);
         let offset = 0;
@@ -14148,7 +14145,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const sections = {{}};
         for (let i = 0; i < sectionCount; i++) {{
             if (offset + 16 > buffer.byteLength) {{
-                throw new Error('Binary gene payload section header is truncated');
+                throw new Error('Binary feature payload section header is truncated');
             }}
             const sectionIndex = view.getUint16(offset, true);
             offset += 2;
@@ -14163,7 +14160,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             offset += 4;
             const sectionId = sectionOrder[sectionIndex];
             if (!sectionId) {{
-                throw new Error(`Binary gene payload references unknown section index ${{sectionIndex}}`);
+                throw new Error(`Binary feature payload references unknown section index ${{sectionIndex}}`);
             }}
 
             if (sectionEncoding === 0) {{
@@ -14174,7 +14171,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             if (sectionEncoding === 1 || sectionEncoding === 3) {{
                 const valueBytes = sectionEncoding === 1 ? cellCount : cellCount * 2;
                 if (offset + valueBytes + (nanCount * 4) > buffer.byteLength) {{
-                    throw new Error('Binary dense gene payload is truncated');
+                    throw new Error('Binary dense feature payload is truncated');
                 }}
                 const valuesBuffer = buffer.slice(offset, offset + valueBytes);
                 offset += valueBytes;
@@ -14197,7 +14194,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const valueBytes = sectionEncoding === 2 ? nnz : nnz * 2;
                 const totalBytes = indexBytes + valueBytes + (nanCount * 4);
                 if (offset + totalBytes > buffer.byteLength) {{
-                    throw new Error('Binary sparse gene payload is truncated');
+                    throw new Error('Binary sparse feature payload is truncated');
                 }}
                 const idxBuffer = buffer.slice(offset, offset + indexBytes);
                 const idxs = nnz ? new Uint32Array(idxBuffer) : new Uint32Array(0);
@@ -14224,10 +14221,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const isCurrent = targetModality === getVisualModality();
         
         const manifest = featureSidecarManifest;
-        const map = manifest?.modalities;
-        const modalityEntry = (map && map[targetModality]) ? map[targetModality] : (targetModality === DEFAULT_MODALITY_NAME ? manifest : null);
+        const modalityEntry = getFeatureSidecarManifestEntryForModality(manifest, targetModality);
         
-        const geneMeta = modalityEntry?.features_meta?.[gene] || manifest?.features_meta?.[gene];
+        const geneMeta = modalityEntry?.features_meta?.[gene];
         if (!geneEntry || !geneMeta) return false;
 
         const targetState = getFeatureState(targetModality);
@@ -14237,11 +14233,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         targetManifest.feature_value_encodings = targetManifest.feature_value_encodings || {{}};
 
         targetManifest.features_meta[gene] = geneMeta;
-        const encoding = modalityEntry?.feature_encodings?.[gene] || manifest?.feature_encodings?.[gene];
+        const encoding = modalityEntry?.feature_encodings?.[gene];
         if (encoding) {{
             targetManifest.feature_encodings[gene] = encoding;
         }}
-        const valueEncoding = modalityEntry?.feature_value_encodings?.[gene] || manifest?.feature_value_encodings?.[gene];
+        const valueEncoding = modalityEntry?.feature_value_encodings?.[gene];
         if (valueEncoding) {{
             targetManifest.feature_value_encodings[gene] = valueEncoding;
         }}
@@ -14278,12 +14274,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!DATA.feature_manifest_url) return null;
         if (window.location.protocol === 'file:' && !window.__karospacePackageMode) {{
             window.__karospaceShowStartupError?.(
-                'This viewer was exported with sidecar gene loading. Open it over HTTP(S) to load additional genes.'
+                'This viewer was exported with sidecar feature loading. Open it over HTTP(S) to load additional features.'
             );
             return null;
         }}
 
-        setGeneLoadingState(true, 'Loading gene manifest…');
+	        setGeneLoadingState(true, 'Loading feature manifest...');
         window.__karospaceShowLoadingWarning?.('Loading feature sidecar manifest…');
         featureSidecarManifestPromise = fetch(DATA.feature_manifest_url, {{ credentials: 'same-origin', cache: 'no-store' }})
             .then((response) => {{
@@ -14294,11 +14290,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }})
             .then((payload) => {{
                 const format = payload?.format;
-                if (!payload || (format !== 'karospace-feature-sidecar-manifest-v3' && format !== 'karospace-feature-sidecar-manifest-v4')) {{
+                if (!payload || format !== 'karospace-feature-sidecar-manifest-v4') {{
                     throw new Error('Unsupported feature sidecar manifest format');
                 }}
-                if (isBinaryFeatureSidecarFormat(getFeatureSidecarFormat(payload)) && !Array.isArray(payload.section_order)) {{
-                    throw new Error('Binary feature sidecar manifest is missing section_order');
+                const modalities = payload.modalities;
+                if (!modalities || typeof modalities !== 'object') {{
+                    throw new Error('Feature sidecar manifest is missing modalities');
+                }}
+                if (isBinaryFeatureSidecarFormat(getFeatureSidecarFormat(payload))) {{
+                    Object.entries(modalities).forEach(([name, entry]) => {{
+                        if (!Array.isArray(entry?.section_order)) {{
+                            throw new Error(`Binary feature sidecar manifest is missing section_order for modality ${{name}}`);
+                        }}
+                    }});
                 }}
                 featureSidecarManifest = payload;
                 return payload;
@@ -14306,7 +14310,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             .catch((error) => {{
                 console.error('Failed to load feature sidecar manifest:', error);
                 window.__karospaceShowStartupError?.(
-                    `Failed to load auxiliary gene data: ${{error?.message || 'Unknown error'}}`
+                    `Failed to load auxiliary feature data: ${{error?.message || 'Unknown error'}}`
                 );
                 featureSidecarManifestPromise = null;
                 return null;
@@ -14354,7 +14358,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             .catch((error) => {{
                 console.error('Failed to load feature shard:', error);
                 window.__karospaceShowStartupError?.(
-                    `Failed to load requested gene data: ${{error?.message || 'Unknown error'}}`
+                    `Failed to load requested feature data: ${{error?.message || 'Unknown error'}}`
                 );
                 featureSidecarShardPromises.delete(shardUrl);
                 return null;
@@ -14390,18 +14394,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const manifest = await loadFeatureSidecarManifest();
         if (!manifest) return false;
         
-        const map = manifest.modalities;
-        const modalityEntry = (map && map[targetModality]) ? map[targetModality] : (targetModality === DEFAULT_MODALITY_NAME ? manifest : null);
+        const modalityEntry = getFeatureSidecarManifestEntryForModality(manifest, targetModality);
         
-        const shardUrl = modalityEntry?.feature_to_shard?.[token] ?? manifest?.feature_to_shard?.[token];
+        const shardUrl = modalityEntry?.feature_to_shard?.[token];
         if (!shardUrl) {{
             if (showErrors) {{
                 alert(`Gene "${{token}}" is listed in the dataset but was not indexed in the auxiliary manifest.`);
             }}
             return false;
         }}
-        const sectionOrder = modalityEntry?.section_order || manifest.section_order || [];
-        const geneMeta = modalityEntry?.features_meta?.[token] ?? manifest?.features_meta?.[token] ?? null;
+        const sectionOrder = modalityEntry?.section_order || [];
+        const geneMeta = modalityEntry?.features_meta?.[token] ?? null;
         let hydrated = false;
         if (isBinaryFeatureSidecarFormat(getFeatureSidecarFormat(manifest))) {{
             try {{
@@ -14410,10 +14413,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const geneEntry = parseBinaryFeaturePayload(payloadBuffer, sectionOrder, geneMeta);
                 hydrated = hydrateGeneFromBinary(token, geneEntry, targetModality);
             }} catch (error) {{
-                console.error('Failed to load binary gene payload:', error);
+                console.error('Failed to load binary feature payload:', error);
                 if (showErrors) {{
                     window.__karospaceShowStartupError?.(
-                        `Failed to load requested gene data: ${{error?.message || 'Unknown error'}}`
+                        `Failed to load requested feature data: ${{error?.message || 'Unknown error'}}`
                     );
                 }}
                 return false;
@@ -14827,18 +14830,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!spec) return 'annotation';
         if (spec.source === 'feature') return 'feature';
         if (spec.source === 'annotation') return 'annotation';
-        return spec.kind && spec.kind !== 'cell' ? 'feature' : 'annotation';
+        return 'annotation';
     }}
 
     function getOverviewBlendModality(spec, side = null) {{
         if (!spec) return side ? getPanelModality(`split.${{side}}`) : DEFAULT_MODALITY_NAME;
         const fallback = side ? getPanelModality(`split.${{side}}`) : DEFAULT_MODALITY_NAME;
-        const legacyKind = spec.kind && spec.kind !== 'cell' ? spec.kind : '';
-        return spec.modality || legacyKind || fallback || DEFAULT_MODALITY_NAME;
+        return spec.modality || fallback || DEFAULT_MODALITY_NAME;
     }}
 
     function getOverviewBlendFeature(spec) {{
-        return String(spec?.feature || spec?.gene || '').trim();
+        return String(spec?.feature || '').trim();
     }}
 
     function getOverviewSplitGeneTarget(side) {{
@@ -15656,11 +15658,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return selectedCells.size > 0 || selectedCellsB.size > 0;
     }}
 
-    function clearRegionBSelection() {{
-        selectionWelchRevision += 1;
+    function resetSelectionWelchState(options = {{}}) {{
+        if (options.bumpRevision !== false) selectionWelchRevision += 1;
+        selectionWelchRunToken += 1;
         selectionWelchCache.clear();
-        selectionWelchRunRequested = false;
-        selectionWelchButtonHidden = false;
+        selectionWelchRunRequested = !!options.keepRequested;
+        selectionWelchRunning = false;
+        selectionWelchButtonHidden = !!options.keepRequested;
+        selectionWelchFullRun = null;
+    }}
+
+    function clearRegionBSelection() {{
+        resetSelectionWelchState();
         selectedCellsB.clear();
         selectedLassoPathB = [];
         selectedCellsBFromGridLasso = false;
@@ -15829,19 +15838,37 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return value.toFixed(2);
     }}
 
-    function computeSelectionWelchExpression(groupA, groupB = null) {{
-        if (!groupA?.size) return [];
+    function getSelectionWelchCacheKey(groupB = null) {{
+        return `${{getExplorationModality()}}:${{groupB === null ? 'all' : 'region-b'}}:${{selectionRevision}}:${{selectionWelchRevision}}`;
+    }}
+
+    function normalizeSelectionWelchResult(result) {{
+        if (!result || !result.available) return null;
+        const modality = result.modality || getExplorationModality();
+        return {{
+            ...result,
+            modality,
+            results: (result.results || []).map((entry) => ({{
+                ...entry,
+                pctA: 100 * Number(entry.pctA || 0),
+                pctB: 100 * Number(entry.pctB || 0),
+                modality,
+            }})),
+        }};
+    }}
+
+    function computeSelectionWelchResult(groupA, groupB = null) {{
+        if (!groupA?.size) return null;
         const cellSetA = buildSelectionCellSetGroup(groupA, {{ key: 'selection-a', label: 'Selection A' }});
         const cellSetB = groupB === null
             ? buildSelectionCellSetGroup(null, {{ key: 'all-cells', label: 'All cells' }}, true)
             : buildSelectionCellSetGroup(groupB, {{ key: 'selection-b', label: 'Selection B' }});
         const result = computePooledWelchCellSetDE(cellSetA, cellSetB);
-        if (!result.available) return [];
-        return result.results.map((entry) => ({{
-            ...entry,
-            pctA: 100 * entry.pctA,
-            pctB: 100 * entry.pctB,
-        }}));
+        return normalizeSelectionWelchResult(result);
+    }}
+
+    function computeSelectionWelchExpression(groupA, groupB = null) {{
+        return computeSelectionWelchResult(groupA, groupB)?.results || [];
     }}
 
     // Compatibility helper for the annotation comparison view, which still plots means.
@@ -15854,14 +15881,103 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}));
     }}
 
-	    function getCachedSelectionWelchExpression(groupA, groupB = null) {{
-	        if (!selectionWelchRunRequested) return [];
-	        const key = `${{getExplorationModality()}}:${{groupB === null ? 'all' : 'region-b'}}:${{selectionRevision}}:${{selectionWelchRevision}}`;
-	        if (selectionWelchCache.has(key)) return selectionWelchCache.get(key);
-	        const result = computeSelectionWelchExpression(groupA, groupB);
-	        selectionWelchCache.set(key, result);
-	        return result;
-	    }}
+    function getCachedSelectionWelchResult(groupA, groupB = null) {{
+        if (!selectionWelchRunRequested) return null;
+        const key = getSelectionWelchCacheKey(groupB);
+        if (selectionWelchCache.has(key)) return selectionWelchCache.get(key);
+        if (selectionWelchRunning || shouldRunFullSidecarDE(getExplorationModality())) return null;
+        const result = computeSelectionWelchResult(groupA, groupB);
+        if (result) selectionWelchCache.set(key, result);
+        return result;
+    }}
+
+    function getCachedSelectionWelchExpression(groupA, groupB = null) {{
+        return getCachedSelectionWelchResult(groupA, groupB)?.results || [];
+    }}
+
+    async function runSelectionWelchComparison() {{
+        if (selectionWelchRunning || selectedCells.size === 0) return;
+        const compareAllCells = selectedCellsB.size === 0;
+        const groupASelection = new Set(selectedCells);
+        const groupBSelection = compareAllCells ? null : new Set(selectedCellsB);
+        const key = getSelectionWelchCacheKey(groupBSelection);
+        const targetModality = getExplorationModality();
+        const token = ++selectionWelchRunToken;
+        selectionWelchRunRequested = true;
+        selectionWelchRunning = true;
+        selectionWelchButtonHidden = true;
+        selectionWelchFullRun = null;
+        updateSelectionInfo();
+        await new Promise((resolve) => window.setTimeout(resolve, 30));
+
+        const cellSetA = buildSelectionCellSetGroup(groupASelection, {{ key: 'selection-a', label: 'Selection A' }});
+        const cellSetB = groupBSelection === null
+            ? buildSelectionCellSetGroup(null, {{ key: 'all-cells', label: 'All cells' }}, true)
+            : buildSelectionCellSetGroup(groupBSelection, {{ key: 'selection-b', label: 'Selection B' }});
+        const isStale = () => token !== selectionWelchRunToken || key !== getSelectionWelchCacheKey(groupBSelection);
+        if (isStale()) return;
+
+        if (shouldRunFullSidecarDE(targetModality)) {{
+            selectionWelchFullRun = {{
+                token,
+                key,
+                running: true,
+                completedShards: 0,
+                totalShards: 0,
+                completedGenes: 0,
+                totalGenes: 0,
+                modality: targetModality,
+                error: null,
+            }};
+            updateSelectionInfo();
+            try {{
+                const fullResult = await runFullCellSetDE(cellSetA, cellSetB, {{
+                    modality: targetModality,
+                    isCancelled: isStale,
+                    onProgress: (progress) => {{
+                        if (isStale()) return;
+                        selectionWelchFullRun = {{
+                            token,
+                            key,
+                            running: true,
+                            completedShards: Number(progress.completedShards || 0),
+                            totalShards: Number(progress.totalShards || 0),
+                            completedGenes: Number(progress.completedGenes || 0),
+                            totalGenes: Number(progress.totalGenes || 0),
+                            modality: targetModality,
+                            error: null,
+                        }};
+                        updateSelectionInfo();
+                    }},
+                }});
+                if (isStale() || !fullResult) return;
+                const normalized = normalizeSelectionWelchResult(fullResult);
+                if (normalized) selectionWelchCache.set(key, normalized);
+                selectionWelchFullRun = null;
+            }} catch (error) {{
+                if (isStale()) return;
+                selectionWelchFullRun = {{
+                    token,
+                    key,
+                    running: false,
+                    completedShards: Number(selectionWelchFullRun?.completedShards || 0),
+                    totalShards: Number(selectionWelchFullRun?.totalShards || 0),
+                    completedGenes: Number(selectionWelchFullRun?.completedGenes || 0),
+                    totalGenes: Number(selectionWelchFullRun?.totalGenes || 0),
+                    modality: targetModality,
+                    error: error?.message || 'Unknown error',
+                }};
+            }}
+        }} else {{
+            const quickResult = normalizeSelectionWelchResult(computePooledWelchCellSetDE(cellSetA, cellSetB));
+            if (isStale()) return;
+            if (quickResult) selectionWelchCache.set(key, quickResult);
+        }}
+
+        if (isStale()) return;
+        selectionWelchRunning = false;
+        updateSelectionInfo();
+    }}
 
     function selectWelchTopResults(results, topN, minPct = 0, pctScale = 100) {{
         const n = Math.max(1, Math.min(20, Number(topN) || 3));
@@ -15885,7 +16001,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function renderWelchTopNControl() {{
-        return `<div class="selection-summary-welch-controls"><div class="selection-summary-welch-control-row"><label>Top N per direction</label><input type="number" name="selection_welch_top_n" min="1" max="20" step="1" value="${{selectionWelchTopN}}" data-welch-top-n aria-label="Number of top positive and negative genes selected by Welch test"></div><div class="selection-summary-welch-control-row"><label>Min expressed %</label><input type="range" name="selection_welch_min_pct" min="0" max="100" step="1" value="${{selectionWelchMinPct}}" data-welch-min-pct aria-label="Minimum percentage of expressing cells in at least one group"><output data-welch-min-pct-value>${{selectionWelchMinPct}}%</output></div></div>`;
+        return `<div class="selection-summary-welch-controls"><div class="selection-summary-welch-control-row"><label>Top N per direction</label><input type="number" name="selection_welch_top_n" min="1" max="20" step="1" value="${{selectionWelchTopN}}" data-welch-top-n aria-label="Number of top positive and negative features selected by Welch test"></div><div class="selection-summary-welch-control-row"><label>Min detected %</label><input type="range" name="selection_welch_min_pct" min="0" max="100" step="1" value="${{selectionWelchMinPct}}" data-welch-min-pct aria-label="Minimum percentage of cells with positive values in at least one group"><output data-welch-min-pct-value>${{selectionWelchMinPct}}%</output></div></div>`;
     }}
 
     function renderFindMarkersButton() {{
@@ -16087,7 +16203,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const entries = Array.isArray(modalGenePanelEntries) ? modalGenePanelEntries : [];
         countEl.textContent = `${{count.toLocaleString()}} cells`;
         if (!entries.length) {{
-            body.innerHTML = `<div class="modal-gene-panel-empty">${{escapeHtml(modalGenePanelState.message || 'Load a gene first to rank by expression')}}</div>`;
+            body.innerHTML = `<div class="modal-gene-panel-empty">${{escapeHtml(modalGenePanelState.message || 'Load a feature first to rank by value')}}</div>`;
         }} else {{
             body.innerHTML = entries.map((entry) => {{
                 const scoreLabel = formatModalGeneDiscoveryEntryScore(entry);
@@ -16113,7 +16229,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                             </span>
                         </button>
                         ${{renderGeneGoogleSearchButton(entry.gene, {{
-                            title: 'Search Google for this selection gene',
+                            title: 'Search Google for this selection feature',
                         }})}}
                     </div>
                 `;
@@ -16151,7 +16267,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             cellCount: indices.length,
             message: markerEntries.length
                 ? ''
-                : (loadedGenes.length ? 'Ranking loaded genes…' : 'Load a gene first to rank by expression'),
+                : (loadedGenes.length ? 'Ranking loaded features...' : 'Load a feature first to rank by value'),
         }};
         modalGenePanelEntries = mergeModalGeneDiscoveryEntries(markerEntries, [], 30);
         renderModalGeneDiscoveryPanel();
@@ -16164,7 +16280,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             if (!modalGenePanelEntries.length && !markerEntries.length) {{
                 modalGenePanelState = {{
                     ...modalGenePanelState,
-                    message: 'No enriched genes found among loaded genes.',
+                    message: 'No enriched features found among loaded features.',
                 }};
             }}
             renderModalGeneDiscoveryPanel();
@@ -16554,62 +16670,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }};
     }}
 
-    function computeCellSetDE(groupA, groupB, options = {{}}) {{
-        const topN = Math.max(1, Number(options.topN) || groupDeTopN || 12);
-        if (!groupA || !groupB) {{
-            return {{ available: false, reason: 'missing_groups', results: [] }};
-        }}
-        if (groupA.key && groupA.key === groupB.key) {{
-            return {{ available: false, reason: 'same_group', nA: groupA.nCells || 0, nB: groupB.nCells || 0, results: [] }};
-        }}
-        if (!(groupA.nCells > 0) || !(groupB.nCells > 0)) {{
-            return {{
-                available: false,
-                reason: 'empty_group',
-                nA: Number(groupA.nCells || 0),
-                nB: Number(groupB.nCells || 0),
-                modality: getExplorationModality(),
-                results: [],
-            }};
-        }}
-
-        const activeModality = getExplorationModality();
-        const loadedGenes = getLoadedFeaturesForModality(activeModality);
-        const totalGenes = getFeatureCatalog(activeModality).length || loadedGenes.length;
-        if (!loadedGenes.length) {{
-            return {{
-                available: false,
-                reason: 'no_loaded_features',
-                nA: Number(groupA.nCells || 0),
-                nB: Number(groupB.nCells || 0),
-                modality: activeModality,
-                loadedGeneCount: 0,
-                totalGeneCount: totalGenes,
-                results: [],
-            }};
-        }}
-
-        const results = [];
-        loadedGenes.forEach((gene) => {{
-            const statsA = computeQuickStatsForGroupGene(groupA, gene, activeModality);
-            const statsB = computeQuickStatsForGroupGene(groupB, gene, activeModality);
-            const entry = buildDEEntryFromStats(gene, statsA, statsB, groupA.nCells, groupB.nCells);
-            if (entry) results.push(entry);
-        }});
-
-        sortCellSetDEResults(results);
-        return {{
-            available: true,
-            reason: null,
-            nA: Number(groupA.nCells || 0),
-            nB: Number(groupB.nCells || 0),
-            modality: activeModality,
-            loadedGeneCount: loadedGenes.length,
-            totalGeneCount: totalGenes,
-            results: selectTwoSidedTopN(results, topN),
-        }};
-    }}
-
     function cancelGroupDEFullRun() {{
         groupDeFullRunToken += 1;
         groupDeFullRun = null;
@@ -16651,7 +16711,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function computeCellSetDEFromSidecarGeneEntry(gene, geneEntry, groupA, groupB, modality = getExplorationModality()) {{
         const modalityEntry = getFeatureSidecarManifestEntryForModality(featureSidecarManifest, modality);
         const geneMeta = modalityEntry?.features_meta?.[gene]
-            || (modality === DEFAULT_MODALITY_NAME ? featureSidecarManifest?.features_meta?.[gene] : null)
             || getFeatureState(modality).features_meta?.[gene]
             || null;
         const statsA = computeGroupStatsFromSidecarGeneEntry(geneEntry, groupA, geneMeta);
@@ -16695,7 +16754,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         if (!payloadBuffer) continue;
                         const geneEntry = parseBinaryFeaturePayload(
                             payloadBuffer,
-                            modalityEntry.section_order || manifest.section_order || [],
+                            modalityEntry.section_order || [],
                             modalityEntry?.features_meta?.[gene] || null
                         );
                         const entry = computeCellSetDEFromSidecarGeneEntry(gene, geneEntry, groupA, groupB, targetModality);
@@ -16971,7 +17030,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function computeRegionAnnotationDEFromSidecarGeneEntry(gene, geneEntry, groupA, groupB, modality = getExplorationModality()) {{
         const modalityEntry = getFeatureSidecarManifestEntryForModality(featureSidecarManifest, modality);
         const geneMeta = modalityEntry?.features_meta?.[gene]
-            || (modality === DEFAULT_MODALITY_NAME ? featureSidecarManifest?.features_meta?.[gene] : null)
             || getFeatureState(modality).features_meta?.[gene]
             || null;
         const statsA = computeGroupStatsFromSidecarGeneEntry(geneEntry, groupA, geneMeta);
@@ -17057,7 +17115,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                             if (!payloadBuffer) continue;
                             const geneEntry = parseBinaryFeaturePayload(
                                 payloadBuffer,
-                                modalityEntry.section_order || manifest.section_order || [],
+                                modalityEntry.section_order || [],
                                 modalityEntry?.features_meta?.[gene] || null
                             );
                             const result = computeRegionAnnotationDEFromSidecarGeneEntry(gene, geneEntry, groupA, groupB, targetModality);
@@ -17432,7 +17490,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const examples = getSelectionQueryExamplePresets();
         const preview = getSelectionQueryPreviewText();
         const summaryHtml = expanded
-            ? 'Use a simple rule with annotations, genes, or section metadata.'
+            ? 'Use a simple rule with annotations, features, or section metadata.'
             : selectionQueryStatus
                 ? escapeHtml(selectionQueryStatus)
                 : preview
@@ -17569,6 +17627,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const labelB = compareAllCells ? 'All cells' : 'Region B';
         const colorA = 'var(--accent-strong)';
         const colorB = compareAllCells ? 'var(--muted-color)' : '#4cc9f0';
+        const selectionResultKey = getSelectionWelchCacheKey(compareAllCells ? null : selectedCellsB);
+        const selectionFullRun = selectionWelchFullRun?.key === selectionResultKey ? selectionWelchFullRun : null;
         let html = '';
 
         // Match the Region composition layout for the two lasso selections.
@@ -17614,16 +17674,30 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
 
         // Welch test for feature values A vs B.
-        const expr = getCachedSelectionWelchExpression(selectedCells, compareAllCells ? null : selectedCellsB);
+        const selectionWelchResult = getCachedSelectionWelchResult(selectedCells, compareAllCells ? null : selectedCellsB);
+        const expr = selectionWelchResult?.results || [];
+        const resultModality = selectionWelchResult?.modality || selectionFullRun?.modality || getExplorationModality();
         if (selectedCells.size > 0 && (compareAllCells || selectedCellsB.size > 0)) {{
             const top = getWelchTopResults(expr);
             html += '<div class="selection-summary-expr">';
-            html += `<div class="selection-summary-title-row"><div class="selection-summary-title">Gene expression — ${{labelA.toLowerCase()}} vs ${{labelB.toLowerCase()}}${{renderCalcInfoButton('selection_expression')}}</div>${{renderFindMarkersButton()}}</div>${{selectionWelchRunRequested && !selectionWelchRunning ? renderWelchTopNControl() : ''}}`;
+            html += `<div class="selection-summary-title-row"><div class="selection-summary-title">Feature values - ${{labelA.toLowerCase()}} vs ${{labelB.toLowerCase()}}${{renderCalcInfoButton('selection_expression')}}</div>${{renderFindMarkersButton()}}</div>${{selectionWelchRunRequested && !selectionWelchRunning ? renderWelchTopNControl() : ''}}`;
+            if (selectionFullRun?.running) {{
+                const maximum = Math.max(1, Number(selectionFullRun.totalGenes || selectionFullRun.totalShards || 1));
+                const value = Math.min(maximum, Number(selectionFullRun.completedGenes || selectionFullRun.completedShards || 0));
+                const progressPct = Math.round((value / maximum) * 100);
+                html += `<div class="agg-group-meta">Scanning all ${{getModalityDisplayLabel(resultModality)}} features from the sidecar.</div><progress value="${{value}}" max="${{maximum}}" style="width:100%;height:12px"></progress><div class="agg-group-meta">${{progressPct}}% complete · ${{Number(selectionFullRun.completedGenes || 0).toLocaleString()}} / ${{Number(selectionFullRun.totalGenes || 0).toLocaleString()}} features</div>`;
+            }} else if (selectionFullRun?.error) {{
+                html += `<div class="agg-group-meta">Full sidecar comparison failed: ${{escapeHtml(selectionFullRun.error)}}</div>`;
+            }} else if (selectionWelchResult?.mode === 'full-sidecar') {{
+                html += `<div class="agg-group-meta">Full sidecar comparison across ${{Number(selectionWelchResult.totalGeneCount || 0).toLocaleString()}} ${{getModalityDisplayLabel(resultModality)}} features.</div>`;
+            }} else if (selectionWelchResult && Number(selectionWelchResult.loadedGeneCount || 0) < Number(selectionWelchResult.totalGeneCount || 0)) {{
+                html += `<div class="agg-group-meta">Quick preview over ${{Number(selectionWelchResult.loadedGeneCount || 0).toLocaleString()}} of ${{Number(selectionWelchResult.totalGeneCount || 0).toLocaleString()}} features.</div>`;
+            }}
             top.forEach(({{gene, meanA, meanB, pctA, pctB}}) => {{
                 const vmax = Math.max(1e-12, meanA || 0, meanB || 0);
                 const factor = meanB > 0 ? (meanA / meanB).toFixed(1) + 'x' : '—';
                 html += `<div class="selection-summary-expr-row">
-                    <span class="selection-summary-expr-gene" data-gene-activate="${{escapeHtml(gene)}}" title="Load ${{escapeHtml(gene)}} into the viewer">${{escapeHtml(gene)}}</span>
+                    <span class="selection-summary-expr-gene" data-gene-activate="${{escapeHtml(gene)}}" data-gene-modality="${{escapeHtml(resultModality)}}" title="Load ${{escapeHtml(gene)}} into the viewer">${{escapeHtml(gene)}}</span>
                     <div class="selection-summary-expr-bars">
                         <div class="selection-summary-expr-bar sel" style="width:${{clampPercent(100 * meanA / vmax)}}%;" title="${{labelA}} mean: ${{formatCompactNumber(meanA)}}">${{formatCompactNumber(meanA)}} (${{pctA.toFixed(0)}}%)</div>
                         <div class="selection-summary-expr-bar ${{compareAllCells ? 'rest' : 'region-b'}}" style="width:${{clampPercent(100 * meanB / vmax)}}%;" title="${{labelB}} mean: ${{formatCompactNumber(meanB)}}">${{formatCompactNumber(meanB)}} (${{pctB.toFixed(0)}}%)</div>
@@ -17642,19 +17716,21 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         <div class="comparison-card-title comparison-de-card-title">
                             <div class="comparison-de-card-title-main">
                                 ${{renderGeneTokenButton(entry.gene, {{
+                                    allowUnknown: true,
                                     isActive: entry.gene === currentGene,
+                                    modality: resultModality,
                                     showMeta: false,
-                                    title: 'Load selection comparison gene into the viewer',
+                                    title: 'Load selection comparison feature into the viewer',
                                 }})}}
                                 ${{renderGeneGoogleSearchButton(entry.gene, {{
-                                    title: 'Search Google for this gene',
+                                    title: 'Search Google for this feature',
                                 }})}}
                             </div>
                             <div class="comparison-de-title-stats" style="border-color:${{Number(entry.score || 0) >= 0 ? colorA : colorB}}"><span>log2FC ${{formatScaleNumber(entry.log2fc)}}</span><span>Score ${{formatScaleNumber(entry.score)}}</span></div>
                         </div>
                         <div class="comparison-metric-grid">
-                            <span class="comparison-de-metric-chip" style="background:${{getComparisonMetricChipBackground(colorA, Number(entry.score || 0) >= 0 ? colorA : colorB)}};color:${{textColorA}}"><span>% expr ${{compareAllCells ? 'selected' : 'A'}}</span><strong>${{Number(entry.pctA || 0).toFixed(1)}}%</strong><span>Mean ${{compareAllCells ? 'selected' : 'A'}}</span><strong>${{formatScaleNumber(entry.meanA)}}</strong></span>
-                            <span class="comparison-de-metric-chip" style="background:${{getComparisonMetricChipBackground(colorB, Number(entry.score || 0) >= 0 ? colorA : colorB)}};color:${{textColorB}}"><span>% expr ${{compareAllCells ? 'all' : 'B'}}</span><strong>${{Number(entry.pctB || 0).toFixed(1)}}%</strong><span>Mean ${{compareAllCells ? 'all' : 'B'}}</span><strong>${{formatScaleNumber(entry.meanB)}}</strong></span>
+	                            <span class="comparison-de-metric-chip" style="background:${{getComparisonMetricChipBackground(colorA, Number(entry.score || 0) >= 0 ? colorA : colorB)}};color:${{textColorA}}"><span>% detected ${{compareAllCells ? 'selected' : 'A'}}</span><strong>${{Number(entry.pctA || 0).toFixed(1)}}%</strong><span>Mean ${{compareAllCells ? 'selected' : 'A'}}</span><strong>${{formatScaleNumber(entry.meanA)}}</strong></span>
+	                            <span class="comparison-de-metric-chip" style="background:${{getComparisonMetricChipBackground(colorB, Number(entry.score || 0) >= 0 ? colorA : colorB)}};color:${{textColorB}}"><span>% detected ${{compareAllCells ? 'all' : 'B'}}</span><strong>${{Number(entry.pctB || 0).toFixed(1)}}%</strong><span>Mean ${{compareAllCells ? 'all' : 'B'}}</span><strong>${{formatScaleNumber(entry.meanB)}}</strong></span>
                         </div>
                     </div>
                 `).join('');
@@ -17751,16 +17827,32 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             html += '<div class="selection-summary-meta">No categorical annotation is available for type counts.</div>';
         }}
 
-        const exprData = getCachedSelectionWelchExpression(selectedCells, null);
+        const selectionResultKey = getSelectionWelchCacheKey(null);
+        const selectionFullRun = selectionWelchFullRun?.key === selectionResultKey ? selectionWelchFullRun : null;
+        const selectionWelchResult = getCachedSelectionWelchResult(selectedCells, null);
+        const exprData = selectionWelchResult?.results || [];
+        const resultModality = selectionWelchResult?.modality || selectionFullRun?.modality || getExplorationModality();
         if (selectedCells.size > 0) {{
             const top = getWelchTopResults(exprData);
             html += '<div class="selection-summary-expr">';
-            html += `<div class="selection-summary-title-row"><div class="selection-summary-title">Gene expression — selected cells vs all cells${{renderCalcInfoButton('selection_expression')}}</div>${{renderFindMarkersButton()}}</div>${{selectionWelchRunRequested && !selectionWelchRunning ? renderWelchTopNControl() : ''}}`;
+            html += `<div class="selection-summary-title-row"><div class="selection-summary-title">Feature values - selected cells vs all cells${{renderCalcInfoButton('selection_expression')}}</div>${{renderFindMarkersButton()}}</div>${{selectionWelchRunRequested && !selectionWelchRunning ? renderWelchTopNControl() : ''}}`;
+            if (selectionFullRun?.running) {{
+                const maximum = Math.max(1, Number(selectionFullRun.totalGenes || selectionFullRun.totalShards || 1));
+                const value = Math.min(maximum, Number(selectionFullRun.completedGenes || selectionFullRun.completedShards || 0));
+                const progressPct = Math.round((value / maximum) * 100);
+                html += `<div class="agg-group-meta">Scanning all ${{getModalityDisplayLabel(resultModality)}} features from the sidecar.</div><progress value="${{value}}" max="${{maximum}}" style="width:100%;height:12px"></progress><div class="agg-group-meta">${{progressPct}}% complete · ${{Number(selectionFullRun.completedGenes || 0).toLocaleString()}} / ${{Number(selectionFullRun.totalGenes || 0).toLocaleString()}} features</div>`;
+            }} else if (selectionFullRun?.error) {{
+                html += `<div class="agg-group-meta">Full sidecar comparison failed: ${{escapeHtml(selectionFullRun.error)}}</div>`;
+            }} else if (selectionWelchResult?.mode === 'full-sidecar') {{
+                html += `<div class="agg-group-meta">Full sidecar comparison across ${{Number(selectionWelchResult.totalGeneCount || 0).toLocaleString()}} ${{getModalityDisplayLabel(resultModality)}} features.</div>`;
+            }} else if (selectionWelchResult && Number(selectionWelchResult.loadedGeneCount || 0) < Number(selectionWelchResult.totalGeneCount || 0)) {{
+                html += `<div class="agg-group-meta">Quick preview over ${{Number(selectionWelchResult.loadedGeneCount || 0).toLocaleString()}} of ${{Number(selectionWelchResult.totalGeneCount || 0).toLocaleString()}} features.</div>`;
+            }}
             top.forEach(({{gene, meanA, meanB, pctA, pctB}}) => {{
                 const vmax = Math.max(1e-12, meanA || 0, meanB || 0);
                 const factor = meanB > 0 ? (meanA / meanB).toFixed(1) + 'x' : '—';
                 html += `<div class="selection-summary-expr-row">
-                    <span class="selection-summary-expr-gene" data-gene-activate="${{escapeHtml(gene)}}" title="Load ${{escapeHtml(gene)}} into the viewer">${{escapeHtml(gene)}}</span>
+                    <span class="selection-summary-expr-gene" data-gene-activate="${{escapeHtml(gene)}}" data-gene-modality="${{escapeHtml(resultModality)}}" title="Load ${{escapeHtml(gene)}} into the viewer">${{escapeHtml(gene)}}</span>
                     <div class="selection-summary-expr-bars">
                         <div class="selection-summary-expr-bar sel" style="width:${{clampPercent(100 * meanA / vmax)}}%;" title="Selected mean: ${{formatCompactNumber(meanA)}}">${{formatCompactNumber(meanA)}} (${{pctA.toFixed(0)}}%)</div>
                         <div class="selection-summary-expr-bar rest" style="width:${{clampPercent(100 * meanB / vmax)}}%;" title="All cells mean: ${{formatCompactNumber(meanB)}}">${{formatCompactNumber(meanB)}} (${{pctB.toFixed(0)}}%)</div>
@@ -17780,7 +17872,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (options.allowGenePanel && modalSection && summary.total > 0) {{
             actionButtons.push(
                 `<button class="selection-summary-compare-btn" type="button" id="selection-show-genes-btn">${{
-                    modalGenePanelState ? 'Hide genes' : 'Genes in selection'
+                    modalGenePanelState ? 'Hide features' : 'Features in selection'
                 }}</button>`
             );
         }}
@@ -17814,10 +17906,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         container.querySelectorAll('[data-selection-de-export-csv]').forEach((button) => {{
             button.addEventListener('click', () => {{
                 const compareAllCells = selectedCellsB.size === 0;
-                const result = {{
-                    results: getCachedSelectionWelchExpression(selectedCells, compareAllCells ? null : selectedCellsB),
+                const cachedResult = getCachedSelectionWelchResult(selectedCells, compareAllCells ? null : selectedCellsB);
+                const result = cachedResult ? {{
+                    ...cachedResult,
+                    nA: Number(cachedResult.nA ?? selectedCells.size),
+                    nB: Number(cachedResult.nB ?? (compareAllCells ? buildAllCellsSelectionSummary().total : selectedCellsB.size)),
+                }} : {{
+                    results: [],
                     nA: selectedCells.size,
                     nB: compareAllCells ? buildAllCellsSelectionSummary().total : selectedCellsB.size,
+                    modality: getExplorationModality(),
+                    loadedGeneCount: 0,
+                    totalGeneCount: 0,
                 }};
                 exportComparisonDECsv(
                     compareAllCells ? 'selected cells' : 'region A',
@@ -17851,16 +17951,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 event.stopPropagation();
                 if (selectionWelchRunning || selectedCells.size === 0) return;
                 const advanceTutorialFromMarkerSearch = tutorialActive && tutorialSteps[tutorialStepIndex]?.requiresSelectionMarkersClicked;
-                if (tutorialActive && tutorialSteps[tutorialStepIndex]?.requiresSelectionMarkersClicked) {{
+                if (advanceTutorialFromMarkerSearch) {{
                     tutorialSelectionMarkersClicked = true;
                 }}
-                selectionWelchRunning = true;
-                selectionWelchButtonHidden = true;
-                updateSelectionInfo();
-                window.setTimeout(() => {{
-                    selectionWelchRunRequested = true;
-                    selectionWelchRunning = false;
-                    updateSelectionInfo();
+                runSelectionWelchComparison().finally(() => {{
                     if (advanceTutorialFromMarkerSearch) {{
                         window.setTimeout(() => {{
                             if (!tutorialActive) return;
@@ -17868,7 +17962,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                             document.getElementById('tutorial-next')?.click();
                         }}, 80);
                     }}
-                }}, 30);
+                }});
             }});
         }});
         container.querySelectorAll('[data-selection-find-more]').forEach((button) => {{
@@ -18328,10 +18422,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         if (lassoModeB) {{
             selectedCellsB = newCells;
-            selectionWelchRevision += 1;
-            selectionWelchCache.clear();
-            selectionWelchRunRequested = false;
-            selectionWelchButtonHidden = false;
+            resetSelectionWelchState();
             selectedLassoPathB = completedLassoPath;
             selectedCellsBFromGridLasso = false;
             selectedGridLassoSectionIdB = null;
@@ -18429,10 +18520,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         if (lassoModeB) {{
             selectedCellsB = newCells;
-            selectionWelchRevision += 1;
-            selectionWelchCache.clear();
-            selectionWelchRunRequested = false;
-            selectionWelchButtonHidden = false;
+            resetSelectionWelchState();
             selectedLassoPathB = [];
             selectedCellsBFromGridLasso = true;
             selectedGridLassoSectionIdB = section.id;
@@ -19525,7 +19613,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             if (downsampleWarning) warnings.push(downsampleWarning);
         }}
         if (insightsGenesTab === 'de-genes') {{
-            warnings.push('<div class="genes-warning"><strong>Double dipping warning.</strong> When unsupervised cell clustering is used as category, the genes contributing to that clustering are inherently likely to be identified as differentially expressed. False positive differentially expressed genes are expected, which could lead to false biological cell-type interpretation.</div>');
+            warnings.push('<div class="genes-warning"><strong>Double dipping warning.</strong> When unsupervised cell clustering is used as category, the features contributing to that clustering are inherently likely to be identified as differentially enriched. False positive differential features are expected, which could lead to false biological interpretation.</div>');
         }}
         container.innerHTML = warnings.join('');
     }}
@@ -20228,9 +20316,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function markPrimarySelectionChanged() {{
         selectionRevision += 1;
         annotationCreatedForSelectionRevision = null;
-        selectionWelchCache.clear();
-        selectionWelchRunRequested = false;
-        selectionWelchButtonHidden = false;
+        resetSelectionWelchState({{ bumpRevision: false }});
     }}
 
     function annotationAlreadyCreatedForCurrentSelection() {{
@@ -20499,10 +20585,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const annotation = getModalAnnotationById(annotationId);
         if (!annotation || !selectedCellsFromAnnotation || selectedAnnotationId === annotation.id || selectedCells.size === 0) return;
         selectedCellsB = getAnnotationCellSet(annotation);
-        selectionWelchRevision += 1;
-        selectionWelchCache.clear();
-        selectionWelchRunRequested = false;
-        selectionWelchButtonHidden = false;
+        resetSelectionWelchState();
         selectedLassoPathB = [];
         selectedCellsBFromGridLasso = false;
         selectedGridLassoSectionIdB = null;
@@ -21235,7 +21318,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 xChunks = [header, ...xChunks];
             }}
 
-            const varCsv = 'gene_name\\n' + genesToExport.map(csvEscape).join('\\n') + (nGenes ? '\\n' : '');
+            const varCsv = 'feature_name\\n' + genesToExport.map(csvEscape).join('\\n') + (nGenes ? '\\n' : '');
 
             const xFileName = useSparse ? 'X.mtx' : 'X.csv';
             const readmeLines = [
@@ -21248,7 +21331,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 '- var.csv      Feature list (' + nGenes.toLocaleString() + ' features)',
                 useSparse
                     ? '- X.mtx        Sparse expression matrix in Matrix Market coordinate format (' + nnz.toLocaleString() + ' non-zero entries)'
-                    : '- X.csv        Dense expression matrix (rows = cells, columns = genes)',
+                    : '- X.csv        Dense feature matrix (rows = cells, columns = features)',
                 '- spatial.csv  Per-cell spatial coordinates',
                 anyUMAP ? '- umap.csv     Per-cell UMAP coordinates' : '- umap.csv     (not produced \u2014 no UMAP in viewer)',
                 '',
@@ -21260,7 +21343,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'import numpy as np',
                 '',
                 'obs = pd.read_csv("obs.csv").set_index("cell_id")',
-                'var = pd.read_csv("var.csv").set_index("gene_name")',
+                'var = pd.read_csv("var.csv").set_index("feature_name")',
             ];
             if (useSparse) {{
                 readmeLines.push(
@@ -21330,7 +21413,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             document.body.removeChild(a);
             setTimeout(() => URL.revokeObjectURL(url), 1000);
             setLabel(origLabel || 'Export data');
-            finalizeExportProgress(`Saved ${{totalCells.toLocaleString()}} cells \u00d7 ${{genesToExport.length.toLocaleString()}} genes`);
+            finalizeExportProgress(`Saved ${{totalCells.toLocaleString()}} cells x ${{genesToExport.length.toLocaleString()}} features`);
         }} catch (err) {{
             if (err && /cancelled/i.test(err.message)) {{
                 finalizeExportProgress('Export cancelled');
@@ -21836,10 +21919,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         if (lassoModeB) {{
             selectedCellsB = newCells;
-            selectionWelchRevision += 1;
-            selectionWelchCache.clear();
-            selectionWelchRunRequested = false;
-            selectionWelchButtonHidden = false;
+            resetSelectionWelchState();
             selectedLassoPathB = [];
             selectedCellsBFromGridLasso = false;
             selectedGridLassoSectionIdB = null;
@@ -22014,7 +22094,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const downsampleWarningHtml = getOverviewDownsampleWarningHtml();
             if (summary.total === 0) {{
                 compareSelectionSummary.classList.remove('selection-expression-only');
-                compareSelectionSummary.innerHTML = downsampleWarningHtml + '<div class="agg-group-meta">Select cells with the lasso tool to compare their expression.</div>';
+                compareSelectionSummary.innerHTML = downsampleWarningHtml + '<div class="agg-group-meta">Select cells with the lasso tool to compare their feature values.</div>';
             }} else {{
                 compareSelectionSummary.classList.add('selection-expression-only');
                 compareSelectionSummary.innerHTML = downsampleWarningHtml + renderSelectionSummaryHtml(summary, {{
@@ -22926,12 +23006,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }});
 
         // Update stats
-        const loadedGenes = Number(DATA.loaded_features ?? Object.keys(DATA.features_meta || {{}}).length);
-        const genesStatsText = Number.isFinite(loadedGenes) && loadedGenes > 0
-            ? ` | ${{loadedGenes.toLocaleString()}} genes`
+        const loadedFeatures = Number(DATA.loaded_features ?? Object.keys(DATA.features_meta || {{}}).length);
+        const featuresStatsText = Number.isFinite(loadedFeatures) && loadedFeatures > 0
+            ? ` | ${{loadedFeatures.toLocaleString()}} features`
             : '';
         document.getElementById('stats-text').textContent =
-            `${{visibleCount}}/${{DATA.n_sections}} sections | ${{totalCells.toLocaleString()}} cells${{genesStatsText}}`;
+            `${{visibleCount}}/${{DATA.n_sections}} sections | ${{totalCells.toLocaleString()}} cells${{featuresStatsText}}`;
 
         // When filters collapse to a single visible sample, avoid full-width stretching.
         if (grid) {{
@@ -24685,6 +24765,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (insightsTopLevelTab === 'features') {{
             renderGenesDetailsWarnings();
             syncGenesDetailsContentVisibility();
+            refreshLoadedGeneFilterDropdowns();
             if (insightsGenesTab === 'de-genes') {{
                 renderMarkerGenes();
             }} else if (insightsGenesTab === 'spatial') {{
@@ -24788,7 +24869,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 : '');
 
         html += `
-            <div class="selection-summary-title">Gene expression — region A vs region B${{renderCalcInfoButton('region_expression')}}</div>
+            <div class="selection-summary-title">Feature values - region A vs region B${{renderCalcInfoButton('region_expression')}}</div>
             <div class="pseudobulk-de-controls">
                 <div class="pseudobulk-de-select-row comparison-pair-select-row">
                     <div>
@@ -24804,11 +24885,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     ${{hasCompletedCalculation ? `<div class="selection-summary-welch-controls">
                         <div class="selection-summary-welch-control-row">
                             <label>Top N per direction</label>
-                            <input id="region-de-topn" type="number" min="1" max="20" step="1" value="${{Math.max(1, Math.min(20, Number(annotationDeTopN) || ANNOTATION_DE_TOP_N))}}" aria-label="Number of top positive and negative genes selected by Welch test">
+	                            <input id="region-de-topn" type="number" min="1" max="20" step="1" value="${{Math.max(1, Math.min(20, Number(annotationDeTopN) || ANNOTATION_DE_TOP_N))}}" aria-label="Number of top positive and negative features selected by Welch test">
                         </div>
                         <div class="selection-summary-welch-control-row">
-                            <label>Min expressed %</label>
-                            <input id="region-de-min-pct" type="range" min="0" max="100" step="1" value="${{Math.max(0, Math.min(100, Number(annotationDeMinPct) || 0))}}" aria-label="Minimum percentage of expressing cells in at least one region">
+	                            <label>Min detected %</label>
+	                            <input id="region-de-min-pct" type="range" min="0" max="100" step="1" value="${{Math.max(0, Math.min(100, Number(annotationDeMinPct) || 0))}}" aria-label="Minimum percentage of cells with positive values in at least one region">
                             <output id="region-de-min-pct-value">${{Math.max(0, Math.min(100, Number(annotationDeMinPct) || 0))}}%</output>
                         </div>
                     </div>` : ''}}
@@ -24851,14 +24932,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                                     title: 'Load region DE feature into the viewer',
                                 }})}}
                                 ${{renderGeneGoogleSearchButton(entry.gene, {{
-                                    title: 'Search Google for this gene',
+                                    title: 'Search Google for this feature',
                                 }})}}
                             </div>
                             <div class="comparison-de-title-stats" style="border-color:${{Number(entry.score || 0) >= 0 ? colorA : colorB}}"><span>log2FC ${{formatScaleNumber(entry.log2fc)}}</span><span>Score ${{formatScaleNumber(entry.score)}}</span></div>
                         </div>
                         <div class="comparison-metric-grid">
-                            <span class="comparison-de-metric-chip" style="background:${{getComparisonMetricChipBackground(colorA, Number(entry.score || 0) >= 0 ? colorA : colorB)}};color:${{textColorA}}"><span>% expr A</span><strong>${{formatPseudobulkDEPct(entry.pctA)}}</strong><span>Mean A</span><strong>${{formatScaleNumber(entry.meanA)}}</strong></span>
-                            <span class="comparison-de-metric-chip" style="background:${{getComparisonMetricChipBackground(colorB, Number(entry.score || 0) >= 0 ? colorA : colorB)}};color:${{textColorB}}"><span>% expr B</span><strong>${{formatPseudobulkDEPct(entry.pctB)}}</strong><span>Mean B</span><strong>${{formatScaleNumber(entry.meanB)}}</strong></span>
+	                            <span class="comparison-de-metric-chip" style="background:${{getComparisonMetricChipBackground(colorA, Number(entry.score || 0) >= 0 ? colorA : colorB)}};color:${{textColorA}}"><span>% detected A</span><strong>${{formatPseudobulkDEPct(entry.pctA)}}</strong><span>Mean A</span><strong>${{formatScaleNumber(entry.meanA)}}</strong></span>
+	                            <span class="comparison-de-metric-chip" style="background:${{getComparisonMetricChipBackground(colorB, Number(entry.score || 0) >= 0 ? colorA : colorB)}};color:${{textColorB}}"><span>% detected B</span><strong>${{formatPseudobulkDEPct(entry.pctB)}}</strong><span>Mean B</span><strong>${{formatScaleNumber(entry.meanB)}}</strong></span>
                         </div>
                     </div>
                 `;
@@ -24876,7 +24957,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const quickSummaryHtml = (deResult.available && displayedQuickResults.length)
             ? `
                 ${{Number(deResult.loadedGeneCount || 0) < Number(deResult.totalGeneCount || 0)
-                    ? `<div class="agg-group-meta">Quick preview over ${{Number(deResult.loadedGeneCount || 0).toLocaleString()}} of ${{Number(deResult.totalGeneCount || 0).toLocaleString()}} genes — run the full sidecar DE for the complete result.</div>`
+	                    ? `<div class="agg-group-meta">Quick preview over ${{Number(deResult.loadedGeneCount || 0).toLocaleString()}} of ${{Number(deResult.totalGeneCount || 0).toLocaleString()}} features - run the full sidecar DE for the complete result.</div>`
                     : ''}}
                 ${{buildGroupVolcanoPlot(displayedQuickResults, volcanoExportButtonHtml, {{
                     positive: getAnnotationDisplayColor(source) || 'var(--accent-strong)',
@@ -24893,7 +24974,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 ? `
                     <div class="agg-group-meta">
                         Cached full sidecar DE${{cachedTimestamp ? ` from ${{cachedTimestamp}}` : ''}}
-                        across ${{Number(fullCached.totalGeneCount || 0).toLocaleString()}} genes.
+	                        across ${{Number(fullCached.totalGeneCount || 0).toLocaleString()}} features.
                     </div>
                     ${{buildGroupVolcanoPlot(displayedFullResults, volcanoExportButtonHtml, {{
                         positive: getAnnotationDisplayColor(source) || 'var(--accent-strong)',
@@ -24903,7 +24984,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 `
                 : `
                     <div class="agg-group-meta">
-                        Cached full sidecar DE${{cachedTimestamp ? ` from ${{cachedTimestamp}}` : ''}} found no enriched genes across ${{Number(fullCached.totalGeneCount || 0).toLocaleString()}} genes.
+	                        Cached full sidecar DE${{cachedTimestamp ? ` from ${{cachedTimestamp}}` : ''}} found no enriched features across ${{Number(fullCached.totalGeneCount || 0).toLocaleString()}} features.
                     </div>
                 `
             : '';
@@ -24913,17 +24994,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }} else if (fullRun?.running) {{
             const totalShards = Number(fullRun.totalShards || 0);
             const completedShards = Number(fullRun.completedShards || 0);
-            const totalGenes = Number(fullRun.totalGenes || 0);
-            const completedGenes = Number(fullRun.completedGenes || 0);
-            const progressMax = Math.max(1, totalGenes || totalShards || 1);
-            const progressValue = Math.min(progressMax, totalGenes ? completedGenes : completedShards);
+	            const totalFeatures = Number(fullRun.totalGenes || 0);
+	            const completedFeatures = Number(fullRun.completedGenes || 0);
+	            const progressMax = Math.max(1, totalFeatures || totalShards || 1);
+	            const progressValue = Math.min(progressMax, totalFeatures ? completedFeatures : completedShards);
             const progressPct = progressMax > 0 ? Math.round((progressValue / progressMax) * 100) : 0;
             resultHtml = `
                 <div class="agg-group-meta">Scanning the full sidecar in the background. The viewer stays interactive while this runs.</div>
                 <progress value="${{progressValue}}" max="${{progressMax}}" style="width:100%; height:12px;"></progress>
                 <div class="agg-group-meta">
                     ${{progressPct}}% complete
-                    · ${{completedGenes.toLocaleString()}} / ${{totalGenes.toLocaleString()}} genes
+	                    · ${{completedFeatures.toLocaleString()}} / ${{totalFeatures.toLocaleString()}} features
                     · ${{completedShards.toLocaleString()}} / ${{totalShards.toLocaleString()}} shards
                 </div>
                 <div style="display:flex; justify-content:flex-end;">
@@ -24941,7 +25022,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 resultHtml += '<div class="agg-group-meta">Showing the previous cached full result:</div>';
                 resultHtml += cachedSummaryHtml;
             }} else if (quickSummaryHtml) {{
-                resultHtml += '<div class="agg-group-meta">Quick DE preview from currently loaded genes:</div>';
+	                resultHtml += '<div class="agg-group-meta">Quick DE preview from currently loaded features:</div>';
                 resultHtml += quickSummaryHtml;
             }}
         }} else if (fullCached?.available) {{
@@ -24954,13 +25035,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }} else if (!deResult.available && deResult.reason === 'too_few_cells') {{
             resultHtml = '<div class="agg-group-meta">Each selected region or group needs at least two cells.</div>';
         }} else if (!deResult.available && deResult.reason === 'no_loaded_features' && sidecarAvailable) {{
-            const totalGenes = Number(deResult.totalGeneCount || 0).toLocaleString();
+            const totalFeatures = Number(deResult.totalGeneCount || 0).toLocaleString();
             resultHtml = `
                 <div class="agg-group-meta">
-                    Differential expression runs across ${{totalGenes !== '0' ? `all ${{totalGenes}} genes` : 'all genes'}} from the feature sidecar.
+                    Differential analysis runs across ${{totalFeatures !== '0' ? `all ${{totalFeatures}} features` : 'all features'}} from the feature sidecar.
                 </div>
                 <div style="display:flex; justify-content:flex-end;">
-                    <button class="legend-btn" id="region-de-run-full" type="button">Compute Region DE across all genes</button>
+                    <button class="legend-btn" id="region-de-run-full" type="button">Compute Region DE across all features</button>
                 </div>
             `;
         }} else if (!deResult.available && deResult.reason === 'no_loaded_features') {{
@@ -24970,13 +25051,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }} else if (!displayedQuickResults.length) {{
             if (sidecarAvailable && Number(deResult.loadedGeneCount || 0) < Number(deResult.totalGeneCount || 0)) {{
                 resultHtml = `
-                    <div class="agg-group-meta">No enriched genes were found among the currently loaded genes.</div>
+	                    <div class="agg-group-meta">No enriched features were found among the currently loaded features.</div>
                     <div style="display:flex; justify-content:flex-end;">
                         <button class="legend-btn" id="region-de-run-full" type="button">Run Full Region DE</button>
                     </div>
                 `;
             }} else {{
-                resultHtml = '<div class="agg-group-meta">No enriched genes were found among the genes currently loaded in the viewer.</div>';
+	                resultHtml = '<div class="agg-group-meta">No enriched features were found among the features currently loaded in the viewer.</div>';
             }}
         }} else {{
             resultHtml = quickSummaryHtml;
@@ -25080,7 +25161,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
 
             // Match the Selections expression layout while preserving each
-            // region's own colour for its mean-expression bar.
+                // region's own colour for its mean-value bar.
             const comparisonResult = annotationDeQuickResultKey === quickResultKey
                 ? annotationDeQuickResult
                 : annotationDeFullCache.get(pairKey);
@@ -25117,7 +25198,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
 
         container.innerHTML = html || '<div class="agg-group-meta">No data available.</div>';
-        // Keep the controls and expression summaries together, then place the
+        // Keep the controls and feature-value summaries together, then place the
         // detailed DE report after those summaries.
         const deResults = container.querySelector('#region-de-results');
         if (deResults) container.appendChild(deResults);
@@ -25783,11 +25864,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 // annotation, so a change discards their derived results.
                 invalidateAnnotationDEState(true);
                 invalidateGroupDEState(true);
-                selectionWelchRevision += 1;
-                selectionWelchCache.clear();
-                selectionWelchRunRequested = false;
-                selectionWelchRunning = false;
-                selectionWelchButtonHidden = false;
+                resetSelectionWelchState();
                 selectionComparisonLegendExpanded = false;
                 hoveredNeighborFocus = null;
                 selectedNeighborFocus = null;
@@ -25822,26 +25899,25 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             if (explorationFeatureModalitySection) {{
                 explorationFeatureModalitySection.style.display = modalityOptions.length > 1 ? '' : 'none';
             }}
-	            explorationFeatureModalitySelect.addEventListener('change', async () => {{
-	                const nextModality = explorationFeatureModalitySelect.value || DEFAULT_MODALITY_NAME;
-	                const shouldRerunSelectionComparison = selectionWelchRunRequested && selectedCells.size > 0;
-	                setExplorationModality(nextModality);
-	                invalidateAnnotationDEState(true);
-	                invalidateGroupDEState(true);
-	                selectionWelchRevision += 1;
-	                selectionWelchCache.clear();
-	                selectionWelchRunRequested = shouldRerunSelectionComparison;
-	                selectionWelchRunning = false;
-	                selectionWelchButtonHidden = shouldRerunSelectionComparison;
-	                const markerSearch = document.getElementById('marker-gene-search');
-	                if (markerSearch) {{
-	                    markerSearch.value = '';
-	                    refreshLoadedGeneFilterDropdowns();
-	                }}
-	                renderGeneDiscoveryPanel?.();
-	                updateSelectionInfo?.();
-	                renderActiveInsightsPanel();
-	            }});
+            explorationFeatureModalitySelect.addEventListener('change', async () => {{
+                const nextModality = explorationFeatureModalitySelect.value || DEFAULT_MODALITY_NAME;
+                const shouldRerunSelectionComparison = selectionWelchRunRequested && selectedCells.size > 0;
+                setExplorationModality(nextModality);
+                invalidateAnnotationDEState(true);
+                invalidateGroupDEState(true);
+                resetSelectionWelchState({{ keepRequested: shouldRerunSelectionComparison }});
+                const markerSearch = document.getElementById('marker-gene-search');
+                if (markerSearch) {{
+                    markerSearch.value = '';
+                    refreshLoadedGeneFilterDropdowns();
+                }}
+                renderGeneDiscoveryPanel?.();
+                updateSelectionInfo?.();
+                renderActiveInsightsPanel();
+                if (shouldRerunSelectionComparison) {{
+                    await runSelectionWelchComparison();
+                }}
+            }});
         }}
 
         const groupBy = document.getElementById('annotation-section-key');
@@ -25940,22 +26016,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }};
             const gene = getInsightsSelectedGene();
             if (!gene) {{
-                await activateViewerGene('', {{ showErrors: false }});
+                renderActiveInsightsPanel();
                 advanceTutorialIfReady();
                 return;
             }}
-            const modality = getExplorationModality();
-            if (isViewerFeatureLoadable(gene, modality)) {{
-                if (getVisualModality() !== modality && typeof setActiveModality === 'function') {{
-                    await setActiveModality(modality);
-                }}
-                await activateViewerGene(gene, {{ showErrors: true }});
-                advanceTutorialIfReady();
-                return;
-            }}
-            // Balanced-rest results remain searchable even when their
-            // expression vectors were intentionally omitted from the HTML.
-            // Keep the selected term as a panel filter, without trying to load it.
+            // Marker search filters Insights panels only. It must not mutate the
+            // visual feature namespace or feature input controls.
             renderActiveInsightsPanel();
             advanceTutorialIfReady();
         }};
@@ -25969,7 +26035,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const markerSearch = document.getElementById('marker-gene-search');
             if (!markerSearch) return;
             markerSearch.value = '';
-            await activateViewerGene('', {{ showErrors: false }});
+            renderActiveInsightsPanel();
         }});
         renderGenesDetailsWarnings();
 
@@ -26016,29 +26082,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             renderInteractionBrowser();
         }});
 
-        const pseudobulkDeModalitySelect = document.getElementById('pseudobulk-de-modality-select');
-        const pseudobulkDeGroupbySelect = document.getElementById('pseudobulk-de-annotation');
         const pseudobulkDeSourceSelect = document.getElementById('pseudobulk-de-source');
         const pseudobulkDeReferenceSelect = document.getElementById('pseudobulk-de-reference');
         const pseudobulkDeSwap = document.getElementById('pseudobulk-de-swap');
 
-        const catCols = getCategoricalColorColumns();
         syncPseudobulkDEControls();
-        pseudobulkDeModalitySelect?.addEventListener('change', () => {{
-            setPseudobulkPanelModality(pseudobulkDeModalitySelect.value || DEFAULT_MODALITY_NAME);
-            pseudobulkDeGroupby = null;
-            pseudobulkDeSourceCategory = null;
-            pseudobulkDeReferenceCategory = null;
-            clusterDETableExpanded = false;
-            pathwayAnnotationSide = 'source';
-            renderPseudobulkDE();
-        }});
-        pseudobulkDeGroupbySelect?.addEventListener('change', () => {{
-            pseudobulkDeGroupby = pseudobulkDeGroupbySelect.value || null;
-            pseudobulkDeSourceCategory = null;
-            pseudobulkDeReferenceCategory = null;
-            renderPseudobulkDE();
-        }});
         pseudobulkDeSourceSelect?.addEventListener('change', () => {{
             pseudobulkDeSourceCategory = pseudobulkDeSourceSelect.value || null;
             renderPseudobulkDE();
@@ -27075,13 +27123,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const z = data.zscores[rowIdx]?.[colIdx];
                 const mean = data.means[rowIdx]?.[colIdx];
                 const star = data.deStars.has(`${{gene}}\u0000${{category}}`);
-                parts.push(`<rect x="${{x}}" y="${{y}}" width="${{cellW - 1}}" height="${{cellH - 1}}" fill="${{heatmapZColor(z)}}" stroke="var(--input-bg)" data-volcano-gene="${{escapeHtml(gene)}}" data-tooltip-title="${{escapeHtml(gene)}}" data-tooltip-line1="Category: ${{escapeHtml(formatCategoryLabel(annotationCol, category))}}" data-tooltip-line2="Mean expression: ${{escapeHtml(Number.isFinite(mean) ? formatScaleNumber(mean) : 'n/a')}}" data-tooltip-line3="Z-score: ${{escapeHtml(Number.isFinite(z) ? z.toFixed(3) : 'n/a')}}" data-tooltip-line4="${{star ? 'DE vs balanced rest' : 'Not DE vs balanced rest'}}"/>`);
+                parts.push(`<rect x="${{x}}" y="${{y}}" width="${{cellW - 1}}" height="${{cellH - 1}}" fill="${{heatmapZColor(z)}}" stroke="var(--input-bg)" data-volcano-gene="${{escapeHtml(gene)}}" data-tooltip-title="${{escapeHtml(gene)}}" data-tooltip-line1="Category: ${{escapeHtml(formatCategoryLabel(annotationCol, category))}}" data-tooltip-line2="Mean feature value: ${{escapeHtml(Number.isFinite(mean) ? formatScaleNumber(mean) : 'n/a')}}" data-tooltip-line3="Z-score: ${{escapeHtml(Number.isFinite(z) ? z.toFixed(3) : 'n/a')}}" data-tooltip-line4="${{star ? 'DE vs balanced rest' : 'Not DE vs balanced rest'}}"/>`);
                 if (star) {{
                     parts.push(`<text x="${{(x + cellW / 2).toFixed(1)}}" y="${{(y + cellH / 2 + 4).toFixed(1)}}" text-anchor="middle" font-size="11" fill="#111">*</text>`);
                 }}
             }});
         }});
-        parts.push(`<text class="volcano-axis-label" x="${{ml}}" y="${{H - 8}}" text-anchor="start">z-score of category mean expression: negative red, positive blue</text>`);
+        parts.push(`<text class="volcano-axis-label" x="${{ml}}" y="${{H - 8}}" text-anchor="start">z-score of category mean feature value: negative red, positive blue</text>`);
         parts.push('</svg>');
         return geneGraphPanel(parts.join(''));
     }}
@@ -27183,7 +27231,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             parts.push(`<line x1="${{x.toFixed(1)}}" y1="${{axisY - 4}}" x2="${{x.toFixed(1)}}" y2="${{axisY + 4}}" stroke="var(--border-color)"/>`);
             parts.push(`<text class="volcano-axis-label" x="${{x.toFixed(1)}}" y="${{H - 12}}" text-anchor="middle">${{formatScaleNumber(tick)}}</text>`);
         }});
-        parts.push(`<text class="volcano-axis-label" x="${{(ml + iw / 2).toFixed(1)}}" y="${{H - 1}}" text-anchor="middle">expression</text>`);
+        parts.push(`<text class="volcano-axis-label" x="${{(ml + iw / 2).toFixed(1)}}" y="${{H - 1}}" text-anchor="middle">feature value</text>`);
         parts.push('</svg>');
         return geneGraphPanel(parts.join(''));
     }}
@@ -27358,7 +27406,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         showMeta: false,
                         title: loadable
                             ? 'Load pseudobulk DE feature into the viewer'
-                            : 'This category-vs-balanced-rest feature is not available for expression viewing',
+                            : 'This category-vs-balanced-rest feature is not available for feature-value viewing',
                     }});
                 }}).join('')
                 : '<div class="marker-empty">No pseudobulk DE features found.</div>';
@@ -27808,7 +27856,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ? ` \u2014 restricted to ${{escapeHtml(formatMetadataLabel(restrictSpec.key))}} = <strong>${{escapeHtml(String(geneDistributionRestrictValue))}}</strong>`
             : '';
         const tableHtml = `
-            <div class="gene-distribution-summary">Expression of <strong>${{escapeHtml(selectedGene)}}</strong> in ${{escapeHtml(getModalityDisplayLabel(modality))}} across ${{escapeHtml(formatMetadataLabel(spec.key))}}${{restrictLabel}}</div>
+            <div class="gene-distribution-summary">Feature value of <strong>${{escapeHtml(selectedGene)}}</strong> in ${{escapeHtml(getModalityDisplayLabel(modality))}} across ${{escapeHtml(formatMetadataLabel(spec.key))}}${{restrictLabel}}</div>
             <table class="gene-distribution-table">
                 <thead>
                     <tr>
@@ -27824,7 +27872,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         `;
 
         const graphHtml = `
-            <div class="gene-distribution-summary">Expression of <strong>${{escapeHtml(selectedGene)}}</strong> in ${{escapeHtml(getModalityDisplayLabel(modality))}} across ${{escapeHtml(formatMetadataLabel(spec.key))}}${{restrictLabel}}</div>
+            <div class="gene-distribution-summary">Feature value of <strong>${{escapeHtml(selectedGene)}}</strong> in ${{escapeHtml(getModalityDisplayLabel(modality))}} across ${{escapeHtml(formatMetadataLabel(spec.key))}}${{restrictLabel}}</div>
             ${{buildGeneDistributionBoxplot(sorted, spec)}}
         `;
         container.innerHTML = toggleHtml + controlsHtml + (isGraphView ? graphHtml : tableHtml);
@@ -28130,9 +28178,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             return '';
         }}
         const genes = Array.isArray(result.genes) ? result.genes : [];
-        const log2fc = Array.isArray(result.log2foldchanges)
-            ? result.log2foldchanges
-            : (Array.isArray(result.logfoldchanges) ? result.logfoldchanges : []);
+        const log2fc = Array.isArray(result.log2foldchanges) ? result.log2foldchanges : [];
         const significantIndices = getPseudobulkDEColoredIndices(result);
         const sourceMarkerEntries = normalizeGeneEntries(
             significantIndices
@@ -28154,15 +28200,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const visibleEntries = expanded ? entries : entries.slice(0, 30);
             const remaining = Math.max(0, entries.length - visibleEntries.length);
             const link = entries.length > 30
-                ? `<button type="button" class="pseudobulk-de-more-link" data-pseudobulk-de-marker-more="${{escapeHtml(key)}}">${{expanded ? 'Hide extra genes' : `Show more (${{remaining.toLocaleString()}})`}}</button>`
+                ? `<button type="button" class="pseudobulk-de-more-link" data-pseudobulk-de-marker-more="${{escapeHtml(key)}}">${{expanded ? 'Hide extra features' : `Show more (${{remaining.toLocaleString()}})`}}</button>`
                 : '';
             return `
             <div class="agg-group">
                 <div class="agg-group-title">
                     <span class="agg-group-title-main">${{renderAggCategoryChip(annotationCol, enrichedCategory)}}</span>
-                    <span class="agg-group-title-actions"><span class="agg-chip agg-count-chip">${{entries.length.toLocaleString()}} genes</span></span>
+                    <span class="agg-group-title-actions"><span class="agg-chip agg-count-chip">${{entries.length.toLocaleString()}} features</span></span>
                 </div>
-                ${{renderComparisonGeneTokenGrid(visibleEntries, 'No genes pass the current adjusted p-value and log\u2082FC thresholds in this direction.', 'Load pseudobulk marker into the viewer', modality)}}
+                ${{renderComparisonGeneTokenGrid(visibleEntries, 'No features pass the current adjusted p-value and log\u2082FC thresholds in this direction.', 'Load pseudobulk marker into the viewer', modality)}}
                 ${{link ? `<div class="pseudobulk-de-table-actions">${{link}}</div>` : ''}}
             </div>
         `;
@@ -28206,7 +28252,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             return `
                 <div class="agg-group">
                     <div class="agg-group-title">Contact-Conditioned Markers</div>
-                    <div class="agg-group-meta">Interaction DE genes were not precomputed for this annotation.</div>
+                    <div class="agg-group-meta">Interaction DE features were not precomputed for this annotation.</div>
                 </div>
             `;
         }}
@@ -28244,9 +28290,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function doesPseudobulkDEIndexPassThresholds(result, idx, direction = 'both') {{
         if (!result || result.available === false) return false;
-        const log2fc = Array.isArray(result.log2foldchanges)
-            ? result.log2foldchanges
-            : (Array.isArray(result.logfoldchanges) ? result.logfoldchanges : []);
+        const log2fc = Array.isArray(result.log2foldchanges) ? result.log2foldchanges : [];
         const pvalsAdj = Array.isArray(result.pvals_adj) ? result.pvals_adj : [];
         const padjCutoff = Math.min(Math.max(normalizePositiveThreshold(result.padj_cutoff, 0.05), 0), 1);
         const log2fcCutoff = normalizePositiveThreshold(result.log2fc_cutoff, 0.5);
@@ -28261,9 +28305,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function getPseudobulkDESignificanceClass(result, idx) {{
         if (!doesPseudobulkDEIndexPassThresholds(result, idx)) return 'grey';
-        const log2fc = Array.isArray(result.log2foldchanges)
-            ? result.log2foldchanges
-            : (Array.isArray(result.logfoldchanges) ? result.logfoldchanges : []);
+        const log2fc = Array.isArray(result.log2foldchanges) ? result.log2foldchanges : [];
         const log2fcValue = Number(log2fc[idx]);
         return log2fcValue > 0 ? 'red' : 'blue';
     }}
@@ -28292,7 +28334,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const bg = color || 'var(--border-color)';
         const textColor = getTextColorForBackground(bg);
         const countValue = Number(count || 0);
-        const countLabel = countValue.toLocaleString() + (countValue === 1 ? ' gene' : ' genes');
+        const countLabel = countValue.toLocaleString() + (countValue === 1 ? ' feature' : ' features');
         const countHtml = count === null || count === undefined
             ? ''
             : '<span class="volcano-summary-count">' + countLabel + '</span>';
@@ -28378,8 +28420,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const baseDisplay = formatScaleNumber(xValues[i]);
             const color = dotClass === 'red' ? '#d94f4f' : 'var(--border-color)';
             const loadable = isViewerFeatureLoadable(gene, modality);
-            const pctLine = 'pct expr: ' + escapeHtml(formatPseudobulkDEPct(Number.isFinite(sourcePct) ? sourcePct : NaN)) + ' / ' + escapeHtml(formatPseudobulkDEPct(Number.isFinite(referencePct) ? referencePct : NaN));
-            const extraLine = loadable ? '' : '" data-tooltip-line6="Expression vector unavailable"';
+            const pctLine = 'pct detected: ' + escapeHtml(formatPseudobulkDEPct(Number.isFinite(sourcePct) ? sourcePct : NaN)) + ' / ' + escapeHtml(formatPseudobulkDEPct(Number.isFinite(referencePct) ? referencePct : NaN));
+            const extraLine = loadable ? '' : '" data-tooltip-line6="Feature vector unavailable"';
             dots.push({{ dotClass, html: '<circle class="volcano-dot" cx="' + xs(xValues[i]).toFixed(1) + '" cy="' + ys(fc).toFixed(1) + '" r="2.8" fill="' + color + '" fill-opacity="0.78" data-volcano-gene="' + escapeHtml(gene) + '" data-gene-loadable="' + (loadable ? 'true' : 'false') + '" data-volcano-fc="' + fc.toFixed(3) + '" data-volcano-p="' + rawPDisplay + '" data-volcano-padj="' + padjDisplay + '" data-tooltip-title="' + escapeHtml(gene) + '" data-tooltip-line1="baseMean: ' + escapeHtml(baseDisplay) + '" data-tooltip-line2="logFC: ' + escapeHtml(fc.toFixed(3)) + '" data-tooltip-line3="pvalue: ' + escapeHtml(rawPDisplay) + '" data-tooltip-line4="adj. p: ' + escapeHtml(padjDisplay) + '" data-tooltip-line5="' + pctLine + extraLine + '"/>' }});
         }});
         ['grey', 'red'].forEach((layer) => {{
@@ -28393,7 +28435,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             buildPseudobulkDESummaryItem('adj. p < 0.1', '#d94f4f', counts.red),
             '</div>',
         ].join('');
-        return wrapPseudobulkDEPlot('MA Plot', 'Mean expression vs log\u2082FC; adjusted p-value controls coloring', parts.join('') + summary, true, 'ma-plot', 'pseudobulk_ma_plot');
+        return wrapPseudobulkDEPlot('MA Plot', 'Mean feature value vs log\u2082FC; adjusted p-value controls coloring', parts.join('') + summary, true, 'ma-plot', 'pseudobulk_ma_plot');
     }}
 
     function buildPseudobulkPCAPlot(sampleInfo, annotationCol) {{
@@ -28444,7 +28486,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         parts.push('<text class="volcano-axis-label" x="8" y="' + (mt+ih/2).toFixed(1) + '" text-anchor="middle" transform="rotate(-90,8,' + (mt+ih/2).toFixed(1) + ')">' + escapeHtml(yLabel) + '</text>');
         const legend = uniqueGroups.slice(0, 6).map((group) => buildPseudobulkDESummaryItem(group, groupColor(group))).join('');
         parts.push('</svg>');
-        return wrapPseudobulkDEPlot('PCA', `Pseudobulk samples, ${{Number(sampleInfo.pca_features || 0).toLocaleString()}} variable genes`, parts.join('') + '<div class="volcano-summary">' + legend + '</div>', true, 'dotplot', 'pseudobulk_pca_plot');
+        return wrapPseudobulkDEPlot('PCA', `Pseudobulk samples, ${{Number(sampleInfo.pca_features || 0).toLocaleString()}} variable features`, parts.join('') + '<div class="volcano-summary">' + legend + '</div>', true, 'dotplot', 'pseudobulk_pca_plot');
     }}
 
     function buildPseudobulkDistanceHeatmap(sampleInfo, annotationCol) {{
@@ -28565,8 +28607,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const safePAdj = Number.isFinite(pvalAdj) ? pvalAdj : 1;
             const padjDisplay = formatAdjustedPValue(safePAdj);
             const loadable = isViewerFeatureLoadable(gene, modality);
-            const pctLine = 'pct expr: ' + escapeHtml(formatPseudobulkDEPct(Number.isFinite(sourcePct) ? sourcePct : NaN)) + ' / ' + escapeHtml(formatPseudobulkDEPct(Number.isFinite(referencePct) ? referencePct : NaN));
-            const extraLine = loadable ? '' : '" data-tooltip-line4="Expression vector unavailable"';
+            const pctLine = 'pct detected: ' + escapeHtml(formatPseudobulkDEPct(Number.isFinite(sourcePct) ? sourcePct : NaN)) + ' / ' + escapeHtml(formatPseudobulkDEPct(Number.isFinite(referencePct) ? referencePct : NaN));
+            const extraLine = loadable ? '' : '" data-tooltip-line4="Feature vector unavailable"';
             dots.push({{ dotClass, html: '<circle class="volcano-dot" cx="' + xs(fc).toFixed(1) + '" cy="' + ys(nlpi).toFixed(1) + '" r="3" fill="' + col + '" fill-opacity="0.82" data-volcano-class="' + dotClass + '" data-volcano-gene="' + escapeHtml(gene) + '" data-gene-loadable="' + (loadable ? 'true' : 'false') + '" data-volcano-fc="' + fc.toFixed(3) + '" data-volcano-padj="' + padjDisplay + '" data-tooltip-title="' + escapeHtml(gene) + '" data-tooltip-line1="log\u2082FC: ' + escapeHtml(fc.toFixed(3)) + '" data-tooltip-line2="adj. p: ' + escapeHtml(padjDisplay) + '" data-tooltip-line3="' + pctLine + extraLine + '"/>' }});
         }});
         ['grey', 'reference', 'source'].forEach((layer) => {{
@@ -28811,9 +28853,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const genes = Array.isArray(result.genes) ? result.genes : [];
         const pvalsAdj = Array.isArray(result.pvals_adj) ? result.pvals_adj : [];
         const pvals = Array.isArray(result.pvals) ? result.pvals : [];
-        const log2fc = Array.isArray(result.log2foldchanges)
-            ? result.log2foldchanges
-            : (Array.isArray(result.logfoldchanges) ? result.logfoldchanges : []);
+        const log2fc = Array.isArray(result.log2foldchanges) ? result.log2foldchanges : [];
         return genes.map((gene, idx) => idx)
             .filter((idx) => doesPseudobulkDEIndexPassThresholds(result, idx))
             .sort((a, b) => {{
@@ -28831,9 +28871,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function getPseudobulkDETableEntries(result, coloredOnly = false) {{
         if (!result || result.available === false) return [];
         const genes = Array.isArray(result.genes) ? result.genes : [];
-        const log2fc = Array.isArray(result.log2foldchanges)
-            ? result.log2foldchanges
-            : (Array.isArray(result.logfoldchanges) ? result.logfoldchanges : []);
+        const log2fc = Array.isArray(result.log2foldchanges) ? result.log2foldchanges : [];
         const pvals = Array.isArray(result.pvals) ? result.pvals : [];
         const pvalsAdj = Array.isArray(result.pvals_adj) ? result.pvals_adj : [];
         const scores = Array.isArray(result.scores) ? result.scores : [];
@@ -29558,9 +29596,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
 
         const genes = Array.isArray(result.genes) ? result.genes : [];
-        const log2fc = Array.isArray(result.log2foldchanges)
-            ? result.log2foldchanges
-            : (Array.isArray(result.logfoldchanges) ? result.logfoldchanges : []);
+        const log2fc = Array.isArray(result.log2foldchanges) ? result.log2foldchanges : [];
         const pvals = Array.isArray(result.pvals) ? result.pvals : [];
         const pvalsAdj = Array.isArray(result.pvals_adj) ? result.pvals_adj : [];
         const scores = Array.isArray(result.scores) ? result.scores : [];
@@ -29641,11 +29677,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const tableMoreButton = significantIndices.length > 20
             ? `<button type="button" class="pseudobulk-de-more-link" data-pseudobulk-de-table-more>${{clusterDETableExpanded ? 'Hide extra lines' : `Show more (${{(significantIndices.length - 20).toLocaleString()}})`}}</button>`
             : '';
-        const tableExportButton = `<button class="icon-btn pseudobulk-de-plot-export" type="button" data-pseudobulk-de-download-csv title="Download differential-expression table as CSV" aria-label="Download differential-expression table as CSV">${{LEGEND_EXPORT_ICON}}</button>`;
+        const tableExportButton = `<button class="icon-btn pseudobulk-de-plot-export" type="button" data-pseudobulk-de-download-csv title="Download differential feature table as CSV" aria-label="Download differential feature table as CSV">${{LEGEND_EXPORT_ICON}}</button>`;
         const tablePanel = `
             <div class="pseudobulk-de-plot-panel pseudobulk-de-table-panel">
                 <div class="pseudobulk-de-figure-title">
-                    <span>Differential Expression Table</span>${{renderCalcInfoButton('pseudobulk_simple_de_table')}}
+                    <span>Differential Feature Table</span>${{renderCalcInfoButton('pseudobulk_simple_de_table')}}
                 </div>
                 ${{tableHtml}}
                 <div class="pseudobulk-de-table-actions">
@@ -29697,27 +29733,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function syncPseudobulkDEControls() {{
-        const modalitySelect = document.getElementById('pseudobulk-de-modality-select');
-        const annotationSelect = document.getElementById('pseudobulk-de-annotation');
         const sourceSelect = document.getElementById('pseudobulk-de-source');
         const referenceSelect = document.getElementById('pseudobulk-de-reference');
-        const availableModalities = getPseudobulkDEModalities();
-        const modality = ensurePseudobulkPanelModality();
+        const modality = getExplorationModality();
         const availableGroupbys = getAvailableComparisonColors(modality);
-
-        if (modalitySelect) {{
-            modalitySelect.innerHTML = availableModalities
-                .map((name) => `<option value="${{escapeHtml(name)}}"${{name === modality ? ' selected' : ''}}>${{escapeHtml(getModalityDisplayLabel(name))}}</option>`)
-                .join('');
-            modalitySelect.value = modality;
-            modalitySelect.disabled = availableModalities.length < 2;
-        }}
-
-        if (annotationSelect) {{
-            annotationSelect.innerHTML = availableGroupbys.length
-                ? `<optgroup label="Cell annotations">${{availableGroupbys.map(col => `<option value="${{escapeHtml(col)}}">${{escapeHtml(getAnnotationColumnLabel(col))}}</option>`).join('')}}</optgroup>`
-                : '';
-        }}
 
         if (!availableGroupbys.length) {{
             pseudobulkDeGroupby = null;
@@ -29725,7 +29744,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             pseudobulkDeReferenceCategory = null;
             if (sourceSelect) sourceSelect.innerHTML = '';
             if (referenceSelect) referenceSelect.innerHTML = '';
-            return {{ availableGroupbys, categories: [], availableModalities, modality }};
+            return {{ availableGroupbys, categories: [], modality }};
         }}
 
         const activeAnnotation = String(explorationColorCol || '');
@@ -29736,10 +29755,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 pseudobulkDeSourceCategory = null;
                 pseudobulkDeReferenceCategory = null;
             }}
-        }} else if (!pseudobulkDeGroupby || !availableGroupbys.includes(pseudobulkDeGroupby)) {{
-            pseudobulkDeGroupby = availableGroupbys.includes(currentAnnotation) ? currentAnnotation : availableGroupbys[0];
+        }} else {{
+            pseudobulkDeGroupby = null;
+            pseudobulkDeSourceCategory = null;
+            pseudobulkDeReferenceCategory = null;
         }}
-        if (annotationSelect) annotationSelect.value = pseudobulkDeGroupby;
 
         const categories = getPseudobulkDECategories(pseudobulkDeGroupby, modality);
         const options = categories.map(category => `<option value="${{escapeHtml(category)}}">${{escapeHtml(category)}}</option>`).join('');
@@ -29749,7 +29769,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!categories.length) {{
             pseudobulkDeSourceCategory = null;
             pseudobulkDeReferenceCategory = null;
-            return {{ availableGroupbys, categories, availableModalities, modality }};
+            return {{ availableGroupbys, categories, modality }};
         }}
 
         if (!pseudobulkDeSourceCategory || !categories.includes(pseudobulkDeSourceCategory)) {{
@@ -29765,14 +29785,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             referenceSelect.disabled = categories.length < 2;
         }}
 
-        return {{ availableGroupbys, categories, availableModalities, modality }};
+        return {{ availableGroupbys, categories, modality }};
     }}
 
     function renderPseudobulkDE() {{
         const container = document.getElementById('pseudobulk-de-results');
         if (!container) return;
 
-        const {{ availableGroupbys, categories, availableModalities, modality }} = syncPseudobulkDEControls();
+        const {{ availableGroupbys, categories, modality }} = syncPseudobulkDEControls();
         const selectedAnnotation = pseudobulkDeGroupby && availableGroupbys.includes(pseudobulkDeGroupby)
             ? pseudobulkDeGroupby
             : null;
@@ -29824,18 +29844,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}).join('');
         const sourceOptions = buildCategoryOptions(pseudobulkDeReferenceCategory);
         const referenceOptions = buildCategoryOptions(pseudobulkDeSourceCategory);
-        const modalityOptions = availableModalities.map((name) => `
-            <option value="${{escapeHtml(name)}}"${{name === modality ? ' selected' : ''}}>${{escapeHtml(getModalityDisplayLabel(name))}}</option>
-        `).join('');
-        const annotationOptions = availableGroupbys.map((col) => `
-            <option value="${{escapeHtml(col)}}"${{col === pseudobulkDeGroupby ? ' selected' : ''}}>${{escapeHtml(getAnnotationColumnLabel(col))}}</option>
-        `).join('');
         const controlsHtml = `
             <div class="pseudobulk-de-controls">
-                <div class="pseudobulk-de-select-row">
-                    <div><label>Feature namespace</label><select id="pseudobulk-de-modality-select" ${{availableModalities.length < 2 ? 'disabled' : ''}}>${{modalityOptions}}</select></div>
-                    <div><label>Annotation</label><select id="pseudobulk-de-annotation">${{annotationOptions}}</select></div>
-                </div>
                 <div class="pseudobulk-de-select-row comparison-pair-select-row">
                     <div><label>Annotation A</label><select id="pseudobulk-de-source" style="border-color:${{sourceColor}}">${{sourceOptions}}</select></div>
                     <div><label>Annotation B</label><select id="pseudobulk-de-reference" style="border-color:${{referenceColor}}">${{referenceOptions}}</select></div>
@@ -29869,12 +29879,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const minPctRetainedGenes = Number(contrastResult?.min_pct_retained_gene_count);
         const minPctPrefilterGenes = Number(contrastResult?.min_pct_prefilter_gene_count);
         const minPctRemovalCountText = Number.isFinite(minPctRemovedGenes)
-            ? ` ${{minPctRemovedGenes.toLocaleString()}} gene${{minPctRemovedGenes === 1 ? '' : 's'}} ${{minPctRemovedGenes === 1 ? 'was' : 'were'}} removed${{
+            ? ` ${{minPctRemovedGenes.toLocaleString()}} feature${{minPctRemovedGenes === 1 ? '' : 's'}} ${{minPctRemovedGenes === 1 ? 'was' : 'were'}} removed${{
                 Number.isFinite(minPctRetainedGenes) && Number.isFinite(minPctPrefilterGenes)
-                    ? ` (${{minPctRetainedGenes.toLocaleString()}} of ${{minPctPrefilterGenes.toLocaleString()}} fitted genes retained)`
+                    ? ` (${{minPctRetainedGenes.toLocaleString()}} of ${{minPctPrefilterGenes.toLocaleString()}} fitted features retained)`
                     : ''
             }}.`
-            : ' Removed-gene count is unavailable for this export.';
+            : ' Removed-feature count is unavailable for this export.';
         const padjCutoff = Math.min(Math.max(normalizePositiveThreshold(
             contrastResult?.padj_cutoff ?? pseudobulkSettings.padj_cutoff,
             0.05
@@ -29895,7 +29905,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <span><code>--pseudobulk-log2fc-cutoff</code> |log₂FC| ≥ ${{formatScaleNumber(log2fcCutoff)}}</span>
                 </div>
             </div>
-            ${{minPct > 0 ? `<div class="comparison-info-warning"><strong>Warning.</strong> Genes expressed in less than ${{formatScaleNumber(100 * minPct)}}% of cells in both selected annotations are removed before DESeq2 statistical testing.${{minPctRemovalCountText}}</div>` : ''}}
+            ${{minPct > 0 ? `<div class="comparison-info-warning"><strong>Warning.</strong> Features detected in less than ${{formatScaleNumber(100 * minPct)}}% of cells in both selected annotations are removed before DESeq2 statistical testing.${{minPctRemovalCountText}}</div>` : ''}}
         `;
 
         const markerSummary = renderComparisonMarkerSummary(
@@ -29923,33 +29933,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ${{pathwaySection ? '<div class="selection-summary-title" id="pathway-enrichment-title">Pathway Enrichment' + renderCalcInfoButton('pathway_enrichment_section') + '</div>' + pathwaySection : ''}}
         `;
 
-        const modalitySelect = container.querySelector('#pseudobulk-de-modality-select');
-        const annotationSelect = container.querySelector('#pseudobulk-de-annotation');
         const sourceSelect = container.querySelector('#pseudobulk-de-source');
         const referenceSelect = container.querySelector('#pseudobulk-de-reference');
-        if (modalitySelect) {{
-            modalitySelect.value = modality;
-            modalitySelect.addEventListener('change', () => {{
-                setPseudobulkPanelModality(modalitySelect.value || DEFAULT_MODALITY_NAME);
-                pseudobulkDeGroupby = null;
-                pseudobulkDeSourceCategory = null;
-                pseudobulkDeReferenceCategory = null;
-                clusterDETableExpanded = false;
-                pathwayAnnotationSide = 'source';
-                renderPseudobulkDE();
-            }});
-        }}
-        if (annotationSelect) {{
-            annotationSelect.value = pseudobulkDeGroupby || '';
-            annotationSelect.addEventListener('change', () => {{
-                pseudobulkDeGroupby = annotationSelect.value || null;
-                pseudobulkDeSourceCategory = null;
-                pseudobulkDeReferenceCategory = null;
-                clusterDETableExpanded = false;
-                pathwayAnnotationSide = 'source';
-                renderPseudobulkDE();
-            }});
-        }}
         if (sourceSelect) {{
             sourceSelect.value = pseudobulkDeSourceCategory;
             sourceSelect.addEventListener('change', () => {{
@@ -30362,539 +30347,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}, sections);
     }}
 
-    async function computeCellSetDEAsync(groupA, groupB, options = {{}}) {{
-        const topN = Math.max(1, Number(options.topN) || groupDeTopN || 12);
-        const isCancelled = typeof options.isCancelled === 'function' ? options.isCancelled : () => false;
-        if (!groupA || !groupB) {{
-            return {{ available: false, reason: 'missing_groups', results: [] }};
-        }}
-        if (groupA.key && groupA.key === groupB.key) {{
-            return {{ available: false, reason: 'same_group', nA: groupA.nCells || 0, nB: groupB.nCells || 0, results: [] }};
-        }}
-        if (!(groupA.nCells > 0) || !(groupB.nCells > 0)) {{
-            return {{
-                available: false,
-                reason: 'empty_group',
-                nA: Number(groupA.nCells || 0),
-                nB: Number(groupB.nCells || 0),
-                modality: getExplorationModality(),
-                results: [],
-            }};
-        }}
-
-        const activeModality = getExplorationModality();
-        const loadedGenes = getLoadedFeaturesForModality(activeModality);
-        const totalGenes = getFeatureCatalog(activeModality).length || loadedGenes.length;
-        if (!loadedGenes.length) {{
-            return {{
-                available: false,
-                reason: 'no_loaded_features',
-                nA: Number(groupA.nCells || 0),
-                nB: Number(groupB.nCells || 0),
-                modality: activeModality,
-                loadedGeneCount: 0,
-                totalGeneCount: totalGenes,
-                results: [],
-            }};
-        }}
-
-        const results = [];
-        const BATCH = 10;
-        for (let i = 0; i < loadedGenes.length; i += BATCH) {{
-            if (isCancelled()) return null;
-            const end = Math.min(i + BATCH, loadedGenes.length);
-            for (let j = i; j < end; j++) {{
-                const gene = loadedGenes[j];
-                const statsA = computeQuickStatsForGroupGene(groupA, gene, activeModality);
-                const statsB = computeQuickStatsForGroupGene(groupB, gene, activeModality);
-                const entry = buildDEEntryFromStats(gene, statsA, statsB, groupA.nCells, groupB.nCells);
-                if (entry) results.push(entry);
-            }}
-            if (end < loadedGenes.length) await new Promise((r) => setTimeout(r, 0));
-        }}
-        if (isCancelled()) return null;
-
-        sortCellSetDEResults(results);
-        return {{
-            available: true,
-            reason: null,
-            nA: Number(groupA.nCells || 0),
-            nB: Number(groupB.nCells || 0),
-            modality: activeModality,
-            loadedGeneCount: loadedGenes.length,
-            totalGeneCount: totalGenes,
-            results: selectTwoSidedTopN(results, topN),
-        }};
-    }}
-
-    // Retained for reference while saved sessions that contain the older group-DE
-    // controls remain readable. The visible Annotations panel is rendered below.
-    function renderLegacyGroupDE() {{
-        groupDeRenderDepth += 1;
-        if (groupDeRenderDepth > 3) {{
-            console.error('renderGroupDE re-entrant depth', groupDeRenderDepth);
-            groupDeRenderDepth -= 1;
-            return;
-        }}
-        try {{
-        const container = document.getElementById('group-de-panel');
-        if (!container) return;
-
-        const {{ sources, sourceSpec, groupValues, restrictSpec, restrictValues }} = syncGroupDEUiState();
-        if (!sources.length) {{
-            setCompareSectionSummary('group-de-summary', 'Needs section metadata or categorical annotations.');
-            container.innerHTML = '<div class="agg-group-meta">Group DE needs section metadata or categorical annotations to define the two groups.</div>';
-            return;
-        }}
-
-        const groupedSourceOptions = (kind) => sources
-            .filter((spec) => spec.kind === kind)
-            .map((spec) => {{
-                const encoded = encodeGroupDESourceSpec(spec);
-                const selected = encoded === groupDeSourceSpecValue ? ' selected' : '';
-                return `<option value="${{encoded}}"${{selected}}>${{escapeHtml(formatGroupDESourceSpecLabel(spec))}}</option>`;
-            }})
-            .join('');
-        const groupedRestrictionOptions = (kind) => sources
-            .filter((spec) => spec.kind === kind)
-            .map((spec) => {{
-                const encoded = encodeGroupDESourceSpec(spec);
-                const selected = encoded === groupDeRestrictSpecValue ? ' selected' : '';
-                return `<option value="${{encoded}}"${{selected}}>${{escapeHtml(formatGroupDESourceSpecLabel(spec))}}</option>`;
-            }})
-            .join('');
-        const renderValueOptions = (values, selectedValue) => values
-            .map((value) => {{
-                const text = String(value);
-                const selected = text === String(selectedValue ?? '') ? ' selected' : '';
-                return `<option value="${{escapeHtml(text)}}"${{selected}}>${{escapeHtml(text)}}</option>`;
-            }})
-            .join('');
-
-        let html = `
-            <div class="agg-group-meta">Exploratory DE between two arbitrary cell groups. Compare samples, section metadata groups, or annotation categories, and optionally restrict within a second annotation.</div>
-            <div class="pseudobulk-de-controls">
-                <div>
-                    <label>Compare By</label>
-                    <select id="group-de-source-spec">
-                        ${{groupedSourceOptions('metadata') ? `<optgroup label="Section metadata">${{groupedSourceOptions('metadata')}}</optgroup>` : ''}}
-                        ${{groupedSourceOptions('annotation') ? `<optgroup label="Cell annotations">${{groupedSourceOptions('annotation')}}</optgroup>` : ''}}
-                    </select>
-                </div>
-                <div class="pseudobulk-de-select-row">
-                    <div>
-                        <label>Group A</label>
-                        <select id="group-de-source-value">${{renderValueOptions(groupValues, groupDeSourceValue)}}</select>
-                    </div>
-                    <div>
-                        <label>Group B</label>
-                        <select id="group-de-reference-value">${{renderValueOptions(groupValues, groupDeReferenceValue)}}</select>
-                    </div>
-                    <div>
-                        <label>Top Genes</label>
-                        <input id="group-de-topn" type="number" min="3" max="100" step="1" value="${{Math.max(3, Number(groupDeTopN) || ANNOTATION_DE_TOP_N)}}">
-                    </div>
-                </div>
-                <div class="pseudobulk-de-select-row">
-                    <div>
-                        <label>Restrict Within</label>
-                        <select id="group-de-restrict-spec">
-                            <option value="">None</option>
-                            ${{groupedRestrictionOptions('metadata') ? `<optgroup label="Section metadata">${{groupedRestrictionOptions('metadata')}}</optgroup>` : ''}}
-                            ${{groupedRestrictionOptions('annotation') ? `<optgroup label="Cell annotations">${{groupedRestrictionOptions('annotation')}}</optgroup>` : ''}}
-                        </select>
-                    </div>
-                    <div>
-                        <label>Restrict Value</label>
-                        <select id="group-de-restrict-value" ${{restrictSpec ? '' : 'disabled'}}>${{renderValueOptions(restrictValues, groupDeRestrictValue)}}</select>
-                    </div>
-                    <div>
-                        <label>Scope</label>
-                        <select id="group-de-scope">
-                            <option value="all"${{groupDeScope === 'all' ? ' selected' : ''}}>All cells</option>
-                            <option value="visible"${{groupDeScope === 'visible' ? ' selected' : ''}}>Current filters</option>
-                        </select>
-                    </div>
-                </div>
-                <div style="display: flex; justify-content: flex-end;">
-                    <button class="legend-btn" id="group-de-swap" type="button">Swap A/B</button>
-                </div>
-            </div>
-        `;
-
-        if (!sourceSpec) {{
-            setCompareSectionSummary('group-de-summary', 'Choose a grouping field.');
-            container.innerHTML = html + '<div class="agg-group-meta">Choose a section metadata field or categorical annotation to define the two groups.</div>';
-            return;
-        }}
-        if (groupValues.length < 2) {{
-            setCompareSectionSummary('group-de-summary', `${{formatGroupDESourceSpecLabel(sourceSpec)}} needs at least two values.`);
-            container.innerHTML = html + '<div class="agg-group-meta">This grouping field needs at least two values.</div>';
-            return;
-        }}
-
-        // Render controls immediately, defer heavy DE computation
-        const token = ++groupDeRenderToken;
-        const summaryLabel = formatGroupDESourceSpecLabel(sourceSpec);
-        const restrictSummary = restrictSpec && groupDeRestrictValue
-            ? ` · within ${{formatGroupDESourceSpecLabel(restrictSpec)}}=${{groupDeRestrictValue}}`
-            : '';
-        setCompareSectionSummary(
-            'group-de-summary',
-            `${{summaryLabel}}: ${{String(groupDeSourceValue ?? 'A')}} vs ${{String(groupDeReferenceValue ?? 'B')}}${{restrictSummary}}`,
-        );
-        // Synchronous placeholder. Only show the indeterminate "Computing…" bar
-        // when a real quick compute (over already-loaded genes) is about to run.
-        // During a full sidecar run this function is re-invoked after every shard,
-        // so showing the indeterminate bar here would flicker against the
-        // determinate bar the async step renders. For sidecar-only datasets the
-        // async step renders the "Compute DE" button, so an empty placeholder
-        // avoids a misleading flash.
-        const groupDeHasLoadedGenes = Object.keys(DATA.features_meta || {{}}).length > 0;
-        html += (groupDeHasLoadedGenes && !(groupDeFullRun && groupDeFullRun.running))
-            ? '<div id="group-de-results"><progress style="width:100%; height:12px;"></progress>'
-                + '<div class="agg-group-meta">Computing differential expression…</div></div>'
-            : '<div id="group-de-results"></div>';
-        container.innerHTML = html;
-
-        const sourceSpecSelect = container.querySelector('#group-de-source-spec');
-        const sourceValueSelect = container.querySelector('#group-de-source-value');
-        const referenceValueSelect = container.querySelector('#group-de-reference-value');
-        const restrictSpecSelect = container.querySelector('#group-de-restrict-spec');
-        const restrictValueSelect = container.querySelector('#group-de-restrict-value');
-        const scopeSelect = container.querySelector('#group-de-scope');
-        const topNInput = container.querySelector('#group-de-topn');
-        const swapBtn = container.querySelector('#group-de-swap');
-        // Defer re-renders via requestAnimationFrame so select elements finish
-        // their event lifecycle before innerHTML replaces them (Safari crash fix).
-        const deferRender = () => requestAnimationFrame(() => renderGroupDE());
-        sourceSpecSelect?.addEventListener('change', () => {{
-            cancelGroupDEFullRun();
-            groupDeSourceSpecValue = sourceSpecSelect.value || '';
-            groupDeSourceValue = null;
-            groupDeReferenceValue = null;
-            deferRender();
-        }});
-        sourceValueSelect?.addEventListener('change', () => {{
-            cancelGroupDEFullRun();
-            groupDeSourceValue = sourceValueSelect.value || null;
-            deferRender();
-        }});
-        referenceValueSelect?.addEventListener('change', () => {{
-            cancelGroupDEFullRun();
-            groupDeReferenceValue = referenceValueSelect.value || null;
-            deferRender();
-        }});
-        restrictSpecSelect?.addEventListener('change', () => {{
-            cancelGroupDEFullRun();
-            groupDeRestrictSpecValue = restrictSpecSelect.value || '';
-            groupDeRestrictValue = null;
-            deferRender();
-        }});
-        restrictValueSelect?.addEventListener('change', () => {{
-            cancelGroupDEFullRun();
-            groupDeRestrictValue = restrictValueSelect.value || null;
-            deferRender();
-        }});
-        scopeSelect?.addEventListener('change', () => {{
-            cancelGroupDEFullRun();
-            groupDeScope = scopeSelect.value === 'visible' ? 'visible' : 'all';
-            deferRender();
-        }});
-        topNInput?.addEventListener('change', () => {{
-            groupDeTopN = Math.min(100, Math.max(3, Number(topNInput.value) || ANNOTATION_DE_TOP_N));
-            deferRender();
-        }});
-        swapBtn?.addEventListener('click', () => {{
-            cancelGroupDEFullRun();
-            const source = groupDeSourceValue;
-            groupDeSourceValue = groupDeReferenceValue;
-            groupDeReferenceValue = source;
-            renderGroupDE();
-        }});
-
-        // Snapshot current state for the deferred computation
-        const deferredSourceSpec = sourceSpec;
-        const deferredRestrictSpec = restrictSpec;
-        const deferredSourceValue = groupDeSourceValue;
-        const deferredReferenceValue = groupDeReferenceValue;
-        const deferredRestrictValue = groupDeRestrictValue;
-        const deferredScope = groupDeScope;
-        const deferredTopN = groupDeTopN;
-
-        // Defer heavy cell-set building + DE computation so browser can breathe
-        (async () => {{
-            await new Promise((r) => setTimeout(r, 0));
-            if (groupDeRenderToken !== token) return;
-            const resultsDiv = document.getElementById('group-de-results');
-            if (!resultsDiv) return;
-
-            const groupA = await buildGroupDECellSetAsync(deferredSourceSpec, deferredSourceValue, {{
-                restrictSpec: deferredRestrictSpec,
-                restrictValue: deferredRestrictValue,
-                scope: deferredScope,
-                isCancelled: () => groupDeRenderToken !== token,
-            }});
-            if (groupDeRenderToken !== token) return;
-            const groupB = await buildGroupDECellSetAsync(deferredSourceSpec, deferredReferenceValue, {{
-                restrictSpec: deferredRestrictSpec,
-                restrictValue: deferredRestrictValue,
-                scope: deferredScope,
-                isCancelled: () => groupDeRenderToken !== token,
-            }});
-            if (groupDeRenderToken !== token) return;
-
-            const quickResult = await computeCellSetDEAsync(groupA, groupB, {{
-                topN: deferredTopN,
-                isCancelled: () => groupDeRenderToken !== token,
-            }});
-            if (groupDeRenderToken !== token || !quickResult) return;
-
-            const exportState = getGroupDEExportState(groupA, groupB, quickResult);
-            const pairKey = getGroupDECacheKey(groupA, groupB);
-            const fullCached = pairKey ? groupDeFullCache.get(pairKey) : null;
-            const fullRun = (groupDeFullRun && groupDeFullRun.key === pairKey) ? groupDeFullRun : null;
-            const sidecarAvailable = !!DATA.feature_manifest_url;
-            const renderCards = (result) => {{
-                const resultModality = result?.modality || getExplorationModality();
-                const topN = Math.max(1, Number(deferredTopN) || ANNOTATION_DE_TOP_N);
-                return selectTwoSidedTopN(result.results || [], topN).map((entry) => {{
-                    return `
-                        <div class="comparison-card">
-                            <div class="comparison-card-title">
-                                ${{renderGeneTokenButton(entry.gene, {{
-                                    allowUnknown: true,
-                                    isActive: entry.gene === currentGene,
-                                    modality: resultModality,
-                                    showMeta: false,
-                                    title: 'Load group DE feature into the viewer',
-                                }})}}
-                                ${{renderGeneGoogleSearchButton(entry.gene, {{
-                                    title: 'Search Google for this gene',
-                                }})}}
-                            </div>
-                            <div class="comparison-metric-grid">
-                                <div class="comparison-metric">
-                                    <span class="comparison-metric-label">log2FC A/B</span>
-                                    <span class="comparison-metric-value">${{formatScaleNumber(entry.log2fc)}}</span>
-                                </div>
-                                <div class="comparison-metric">
-                                    <span class="comparison-metric-label">Score</span>
-                                    <span class="comparison-metric-value">${{formatScaleNumber(entry.score)}}</span>
-                                </div>
-                                <div class="comparison-metric">
-                                    <span class="comparison-metric-label">% expr A</span>
-                                    <span class="comparison-metric-value">${{formatPseudobulkDEPct(entry.pctA)}}</span>
-                                </div>
-                                <div class="comparison-metric">
-                                    <span class="comparison-metric-label">% expr B</span>
-                                    <span class="comparison-metric-value">${{formatPseudobulkDEPct(entry.pctB)}}</span>
-                                </div>
-                                <div class="comparison-metric">
-                                    <span class="comparison-metric-label">Mean A</span>
-                                    <span class="comparison-metric-value">${{formatScaleNumber(entry.meanA)}}</span>
-                                </div>
-                                <div class="comparison-metric">
-                                    <span class="comparison-metric-label">Mean B</span>
-                                    <span class="comparison-metric-value">${{formatScaleNumber(entry.meanB)}}</span>
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                }}).join('');
-            }};
-            const sourceLabel = groupA ? escapeHtml(groupA.description) : '';
-            const referenceLabel = groupB ? escapeHtml(groupB.description) : '';
-            const sizeSummary = (groupA && groupB)
-                ? ` · ${{Number(groupA.nCells || 0).toLocaleString()}} vs ${{Number(groupB.nCells || 0).toLocaleString()}} cells`
-                : '';
-            setCompareSectionSummary(
-                'group-de-summary',
-                `${{summaryLabel}}: ${{String(deferredSourceValue ?? 'A')}} vs ${{String(deferredReferenceValue ?? 'B')}}${{restrictSummary}}${{sizeSummary}}`,
-            );
-            const topNLabel = Math.max(1, Number(deferredTopN) || ANNOTATION_DE_TOP_N).toLocaleString();
-            const quickSummaryHtml = (quickResult.available && quickResult.results.length)
-                ? `
-                    <div class="agg-group-meta">
-                        Group A: <strong>${{sourceLabel}}</strong> (${{Number(quickResult.nA || 0).toLocaleString()}} cells)
-                        vs Group B: <strong>${{referenceLabel}}</strong> (${{Number(quickResult.nB || 0).toLocaleString()}} cells).
-                    </div>
-                    <div class="agg-group-meta">
-                        ${{
-                            Number(quickResult.loadedGeneCount || 0) < Number(quickResult.totalGeneCount || 0)
-                                ? `Quick preview over ${{Number(quickResult.loadedGeneCount || 0).toLocaleString()}} of ${{Number(quickResult.totalGeneCount || 0).toLocaleString()}} genes — run the full sidecar DE for the complete result.`
-                                : ''
-                        }}
-                        Showing top ${{topNLabel}} genes in both directions — positive scores = enriched in Group A, negative = enriched in Group B.
-                    </div>
-                    ${{buildGroupVolcanoPlot(quickResult.results || [])}}
-                    <div class="comparison-stack">${{renderCards(quickResult)}}</div>
-                `
-                : '';
-            const cachedTimestamp = fullCached?.completedAt
-                ? new Date(fullCached.completedAt).toLocaleTimeString([], {{ hour: '2-digit', minute: '2-digit', second: '2-digit' }})
-                : '';
-            const cachedSummaryHtml = fullCached?.available
-                ? (fullCached.results || []).length
-                    ? `
-                        <div class="agg-group-meta">
-                            Group A: <strong>${{sourceLabel}}</strong> (${{Number(fullCached.nA || 0).toLocaleString()}} cells)
-                            vs Group B: <strong>${{referenceLabel}}</strong> (${{Number(fullCached.nB || 0).toLocaleString()}} cells).
-                        </div>
-                        <div class="agg-group-meta">
-                            Cached full sidecar DE${{cachedTimestamp ? ` from ${{cachedTimestamp}}` : ''}}
-                            across ${{Number(fullCached.totalGeneCount || 0).toLocaleString()}} genes.
-                            Showing top ${{topNLabel}} genes in both directions — positive scores = enriched in Group A, negative = enriched in Group B.
-                        </div>
-                        ${{buildGroupVolcanoPlot(fullCached.results || [])}}
-                        <div class="comparison-stack">${{renderCards(fullCached)}}</div>
-                    `
-                    : `
-                        <div class="agg-group-meta">
-                            Group A: <strong>${{sourceLabel}}</strong> (${{Number(fullCached.nA || 0).toLocaleString()}} cells)
-                            vs Group B: <strong>${{referenceLabel}}</strong> (${{Number(fullCached.nB || 0).toLocaleString()}} cells).
-                        </div>
-                        <div class="agg-group-meta">
-                            Cached full sidecar DE${{cachedTimestamp ? ` from ${{cachedTimestamp}}` : ''}} found no enriched genes across ${{Number(fullCached.totalGeneCount || 0).toLocaleString()}} genes.
-                        </div>
-                    `
-                : '';
-            let resultHtml = '';
-            if (!groupA || !groupB) {{
-                resultHtml = '<div class="agg-group-meta">Choose two different groups to compare.</div>';
-            }} else if (fullRun?.running) {{
-                const totalShards = Number(fullRun.totalShards || 0);
-                const completedShards = Number(fullRun.completedShards || 0);
-                const totalGenes = Number(fullRun.totalGenes || 0);
-                const completedGenes = Number(fullRun.completedGenes || 0);
-                const progressMax = Math.max(1, totalGenes || totalShards || 1);
-                const progressValue = Math.min(progressMax, totalGenes ? completedGenes : completedShards);
-                const progressPct = progressMax > 0 ? Math.round((progressValue / progressMax) * 100) : 0;
-                resultHtml = `
-                    <div class="agg-group-meta">Scanning the full sidecar in the background. The viewer stays interactive while this runs.</div>
-                    <progress value="${{progressValue}}" max="${{progressMax}}" style="width:100%; height:12px;"></progress>
-                    <div class="agg-group-meta">
-                        ${{progressPct}}% complete
-                        · ${{completedGenes.toLocaleString()}} / ${{totalGenes.toLocaleString()}} genes
-                        · ${{completedShards.toLocaleString()}} / ${{totalShards.toLocaleString()}} shards
-                    </div>
-                    <div style="display:flex; justify-content:flex-end;">
-                        <button class="legend-btn" id="group-de-cancel" type="button">Cancel Full DE</button>
-                    </div>
-                `;
-            }} else if (fullRun?.error) {{
-                resultHtml = `
-                    <div class="agg-group-meta">Full sidecar DE failed: ${{escapeHtml(fullRun.error)}}</div>
-                    <div style="display:flex; justify-content:flex-end;">
-                        <button class="legend-btn" id="group-de-run-full" type="button">Retry Full DE</button>
-                    </div>
-                `;
-                if (cachedSummaryHtml) {{
-                    resultHtml += '<div class="agg-group-meta">Showing the previous cached full result:</div>';
-                    resultHtml += cachedSummaryHtml;
-                }} else if (quickSummaryHtml) {{
-                    resultHtml += '<div class="agg-group-meta">Quick DE preview from currently loaded genes:</div>';
-                    resultHtml += quickSummaryHtml;
-                }}
-            }} else if (fullCached?.available) {{
-                resultHtml = cachedSummaryHtml;
-                resultHtml += '<div style="display:flex; justify-content:flex-end;"><button class="legend-btn" id="group-de-refresh-full" type="button">Refresh Full DE</button></div>';
-            }} else if (!quickResult.available && quickResult.reason === 'empty_group') {{
-                resultHtml = '<div class="agg-group-meta">One of the selected groups has no cells after applying the current restriction.</div>';
-            }} else if (!quickResult.available && quickResult.reason === 'no_loaded_features' && sidecarAvailable) {{
-                const totalGenes = Number(quickResult.totalGeneCount || 0).toLocaleString();
-                resultHtml = `
-                    <div class="agg-group-meta">
-                        Differential expression runs across ${{totalGenes !== '0' ? `all ${{totalGenes}} genes` : 'all genes'}} from the feature sidecar.
-                    </div>
-                    <div style="display:flex; justify-content:flex-end;">
-                        <button class="legend-btn" id="group-de-run-full" type="button">Compute DE across all genes</button>
-                    </div>
-                `;
-            }} else if (!quickResult.available && quickResult.reason === 'no_loaded_features') {{
-                resultHtml = '<div class="agg-group-meta">No features are currently loaded for group DE. Load features in the Features tab or click pseudobulk DE features first.</div>';
-            }} else if (!quickResult.available && quickResult.reason === 'same_group') {{
-                resultHtml = '<div class="agg-group-meta">Choose two different groups to compare.</div>';
-            }} else if (!quickResult.available) {{
-                resultHtml = '<div class="agg-group-meta">Choose two different groups to compare.</div>';
-            }} else if (!quickResult.results.length) {{
-                if (sidecarAvailable && Number(quickResult.loadedGeneCount || 0) < Number(quickResult.totalGeneCount || 0)) {{
-                    resultHtml = `
-                        <div class="agg-group-meta">No enriched genes were found among the currently loaded genes.</div>
-                        <div style="display:flex; justify-content:flex-end;">
-                            <button class="legend-btn" id="group-de-run-full" type="button">Run Full DE</button>
-                        </div>
-                    `;
-                }} else {{
-                    resultHtml = '<div class="agg-group-meta">No enriched genes were found among the genes currently loaded in the viewer.</div>';
-                }}
-            }} else {{
-                resultHtml = quickSummaryHtml;
-                if (sidecarAvailable && Number(quickResult.loadedGeneCount || 0) < Number(quickResult.totalGeneCount || 0)) {{
-                    resultHtml += '<div style="display:flex; justify-content:flex-end;"><button class="legend-btn" id="group-de-run-full" type="button">Run Full DE</button></div>';
-                }}
-            }}
-
-            if (exportState) {{
-                resultHtml += `
-                    <div style="display:flex; justify-content:flex-end; gap:6px; margin-top:6px;">
-                        <button class="legend-btn" id="group-de-export-json" type="button">Export JSON</button>
-                        <button class="legend-btn" id="group-de-export-csv" type="button">Export CSV</button>
-                    </div>
-                `;
-            }}
-
-            resultsDiv.innerHTML = `<div class="gene-distribution-summary">Group differential expression${{renderCalcInfoButton('group_de')}}</div>` + resultHtml;
-
-            const runFullBtn = resultsDiv.querySelector('#group-de-run-full');
-            if (runFullBtn && groupA && groupB) {{
-                runFullBtn.addEventListener('click', () => {{
-                    runFullGroupDE(groupA, groupB);
-                }});
-            }}
-            const refreshFullBtn = resultsDiv.querySelector('#group-de-refresh-full');
-            if (refreshFullBtn && groupA && groupB) {{
-                refreshFullBtn.addEventListener('click', () => {{
-                    runFullGroupDE(groupA, groupB);
-                }});
-            }}
-            const cancelBtn = resultsDiv.querySelector('#group-de-cancel');
-            if (cancelBtn) {{
-                cancelBtn.addEventListener('click', () => {{
-                    cancelGroupDEFullRun();
-                    renderGroupDE();
-                }});
-            }}
-            const exportJsonBtn = resultsDiv.querySelector('#group-de-export-json');
-            if (exportJsonBtn && groupA && groupB) {{
-                exportJsonBtn.addEventListener('click', () => {{
-                    exportGroupDEReport(groupA, groupB, exportState);
-                }});
-            }}
-            const exportCsvBtn = resultsDiv.querySelector('#group-de-export-csv');
-            if (exportCsvBtn && groupA && groupB) {{
-                exportCsvBtn.addEventListener('click', () => {{
-                    exportGroupDECsv(groupA, groupB, exportState);
-                }});
-            }}
-            bindVolcanoGroupInteraction(resultsDiv, renderGroupDE);
-            bindGeneActivateButtons(resultsDiv, renderGroupDE);
-            bindGeneGoogleSearchButtons(resultsDiv);
-        }})().catch((asyncErr) => {{
-            // Without this, a throw inside the async compute would leave the
-            // "Computing…" placeholder stuck on screen forever.
-            console.error('group DE async compute failed:', asyncErr);
-            if (groupDeRenderToken !== token) return;
-            const rd = document.getElementById('group-de-results');
-            if (rd) rd.innerHTML = '<div class="agg-group-meta">Differential expression could not be computed. Adjust the selection and try again.</div>';
-        }});
-        }} catch (err) {{
-            console.error('renderGroupDE crashed:', err);
-        }} finally {{
-            groupDeRenderDepth -= 1;
-        }}
-    }}
-
     function getActiveAnnotationGroupDESpec() {{
         const column = String(explorationColorCol || '');
         if (!column || column.startsWith(SECTION_METADATA_COLOR_PREFIX)) return null;
@@ -31038,7 +30490,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ? '<div class="selection-query-icon-btn selection-summary-find-markers loading" role="status" aria-label="Finding annotation markers"><span class="selection-summary-find-markers-spinner"></span></div>'
             : (!hasCompletedCalculation ? '<button class="selection-query-icon-btn" id="group-de-run" type="button" title="Find annotation markers" aria-label="Find annotation markers"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg></button>' : '');
         const controlsHtml = `
-            <div class="selection-summary-title">Gene expression — annotation A vs annotation B${{renderCalcInfoButton('group_de')}}</div>
+            <div class="selection-summary-title">Feature values - annotation A vs annotation B${{renderCalcInfoButton('group_de')}}</div>
             <div class="pseudobulk-de-controls insights-panel-section">
                 <div class="pseudobulk-de-select-row comparison-pair-select-row">
                     <div><label>Annotation A</label><select id="group-de-source-value" style="border-color:${{colorA}}">${{renderValues(groupValues, groupDeSourceValue)}}</select></div>
@@ -31053,7 +30505,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <select id="group-de-restrict-value"${{restrictSpec ? '' : ' disabled'}}>${{renderRestrictionValues}}</select>
                 </div>
                 <div class="comparison-de-action-row">
-                    ${{hasCompletedCalculation ? `<div class="selection-summary-welch-controls"><div class="selection-summary-welch-control-row"><label>Top N per direction</label><input id="group-de-topn" type="number" min="1" max="20" step="1" value="${{groupDeTopN}}"></div><div class="selection-summary-welch-control-row"><label>Min expressed %</label><input id="group-de-min-pct" type="range" min="0" max="100" step="1" value="${{groupDeMinPct}}"><output id="group-de-min-pct-value">${{groupDeMinPct}}%</output></div></div>` : ''}}
+                    ${{hasCompletedCalculation ? `<div class="selection-summary-welch-controls"><div class="selection-summary-welch-control-row"><label>Top N per direction</label><input id="group-de-topn" type="number" min="1" max="20" step="1" value="${{groupDeTopN}}"></div><div class="selection-summary-welch-control-row"><label>Min detected %</label><input id="group-de-min-pct" type="range" min="0" max="100" step="1" value="${{groupDeMinPct}}"><output id="group-de-min-pct-value">${{groupDeMinPct}}%</output></div></div>` : ''}}
                     <div class="comparison-de-action-buttons"><button class="legend-btn icon-only" id="group-de-swap" type="button" title="Swap Annotation A and Annotation B" aria-label="Swap Annotation A and Annotation B"><svg class="lucide lucide-arrow-left-right" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3 4 7l4 4"></path><path d="M4 7h16"></path><path d="m16 21 4-4-4-4"></path><path d="M20 17H4"></path></svg></button>${{runButtonHtml}}</div>
                 </div>
             </div>`;
@@ -31091,11 +30543,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const volcanoToolbar = '<button class="icon-btn" type="button" data-group-de-export-volcano title="Download volcano plot as SVG" aria-label="Download volcano plot as SVG"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path></svg></button>';
             html += `<div id="group-de-results">${{buildGroupVolcanoPlot(displayed, volcanoToolbar, {{ positive: colorA, negative: colorB }})}}<div class="comparison-stack">${{renderCards()}}</div><div style="display:flex;justify-content:flex-end;gap:6px;margin-top:6px;"><button class="icon-btn" type="button" data-group-de-export-csv title="Download all annotation comparison features as CSV" aria-label="Download all annotation comparison features as CSV"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path></svg></button></div>${{DATA.feature_manifest_url && result === quickResult && Number(result.loadedGeneCount || 0) < Number(result.totalGeneCount || 0) ? '<div style="display:flex;justify-content:flex-end"><button class="legend-btn" id="group-de-run-full" type="button">Run Full DE</button></div>' : ''}}</div>`;
         }} else if (quickResult && !quickResult.available) {{
-            const noLoadedGenes = quickResult.reason === 'no_loaded_features' && !!DATA.feature_manifest_url;
-            const message = noLoadedGenes
-                ? 'No genes are currently loaded. Run the full sidecar comparison to scan all genes.'
+            const noLoadedFeatures = quickResult.reason === 'no_loaded_features' && !!DATA.feature_manifest_url;
+            const message = noLoadedFeatures
+                ? 'No features are currently loaded. Run the full sidecar comparison to scan all features.'
                 : (quickResult.reason === 'too_few_cells' ? 'Each annotation needs at least two cells.' : 'The selected annotations could not be compared.');
-            html += `<div id="group-de-results"><div class="agg-group-meta">${{message}}</div>${{noLoadedGenes ? '<div style="display:flex;justify-content:flex-end"><button class="legend-btn" id="group-de-run-full" type="button">Run Full DE</button></div>' : ''}}</div>`;
+            html += `<div id="group-de-results"><div class="agg-group-meta">${{message}}</div>${{noLoadedFeatures ? '<div style="display:flex;justify-content:flex-end"><button class="legend-btn" id="group-de-run-full" type="button">Run Full DE</button></div>' : ''}}</div>`;
         }} else {{
             html += '<div id="group-de-results"></div>';
         }}
@@ -33183,7 +32635,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const activateAttr = loadable ? ` data-gene-activate="${{escapeHtml(token)}}" data-gene-modality="${{escapeHtml(modality)}}"` : '';
             const title = loadable
                 ? `Load ${{g}} into the ${{getModalityDisplayLabel(modality)}} viewer`
-                : `${{g}} is shown in DE results but its expression vector is unavailable for ${{getModalityDisplayLabel(modality)}}`;
+                : `${{g}} is shown in DE results but its feature vector is unavailable for ${{getModalityDisplayLabel(modality)}}`;
             return `<span class="${{cls}}"${{activateAttr}} title="${{escapeHtml(title)}}">${{escapeHtml(g)}}</span>`;
         }}).join(', ');
         const sourceMarkerLabel = sourceMarkers.length ? renderInlineGeneLinks(sourceMarkers) : 'No pseudobulk DE features available.';
@@ -34417,14 +33869,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 overviewBlendSpec.b.modality = overviewBlendSpec.b.modality || defaultModality;
 
                 const normalize = (entry, side, preferSecond) => {{
-                    const legacyModality = entry.kind && entry.kind !== 'cell' ? entry.kind : '';
-                    if (!entry.source) entry.source = legacyModality ? 'feature' : (catCols.length ? 'annotation' : 'feature');
+                    if (!entry.source) entry.source = catCols.length ? 'annotation' : 'feature';
                     if (entry.source !== 'feature' && entry.source !== 'annotation') entry.source = 'annotation';
-                    if (!entry.modality) entry.modality = legacyModality || getPanelModality(`split.${{side}}`, defaultModality);
+                    if (!entry.modality) entry.modality = getPanelModality(`split.${{side}}`, defaultModality);
                     if (!namespaceSet.has(entry.modality)) entry.modality = defaultModality;
                     setPanelModality(`split.${{side}}`, entry.modality);
-                    if (!entry.feature && entry.gene) entry.feature = entry.gene;
-                    if (entry.geneCleared && entry.featureCleared === undefined) entry.featureCleared = true;
 
                     if (entry.source === 'annotation') {{
                         if (!catCols.length) {{
@@ -35257,63 +34706,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 '''
 
 
-def _legacy_export_kwargs_shim(func):
-    """Back-compat wrapper for pre-migration ``export_to_html`` keyword names.
-
-    The gene->feature / marker->pseudobulk API migration renamed or removed many
-    parameters; the bundled example scripts still call the old names. This shim
-    remaps the recoverable ones and warns-and-drops the rest so existing callers
-    keep working. It is intentionally lenient — remove it once callers migrate.
-    """
-    import functools
-    import inspect
-    import warnings as _warnings
-
-    _RENAMES = {
-        "color": "main_cell_annotation",
-        "additional_colors": "cell_annotations",
-        "genes": "features",
-        "gene_encoding": "feature_encoding",
-        "gene_value_encoding": "feature_value_encoding",
-        "gene_storage": "feature_storage",
-        "gene_aux_path": "feature_manifest_path",
-        "gene_manifest_path": "feature_manifest_path",
-        "gene_sidecar_shard_size": "feature_sidecar_shard_size",
-        "gene_sparse_zero_threshold": "feature_sparse_zero_threshold",
-        "neighbor_stats_groupby": "neighbor_stats_annotations",
-        "cluster_de_groupby": "pseudobulk_additional_annotations",
-        "pseudobulk_de_annotations": "pseudobulk_additional_annotations",
-        "marker_gene_annotations": "pseudobulk_additional_annotations",
-        "interaction_marker_annotations": "interaction_markers",
-    }
-    _accepted = set(inspect.signature(func).parameters)
-
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        out = {}
-        dropped = []
-        for key, value in kwargs.items():
-            if key in _accepted:
-                out.setdefault(key, value)
-                continue
-            new_key = _RENAMES.get(key)
-            if new_key and new_key in _accepted and new_key not in out:
-                out[new_key] = value
-            else:
-                dropped.append(key)
-        if dropped:
-            _warnings.warn(
-                "export_to_html: ignoring legacy keyword(s) removed in the "
-                "gene->feature/pseudobulk API migration: "
-                + ", ".join(sorted(dropped)),
-                stacklevel=2,
-            )
-        return func(*args, **out)
-
-    return wrapper
-
-
-@_legacy_export_kwargs_shim
 def export_to_html(
     dataset: SpatialDataset,
     output_path: str,
@@ -35388,7 +34780,7 @@ def export_to_html(
         Path for output HTML file, or a `.karospace` package when
         `feature_storage="sidecar"`.
     main_cell_annotation : str
-        Main cell annotation column or gene name shown first in the viewer
+        Main cell annotation column or feature name shown first in the viewer
     title : str
         Page title
     min_panel_size : int
@@ -35412,20 +34804,20 @@ def export_to_html(
     cell_annotations : list, optional
         Additional cell obs columns to include for annotation switching.
     features : list, optional
-        Feature names to include for expression visualization
+        Feature names to include for visualization
     features_list : str or Path, optional
-        Text file containing one feature/gene name per line. Values are
+        Text file containing one feature name per line. Values are
         appended to `features`, then deduplicated while preserving order.
     feature_encoding : str
         "dense", "sparse", or "auto" (default). "auto" uses sparse encoding for
-        zero-inflated genes to reduce HTML size.
+        zero-inflated feature matrices to reduce HTML size.
     feature_value_encoding : str
         Only used for sidecar/package features. "uint16" (default) and "uint8"
         store linearly quantized values using each feature's exported vmin/vmax range.
     feature_storage : str
         "embedded" (default) keeps requested/top DE feature vectors in
         the HTML. "sidecar" embeds no feature vectors in the HTML and
-        writes all default-modality features to sidecar shards for lazy loading.
+        writes all selected-modality features to sidecar shards for lazy loading.
         `.karospace` package export requires `"sidecar"`.
     feature_manifest_path : str, optional
         Output path for the sidecar feature JSON when feature_storage="sidecar".
@@ -35436,20 +34828,19 @@ def export_to_html(
         Only used when feature_encoding="auto". Use sparse encoding when the
         fraction of zeros is >= this threshold (default: 0.8).
     gene_correlation_top_n : int
-        Number of top correlated genes to show per embedded gene (default 5). Set to 0 to disable.
+        Number of top correlated features to show per embedded feature (default 5). Set to 0 to disable.
     category_means_n_genes : int
-        Maximum embedded pseudobulk-DE genes to expose in category mean summaries
-        (default 500). These means power the Genes -> Means tab and the lasso
+        Maximum embedded pseudobulk-DE features to expose in category mean summaries
+        (default 500). These means power the Features -> Means tab and the lasso
         selection summary. Set to 0 to disable.
     spatial_variable_genes_n : int
-        Number of top variable genes to score with Moran's I spatial autocorrelation
+        Number of top variable features to score with Moran's I spatial autocorrelation
         (default 20). Requires a spatial weight matrix in adata.obsp. Set to 0 to disable.
     pseudobulk : str, optional
         Category pseudobulk DE mode. Use "auto" to analyze the main cells annotation and
         pseudobulk_additional_annotations, or None/"None" to disable.
     pseudobulk_additional_annotations : list, optional
-        Additional annotation columns to analyze with category pseudobulk DE and
-        interaction pseudobulk DE when their modes are enabled.
+        Additional annotation columns to analyze with category pseudobulk DE.
     pseudobulk_replicate_annotation : str, optional
         Obs annotation used as the biological replicate for pseudobulk analyses.
         Defaults to the dataset section_key annotation.
@@ -35470,7 +34861,7 @@ def export_to_html(
         Exclude cells below this total raw-count threshold before pseudobulk
         aggregation. Zero disables filtering.
     pseudobulk_min_gene_counts : int
-        Exclude genes below this total raw pseudobulk-count threshold in the
+        Exclude features below this total raw pseudobulk-count threshold in the
         shared DESeq2 fit. Zero disables filtering.
     pseudobulk_min_cells_per_pseudobulk : int
         Minimum cells required in each replicate x annotation pseudobulk sample
@@ -35480,7 +34871,7 @@ def export_to_html(
         contrast.
         Pseudobulk DE always requires at least two replicates.
     pseudobulk_min_pct_expressed : float
-        Minimum fraction of cells expressing a gene required in at least one
+        Minimum fraction of cells with a positive feature value required in at least one
         compared group before DE results are reported. Values > 1 are interpreted as
         percentages.
     pseudobulk_p_adjust_method : str
@@ -35495,9 +34886,13 @@ def export_to_html(
         Number of CPU workers used for the shared PyDESeq2 fit and the maximum
         number of parallel shared-fit contrasts. Must be at least one.
     pseudobulk_embed_top_n_per_comparison : int
-        Maximum significant DE genes to auto-embed per category or contact
-        comparison in embedded mode. Ignored in sidecar mode, where all gene
-        expression vectors are written to the sidecar.
+        Maximum significant DE features to auto-embed per category or contact
+        comparison in embedded mode. Ignored in sidecar mode, where all feature
+        vectors are written to the sidecar.
+    modalities : list, optional
+        Feature modalities to expose in the viewer. By default, embedded storage
+        exports only the default modality; sidecar storage exports all detected
+        modalities. Explicit non-default modalities are skipped in embedded mode.
     pathway_gmt : str or list, optional
         GMT pathway file(s) used for ORA and preranked GSEA. When omitted,
         KaroSpace loads a bundled or cached default Reactome GMT when
@@ -35515,7 +34910,8 @@ def export_to_html(
         Pathway comparisons are processed sequentially.
     neighbor_stats_annotations : list, optional
         Obs columns to compute neighbor composition stats for (categorical only).
-        If None/empty, neighbor stats are not computed.
+        If None, the exporter computes them for the main cells annotation plus
+        cell_annotations. Empty disables unless needed by enabled interaction markers.
     neighbor_stats_permutations : int
         Number of permutations for neighbor enrichment z-scores (0 disables)
     neighbor_stats_seed : int
@@ -35523,7 +34919,7 @@ def export_to_html(
     interaction_markers_top_targets : int
         Number of target categories to evaluate per source.
     interaction_markers_top_genes : int
-        Number of top DE genes to keep per source-target interaction.
+        Number of top DE features to keep per source-target interaction.
     interaction_markers_min_cells : int
         Minimum cells required per replicate in both contact+ and contact-
         pseudobulk samples.
@@ -35531,7 +34927,7 @@ def export_to_html(
         Minimum target neighbors to classify source cells as contact+.
     interaction_markers : str, optional
         Contact-conditioned interaction marker mode. Use "auto" to analyze the
-        main cells annotation and pseudobulk_additional_annotations, or None/"None" to disable.
+        main cells annotation and cell_annotations, or None/"None" to disable.
     section_rotations : mapping, optional
         Optional mapping of section_id -> initial rotation angle in degrees.
         Angles are stored exactly (normalized modulo 360) for the interactive viewer.
@@ -35636,18 +35032,11 @@ def export_to_html(
     selected_modalities = _normalize_modality_selection(
         modalities,
         option_name="modalities",
-        default_to_all=True,
+        default_to_all=(feature_storage == "sidecar"),
     )
     if default_modality_name in available_modalities and default_modality_name not in selected_modalities:
         selected_modalities.insert(0, default_modality_name)
     extra_modalities = [m for m in selected_modalities if m != default_modality_name]
-    if extra_modalities and feature_storage != "sidecar":
-        log_warning(
-            f"extra modalities {extra_modalities} require feature_storage='sidecar'; "
-            "skipping them in embedded mode."
-        )
-        selected_modalities = [m for m in selected_modalities if m == default_modality_name]
-        extra_modalities = []
     requested_feature_modalities = list(selected_modalities)
 
     def _features_for_modality(modality_name: str) -> List[str]:
@@ -35687,7 +35076,12 @@ def export_to_html(
         requested_feature_modalities,
     )
     requested_features = list(requested_features_by_modality.get(default_modality_name, []))
-    embedded_features = [] if feature_storage == "sidecar" else list(requested_features)
+    requested_embedding_features = [
+        feature
+        for modality_features in requested_features_by_modality.values()
+        for feature in modality_features
+    ]
+    embedded_features = [] if feature_storage == "sidecar" else list(requested_embedding_features)
     effective_pseudobulk_embed_top_n_per_comparison = (
         0 if feature_storage == "sidecar" else int(pseudobulk_embed_top_n_per_comparison)
     )
@@ -35814,17 +35208,22 @@ def export_to_html(
         if col and col not in pseudobulk_analysis_annotations:
             pseudobulk_analysis_annotations.append(col)
     pseudobulk_de_annotations = list(pseudobulk_analysis_annotations) if pseudobulk_enabled else []
-    interaction_marker_annotations = list(pseudobulk_analysis_annotations) if interaction_markers_enabled else []
+    interaction_annotation_candidates = []
+    for col in [annotation, *(cell_annotations or [])]:
+        if col and col not in interaction_annotation_candidates:
+            interaction_annotation_candidates.append(col)
+    interaction_marker_annotations = (
+        list(interaction_annotation_candidates) if interaction_markers_enabled else []
+    )
     analytics_annotations = list(pseudobulk_de_annotations)
     analytics_annotations.extend(
         col for col in interaction_marker_annotations if col and col not in analytics_annotations
     )
     if neighbor_stats_annotations is None:
-        neighbor_stats_annotations = list(analytics_annotations)
-        if cell_annotations:
-            neighbor_stats_annotations.extend(
-                col for col in cell_annotations if col and col not in neighbor_stats_annotations
-            )
+        neighbor_stats_annotations = []
+        for col in [*interaction_annotation_candidates, *analytics_annotations]:
+            if col and col not in neighbor_stats_annotations:
+                neighbor_stats_annotations.append(col)
     else:
         neighbor_stats_annotations = list(neighbor_stats_annotations)
         neighbor_stats_annotations.extend(
@@ -35982,7 +35381,7 @@ def export_to_html(
             level=2,
         )
         log_detail(
-            "GSEA ranked genes: all retained genes per contrast after model and % expression filtering.",
+            "GSEA ranked genes: all retained genes per contrast after model and percent-detected filtering.",
             level=2,
         )
         log_detail(
@@ -36083,11 +35482,6 @@ def export_to_html(
                     "reason": "unsupported_modality",
                     "modality": pathway_modality_name,
                 }
-                log_detail(
-                    f"Skipping pathway enrichment for modality {pathway_modality_name} "
-                    "(not gene-compatible).",
-                    level=2,
-                )
                 continue
             log_detail(f"Pathway modality: {pathway_modality_name}.", level=2)
             pathway_settings_by_modality[pathway_modality_name] = add_pathway_enrichment_to_pseudobulk_de(
@@ -36105,6 +35499,8 @@ def export_to_html(
             settings = pathway_settings_by_modality.get(pathway_modality_name) or {}
             if not settings.get("available"):
                 reason = settings.get("reason") or "unavailable"
+                if reason == "unsupported_modality":
+                    continue
                 error = settings.get("error")
                 log_warning(
                     f"pathway enrichment unavailable for modality {pathway_modality_name} "
@@ -36115,7 +35511,7 @@ def export_to_html(
                     f"Stored pathway enrichment for modality {pathway_modality_name}: "
                     f"{int(settings.get('enriched_comparisons') or 0):,}/"
                     f"{int(settings.get('comparisons') or 0):,} pseudobulk comparisons.",
-                    level=2,
+                    level=1,
                 )
     except Exception as exc:
         pathway_settings_by_modality = dict(data.get("pathway_settings_by_modality") or {})
@@ -36424,15 +35820,22 @@ def export_to_html(
                     dynamic_ncols=True,
                 )
         manifest = {
-            "format": "karospace-feature-sidecar-manifest-v3",
+            "format": "karospace-feature-sidecar-manifest-v4",
             "feature_sidecar_format": FEATURE_SIDECAR_FORMAT_BINARY,
+            "feature_count": total_sidecar_features,
+            "modalities": {},
+        }
+        default_entry: Dict[str, Any] = {
             "shards": {},
             "features_meta": {},
             "feature_encodings": {},
             "feature_value_encodings": {},
             "feature_to_shard": {},
+            "value_kind": "counts",
+            "label": default_modality_name,
             "section_order": [section.section_id for section in dataset.sections],
         }
+        manifest["modalities"][default_modality_name] = default_entry
         output_parent = Path(output_path).resolve().parent
         section_cell_counts = {
             section_id: int(len(indices))
@@ -36464,20 +35867,20 @@ def export_to_html(
                 feature_value_encoding=feature_value_encoding,
                 feature_sparse_zero_threshold=feature_sparse_zero_threshold,
             )
-            manifest["shards"][shard_rel] = shard_features
+            default_entry["shards"][shard_rel] = shard_features
             for gene in shard_features:
-                manifest["feature_to_shard"][gene] = shard_rel
+                default_entry["feature_to_shard"][gene] = shard_rel
                 if gene in shard_data.get("features_meta", {}):
-                    manifest["features_meta"][gene] = shard_data["features_meta"][gene]
+                    default_entry["features_meta"][gene] = shard_data["features_meta"][gene]
                 if gene in shard_data.get("feature_encodings", {}):
-                    manifest["feature_encodings"][gene] = shard_data["feature_encodings"][gene]
+                    default_entry["feature_encodings"][gene] = shard_data["feature_encodings"][gene]
                 if gene in shard_data.get("feature_value_encodings", {}):
-                    manifest["feature_value_encodings"][gene] = shard_data["feature_value_encodings"][gene]
+                    default_entry["feature_value_encodings"][gene] = shard_data["feature_value_encodings"][gene]
             _write_binary_feature_shard(
                 shard_path=shard_path,
                 shard_features=shard_features,
                 shard_data=shard_data,
-                section_order=manifest["section_order"],
+                section_order=default_entry["section_order"],
                 section_cell_counts=section_cell_counts,
             )
             features_written += len(shard_features)
@@ -36496,19 +35899,6 @@ def export_to_html(
         if progress is not None:
             progress.close()
             progress = None
-        # Mirror RNA fields under manifest.modalities for forward-compat.
-        manifest["modalities"] = {
-            default_modality_name: {
-                "shards": dict(manifest["shards"]),
-                "features_meta": dict(manifest["features_meta"]),
-                "feature_encodings": dict(manifest["feature_encodings"]),
-                "feature_value_encodings": dict(manifest["feature_value_encodings"]),
-                "feature_to_shard": dict(manifest["feature_to_shard"]),
-                "value_kind": "counts",
-                "section_order": list(manifest["section_order"]),
-            }
-        }
-
         # Per-modality shard writes for non-default modalities.
         for mod_name in extra_modalities:
             mod = dataset.modalities[mod_name]
@@ -36568,10 +35958,6 @@ def export_to_html(
                 )
             manifest["modalities"][mod_name] = mod_entry
 
-        # Bump format only when extra modalities are actually present.
-        if extra_modalities:
-            manifest["format"] = "karospace-feature-sidecar-manifest-v4"
-
         with open(resolved_feature_manifest_path, "w", encoding="utf-8") as f:
             json.dump(manifest, f, separators=(",", ":"))
         if package_mode:
@@ -36624,23 +36010,37 @@ def export_to_html(
     else:
         log_detail(f"Spot size: {resolved_spot_size:.2f}.")
     log_detail(f"Annotation options: {len(data['available_annotations'])}")
-    if embedded_features:
-        default_feature_state = (
-            (data.get("feature_state_by_modality") or {}).get(default_modality_name)
-            or {}
-        )
-        log_detail(
-            "Features embedded in HTML "
-            f"({default_modality_name}): {len(default_feature_state.get('features_meta') or {})}"
-        )
-        enc = default_feature_state.get("feature_encodings") or {}
-        if enc:
-            n_sparse = sum(1 for v in enc.values() if v == "sparse")
-            n_dense = sum(1 for v in enc.values() if v == "dense")
+    feature_state_by_modality = data.get("feature_state_by_modality") or {}
+    embedded_feature_counts = []
+    embedded_feature_encodings = {}
+    for modality_name in selected_modalities:
+        state = feature_state_by_modality.get(modality_name) or {}
+        features_meta = state.get("features_meta") or {}
+        if not features_meta:
+            continue
+        embedded_feature_counts.append((modality_name, len(features_meta)))
+        embedded_feature_encodings.update(state.get("feature_encodings") or {})
+    if embedded_feature_counts:
+        total_embedded_features = sum(count for _modality_name, count in embedded_feature_counts)
+        if len(embedded_feature_counts) == 1:
+            modality_name, count = embedded_feature_counts[0]
+            log_detail(f"Features embedded in HTML ({modality_name}): {count:,}")
+        else:
+            count_text = ", ".join(
+                f"{modality_name}={count:,}"
+                for modality_name, count in embedded_feature_counts
+            )
+            log_detail(
+                f"Features embedded in HTML: {count_text} "
+                f"(total {total_embedded_features:,})."
+            )
+        if embedded_feature_encodings:
+            n_sparse = sum(1 for v in embedded_feature_encodings.values() if v == "sparse")
+            n_dense = sum(1 for v in embedded_feature_encodings.values() if v == "dense")
             log_detail(f"Embedded feature encoding: {n_sparse} sparse, {n_dense} dense.")
     if feature_manifest_url:
         if not embedded_features:
-            log_detail("Features embedded in HTML: 0; expression is sidecar-only.")
+            log_detail("Features embedded in HTML: 0; feature values are sidecar-only.")
         log_detail(f"Sidecar features available via: {feature_manifest_url}")
         log_detail("Sidecar viewers must be opened over HTTP(S) with the .features.json file and .features/ directory next to the HTML.")
         log_detail(f"Sidecar format: {FEATURE_SIDECAR_FORMAT_BINARY}")

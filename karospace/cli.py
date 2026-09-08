@@ -40,13 +40,13 @@ def _parse_section_rotations_arg(raw: str) -> Optional[Dict[str, float]]:
 
 def _run_export_cli(argv=None):
     parser = argparse.ArgumentParser(
-        description="Generate HTML viewer for Xenium spatial transcriptomics data"
+        description="Generate HTML viewer for multimodal spatial data"
     )
     io_args = parser.add_argument_group("Input/output")
     dataset_args = parser.add_argument_group("Dataset loading and coordinates")
     metadata_args = parser.add_argument_group("Metadata and labels")
     viewer_args = parser.add_argument_group("Viewer layout")
-    gene_args = parser.add_argument_group("Gene content and storage")
+    feature_args = parser.add_argument_group("Feature content and storage")
     pseudobulk_args = parser.add_argument_group("Pseudobulk DE")
     neighborhood_args = parser.add_argument_group("Neighborhoods and interactions")
     overlay_args = parser.add_argument_group("Images, deconvolution, and utilities")
@@ -74,7 +74,7 @@ def _run_export_cli(argv=None):
         type=str,
         default="leiden",
         dest="main_cell_annotation",
-        help="Main cell annotation column or gene shown first in the viewer (default: leiden)"
+        help="Main cell annotation column or feature shown first in the viewer (default: leiden)"
     )
     viewer_args.add_argument(
         "--cell-annotations",
@@ -84,18 +84,18 @@ def _run_export_cli(argv=None):
         help="Comma-separated extra cell obs annotation columns to embed as selectable annotations "
              "(e.g. a second clustering). Needed to compare annotations in the River plot."
     )
-    gene_args.add_argument(
+    feature_args.add_argument(
         "--features",
         type=str,
         default="",
-        help="Comma-separated features to preload for expression visualization. In embedded mode, significant DE genes are embedded automatically up to the configured cap."
+        help="Comma-separated features to preload for visualization. In embedded mode, significant DE features are embedded automatically up to the configured cap."
     )
-    gene_args.add_argument(
+    feature_args.add_argument(
         "--features-list",
         type=str,
         default=None,
         dest="features_list",
-        help="Path to a text file with one feature/gene per line. Values are combined with --features and deduplicated."
+        help="Path to a text file with one feature per line. Values are combined with --features and deduplicated."
     )
     dataset_args.add_argument(
         "--section-key",
@@ -254,46 +254,47 @@ def _run_export_cli(argv=None):
         ),
     )
     viewer_args.set_defaults(embed_reproducibility_info=True)
-    gene_args.add_argument(
+    feature_args.add_argument(
         "--feature-encoding",
         choices=["auto", "dense", "sparse"],
         default="auto",
         help="Feature vector encoding. 'sparse' stores only non-zero indices/values (smaller HTML for zero-inflated data). (default: auto)"
     )
-    gene_args.add_argument(
+    feature_args.add_argument(
         "--feature-value-encoding",
         choices=["uint16", "uint8"],
         default="uint16",
         help="Sidecar/package feature value encoding for binary shards. (default: uint16)"
     )
-    gene_args.add_argument(
+    feature_args.add_argument(
         "--feature-storage",
         choices=["embedded", "sidecar"],
         default="embedded",
         help="Store requested/top DE feature vectors in the HTML (`embedded`) or write all feature vectors to a sidecar (`sidecar`). (default: embedded)"
     )
-    gene_args.add_argument(
+    feature_args.add_argument(
         "--feature-manifest-path",
         type=str,
         default=None,
         help="Optional output path for the feature sidecar JSON when --feature-storage sidecar."
     )
-    gene_args.add_argument(
+    feature_args.add_argument(
         "--feature-sidecar-shard-size",
         type=int,
         default=256,
         help="Number of features per sidecar shard. (default: 256)"
     )
-    gene_args.add_argument(
+    feature_args.add_argument(
         "--modalities",
         type=str,
         default=None,
         help=(
             "Comma-separated list of modalities to export (e.g. 'rna,protein'). "
-            "Defaults to all detected. Non-default modalities require --feature-storage sidecar."
+            "Defaults to the default modality with --feature-storage embedded, "
+            "or all detected modalities with --feature-storage sidecar."
         ),
     )
-    gene_args.add_argument(
+    feature_args.add_argument(
         "--feature-sparse-zero-threshold",
         type=float,
         default=0.8,
@@ -309,7 +310,11 @@ def _run_export_cli(argv=None):
         "--neighbor-stats-annotations",
         type=str,
         default="auto",
-        help="Comma-separated obs columns to compute neighbor composition stats for. Use 'auto' (default) to match --main-cell-annotation; empty disables."
+        help=(
+            "Comma-separated obs columns to compute neighbor composition stats for. "
+            "Use 'auto' (default) to include --main-cell-annotation and --cell-annotations; "
+            "empty disables standalone neighbor enrichment unless interaction markers need it."
+        )
     )
     pseudobulk_args.add_argument(
         "--pseudobulk",
@@ -325,8 +330,8 @@ def _run_export_cli(argv=None):
         type=str,
         default="",
         help=(
-            "Comma-separated additional annotation columns to analyze when pseudobulk or "
-            "interaction markers are enabled. --main-cell-annotation is included automatically."
+            "Comma-separated additional annotation columns to analyze when pseudobulk is "
+            "enabled. --main-cell-annotation is included automatically."
         )
     )
     pseudobulk_args.add_argument(
@@ -379,13 +384,21 @@ def _run_export_cli(argv=None):
         ),
     )
     pseudobulk_args.add_argument(
-        "--pseudobulk-min-gene-counts",
+        "--pseudobulk-min-feature-counts",
         type=int,
         default=0,
+        dest="pseudobulk_min_gene_counts",
+        metavar="N",
         help=(
-            "Exclude genes with fewer than this many total raw pseudobulk counts in the shared DESeq2 fit. "
+            "Exclude features with fewer than this many total raw pseudobulk counts in the shared DESeq2 fit. "
             "Use 0 to disable. (default: 0)"
         ),
+    )
+    pseudobulk_args.add_argument(
+        "--pseudobulk-min-gene-counts",
+        type=int,
+        dest="pseudobulk_min_gene_counts",
+        help=argparse.SUPPRESS,
     )
     pseudobulk_args.add_argument(
         "--pseudobulk-min-cells-per-pseudobulk",
@@ -411,8 +424,8 @@ def _run_export_cli(argv=None):
         type=int,
         default=2,
         help=(
-            "Maximum significant DE genes to auto-embed per category/contact comparison in embedded mode. "
-            "Ignored by --feature-storage sidecar, where all gene expression vectors are written to the sidecar. (default: 2)"
+            "Maximum significant DE features to auto-embed per category/contact comparison in embedded mode. "
+            "Ignored by --feature-storage sidecar, where all feature vectors are written to the sidecar. (default: 2)"
         ),
     )
     pseudobulk_args.add_argument(
@@ -425,7 +438,7 @@ def _run_export_cli(argv=None):
         "--pseudobulk-min-pct-expressed",
         type=float,
         default=0.0,
-        help="Minimum fraction of cells expressing a gene in at least one compared group before reporting DE results. Values >1 are interpreted as percentages. (default: 0)"
+        help="Minimum fraction of cells with a positive feature value in at least one compared group before reporting DE results. Values >1 are interpreted as percentages. (default: 0)"
     )
     pseudobulk_args.add_argument(
         "--pseudobulk-p-adjust-method",
@@ -507,10 +520,18 @@ def _run_export_cli(argv=None):
         help="Number of target categories to evaluate per source for contact-conditioned markers. (default: 5)"
     )
     neighborhood_args.add_argument(
-        "--interaction-markers-top-genes",
+        "--interaction-markers-top-features",
         type=int,
         default=20,
-        help="Number of top DE genes to keep per source-target interaction. (default: 20)"
+        dest="interaction_markers_top_genes",
+        metavar="N",
+        help="Number of top DE features to keep per source-target interaction. (default: 20)"
+    )
+    neighborhood_args.add_argument(
+        "--interaction-markers-top-genes",
+        type=int,
+        dest="interaction_markers_top_genes",
+        help=argparse.SUPPRESS,
     )
     neighborhood_args.add_argument(
         "--interaction-markers-min-cells",
@@ -530,23 +551,47 @@ def _run_export_cli(argv=None):
         default="",
         help="Comma-separated section_id:angle pairs for initial per-section rotations with exact degree values (example: S1:37.5,S2:-90)."
     )
-    gene_args.add_argument(
-        "--gene-correlation-top-n",
+    feature_args.add_argument(
+        "--feature-correlation-top-n",
         type=int,
         default=5,
-        help="Number of top correlated genes to show per embedded gene in the discovery panel. Use 0 to disable. (default: 5)"
+        dest="gene_correlation_top_n",
+        metavar="N",
+        help="Number of top correlated features to show per embedded feature in the discovery panel. Use 0 to disable. (default: 5)"
     )
-    gene_args.add_argument(
-        "--category-means-n-genes",
+    feature_args.add_argument(
+        "--gene-correlation-top-n",
+        type=int,
+        dest="gene_correlation_top_n",
+        help=argparse.SUPPRESS,
+    )
+    feature_args.add_argument(
+        "--category-means-n-features",
         type=int,
         default=500,
-        help="Maximum embedded pseudobulk-DE genes to expose in category mean summaries. Use 0 to disable. (default: 500)"
+        dest="category_means_n_genes",
+        metavar="N",
+        help="Maximum embedded pseudobulk-DE features to expose in category mean summaries. Use 0 to disable. (default: 500)"
     )
-    gene_args.add_argument(
-        "--spatial-variable-genes-n",
+    feature_args.add_argument(
+        "--category-means-n-genes",
+        type=int,
+        dest="category_means_n_genes",
+        help=argparse.SUPPRESS,
+    )
+    feature_args.add_argument(
+        "--spatial-variable-features-n",
         type=int,
         default=20,
-        help="Number of top variable genes to score with Moran's I spatial autocorrelation. Requires spatial graph in obsp. Use 0 to disable. (default: 20)"
+        dest="spatial_variable_genes_n",
+        metavar="N",
+        help="Number of top variable features to score with Moran's I spatial autocorrelation. Requires spatial graph in obsp. Use 0 to disable. (default: 20)"
+    )
+    feature_args.add_argument(
+        "--spatial-variable-genes-n",
+        type=int,
+        dest="spatial_variable_genes_n",
+        help=argparse.SUPPRESS,
     )
     viewer_args.add_argument(
         "--scalebar-unit",
@@ -578,7 +623,7 @@ def _run_export_cli(argv=None):
     if args.pseudobulk_min_cell_counts < 0:
         parser.error("--pseudobulk-min-cell-counts must be >= 0")
     if args.pseudobulk_min_gene_counts < 0:
-        parser.error("--pseudobulk-min-gene-counts must be >= 0")
+        parser.error("--pseudobulk-min-feature-counts must be >= 0")
     if args.pseudobulk_n_cpus < 1:
         parser.error("--pseudobulk-n-cpus must be >= 1")
     if args.pseudobulk_embed_top_n_per_comparison < 0:
@@ -615,7 +660,21 @@ def _run_export_cli(argv=None):
         print(f"Input: {report['path']}")
         if report.get("spatialdata_table"):
             print(f"SpatialData table: {report['spatialdata_table']}")
-        print(f"Cells: {report['n_cells']:,} | Genes: {report['n_genes']:,}")
+        print(f"Cells: {report['n_cells']:,}")
+        feature_modalities = report.get("feature_modalities") or []
+        if feature_modalities:
+            print("Features by modality:")
+            for entry in feature_modalities:
+                name = str(entry.get("name") or "")
+                label = str(entry.get("label") or name)
+                display = name
+                if label and label != name:
+                    display = f"{name} [{label}]"
+                if entry.get("is_default"):
+                    display += " (default)"
+                print(f"  - {display}: {int(entry.get('n_features') or 0):,} features")
+        else:
+            print(f"Features: {report['n_genes']:,}")
         print("Available cell metadata (adata.obs):")
         for entry in report["metadata"]:
             examples = ", ".join(json.dumps(value, ensure_ascii=False) for value in entry["examples"])
@@ -683,10 +742,6 @@ def _run_export_cli(argv=None):
         print(f"Error: {option_name} must be 'auto' or 'None'", file=sys.stderr)
         sys.exit(2)
 
-    if str(args.neighbor_stats_annotations).lower() == "auto":
-        neighbor_stats_annotations = [args.main_cell_annotation]
-    else:
-        neighbor_stats_annotations = _parse_csv(args.neighbor_stats_annotations)
     pseudobulk_mode = _parse_auto_or_none(args.pseudobulk, "--pseudobulk")
     interaction_markers_mode = _parse_auto_or_none(args.interaction_markers, "--interaction-markers")
     pseudobulk_additional_annotations = _parse_csv(args.pseudobulk_additional_annotations)
@@ -707,6 +762,13 @@ def _run_export_cli(argv=None):
     pathway_gmt = _parse_csv(args.pathway_gmt) or None
     pathway_organism = str(args.pathway_organism or "Mouse").strip() or "Mouse"
     cell_annotations = _parse_csv(args.cell_annotations)
+    if str(args.neighbor_stats_annotations).lower() == "auto":
+        neighbor_stats_annotations = []
+        for col in [args.main_cell_annotation, *(cell_annotations or [])]:
+            if col and col not in neighbor_stats_annotations:
+                neighbor_stats_annotations.append(col)
+    else:
+        neighbor_stats_annotations = _parse_csv(args.neighbor_stats_annotations)
     features = _parse_csv(args.features)
     if args.features_list:
         features_list_path = Path(args.features_list).expanduser()
@@ -852,7 +914,7 @@ def _run_export_cli(argv=None):
     if args.feature_storage == "sidecar":
         output_obj = Path(output_path).expanduser()
         print(
-            "Done! Sidecar gene loading requires HTTP(S). "
+            "Done! Sidecar feature loading requires HTTP(S). "
             f"Serve the output directory with: python -m http.server --directory {output_obj.parent}"
         )
         print(f"Then open http://localhost:8000/{output_obj.name}")
