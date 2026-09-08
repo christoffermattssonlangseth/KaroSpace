@@ -81,7 +81,7 @@ FIELD_HELP_TEXT = """Input / Output
 
 Core Options
 - Group by: Column in adata.obs that identifies sections (for example sample_id).
-- Main cells annotation: Starting cell annotation variable (obs column or a pre-loaded gene).
+- Main cells annotation: Starting cell annotation variable (obs column or a pre-loaded feature).
 - Outline by: Optional obs/metadata column used to paint panel outlines. Leave blank to disable.
 - Theme: light or dark.
 - Title: Viewer page title shown in header/browser tab.
@@ -91,7 +91,7 @@ Core Options
 
 Dataset Loading Options
 - Metadata section: Comma/newline-separated obs columns used as section metadata/filter chips.
-  Empty uses defaults (course, region, condition, timepoint, ...).
+  Empty disables section metadata/filter chips.
 - Metadata max columns: Empty or integer >= 0.
 - Metadata value order (JSON): Dict mapping metadata column -> ordered values.
   Example:
@@ -100,24 +100,24 @@ Dataset Loading Options
   Example:
   {"sample_id": "Sample", "last_score": "Disease score"}
 
-Annotation & Gene Content
+Annotation & Feature Content
 - Cells annotations: Comma/newline-separated obs columns to include in the annotation dropdown.
-- Genes: Hand-picked gene symbols (comma/newline-separated) to pre-load for expression view.
-- In embedded mode, significant shared-fit pseudobulk DE genes are embedded automatically up to the per-comparison cap.
+- Features: Hand-picked feature names (comma/newline-separated) to pre-load for visualization.
+- In embedded mode, significant shared-fit pseudobulk DE features are embedded automatically up to the per-comparison cap.
 
 Advanced Options
-- Gene encoding: auto | dense | sparse.
-- Feature storage: embedded keeps requested/top DE genes in the HTML; sidecar writes all gene expression vectors to separate sidecar files.
+- Feature encoding: auto | dense | sparse.
+- Feature storage: embedded keeps requested/top DE features in the HTML; sidecar writes all feature vectors to separate sidecar files.
 - Feature manifest path: Optional override for the sidecar JSON path. Leave blank to place it next to the HTML.
 - Feature sparse threshold: Number between 0 and 1 (used when encoding=auto).
 - Neighbor permutations: "auto" or integer >= 0.
 - Neighbor stats annotations: "auto" or comma/newline-separated obs columns.
 - Neighbor stats seed: Integer random seed.
 - Interaction top targets: Integer > 0.
-- Interaction top genes: Integer > 0.
+- Interaction top features: Integer > 0.
 - Interaction min cells: Integer > 0.
 - Interaction min neighbors: Integer > 0.
-- Pseudobulk DE uses one shared replicate + annotation fit for each selected annotation, with category-versus-category and balanced-rest contrasts. Non-embedded DE genes remain visible but cannot be clicked for expression.
+- Pseudobulk DE uses one shared replicate + annotation fit for each selected annotation, with category-versus-category and balanced-rest contrasts. Non-embedded DE features remain visible but cannot be clicked for visualization.
 - Interaction markers use the same pseudobulk counts layer and section replicate.
 """
 
@@ -279,11 +279,11 @@ class KaroSpaceExportGUI:
         self.section_key = tk.StringVar(value="sample_id")
         self.spatial_key = tk.StringVar(value="spatial")
         self.annotation = tk.StringVar(value="leiden")
-        self.outline_by = tk.StringVar(value="condition")
+        self.outline_by = tk.StringVar(value="")
         self.title = tk.StringVar(value="KaroSpace")
-        self.section_metadata = tk.StringVar(value="condition")
+        self.section_metadata = tk.StringVar(value="")
         self.metadata_max_columns = tk.StringVar(value="")
-        self.metadata_labels = tk.StringVar(value='{\n  "condition": "Condition"\n}')
+        self.metadata_labels = tk.StringVar(value="{}")
         self.min_panel_size = tk.StringVar(value="150")
         self.spot_size = tk.StringVar(value="auto")
         self.downsample = tk.StringVar(value="")
@@ -490,7 +490,7 @@ class KaroSpaceExportGUI:
         ttk.Label(header, text="KaroSpaceBuilder", style="AppTitle.TLabel").pack(anchor="w")
         ttk.Label(
             header,
-            text="Build and export shareable KaroSpace viewers with full control over annotations, genes, and analytics.",
+            text="Build and export shareable KaroSpace viewers with full control over annotations, features, and analytics.",
             style="Subtitle.TLabel",
         ).pack(anchor="w", pady=(4, 0))
 
@@ -530,7 +530,7 @@ class KaroSpaceExportGUI:
         advanced_tab = ttk.Frame(self.tabs, style="App.TFrame", padding=4)
         help_tab = ttk.Frame(self.tabs, style="App.TFrame", padding=4)
         self.tabs.add(basic_tab, text="Basic")
-        self.tabs.add(colors_tab, text="Annotations & Genes")
+        self.tabs.add(colors_tab, text="Annotations & Features")
         self.tabs.add(advanced_tab, text="Advanced")
         self.tabs.add(help_tab, text="Help")
 
@@ -628,22 +628,22 @@ class KaroSpaceExportGUI:
         )
         self.cell_annotations_editor.pack(fill="x")
 
-        genes_group = ttk.LabelFrame(colors_tab, text="Gene Layers", padding=12, style="Card.TLabelframe")
-        genes_group.pack(fill="x", pady=(0, 10))
-        self.genes_editor = SearchableListEditor(
-            genes_group,
-            "Genes",
+        features_group = ttk.LabelFrame(colors_tab, text="Feature Layers", padding=12, style="Card.TLabelframe")
+        features_group.pack(fill="x", pady=(0, 10))
+        self.features_editor = SearchableListEditor(
+            features_group,
+            "Features",
             height=7,
-            help_text="Hand-pick genes for expression view and dotplot.",
+            help_text="Hand-pick features for visualization and dotplot.",
         )
-        self.genes_editor.pack(fill="x")
+        self.features_editor.pack(fill="x")
 
-        genes_opts = ttk.Frame(genes_group, style="Card.TFrame")
-        genes_opts.pack(fill="x", pady=(10, 0))
-        ttk.Label(genes_opts, text="Corr. top N").pack(side="left", padx=(0, 4))
-        ttk.Entry(genes_opts, textvariable=self.gene_correlation_top_n, width=6).pack(side="left")
-        ttk.Label(genes_opts, text="Moran genes N").pack(side="left", padx=(12, 4))
-        ttk.Entry(genes_opts, textvariable=self.spatial_variable_genes_n, width=6).pack(side="left")
+        features_opts = ttk.Frame(features_group, style="Card.TFrame")
+        features_opts.pack(fill="x", pady=(10, 0))
+        ttk.Label(features_opts, text="Corr. top N").pack(side="left", padx=(0, 4))
+        ttk.Entry(features_opts, textvariable=self.gene_correlation_top_n, width=6).pack(side="left")
+        ttk.Label(features_opts, text="Moran features N").pack(side="left", padx=(12, 4))
+        ttk.Entry(features_opts, textvariable=self.spatial_variable_genes_n, width=6).pack(side="left")
 
         advanced_group = ttk.LabelFrame(advanced_tab, text="Advanced Options", padding=12, style="Card.TLabelframe")
         advanced_group.pack(fill="x", pady=(0, 10))
@@ -670,7 +670,7 @@ class KaroSpaceExportGUI:
         encoding_group.pack(fill="x", pady=(0, 10))
         encoding_group.columnconfigure(1, weight=1)
         encoding_group.columnconfigure(3, weight=1)
-        ttk.Label(encoding_group, text="Gene encoding").grid(row=0, column=0, sticky="w", pady=4)
+        ttk.Label(encoding_group, text="Feature encoding").grid(row=0, column=0, sticky="w", pady=4)
         ttk.Combobox(encoding_group, textvariable=self.feature_encoding, values=["auto", "dense", "sparse"], state="readonly").grid(
             row=0, column=1, sticky="ew", padx=(8, 16), pady=4
         )
@@ -712,7 +712,7 @@ class KaroSpaceExportGUI:
         ttk.Entry(interaction_group, textvariable=self.interaction_markers_top_targets).grid(
             row=0, column=1, sticky="ew", padx=(8, 16), pady=4
         )
-        ttk.Label(interaction_group, text="Top genes").grid(row=0, column=2, sticky="w", pady=4)
+        ttk.Label(interaction_group, text="Top features").grid(row=0, column=2, sticky="w", pady=4)
         ttk.Entry(interaction_group, textvariable=self.interaction_markers_top_genes).grid(row=0, column=3, sticky="ew", pady=4)
         ttk.Label(interaction_group, text="Min cells").grid(row=1, column=0, sticky="w", pady=4)
         ttk.Entry(interaction_group, textvariable=self.interaction_markers_min_cells).grid(
@@ -730,7 +730,7 @@ class KaroSpaceExportGUI:
         hint_lines = [
             "1. Start with a preset (Default, Pancreas, Lightweight).",
             "2. Browse to your .h5ad and click Inspect.",
-            "3. Use tabbed editors to add annotations, genes, and section metadata lists.",
+            "3. Use tabbed editors to add annotations, features, and section metadata lists.",
             "4. Open Advanced only when needed.",
             "5. Export HTML.",
         ]
@@ -854,7 +854,7 @@ class KaroSpaceExportGUI:
             "title": "KaroSpace",
             "section_key": "sample_id",
             "spatial_key": "spatial",
-            "outline_by": "condition",
+            "outline_by": "",
             "spot_size": "auto",
             "feature_encoding": "auto",
             "feature_storage": "embedded",
@@ -912,7 +912,7 @@ class KaroSpaceExportGUI:
                 "Serpina3n",
             ]
             self.cell_annotations_editor.set_items(pancreas_colors)
-            self.genes_editor.set_items(pancreas_genes)
+            self.features_editor.set_items(pancreas_genes)
 
             self.neighbor_stats_auto.set(False)
             self.neighbor_stats_annotations_editor.set_items(["leiden_2"])
@@ -939,7 +939,7 @@ class KaroSpaceExportGUI:
             self._merge_json_text_widget(self.metadata_labels_text, '{\n  "condition": "Condition"\n}')
 
             self.cell_annotations_editor.set_items(["leiden_1"])
-            self.genes_editor.set_items(["Cd4", "Cd8a", "Mki67"])
+            self.features_editor.set_items(["Cd4", "Cd8a", "Mki67"])
 
             self.neighbor_stats_auto.set(True)
             self.neighbor_stats_annotations_editor.set_items([])
@@ -956,17 +956,17 @@ class KaroSpaceExportGUI:
         else:
             self.section_key.set("sample_id")
             self.annotation.set("leiden")
-            self.outline_by.set("condition")
+            self.outline_by.set("")
             self.title.set("KaroSpace")
             self.min_panel_size.set("150")
             self.downsample.set("")
-            self.section_metadata.set("condition")
+            self.section_metadata.set("")
             self.metadata_max_columns.set("")
-            self._set_text_widget(self.metadata_value_order_text, '{\n  "condition": ["control", "treated"]\n}')
-            self._merge_json_text_widget(self.metadata_labels_text, '{\n  "condition": "Condition"\n}')
+            self._set_text_widget(self.metadata_value_order_text, "{}")
+            self._set_text_widget(self.metadata_labels_text, "{}")
 
             self.cell_annotations_editor.set_items(["leiden_1", "leiden_2", "gmm_mana_10"])
-            self.genes_editor.set_items(["Cd4", "Cd8a", "Gfap", "Mki67"])
+            self.features_editor.set_items(["Cd4", "Cd8a", "Gfap", "Mki67"])
 
             self.neighbor_stats_auto.set(True)
             self.neighbor_stats_annotations_editor.set_items([])
@@ -1116,7 +1116,7 @@ class KaroSpaceExportGUI:
         self.outline_combo.configure(values=[""] + self._obs_columns)
         self.cell_annotations_editor.set_choices(self._obs_columns)
         self.neighbor_stats_annotations_editor.set_choices(self._obs_columns)
-        self.genes_editor.set_choices(self._var_names)
+        self.features_editor.set_choices(self._var_names)
         self.spatial_key_combo.configure(values=self._obsm_keys)
 
         if self.spatial_key.get() not in self._obsm_keys:
@@ -1157,7 +1157,7 @@ class KaroSpaceExportGUI:
             else:
                 self.outline_by.set("")
 
-        self._log(f"Inspect complete: {len(self._obs_columns)} obs columns, {len(self._var_names)} genes.")
+        self._log(f"Inspect complete: {len(self._obs_columns)} obs columns, {len(self._var_names)} features.")
         self._set_busy(False, "Ready.")
 
     def _on_inspect_error(self, exc: Exception) -> None:
@@ -1253,10 +1253,10 @@ class KaroSpaceExportGUI:
         if feature_manifest_path_raw:
             feature_manifest_path = str(Path(feature_manifest_path_raw).expanduser())
 
-        gene_correlation_top_n = _parse_non_negative_int("Corr. top N", self.gene_correlation_top_n.get())
-        spatial_variable_genes_n = _parse_non_negative_int("SVG n", self.spatial_variable_genes_n.get())
+        feature_correlation_top_n = _parse_non_negative_int("Corr. top N", self.gene_correlation_top_n.get())
+        spatial_variable_features_n = _parse_non_negative_int("Moran features N", self.spatial_variable_genes_n.get())
         cell_annotations = _unique(self.cell_annotations_editor.get_items())
-        features = _unique(self.genes_editor.get_items())
+        features = _unique(self.features_editor.get_items())
         outline_by = self.outline_by.get().strip() or None
 
         load_kwargs = {
@@ -1278,8 +1278,8 @@ class KaroSpaceExportGUI:
             "metadata_labels": metadata_labels,
             "cell_annotations": cell_annotations,
             "features": features,
-            "gene_correlation_top_n": gene_correlation_top_n,
-            "spatial_variable_genes_n": spatial_variable_genes_n,
+            "gene_correlation_top_n": feature_correlation_top_n,
+            "spatial_variable_genes_n": spatial_variable_features_n,
             "feature_encoding": self.feature_encoding.get().strip() or "auto",
             "feature_storage": feature_storage,
             "feature_manifest_path": feature_manifest_path,
@@ -1287,7 +1287,7 @@ class KaroSpaceExportGUI:
             "neighbor_stats_permutations": _parse_neighbor_permutations(self.neighbor_permutations.get()),
             "neighbor_stats_seed": int(self.neighbor_stats_seed.get().strip() or "0"),
             "interaction_markers_top_targets": _parse_positive_int("Interaction top targets", self.interaction_markers_top_targets.get()),
-            "interaction_markers_top_genes": _parse_positive_int("Interaction top genes", self.interaction_markers_top_genes.get()),
+            "interaction_markers_top_genes": _parse_positive_int("Interaction top features", self.interaction_markers_top_genes.get()),
             "interaction_markers_min_cells": _parse_positive_int("Interaction min cells", self.interaction_markers_min_cells.get()),
             "interaction_markers_min_neighbors": _parse_positive_int(
                 "Interaction min neighbors",
@@ -1296,7 +1296,7 @@ class KaroSpaceExportGUI:
         }
 
         if bool(self.neighbor_stats_auto.get()):
-            export_kwargs["neighbor_stats_annotations"] = [color]
+            export_kwargs["neighbor_stats_annotations"] = _unique([color, *(cell_annotations or [])])
         else:
             export_kwargs["neighbor_stats_annotations"] = _unique(self.neighbor_stats_annotations_editor.get_items())
 

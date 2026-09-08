@@ -263,9 +263,7 @@ def _match_gene_sets(
 
 def _result_gene_table(result: Mapping[str, Any]) -> List[Dict[str, Any]]:
     genes = result.get("genes") if isinstance(result.get("genes"), list) else []
-    log2fc = result.get("log2foldchanges")
-    if not isinstance(log2fc, list):
-        log2fc = result.get("logfoldchanges") if isinstance(result.get("logfoldchanges"), list) else []
+    log2fc = result.get("log2foldchanges") if isinstance(result.get("log2foldchanges"), list) else []
     pvals_adj = result.get("pvals_adj") if isinstance(result.get("pvals_adj"), list) else []
     pvals = result.get("pvals") if isinstance(result.get("pvals"), list) else []
     scores = result.get("scores") if isinstance(result.get("scores"), list) else []
