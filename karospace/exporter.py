@@ -4601,6 +4601,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             line-height: 1.35;
         }}
         .genes-warning + .genes-warning {{ margin-top: -2px; }}
+        .marker-fallback-warning {{
+            margin: 4px 0 6px;
+            padding: 7px 9px;
+            border: 1px solid color-mix(in srgb, var(--warning-border) 80%, #b45309);
+            border-left: 3px solid #b45309;
+            border-radius: 6px;
+            background: var(--warning-bg);
+            color: var(--warning-text);
+            font-size: 10px;
+            line-height: 1.4;
+        }}
+        .marker-fallback-warning strong {{ display: block; margin-bottom: 2px; }}
         .genes-warning .agg-chip {{
             margin-left: 4px;
             color: var(--chip-text);
@@ -7992,12 +8004,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         _snapshotModalityFeatureState(getVisualModality());
         setVisualModality(name);
-	        _restoreModalityFeatureState(getVisualModality());
-	        rebuildActiveFeatureIndex();
-	        populateGeneInputDatalist();
-	        if (typeof syncVisualFeatureNamespaceSelect === 'function') syncVisualFeatureNamespaceSelect();
-	        recentGenes = loadRecentGenes(getVisualModality());
-	        savedGenePanels = loadSavedGenePanels(getVisualModality());
+        _restoreModalityFeatureState(getVisualModality());
+        rebuildActiveFeatureIndex();
+        populateGeneInputDatalist();
+        if (typeof syncVisualFeatureNamespaceSelect === 'function') syncVisualFeatureNamespaceSelect();
+        recentGenes = loadRecentGenes(getVisualModality());
+        savedGenePanels = loadSavedGenePanels(getVisualModality());
         // Clear any active gene selection so cells don't render with a feature
         // that doesn't exist in the new modality.
         if (typeof activateViewerGene === 'function') {{
@@ -27394,8 +27406,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 }});
                 if (!hasMatch) return '';
             }}
-            const geneButtons = genes.length
-                ? genes.map((entry) => {{
+            const bodyHtml = genes.length
+                ? `<div class="gene-token-grid">${{genes.map((entry) => {{
                     const loadable = isViewerFeatureLoadable(entry.raw, modality);
                     return renderGeneTokenButton(entry.raw, {{
                         allowUnknown: true,
@@ -27408,13 +27420,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                             ? 'Load pseudobulk DE feature into the viewer'
                             : 'This category-vs-balanced-rest feature is not available for feature-value viewing',
                     }});
-                }}).join('')
+                }}).join('')}}</div>`
                 : '<div class="marker-empty">No pseudobulk DE features found.</div>';
             const isSpotlit = linkedSpotlightEnabled && spotlightPinnedCategory === key;
             return `
                 <div class="marker-group">
                     <div class="marker-group-title${{isSpotlit ? ' is-spotlit' : ''}}" data-marker-category="${{escapeHtml(key)}}" title="Click to color the map by this annotation and highlight this cluster">${{renderAggCategoryChip(markerColorCol, key, catIdx)}}</div>
-                    <div class="gene-token-grid">${{geneButtons}}</div>
+                    ${{bodyHtml}}
                 </div>
             `;
         }}).filter(Boolean);
