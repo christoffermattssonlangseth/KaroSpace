@@ -25,7 +25,7 @@ Visit [KaroSpace Website](https://karospace.se/).
 - [x] **Legend controls** — Toggle/hide categories and spotlight one class across grid and UMAP
 - [x] **Feature exploration** — Search within a selected modality, inspect value distributions, review marker features, spatial features, category means, and related-feature suggestions
 - [x] **Per cell comparison** — Live comparison of cell selections or regions with table and graph visualization (Welch test scores, log2FC, mean, percent detected)
-- [x] **Per sample comparison** — Precomputed pseudobulk differential feature analysis using DESeq2 (PCA, distance matrices, volcano plots) with pathway enrichment for gene-compatible modalities.
+- [x] **Per sample comparison** — Precomputed pseudobulk differential feature analysis using DESeq2 (PCA, distance matrices, volcano plots) with pathway enrichment for feature-supported modalities.
 - [x] **Neighbor graph tools** — Graph overlay, hover rings (1–3 hops), enrichment, interactions, and dispersion summaries when `adata.obsp` contains a spatial graph
 - [x] **Quality-of-life controls** — Hideable toolbar, screenshots, light/dark theme toggle, buttons explanation, keyboard shortcuts, and adjustable spot size
 - [x] **Standalone export** — One self-contained HTML file, no backend required
@@ -148,7 +148,7 @@ export_to_html(
     modalities=["rna", "protein"],  # Feature namespaces to export into the viewer
     neighbor_stats_annotations=["cell_type"],
     neighbor_stats_permutations=20,
-    pseudobulk="auto",           # Use None to disable category pseudobulk DE
+    pseudobulk="auto",           # Use None to disable category pseudobulk DE in Python
     pseudobulk_additional_annotations=["niche"],
     pseudobulk_counts_layer="counts",
     pseudobulk_modalities=["rna"],  # Use ["all"] or e.g. ["rna", "protein"] to run DE on multiple modalities
@@ -160,12 +160,13 @@ export_to_html(
     pseudobulk_deseq2_fit_type="parametric",
     pseudobulk_n_cpus=1,
     pseudobulk_embed_top_n_per_comparison=2,
+    pathway="auto",             # Use None to disable pathway enrichment in Python
     pathway_gmt=None,            # default cached Reactome; or pass "reactome.gmt"
     pathway_organism="Mouse",
     pathway_top_n=10,
     pathway_min_overlap=3,
     pathway_gsea_permutations=100,
-    interaction_markers="auto",  # Use None to disable contact-conditioned marker DE
+    interaction_markers="auto",  # Use None to disable contact-conditioned marker DE in Python
     embed_reproducibility_info=True,  # Embed export arguments/settings in the HTML header popover
     source_input_path="your_data.h5ad",  # Optional provenance path shown in the reproducibility popover
     section_rotations={
@@ -250,6 +251,7 @@ karospace your_data.h5ad \
   --pseudobulk-deseq2-fit-type parametric \
   --pseudobulk-n-cpus 1 \
   --pseudobulk-embed-top-n-per-comparison 2 \
+  --pathway auto \
   --pathway-organism Mouse \
   --pathway-top-n 10 \
   --pathway-min-overlap 3 \
@@ -260,55 +262,114 @@ karospace your_data.h5ad \
 
 #### CLI Options
 
+CLI value conventions:
+- Use `auto` when KaroSpace should choose behavior automatically.
+- Use `off` to disable analysis modes such as `--pseudobulk`, `--pathway`, and `--interaction-markers`.
+- Use `none` where an option documents a nullable string value, such as `--outlineby` and `--pseudobulk-counts-layer`.
+- Omit comma-separated/JSON options, or pass `""`, for an empty list or object.
+- Use `0` for numeric disable switches.
+
+##### Required
+
 | Option | Description | Default |
 |--------|-------------|---------|
+| `input` | Path to input `.h5ad` file or SpatialData `.zarr` store | required |
 | `-o, --output` | Output HTML file path | `karospace.html` |
-| `--inspect-input` | Read input metadata and exit without building sections, downsampling, exporting HTML, or running analytics | off |
-| `--main-cell-annotation` | Main cell-annotation column shown first in the viewer | `leiden` |
-| `--cell-annotations` | Comma-separated extra cell obs annotation columns to embed as selectable cell annotations | empty |
-| `--features` | Comma-separated features to preload. Requested names are matched against every exported `--modalities` namespace, so the same feature name is included in each selected modality where it exists. Significant pseudobulk DE features are embedded automatically up to the per-comparison cap | empty |
-| `--features-list` | Text file with one feature per line; combined with `--features`, deduplicated, and resolved across selected modalities | empty |
-| `--section-metadata` | Comma-separated obs columns to use as section metadata shown in the visual params bar/filter chips | empty |
-| `--section-metadata-extra` | Comma-separated obs columns to store as section metadata without visual params bar/filter chips | empty |
-| `--metadata-value-order` | JSON object mapping metadata columns to ordered value lists | empty |
-| `--metadata-max-columns` | Limit metadata columns used, preserving order | empty |
-| `--metadata-labels` | JSON object mapping metadata/obs column keys to display labels in the viewer UI | empty |
-| `-g, --section-key` | Column to identify sections | `sample_id` |
-| `--section-order` | Comma-separated section IDs to control section order | empty |
+| `--section-key` | Column to identify sections | `sample_id` |
+| `--section-order` | Comma-separated section IDs to control section order | empty string |
 | `--spatial-key` | Key in `adata.obsm` containing spatial coordinates, or target key created from `--spatial-x/--spatial-y` | `spatial` |
-| `--spatial-x` | Obs/metadata column to use as X coordinates; requires `--spatial-y` | empty |
-| `--spatial-y` | Obs/metadata column to use as Y coordinates; requires `--spatial-x` | empty |
-| `--spatialdata-table` | AnnData table key to use when the input is a SpatialData object/store; required when multiple tables are present and no table named `table` exists | empty |
+| `--main-cell-annotation` | Main cell-annotation column shown first in the viewer | `leiden` |
+| `--section-metadata` | Comma-separated obs columns to use as section metadata shown in the visual params bar/filter chips | empty string |
+| `--modalities` | Comma-separated modalities to export | all detected |
+
+##### Inspection
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--inspect-input` | Read input metadata and exit without building sections, downsampling, exporting HTML, or running analytics | flag off |
+
+##### Coordinates
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--spatial-x` | Obs/metadata column to use as X coordinates; requires `--spatial-y` | not set |
+| `--spatial-y` | Obs/metadata column to use as Y coordinates; requires `--spatial-x` | not set |
+| `--spatialdata-table` | AnnData table key to use when the input is a SpatialData object/store; required when multiple tables are present and no table named `table` exists | not set |
+
+##### Annotations
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--cell-annotations` | Comma-separated extra cell obs annotation columns to embed as selectable cell annotations | empty string |
+| `--section-metadata-extra` | Comma-separated obs columns to store as section metadata without visual params bar/filter chips | empty string |
+| `--metadata-value-order` | JSON object mapping metadata columns to ordered value lists | empty string |
+| `--metadata-max-columns` | Limit metadata columns used, preserving order | not set |
+| `--metadata-labels` | JSON object mapping metadata/obs column keys to display labels in the viewer UI | empty string |
+
+##### Viewer layout
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--outlineby` | Metadata column used to paint panel outlines; use `none` to disable | `none` |
+| `--downsample` | Max cells per section | not set |
+| `--title` | Page title | `KaroSpace` |
+| `--tutorial` | (in development) Embed the static Story Mode HTML tutorial; users start it from the graduation-cap control and move through prepared viewer states with Next/Back | flag off |
+| `--no-reproducibility-info` | Do not embed export arguments, thresholds, cutoffs, inputs, and resolved settings in the HTML reproducibility popover | flag off |
 | `--min-panel-size` | Minimum panel width in pixels | `150` |
 | `--spot-size` | Cell/spot size (`auto` or positive number) | `auto` |
-| `--downsample` | Max cells per section | None |
-| `--title` | Page title | `KaroSpace` |
-| `--outlineby` | Metadata column used to paint panel outlines; use `None` to disable | None |
+| `--deconvolutions` | JSON object mapping deconvolution labels to obs/obsm keys | empty string |
+| `--scalebar-unit` | Unit label for the scalebar | `μm` |
 | `--viewer-info-html` | HTML string shown in the viewer Info tab | default info |
-| `--viewer-info-html-file` | Path to an HTML fragment shown in the viewer Info tab | empty |
-| `--tutorial` | (in development) Embed the static Story Mode HTML tutorial; users start it from the graduation-cap control and move through prepared viewer states with Next/Back | off |
-| `--no-reproducibility-info` | Do not embed export arguments, thresholds, cutoffs, inputs, and resolved settings in the HTML reproducibility popover | off |
+| `--viewer-info-html-file` | Path to an HTML fragment shown in the viewer Info tab | not set |
+
+##### Feature content and storage
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--features` | Comma-separated features to preload. Requested names are matched against every exported `--modalities` namespace, so the same feature name is included in each selected modality where it exists. Significant pseudobulk DE features are embedded automatically up to the per-comparison cap | empty string |
+| `--features-list` | Text file with one feature per line; combined with `--features`, deduplicated, and resolved across selected modalities | not set |
+| `--feature-storage` | Feature storage mode: `embedded` stores requested/top DE feature vectors in the HTML; `sidecar` stores all feature vectors outside the HTML | `embedded` |
 | `--feature-encoding` | Feature vector encoding (`auto`, `dense`, `sparse`) | `auto` |
 | `--feature-value-encoding` | Sidecar/package feature value encoding for binary shards (`uint16`, `uint8`) | `uint16` |
-| `--feature-storage` | Feature storage mode: `embedded` stores requested/top DE feature vectors in the HTML; `sidecar` stores all feature vectors outside the HTML | `embedded` |
-| `--feature-manifest-path` | Path for the feature sidecar manifest JSON | auto |
+| `--feature-manifest-path` | Path for the feature sidecar manifest JSON | derived from output path |
 | `--feature-sidecar-shard-size` | Features per sidecar shard | `256` |
 | `--feature-sparse-zero-threshold` | Zero fraction threshold for `auto` sparse encoding | `0.8` |
-| `--modalities` | Comma-separated modalities to export | all detected |
+
+##### Neighborhoods
+
+| Option | Description | Default |
+|--------|-------------|---------|
 | `--neighbor-permutations` | Permutations for neighbor enrichment z-scores | `auto` |
-| `--neighbor-stats-annotations` | Obs columns for neighbor composition stats (`auto` or comma-separated) | `auto` |
+| `--neighbor-stats-annotations` | Obs columns for neighbor composition stats (`auto` or comma-separated; pass `""` to disable standalone neighbor enrichment) | `auto` |
 | `--neighbor-stats-seed` | Random seed for neighbor enrichment permutations | `0` |
-| `--interaction-markers` | Contact-conditioned pseudobulk marker mode (`auto`, `None`) | `auto` |
+
+##### Interactions
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--interaction-markers` | Contact-conditioned pseudobulk marker mode (`auto`, `off`) | `auto` |
 | `--interaction-markers-top-targets` | Target categories evaluated per source for contact-conditioned markers | `5` |
 | `--interaction-markers-top-features` | Top DE features kept per source-target interaction | `20` |
 | `--interaction-markers-min-cells` | Minimum cells per replicate contact+ and contact- pseudobulk sample | `30` |
 | `--interaction-markers-min-neighbors` | Minimum target neighbors to classify contact+ source cells | `1` |
-| `--pseudobulk` | Category pseudobulk DE mode (`auto`, `None`) | `auto` |
-| `--pseudobulk-additional-annotations` | Additional annotation columns to analyze when pseudobulk or interaction markers are enabled. `--main-cell-annotation` is included automatically | empty |
+
+##### Connections
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--feature-correlation-top-n` | Correlated features shown per embedded feature in discovery panel | `5` |
+| `--spatial-variable-features-n` | Top variable features scored with Moran's I; use `0` to disable | `20` |
+
+##### Pseudobulk DE
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--pseudobulk` | Category pseudobulk DE mode (`auto`, `off`) | `auto` |
+| `--pseudobulk-additional-annotations` | Additional annotation columns to analyze when pseudobulk or interaction markers are enabled. `--main-cell-annotation` is included automatically | empty string |
 | `--pseudobulk-replicate-annotation` | Obs annotation to use as the biological replicate for pseudobulk analyses; defaults to `--section-key` | `--section-key` |
-| `--pseudobulk-counts-layer` | Raw-count AnnData layer for pseudobulk aggregation; use `None` for `adata.X` | `counts` |
+| `--pseudobulk-counts-layer` | Raw-count AnnData layer for pseudobulk aggregation; use `none` for `adata.X` | `counts` |
 | `--pseudobulk-modalities` | Comma-separated modalities to run category pseudobulk DE and contact-conditioned interaction markers on. Use `all` for all detected modalities. This is independent of `--modalities`, which controls feature export for the viewer | dataset default modality |
-| `--pseudobulk-simple-constrast-categories` | Categories to report in category-versus-category contrasts. With `--pseudobulk-additional-annotations`, use annotation-specific JSON wrapped in single quotes, such as `'{"cell_type":["Astrocyte","B cell"],"region":["Cortex"]}'`, or a nested list matching `[main-cell-annotation, additional...]` | empty |
+| `--pseudobulk-simple-constrast-categories` | Categories to report in category-versus-category contrasts. With `--pseudobulk-additional-annotations`, use annotation-specific JSON wrapped in single quotes, such as `'{"cell_type":["Astrocyte","B cell"],"region":["Cortex"]}'`, or a nested list matching `[main-cell-annotation, additional...]` | empty string |
 | `--pseudobulk-min-cell-counts` | Exclude cells with fewer than this many total raw counts before pseudobulk aggregation; use `0` to disable | `0` |
 | `--pseudobulk-min-feature-counts` | Exclude features with fewer than this many total raw pseudobulk counts in the shared DESeq2 fit; use `0` to disable | `0` |
 | `--pseudobulk-min-cells-per-pseudobulk` | Minimum cells required in each replicate × annotation pseudobulk sample before it can enter the shared DESeq2 fit | `20` |
@@ -320,21 +381,25 @@ karospace your_data.h5ad \
 | `--pseudobulk-deseq2-fit-type` | PyDESeq2 dispersion trend fit type; use `mean` to avoid parametric trend fallback warnings | `parametric` |
 | `--pseudobulk-n-cpus` | CPU workers for the shared DESeq2 fit and maximum parallel shared-fit contrasts | `1` |
 | `--pseudobulk-embed-top-n-per-comparison` | Significant DE features to auto-embed per category/contact comparison in embedded mode; ignored by sidecar mode because feature vectors are sidecar-loaded | `2` |
+
+##### Pathway enrichment
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--pathway` | Pathway enrichment mode (`auto`, `off`) | `auto` |
 | `--pathway-gmt` | GMT pathway file(s) for ORA/GSEA after Simple design DE; omitted uses cached/default Reactome when available, then falls back to GSEApy/Enrichr | Reactome |
 | `--pathway-organism` | Organism used for default Reactome loading, e.g. `Human` or `Mouse` | `Mouse` |
 | `--pathway-top-n` | Maximum ORA/GSEA pathways stored per direction and comparison | `10` |
-| `--pathway-min-overlap` | Minimum pathway/query gene overlap for ORA/GSEA reporting | `3` |
+| `--pathway-min-overlap` | Minimum pathway/query feature overlap for ORA/GSEA reporting | `3` |
 | `--pathway-gsea-permutations` | Permutations for compact preranked GSEA p-values | `100` |
-| `--section-rotations` | Comma-separated `section_id:angle` pairs | empty |
-| `--feature-correlation-top-n` | Correlated features shown per embedded feature in discovery panel | `5` |
-| `--category-means-n-features` | Maximum embedded pseudobulk-DE features used for category mean summaries; use `0` to disable | `500` |
-| `--spatial-variable-features-n` | Top variable features scored with Moran's I; use `0` to disable | `20` |
-| `--deconvolutions` | JSON object mapping deconvolution labels to obs/obsm keys | empty |
-| `--section-images` | JSON object mapping section IDs to image paths/specs | empty |
-| `--section-images-max-px` | Maximum image dimension when embedding section images | `4096` |
-| `--scalebar-unit` | Unit label for the scalebar | `μm` |
 
-Legacy gene-named aliases for feature-count options are still accepted for existing scripts, but new commands should use the feature-named options above.
+##### Images, overlays, and utilities
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--section-rotations` | Comma-separated `section_id:angle` pairs | empty string |
+| `--section-images` | JSON object mapping section IDs to image paths/specs | empty string |
+| `--section-images-max-px` | Maximum image dimension when embedding section images | `4096` |
 
 > [!NOTE]
 > See [FEATURES_SUMMARY.md](FEATURES_SUMMARY.md) for a guided overview of the main HTML viewer features.
@@ -415,11 +480,11 @@ Split view keeps an independent source and feature namespace for layer A and lay
 
 `Insights → Features` has its own feature-namespace selector for marker features, spatial features, per-cell distributions, per-sample/category means, and related-feature suggestions. `Insights → Compare → Per sample → Simple design` has a pseudobulk modality selector, and `Insights → Neighbors → Interactions` has an interaction-marker modality selector. Exported CSV/SVG filenames include the selected modality where a result is modality-specific.
 
-Pathway enrichment is gene-compatible only. It is computed for RNA/gene-like modalities and reported as unavailable for unsupported modalities unless a future export provides an explicit feature-to-gene mapping.
+Pathway enrichment is feature-supported only. It is computed for RNA-like modalities and reported as unavailable for unsupported modalities unless a future export provides an explicit feature-to-pathway mapping.
 
 ### Optional pseudobulk category selection
 
-Pseudobulk category DE is precomputed automatically for the initial `main cells annotation` column unless `pseudobulk=None` / `--pseudobulk None` is used, and shown in `Insights → Compare → Per sample → Simple design`. KaroSpace aggregates raw counts by replicate and annotation, keeps replicate × annotation pseudobulk samples with at least `pseudobulk_min_cells_per_pseudobulk` / `--pseudobulk-min-cells-per-pseudobulk` cells, fits one shared `~ replicate + annotation` DESeq2 model per annotation column, then extracts category-versus-category contrasts. It also extracts a balanced-rest contrast for every category: the category minus the equally weighted mean of all other retained annotation categories. Features that do not reach `pseudobulk_min_pct_expressed` / `--pseudobulk-min-pct-expressed` in at least one compared group are removed from reported DE results, so they do not enter the contrast-level multiple-testing correction applied by KaroSpace. Pairwise PCA/distance diagnostics are generated automatically for selected category pairs.
+Pseudobulk category DE is precomputed automatically for the initial `main cells annotation` column unless `pseudobulk=None` in Python or `--pseudobulk off` on the CLI is used, and shown in `Insights → Compare → Per sample → Simple design`. KaroSpace aggregates raw counts by replicate and annotation, keeps replicate × annotation pseudobulk samples with at least `pseudobulk_min_cells_per_pseudobulk` / `--pseudobulk-min-cells-per-pseudobulk` cells, fits one shared `~ replicate + annotation` DESeq2 model per annotation column, then extracts category-versus-category contrasts. It also extracts a balanced-rest contrast for every category: the category minus the equally weighted mean of all other retained annotation categories. Features that do not reach `pseudobulk_min_pct_expressed` / `--pseudobulk-min-pct-expressed` in at least one compared group are removed from reported DE results, so they do not enter the contrast-level multiple-testing correction applied by KaroSpace. Pairwise PCA/distance diagnostics are generated automatically for selected category pairs.
 
 By default, pseudobulk DE and contact-conditioned interaction markers run on the dataset default modality, usually `rna`. Use `pseudobulk_modalities=["rna", "protein"]` in Python or `--pseudobulk-modalities rna,protein` on the CLI to run those analyses on selected modalities, or use `all` for every detected modality. Results are stored only in modality-keyed payloads such as `pseudobulk_de_by_modality`, `interaction_markers_by_modality`, `category_feature_means_by_modality`, `feature_correlations_by_modality`, `spatial_variable_features_by_modality`, and `pathway_settings_by_modality`.
 

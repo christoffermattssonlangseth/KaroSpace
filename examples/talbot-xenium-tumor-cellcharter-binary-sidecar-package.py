@@ -68,23 +68,11 @@ common_kwargs = dict(
     outline_by=None,
     cell_annotations=ADDITIONAL_ANNOTATIONS,
     features=[],
-    use_hvgs=False,
-    hvg_limit=50,
     feature_storage="sidecar",
     feature_encoding="auto",
     feature_value_encoding="uint16",
     feature_manifest_path=FEATURE_MANIFEST_PATH,
     feature_sidecar_shard_size=16,
-    marker_gene_annotations=[
-        "CellCharter_20",
-      "CellCharter_15",
-      "condition",
-      "genotype",
-      "cytetype_annotation_leiden_4",
-      "cytetype_cellState_leiden_4",
-      "leiden_4"
-    ],
-    marker_genes_top_n=30,
     neighbor_stats_annotations=[
         "CellCharter_20",
       "CellCharter_15",
@@ -96,7 +84,7 @@ common_kwargs = dict(
     ],
     neighbor_stats_permutations=0,
     neighbor_stats_seed=42,
-    pseudobulk_de_annotations=[
+    pseudobulk_additional_annotations=[
       "CellCharter_20",
       "CellCharter_15",
       "condition",
@@ -105,11 +93,9 @@ common_kwargs = dict(
       "cytetype_cellState_leiden_4",
       "leiden_4"
     ],
-    pseudobulk_de_top_n=20,
-    pseudobulk_de_method="t-test",
-    pseudobulk_de_layer=None,
-    pseudobulk_de_min_cells=20,
-    interaction_marker_annotations=None,
+    pseudobulk_embed_top_n_per_comparison=20,
+    pseudobulk_counts_layer=None,
+    pseudobulk_min_cells_per_pseudobulk=20,
 )
 
 export_to_html(

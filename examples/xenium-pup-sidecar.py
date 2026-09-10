@@ -1,8 +1,8 @@
 """
-Example usage of KaroSpace with sidecar-based gene loading.
+Example usage of KaroSpace with sidecar-based feature loading.
 
 This script demonstrates how to load the Xenium mouse pup dataset
-and export it to an interactive HTML viewer plus an auxiliary gene JSON file.
+and export it to an interactive HTML viewer plus an auxiliary feature JSON file.
 """
 
 import os
@@ -31,8 +31,7 @@ if H5AD_PATH.startswith("/path/to/"):
 PRIMARY_CLUSTER = "leiden_0.5"
 ANALYTICS_COLUMNS = [PRIMARY_CLUSTER, "leiden_0.1", "leiden_1", "leiden_1.5", "leiden_2"]
 cell_annotations=ANALYTICS_COLUMNS[1:],
-marker_gene_annotations=ANALYTICS_COLUMNS,
-pseudobulk_de_annotations=ANALYTICS_COLUMNS,
+pseudobulk_additional_annotations=ANALYTICS_COLUMNS,
 neighbor_stats_annotations=ANALYTICS_COLUMNS,
 OUTPUT_PATH = "xenium-mouse-pup-sidecar.html"
 FEATURE_MANIFEST_PATH = "xenium-mouse-pup-sidecar.features.json"
@@ -60,25 +59,19 @@ export_to_html(
       outline_by=None,
       cell_annotations=ANALYTICS_COLUMNS[1:],
       features=[],
-      use_hvgs=False,
-      hvg_limit=50,
       feature_storage="sidecar",
       feature_manifest_path=FEATURE_MANIFEST_PATH,
       feature_sidecar_shard_size=8,
-      marker_gene_annotations=ANALYTICS_COLUMNS,
-      marker_genes_top_n=50,
-      pseudobulk_de_annotations=ANALYTICS_COLUMNS,
-      pseudobulk_de_top_n=20,
-      pseudobulk_de_method="t-test",
-      pseudobulk_de_layer="normalized",
-      pseudobulk_de_min_cells=20,
+      pseudobulk_additional_annotations=ANALYTICS_COLUMNS,
+      pseudobulk_embed_top_n_per_comparison=20,
+      pseudobulk_counts_layer="normalized",
+      pseudobulk_min_cells_per_pseudobulk=20,
       neighbor_stats_annotations=ANALYTICS_COLUMNS,
       neighbor_stats_permutations=0,
       neighbor_stats_seed=42,
-      interaction_marker_annotations=None,
   )
 
 print(f"\nDone! Open {OUTPUT_PATH} through a local web server.")
-print(f"This export also writes {FEATURE_MANIFEST_PATH} for lazy downstream gene loading.")
+print(f"This export also writes {FEATURE_MANIFEST_PATH} for lazy downstream feature loading.")
 print("Example: python -m http.server 8765")
 print(f"Then open: http://127.0.0.1:8765/{OUTPUT_PATH}")

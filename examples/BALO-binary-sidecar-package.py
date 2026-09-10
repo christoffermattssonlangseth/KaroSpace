@@ -24,7 +24,6 @@ H5AD_PATH = os.environ.get(
 )
 
 PRIMARY_CLUSTER = "leiden_2_names_sub"
-USE_HVGS = False
 ENABLE_ANALYTICS = True
 SIDECAR_OUTPUT = "BALO-binary-sidecar.html"
 PACKAGE_OUTPUT = "BALO-binary.karospace"
@@ -55,23 +54,17 @@ common_kwargs = dict(
         "run",
     ],
     features=[],
-    use_hvgs=USE_HVGS,
-    hvg_limit=200,
     feature_storage="sidecar",
     feature_encoding="auto",
     feature_value_encoding="uint8",
     feature_manifest_path=FEATURE_MANIFEST_PATH,
-    marker_gene_annotations=[PRIMARY_CLUSTER] if ENABLE_ANALYTICS else None,
-    marker_genes_top_n=30,
     neighbor_stats_annotations=[PRIMARY_CLUSTER] if ENABLE_ANALYTICS else None,
     neighbor_stats_permutations=0,
     neighbor_stats_seed=42,
-    pseudobulk_de_annotations=[PRIMARY_CLUSTER] if ENABLE_ANALYTICS else None,
-    pseudobulk_de_top_n=20,
-    pseudobulk_de_method="t-test",
-    pseudobulk_de_layer="normalized",
-    pseudobulk_de_min_cells=20,
-    interaction_marker_annotations=None,
+    pseudobulk_additional_annotations=[PRIMARY_CLUSTER] if ENABLE_ANALYTICS else None,
+    pseudobulk_embed_top_n_per_comparison=20,
+    pseudobulk_counts_layer="normalized",
+    pseudobulk_min_cells_per_pseudobulk=20,
 )
 
 export_to_html(

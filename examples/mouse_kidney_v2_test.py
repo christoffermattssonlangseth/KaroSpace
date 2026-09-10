@@ -1,15 +1,15 @@
 """
 KaroSpace viewer for the mouse_kidney Illumina NovaSeq X spatial dataset
-(companion-ready) — a single section, 276,925 cells × 56,748 genes.
+(companion-ready) — a single section, 276,925 cells × 56,748 features.
 
 Carries an RGB H&E `he_hires` image (uns/spatial/mouse_kidney) attached as an
-overlay (open the sample → H&E Overlay controls or ✨ Auto-align). Gene
+overlay (open the sample → H&E Overlay controls or ✨ Auto-align). Feature
 expression is shown from the `lognorm` layer; analytics / DE are enabled for the
 two columns the companion precomputed stats for: `leiden` and
 `cellcharter_domains`. The remaining cellcharter_k* columns are exposed as plain
 categorical overlays (no precomputed analytics).
 
-Analytics (marker genes, cluster-vs-cluster DE, neighbor composition stats) are
+Analytics (marker features, cluster-vs-cluster DE, neighbor composition stats) are
 read straight from uns/karospace_companion — requesting the two analytics
 columns reuses those precomputed results instead of recomputing them.
 
@@ -48,7 +48,7 @@ SIDECAR_OUTPUT = str(OUTPUT_DIR / "mouse_kidney_v2.html")
 PACKAGE_OUTPUT = str(OUTPUT_DIR / "mouse_kidney_v2.karospace")
 # Sidecar accepts a full path; the .karospace packager needs a bare filename
 # (it lives inside the archive), so pass Path(...).name there.
-GENE_AUX_PATH = str(OUTPUT_DIR / "mouse_kidney_v2.genes.json")
+FEATURE_MANIFEST_PATH = str(OUTPUT_DIR / "mouse_kidney_v2.features.json")
 
 GROUPBY = "sample_id"
 PRIMARY_COLOR = "leiden"
@@ -70,7 +70,7 @@ PLAIN_CATEGORICAL = [
 # Continuous QC / morphology metrics available as colourings.
 CONTINUOUS_METRICS = [
     "total_counts",
-    "n_genes",
+    "n_features",
     "area_um2",
     "nuc_area_um2",
     "nuc_cyto_ratio",
@@ -167,7 +167,7 @@ def main() -> None:
     images_by_sample = extract_he_image(H5AD_PATH, IMAGE_DIR)
     print(f"  extracted {len(images_by_sample)} image(s)")
 
-    print("Loading spatial data (276k cells × 56.7k genes — this can take a while)...")
+    print("Loading spatial data (276k cells × 56.7k features — this can take a while)...")
     dataset = load_spatial_data(
         H5AD_PATH,
         section_key=GROUPBY,          # was: groupby (renamed in the merge)
@@ -176,12 +176,12 @@ def main() -> None:
     )
     print(f"  {dataset.n_sections} section(s), {dataset.n_cells:,} cells")
 
-    # The viewer's gene-expression path reads a layer literally named
+    # The viewer's feature-expression path reads a layer literally named
     # "normalized"; this file stores normalized counts under "lognorm". Alias it
-    # so both gene display and cluster DE use the lognorm values.
+    # so both feature display and cluster DE use the lognorm values.
     if "normalized" not in dataset.adata.layers and "lognorm" in dataset.adata.layers:
         dataset.adata.layers["normalized"] = dataset.adata.layers["lognorm"]
-        print("  Aliased layers['lognorm'] -> layers['normalized'] for gene display/DE")
+        print("  Aliased layers['lognorm'] -> layers['normalized'] for feature display/DE")
 
     # Attach the H&E overlay to its matching section.
     section_images = {
@@ -191,45 +191,37 @@ def main() -> None:
     } or None
 
     common_kwargs = dict(
-        color=PRIMARY_COLOR,
+        main_cell_annotation=PRIMARY_COLOR,
         title="Mouse Kidney — NovaSeq X Spatial",
         min_panel_size=140,
         spot_size="auto",
         theme="light",
         outline_by=None,
-        additional_colors=ADDITIONAL_COLORS,
-        genes=[],
-        use_hvgs=False,
-        gene_storage="sidecar",
-        gene_sidecar_format="binary-v1",
-        gene_encoding="auto",
-        gene_value_encoding="uint8",
-        gene_sidecar_shard_size=128,
+        cell_annotations=ADDITIONAL_COLORS,
+        features=[],
+        feature_storage="sidecar",
+                feature_encoding="auto",
+        feature_value_encoding="uint8",
+        feature_sidecar_shard_size=128,
         # Analytics enabled ONLY for the two companion-precomputed columns;
         # requesting them reuses uns/karospace_companion instead of recomputing.
-        marker_genes_groupby=ANALYTICS_COLUMNS,
-        marker_genes_top_n=30,
-        neighbor_stats_groupby=ANALYTICS_COLUMNS,
+        neighbor_stats_annotations=ANALYTICS_COLUMNS,
         neighbor_stats_permutations=0,
-        cluster_de_groupby=ANALYTICS_COLUMNS,
-        cluster_de_top_n=20,
-        cluster_de_method="t-test",
-        cluster_de_layer="normalized",
-        interaction_markers_groupby=None,
+        pseudobulk_additional_annotations=ANALYTICS_COLUMNS,
         section_images=section_images,
         section_images_max_px=4096,
     )
 
     print("Exporting sidecar HTML...")
     export_to_html(
-        dataset, output_path=SIDECAR_OUTPUT, gene_aux_path=GENE_AUX_PATH, **common_kwargs
+        dataset, output_path=SIDECAR_OUTPUT, feature_manifest_path=FEATURE_MANIFEST_PATH, **common_kwargs
     )
 
     print("Packaging .karospace archive...")
     export_to_html(
         dataset,
         output_path=PACKAGE_OUTPUT,
-        gene_aux_path=Path(GENE_AUX_PATH).name,
+        feature_manifest_path=Path(FEATURE_MANIFEST_PATH).name,
         **common_kwargs,
     )
 

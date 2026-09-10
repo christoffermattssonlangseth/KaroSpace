@@ -33,7 +33,7 @@ DATASETS = [
     (
         "XeniumPup_1.36M",
         os.path.expanduser(
-            "~/work/karolinska_institutet/projects/xenium_mouse_embryo/derived_scanpy/xenium_mouse_pup_gene_only.h5ad"
+            "~/work/karolinska_institutet/projects/xenium_mouse_embryo/derived_scanpy/xenium_mouse_pup_feature_only.h5ad"
         ),
     ),
 ]

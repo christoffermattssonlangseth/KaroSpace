@@ -8,7 +8,7 @@ h5ad (Stroke_merscop_Fan_CG) and writes:
 
 What the h5ad exposes for coloring:
   - leiden     (16 clusters; composition_cell_type, has stored leiden_colors)
-  - all 500 panel genes (streamed to the binary feature sidecar)
+  - all 500 panel features (streamed to the binary feature sidecar)
   - the experimental metadata we added (per-cell obs columns), used both as
     filters and as categorical/continuous color tracks:
         animal_id, line, model, model_norm, treatment,
@@ -95,24 +95,18 @@ common_kwargs = dict(
     outline_by=None,
     cell_annotations=ADDITIONAL_ANNOTATIONS,
     features=[],
-    use_hvgs=False,
-    hvg_limit=50,
     feature_storage="sidecar",
     feature_encoding="auto",
     feature_value_encoding="uint8",
     feature_manifest_path=FEATURE_MANIFEST_PATH,
     feature_sidecar_shard_size=128,
-    marker_gene_annotations=ANNOTATION_GROUPBYS,
-    marker_genes_top_n=30,
     neighbor_stats_annotations=ANNOTATION_GROUPBYS,
     neighbor_stats_permutations=0,
     neighbor_stats_seed=42,
-    pseudobulk_de_annotations=ANNOTATION_GROUPBYS,
-    pseudobulk_de_top_n=20,
-    pseudobulk_de_method="t-test",
-    pseudobulk_de_layer=None,
-    pseudobulk_de_min_cells=20,
-    interaction_marker_annotations=None,
+    pseudobulk_additional_annotations=ANNOTATION_GROUPBYS,
+    pseudobulk_embed_top_n_per_comparison=20,
+    pseudobulk_counts_layer=None,
+    pseudobulk_min_cells_per_pseudobulk=20,
 )
 
 export_to_html(

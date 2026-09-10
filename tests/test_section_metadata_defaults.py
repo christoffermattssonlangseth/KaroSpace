@@ -17,7 +17,7 @@ def _make_section_metadata_adata():
     adata = AnnData(
         X=np.ones((4, 2), dtype=np.float32),
         obs=obs,
-        var=pd.DataFrame(index=["gene_a", "gene_b"]),
+        var=pd.DataFrame(index=["feature_a", "feature_b"]),
     )
     adata.obsm["spatial"] = np.asarray(
         [

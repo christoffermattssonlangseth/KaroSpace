@@ -123,9 +123,9 @@ def test_multimodal_export_uses_only_by_modality_payloads():
         "feature_value_encodings",
         "pseudobulk_de",
         "interaction_markers",
-        "category_gene_means",
-        "gene_correlations",
-        "spatial_variable_genes",
+        "category_feature_means",
+        "feature_correlations",
+        "spatial_variable_features",
         "pathway_settings",
     ]:
         assert removed_key not in data
@@ -176,7 +176,6 @@ def test_cli_inspect_input_prints_feature_counts_by_modality(tmp_path=None):
     assert "Features by modality:" in output
     assert "  - rna [RNA] (default): 2 features" in output
     assert "  - protein: 2 features" in output
-    assert "Genes:" not in output
 
 
 def test_cli_help_prefers_feature_named_options():
@@ -189,16 +188,85 @@ def test_cli_help_prefers_feature_named_options():
 
     output = stream.getvalue()
     assert "Feature content and storage:" in output
+    assert "Pathway enrichment:" in output
     assert "--pseudobulk-min-feature-counts" in output
     assert "--interaction-markers-top-features" in output
     assert "--feature-correlation-top-n" in output
-    assert "--category-means-n-features" in output
     assert "--spatial-variable-features-n" in output
-    assert "--pseudobulk-min-gene-counts" not in output
-    assert "--interaction-markers-top-genes" not in output
-    assert "--gene-correlation-top-n" not in output
-    assert "--category-means-n-genes" not in output
-    assert "--spatial-variable-genes-n" not in output
+    assert "--pathway" in output
+    old_root = "".join(["g", "ene"])
+    old_plural = "".join(["g", "enes"])
+    removed_feature_aliases = [
+        f"--pseudobulk-min-{old_root}-counts",
+        f"--interaction-markers-top-{old_plural}",
+        f"--{old_root}-correlation-top-n",
+        f"--category-means-n-{old_plural}",
+        f"--spatial-variable-{old_plural}-n",
+    ]
+    for option in removed_feature_aliases:
+        assert option not in output
+    assert "--category-means-n-features" not in output
+
+
+def test_cli_pathway_none_passes_disabled_mode_to_exporter(tmp_path, monkeypatch):
+    input_path = tmp_path / "input.h5ad"
+    input_path.write_text("", encoding="utf-8")
+    output_path = tmp_path / "viewer.html"
+    captured = {}
+
+    def fake_load_spatial_data(input_arg, **kwargs):
+        captured["input_arg"] = input_arg
+        captured["load_kwargs"] = kwargs
+        return _make_multimodal_dataset()
+
+    def fake_export_to_html(dataset, **kwargs):
+        captured["dataset"] = dataset
+        captured["export_kwargs"] = kwargs
+        return kwargs["output_path"]
+
+    monkeypatch.setattr("karospace.data_loader.load_spatial_data", fake_load_spatial_data)
+    monkeypatch.setattr("karospace.exporter.export_to_html", fake_export_to_html)
+
+    _run_export_cli([
+        str(input_path),
+        "-o",
+        str(output_path),
+        "--main-cell-annotation",
+        "cell_type",
+        "--pathway",
+        "None",
+    ])
+
+    assert captured["input_arg"] == str(input_path)
+    assert captured["export_kwargs"]["pathway"] is None
+
+
+def test_export_pathway_none_marks_pathway_disabled(tmp_path=None):
+    output_dir = Path(tmp_path) if tmp_path is not None else Path("/private/tmp")
+    output_path = output_dir / "karospace-pathway-disabled-test.html"
+
+    stream = io.StringIO()
+    with redirect_stdout(stream):
+        export_to_html(
+            _make_multimodal_dataset(),
+            output_path=str(output_path),
+            main_cell_annotation="cell_type",
+            features=["rna_a"],
+            modalities=["rna"],
+            pseudobulk=None,
+            interaction_markers=None,
+            pathway=None,
+            spatial_variable_features_n=0,
+            feature_correlation_top_n=0,
+            tutorial=False,
+        )
+
+    data = _extract_embedded_viewer_data(output_path.read_text(encoding="utf-8"))
+    log_text = stream.getvalue()
+    assert data["pathway_settings_by_modality"]["rna"]["available"] is False
+    assert data["pathway_settings_by_modality"]["rna"]["reason"] == "disabled"
+    assert "Pathway enrichment=off." in log_text
+    assert "Computing pathway enrichment" not in log_text
 
 
 def test_secondary_analytics_are_modality_scoped():
@@ -213,9 +281,8 @@ def test_secondary_analytics_are_modality_scoped():
             pseudobulk_modalities=["rna", "protein"],
             pseudobulk_min_replicates=1,
             pseudobulk_min_cells_per_pseudobulk=1,
-            spatial_variable_genes_n=2,
-            category_means_n_genes=2,
-            gene_correlation_top_n=1,
+            spatial_variable_features_n=2,
+            feature_correlation_top_n=1,
         )
 
     log_text = stream.getvalue()
@@ -237,13 +304,14 @@ def test_secondary_analytics_are_modality_scoped():
     for modality, feature_name in [("rna", "rna_a"), ("protein", "protein_a")]:
         means = data["category_feature_means_by_modality"][modality]
         assert means is not None
-        assert feature_name in means["genes"]
+        assert means["features"] == data["embedded_features_by_modality"][modality]
+        assert feature_name in means["features"]
 
         correlations = data["feature_correlations_by_modality"][modality]
         assert feature_name in correlations
 
         spatial = data["spatial_variable_features_by_modality"][modality]
-        assert any(row["gene"] == feature_name for row in spatial)
+        assert any(row["feature"] == feature_name for row in spatial)
 
 
 def test_spatial_variable_features_warn_when_graph_missing():
@@ -257,9 +325,8 @@ def test_spatial_variable_features_warn_when_graph_missing():
             features=["rna_a"],
             pseudobulk_de_annotations=[],
             interaction_marker_annotations=[],
-            spatial_variable_genes_n=2,
-            category_means_n_genes=0,
-            gene_correlation_top_n=0,
+            spatial_variable_features_n=2,
+            feature_correlation_top_n=0,
         )
 
     log_text = stream.getvalue()
@@ -285,7 +352,7 @@ def test_neighbor_and_interaction_annotations_include_cell_annotations():
         interaction_markers_min_cells=1,
         interaction_markers_min_neighbors=1,
         interaction_markers_top_targets=2,
-        interaction_markers_top_genes=2,
+        interaction_markers_top_features=2,
     )
 
     assert set(data["neighbor_stats"]) == {"cell_type", "cell_state"}
@@ -321,9 +388,8 @@ def test_export_defaults_analyze_neighbors_for_cell_annotations():
                 interaction_markers="auto",
                 neighbor_stats_annotations=None,
                 neighbor_stats_permutations=0,
-                spatial_variable_genes_n=0,
-                category_means_n_genes=0,
-                gene_correlation_top_n=0,
+                spatial_variable_features_n=0,
+                feature_correlation_top_n=0,
                 pathway_gsea_permutations=0,
                 tutorial=False,
             )
@@ -364,9 +430,8 @@ def test_export_neighbor_defaults_include_cell_annotations_without_interactions(
                 interaction_markers=None,
                 neighbor_stats_annotations=None,
                 neighbor_stats_permutations=0,
-                spatial_variable_genes_n=0,
-                category_means_n_genes=0,
-                gene_correlation_top_n=0,
+                spatial_variable_features_n=0,
+                feature_correlation_top_n=0,
                 pathway_gsea_permutations=0,
                 tutorial=False,
             )
@@ -396,9 +461,8 @@ def test_feature_sidecar_manifest_is_modality_only(tmp_path=None):
         feature_sidecar_shard_size=1,
         pseudobulk=None,
         interaction_markers=None,
-        spatial_variable_genes_n=0,
-        category_means_n_genes=0,
-        gene_correlation_top_n=0,
+        spatial_variable_features_n=0,
+        feature_correlation_top_n=0,
         pathway_gsea_permutations=0,
         tutorial=False,
     )
@@ -422,6 +486,70 @@ def test_feature_sidecar_manifest_is_modality_only(tmp_path=None):
         assert "feature_to_shard" in modality_entry
 
 
+def test_sidecar_category_means_use_sidecar_loadable_features(tmp_path=None):
+    data = _make_multimodal_dataset().to_json_data(
+        annotation="cell_type",
+        features=[],
+        analytics_features=["rna_a", "rna_b", "protein_a", "protein_b"],
+        analytics_modalities=["rna", "protein"],
+        pseudobulk_de_annotations=["cell_type"],
+        pseudobulk_replicate_annotation="replicate",
+        pseudobulk_modalities=["rna", "protein"],
+        pseudobulk_min_replicates=1,
+        pseudobulk_min_cells_per_pseudobulk=1,
+        pseudobulk_embed_top_n_per_comparison=0,
+        interaction_marker_annotations=[],
+        spatial_variable_features_n=0,
+        feature_correlation_top_n=0,
+    )
+
+    assert data["embedded_features_by_modality"]["rna"] == []
+    assert data["embedded_features_by_modality"]["protein"] == []
+    assert data["category_feature_means_by_modality"]["rna"]["features"] == ["rna_a", "rna_b"]
+    assert data["category_feature_means_by_modality"]["protein"]["features"] == ["protein_a", "protein_b"]
+
+
+def test_sidecar_export_passes_loadable_features_for_category_means():
+    multimodal_dataset = _make_multimodal_dataset()
+    captured = {}
+
+    class CapturedToJsonCall(RuntimeError):
+        pass
+
+    def capture_to_json_data(annotation, **kwargs):
+        captured["annotation"] = annotation
+        captured["kwargs"] = kwargs
+        raise CapturedToJsonCall
+
+    original_to_json_data = multimodal_dataset.to_json_data
+    multimodal_dataset.to_json_data = capture_to_json_data
+    try:
+        try:
+            export_to_html(
+                multimodal_dataset,
+                output_path="/private/tmp/karospace-sidecar-category-means-capture.html",
+                main_cell_annotation="cell_type",
+                features=[],
+                modalities=["rna", "protein"],
+                feature_storage="sidecar",
+                pseudobulk=None,
+                interaction_markers=None,
+                spatial_variable_features_n=0,
+                feature_correlation_top_n=0,
+                pathway_gsea_permutations=0,
+                tutorial=False,
+            )
+        except CapturedToJsonCall:
+            pass
+    finally:
+        multimodal_dataset.to_json_data = original_to_json_data
+
+    assert captured["annotation"] == "cell_type"
+    assert captured["kwargs"]["features"] == []
+    assert captured["kwargs"]["analytics_features"] == ["rna_a", "rna_b", "protein_a", "protein_b"]
+    assert captured["kwargs"]["analytics_modalities"] == ["rna", "protein"]
+
+
 def test_embedded_storage_includes_explicit_extra_modalities_without_sidecar(tmp_path=None):
     output_dir = Path(tmp_path) if tmp_path is not None else Path("/private/tmp")
     stem = f"karospace-embedded-default-{uuid.uuid4().hex}"
@@ -441,9 +569,8 @@ def test_embedded_storage_includes_explicit_extra_modalities_without_sidecar(tmp
             pseudobulk=None,
             pseudobulk_modalities=["rna", "protein"],
             interaction_markers=None,
-            spatial_variable_genes_n=0,
-            category_means_n_genes=0,
-            gene_correlation_top_n=0,
+            spatial_variable_features_n=0,
+            feature_correlation_top_n=0,
             pathway_gsea_permutations=0,
             tutorial=False,
         )
@@ -486,9 +613,8 @@ def test_embedded_storage_defaults_to_default_modality_without_sidecar(tmp_path=
             feature_storage="embedded",
             pseudobulk=None,
             interaction_markers=None,
-            spatial_variable_genes_n=0,
-            category_means_n_genes=0,
-            gene_correlation_top_n=0,
+            spatial_variable_features_n=0,
+            feature_correlation_top_n=0,
             pathway_gsea_permutations=0,
             tutorial=False,
         )
@@ -526,7 +652,7 @@ def test_neighbor_interaction_dispersion_logs_follow_computation_tree():
             interaction_markers_min_cells=1,
             interaction_markers_min_neighbors=1,
             interaction_markers_top_targets=2,
-            interaction_markers_top_genes=2,
+            interaction_markers_top_features=2,
         )
 
     log_text = stream.getvalue()

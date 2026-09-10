@@ -28,8 +28,8 @@ COMPANION_ANALYTICS_JSON_FIELDS = {
     "pseudobulk_de_json": "pseudobulk_de",
     "neighbor_stats_json": "neighbor_stats",
     "interaction_markers_json": "interaction_markers",
-    "gene_correlations_json": "gene_correlations",
-    "spatial_variable_genes_json": "spatial_variable_genes",
+    "feature_correlations_json": "feature_correlations",
+    "spatial_variable_features_json": "spatial_variable_features",
 }
 
 
@@ -442,16 +442,16 @@ def _numeric_category_perm(categories: List) -> Optional[List[int]]:
 def _compute_positive_fraction(
     matrix,
     mask: np.ndarray,
-    gene_positions: List[Optional[int]],
+    feature_positions: List[Optional[int]],
 ) -> List[Optional[float]]:
-    out: List[Optional[float]] = [None] * len(gene_positions)
+    out: List[Optional[float]] = [None] * len(feature_positions)
     if matrix is None:
         return out
     mask = np.asarray(mask, dtype=bool)
     if matrix.shape[0] == 0 or not mask.any():
-        return [0.0 if pos is not None and pos >= 0 else None for pos in gene_positions]
+        return [0.0 if pos is not None and pos >= 0 else None for pos in feature_positions]
 
-    valid = [(idx, pos) for idx, pos in enumerate(gene_positions) if pos is not None and pos >= 0]
+    valid = [(idx, pos) for idx, pos in enumerate(feature_positions) if pos is not None and pos >= 0]
     if not valid:
         return out
 
@@ -728,7 +728,7 @@ def inspect_input_file(data: Any, spatialdata_table: Optional[str] = None) -> Di
         "path": str(source_label),
         "spatialdata_table": table_key,
         "n_cells": int(adata.n_obs),
-        "n_genes": int(adata.n_vars),
+        "n_features": int(adata.n_vars),
         "feature_modalities": feature_modalities,
         "metadata": metadata,
     }
@@ -906,7 +906,7 @@ def _compute_morans_i_for_features(
     i_values = np.clip(i_values, -1.0, 1.0)
 
     results = [
-        {"gene": feature, "I": round(float(i_values[idx]), 4)}
+        {"feature": feature, "I": round(float(i_values[idx]), 4)}
         for idx, feature in enumerate(selected)
         if valid[idx]
     ]
@@ -924,7 +924,7 @@ def _compute_feature_correlations_from_category_means(
         return {feature: [] for feature in features} if features else {}
     if not category_feature_means or not isinstance(category_feature_means, dict):
         return {feature: [] for feature in features}
-    mean_features = [str(g) for g in (category_feature_means.get("genes") or [])]
+    mean_features = [str(g) for g in (category_feature_means.get("features") or [])]
     if len(mean_features) < 2:
         return {feature: [] for feature in features}
     feature_positions = {feature: idx for idx, feature in enumerate(mean_features)}
@@ -952,7 +952,7 @@ def _compute_feature_correlations_from_category_means(
         scores[i] = -2.0
         top_idx = np.argsort(scores)[::-1][: int(top_n)]
         result[feature] = [
-            {"gene": selected[j], "r": round(float(corr[i, j]), 3)}
+            {"feature": selected[j], "r": round(float(corr[i, j]), 3)}
             for j in top_idx
             if j != i and np.isfinite(corr[i, j]) and corr[i, j] > 0
         ]
@@ -962,23 +962,22 @@ def _compute_feature_correlations_from_category_means(
 def _category_feature_means_from_pseudobulk_de(
     pseudobulk_de: Optional[dict],
     features: List[str],
-    max_features: int,
 ) -> Optional[dict]:
     """Build viewer category mean payload from pseudobulk DE aggregate summaries."""
-    if not isinstance(pseudobulk_de, dict) or int(max_features) <= 0:
+    if not isinstance(pseudobulk_de, dict):
         return None
     requested = [str(feature) for feature in features if str(feature)]
     if not requested:
         return None
-    selected = requested[: int(max_features)]
+    selected = requested
     columns = {}
     feature_order: List[str] = []
     for annotation_col, by_source in pseudobulk_de.items():
         if not isinstance(by_source, dict):
             continue
         summary = by_source.get("_summary") or {}
-        cmeans = summary.get("category_gene_means") or {}
-        src_features = [str(g) for g in (cmeans.get("genes") or [])]
+        cmeans = summary.get("category_feature_means") or {}
+        src_features = [str(g) for g in (cmeans.get("features") or [])]
         if not src_features:
             continue
         src_pos = {feature: idx for idx, feature in enumerate(src_features)}
@@ -1010,7 +1009,7 @@ def _category_feature_means_from_pseudobulk_de(
             }
     if not columns or not feature_order:
         return None
-    return {"genes": feature_order, "columns": columns, "source": "pseudobulk_de"}
+    return {"features": feature_order, "columns": columns, "source": "pseudobulk_de"}
 
 
 @dataclass
@@ -1168,19 +1167,6 @@ class SpatialDataset:
         mod = self._resolve_modality(modality)
         if mod is not None and annotation in mod.feature_names:
             return mod.get_feature_vector(annotation), True, None
-
-        if annotation in self.adata.var_names:
-            # Back-compat fallback when modality registry is unpopulated.
-            gene_idx = self.adata.var_names.get_loc(annotation)
-            expr_layer = None
-            if "normalized" in self.adata.layers:
-                expr_layer = self.adata.layers["normalized"]
-            x = expr_layer[:, gene_idx] if expr_layer is not None else self.adata.X[:, gene_idx]
-            if issparse(x):
-                values = np.asarray(x.toarray()).ravel()
-            else:
-                values = np.asarray(x).ravel()
-            return values, True, None
 
         raise KeyError(f"{annotation!r} not found in obs columns or modality {modality or self.default_modality!r}")
 
@@ -1686,7 +1672,7 @@ class SpatialDataset:
         pseudobulk_counts_layer: Optional[str] = "counts",
         pseudobulk_modalities: Optional[Sequence[str]] = None,
         pseudobulk_min_cell_counts: int = 0,
-        pseudobulk_min_gene_counts: int = 0,
+        pseudobulk_min_feature_counts: int = 0,
         pseudobulk_min_cells_per_pseudobulk: int = 20,
         pseudobulk_min_replicates: int = 2,
         pseudobulk_min_pct_expressed: float = 0.0,
@@ -1701,14 +1687,13 @@ class SpatialDataset:
         neighbor_stats_permutations: int = 0,
         neighbor_stats_seed: int = 0,
         interaction_markers_top_targets: int = 5,
-        interaction_markers_top_genes: int = 20,
+        interaction_markers_top_features: int = 20,
         interaction_markers_min_cells: int = 30,
         interaction_markers_min_neighbors: int = 1,
         analytics_modalities: Optional[Sequence[str]] = None,
         analytics_features: Optional[Sequence[str]] = None,
-        gene_correlation_top_n: int = 0,
-        category_means_n_genes: int = 0,
-        spatial_variable_genes_n: int = 0,
+        feature_correlation_top_n: int = 0,
+        spatial_variable_features_n: int = 0,
         section_rotations: Optional[Dict[str, float]] = None,
         deconvolutions: Optional[Dict[str, str]] = None,
     ) -> Dict:
@@ -1718,7 +1703,7 @@ class SpatialDataset:
         Parameters
         ----------
         annotation : str
-            Initial cell annotation column or gene
+            Initial cell annotation column or feature
         downsample : int, optional
             If set, randomly downsample to this many cells per section
         cell_annotations : list, optional
@@ -1762,7 +1747,7 @@ class SpatialDataset:
         pseudobulk_min_cell_counts : int
             Exclude cells below this total raw-count threshold before pseudobulk
             aggregation. Zero disables filtering.
-        pseudobulk_min_gene_counts : int
+        pseudobulk_min_feature_counts : int
             Exclude features below this total raw pseudobulk-count threshold in the
             shared DESeq2 fit. Zero disables filtering.
         pseudobulk_min_cells_per_pseudobulk : int
@@ -1803,7 +1788,7 @@ class SpatialDataset:
             Random seed used for neighbor permutations
         interaction_markers_top_targets : int
             Number of target categories to evaluate per source (ranked by z-score or edge count).
-        interaction_markers_top_genes : int
+        interaction_markers_top_features : int
             Number of top features to keep per source-target interaction.
         interaction_markers_min_cells : int
             Minimum cells required per replicate in both contact+ and contact-
@@ -1852,7 +1837,7 @@ class SpatialDataset:
                 neighbor_graph = neighbor_graph.tocsr()
             # Some writers store CSR with mismatched index dtypes (e.g. squidpy
             # spatial_connectivities: int64 indptr + int32 indices). scipy fancy
-            # indexing then raises "Output dtype not compatible with inputs", so
+            # indexing then raises on mixed output/input dtypes, so
             # canonicalize indptr/indices to a single consistent dtype.
             if neighbor_graph.indptr.dtype != neighbor_graph.indices.dtype:
                 maxval = max(
@@ -1893,13 +1878,13 @@ class SpatialDataset:
                 if not is_cont and cats:
                     cat_perm = _numeric_category_perm(cats)
                     if cat_perm is not None:
-                        old_to_new = np.empty(len(cats), dtype=np.int64)
-                        for new_idx, old_idx in enumerate(cat_perm):
-                            old_to_new[old_idx] = new_idx
-                        cats = [cats[old_idx] for old_idx in cat_perm]
+                        source_to_display = np.empty(len(cats), dtype=np.int64)
+                        for display_idx, source_idx in enumerate(cat_perm):
+                            source_to_display[source_idx] = display_idx
+                        cats = [cats[source_idx] for source_idx in cat_perm]
                         finite = np.isfinite(vals)
                         remapped = vals.copy()
-                        remapped[finite] = old_to_new[vals[finite].astype(np.int64)]
+                        remapped[finite] = source_to_display[vals[finite].astype(np.int64)]
                         vals = remapped
                 if is_cont:
                     finite = np.isfinite(vals)
@@ -1965,8 +1950,8 @@ class SpatialDataset:
             raise ValueError("pseudobulk_embed_top_n_per_comparison must be >= 0")
         if int(interaction_markers_top_targets) < 1:
             raise ValueError("interaction_markers_top_targets must be >= 1")
-        if int(interaction_markers_top_genes) < 1:
-            raise ValueError("interaction_markers_top_genes must be >= 1")
+        if int(interaction_markers_top_features) < 1:
+            raise ValueError("interaction_markers_top_features must be >= 1")
         if int(interaction_markers_min_cells) < 1:
             raise ValueError("interaction_markers_min_cells must be >= 1")
         if int(interaction_markers_min_neighbors) < 1:
@@ -1987,7 +1972,7 @@ class SpatialDataset:
             if cdata.get("is_continuous"):
                 cdata["_values_f4"] = np.asarray(cdata["values"], dtype=np.float32, order="C")
             else:
-                # Categorical codes are already numeric; keep float32 for compatibility (NaN for missing).
+                # Categorical codes are numeric; keep float32 so missing values remain NaN.
                 cdata["_values_f4"] = np.asarray(cdata["values"], dtype=np.float32, order="C")
 
         # Get metadata filters
@@ -2476,7 +2461,7 @@ class SpatialDataset:
         else:
             analytics_modality_names = [str(name) for name in analytics_modalities if str(name) in modality_names]
 
-        def _significant_de_genes(
+        def _significant_de_features(
             payload: Any,
             padj_threshold: float,
             log2fc_threshold: float,
@@ -2494,16 +2479,16 @@ class SpatialDataset:
                     return
                 if exclude_category_vs_rest and key == "__rest__":
                     return
-                genes_list = node.get("genes")
+                features_list = node.get("features")
                 padj_list = node.get("pvals_adj")
                 log2fc_list = node.get("log2foldchanges")
                 if (
-                    isinstance(genes_list, list)
+                    isinstance(features_list, list)
                     and isinstance(padj_list, list)
                     and isinstance(log2fc_list, list)
                 ):
                     ranked = []
-                    for idx, (gene, padj, log2fc) in enumerate(zip(genes_list, padj_list, log2fc_list)):
+                    for idx, (feature, padj, log2fc) in enumerate(zip(features_list, padj_list, log2fc_list)):
                         try:
                             padj_value = float(padj)
                             log2fc_value = float(log2fc)
@@ -2515,11 +2500,11 @@ class SpatialDataset:
                             and padj_value < padj_threshold
                             and abs(log2fc_value) >= log2fc_threshold
                         ):
-                            ranked.append((padj_value, -abs(log2fc_value), idx, str(gene)))
+                            ranked.append((padj_value, -abs(log2fc_value), idx, str(feature)))
                     ranked.sort(key=lambda item: (item[0], item[1], item[2], item[3]))
                     if limit > 0:
                         ranked = ranked[:limit]
-                    found.extend(gene for *_score, gene in ranked)
+                    found.extend(feature for *_score, feature in ranked)
                 for child_key, value in node.items():
                     if isinstance(value, dict):
                         _walk(value, str(child_key))
@@ -2536,7 +2521,7 @@ class SpatialDataset:
             requested = list(embedded_requested_features_by_modality.get(modality_name) or [])
             auto_features: List[str] = []
             auto_features.extend(
-                _significant_de_genes(
+                _significant_de_features(
                     pseudobulk_payload or {},
                     float(pseudobulk_padj_cutoff),
                     float(pseudobulk_log2fc_cutoff),
@@ -2544,7 +2529,7 @@ class SpatialDataset:
                 )
             )
             auto_features.extend(
-                _significant_de_genes(
+                _significant_de_features(
                     interaction_payload or {},
                     float(pseudobulk_padj_cutoff),
                     float(pseudobulk_log2fc_cutoff),
@@ -2564,7 +2549,7 @@ class SpatialDataset:
                 "pseudobulk_replicate_annotation "
                 f"'{pseudobulk_replicate_name}' is not an obs column"
             )
-        marker_genes = {}
+        marker_features = {}
         requested_pseudobulk_de_annotations = list(pseudobulk_de_annotations or [])
         pseudobulk_simple_categories_by_annotation = normalize_pseudobulk_simple_constrast_categories(
             pseudobulk_simple_constrast_categories,
@@ -2577,7 +2562,7 @@ class SpatialDataset:
         if requested_pseudobulk_de_annotations:
             pseudobulk_min_cells_n = int(pseudobulk_min_cells_per_pseudobulk)
             pseudobulk_min_cell_counts_n = int(pseudobulk_min_cell_counts)
-            pseudobulk_min_gene_counts_n = int(pseudobulk_min_gene_counts)
+            pseudobulk_min_feature_counts_n = int(pseudobulk_min_feature_counts)
             pseudobulk_min_rep_n = int(pseudobulk_min_replicates)
             pseudobulk_min_pct_n = float(pseudobulk_min_pct_expressed)
             pseudobulk_padj_cutoff_n = float(pseudobulk_padj_cutoff)
@@ -2677,7 +2662,7 @@ class SpatialDataset:
                     log_detail("rest=balanced_equal_category_weight", level=3)
                     log_detail(f"counts_layer={pseudobulk_counts_layer or 'X'}", level=3)
                     log_detail(f"min_cell_counts={pseudobulk_min_cell_counts_n}", level=3)
-                    log_detail(f"min_gene_counts={pseudobulk_min_gene_counts_n}", level=3)
+                    log_detail(f"min_feature_counts={pseudobulk_min_feature_counts_n}", level=3)
                     log_detail(f"min_cells_per_pseudobulk={pseudobulk_min_cells_n}", level=3)
                     log_detail(f"min_replicates={max(2, pseudobulk_min_rep_n)}", level=3)
                     log_detail(f"min_pct_expressed={pseudobulk_min_pct_n:g}", level=3)
@@ -2700,7 +2685,7 @@ class SpatialDataset:
                         pairwise_categories=annotation_pairwise_categories,
                         counts_layer=pseudobulk_counts_layer,
                         min_cell_counts=pseudobulk_min_cell_counts_n,
-                        min_gene_counts=pseudobulk_min_gene_counts_n,
+                        min_feature_counts=pseudobulk_min_feature_counts_n,
                         min_cells=pseudobulk_min_cells_n,
                         min_replicates=pseudobulk_min_rep_n,
                         min_pct_expressed=pseudobulk_min_pct_n,
@@ -2814,7 +2799,7 @@ class SpatialDataset:
         companion_interaction_markers = companion_analytics.get("interaction_markers")
         if neighbor_graph is not None and requested_interaction_marker_annotations:
             top_targets = int(interaction_markers_top_targets)
-            top_genes = int(interaction_markers_top_genes)
+            top_features = int(interaction_markers_top_features)
             min_cells = int(interaction_markers_min_cells)
             min_neighbors = int(interaction_markers_min_neighbors)
             interaction_replicate_name = pseudobulk_replicate_name
@@ -2911,9 +2896,9 @@ class SpatialDataset:
                         neighbor_n_cells=n_cells,
                         counts_layer=pseudobulk_counts_layer,
                         min_cell_counts=int(pseudobulk_min_cell_counts),
-                        min_gene_counts=int(pseudobulk_min_gene_counts),
+                        min_feature_counts=int(pseudobulk_min_feature_counts),
                         top_targets=top_targets,
-                        top_genes=top_genes,
+                        top_features=top_features,
                         min_cells=min_cells,
                         min_neighbors=min_neighbors,
                         min_replicates=interaction_min_rep_n,
@@ -2937,7 +2922,7 @@ class SpatialDataset:
 
         dispersion_stats = _compute_full_dispersion_stats()
 
-        def _pseudobulk_de_marker_genes(
+        def _pseudobulk_de_marker_features(
             payload: Any,
             padj_threshold: float,
             log2fc_threshold: float,
@@ -2966,16 +2951,16 @@ class SpatialDataset:
                             and str(reference) != rest_reference_key
                         ) or not isinstance(result, dict):
                             continue
-                        genes_list = result.get("genes")
+                        features_list = result.get("features")
                         padj_list = result.get("pvals_adj")
                         log2fc_list = result.get("log2foldchanges")
                         if (
-                            not isinstance(genes_list, list)
+                            not isinstance(features_list, list)
                             or not isinstance(padj_list, list)
                             or not isinstance(log2fc_list, list)
                         ):
                             continue
-                        for idx, (gene, padj, log2fc) in enumerate(zip(genes_list, padj_list, log2fc_list)):
+                        for idx, (feature, padj, log2fc) in enumerate(zip(features_list, padj_list, log2fc_list)):
                             try:
                                 padj_value = float(padj)
                                 log2fc_value = float(log2fc)
@@ -2987,15 +2972,15 @@ class SpatialDataset:
                                 and padj_value < padj_threshold
                                 and log2fc_value >= log2fc_threshold
                             ):
-                                key = str(gene)
+                                key = str(feature)
                                 prev = ranked.get(key)
                                 score = (padj_value, -abs(log2fc_value))
                                 if prev is None or score < prev:
                                     ranked[key] = score
                     if ranked:
                         color_markers[str(source)] = [
-                            gene
-                            for gene, _score in sorted(
+                            feature
+                            for feature, _score in sorted(
                                 ranked.items(),
                                 key=lambda item: (item[1][0], item[1][1], item[0]),
                             )[: int(limit_per_category)]
@@ -3005,41 +2990,41 @@ class SpatialDataset:
             return markers
 
         de_embed_limit = int(pseudobulk_embed_top_n_per_comparison)
-        de_gene_candidates = list(dict.fromkeys([
-            *_significant_de_genes(
+        de_feature_candidates = list(dict.fromkeys([
+            *_significant_de_features(
                 pseudobulk_de,
                 float(pseudobulk_padj_cutoff),
                 float(pseudobulk_log2fc_cutoff),
                 limit_per_comparison=de_embed_limit,
             ),
-            *_significant_de_genes(
+            *_significant_de_features(
                 interaction_markers,
                 float(pseudobulk_padj_cutoff),
                 float(pseudobulk_log2fc_cutoff),
                 limit_per_comparison=de_embed_limit,
             ),
         ]))
-        export_genes = _html_embedded_feature_candidates_for_modality(
+        export_features = _html_embedded_feature_candidates_for_modality(
             default_modality_name,
             pseudobulk_de,
             interaction_markers,
         )
-        if de_gene_candidates:
+        if de_feature_candidates:
             log_step("Preparing viewer feature payload")
             log_detail(
-                f"Embedding {len(export_genes)} requested/significant DE feature"
-                f"{'s' if len(export_genes) != 1 else ''} in the HTML feature viewer "
+                f"Embedding {len(export_features)} requested/significant DE feature"
+                f"{'s' if len(export_features) != 1 else ''} in the HTML feature viewer "
                 f"(padj < {float(pseudobulk_padj_cutoff):g}, "
                 f"|log2FC| >= {float(pseudobulk_log2fc_cutoff):g}; "
                 f"automatic cap={de_embed_limit} per comparison).",
                 level=1,
             )
-        marker_genes = _pseudobulk_de_marker_genes(
+        marker_features = _pseudobulk_de_marker_features(
             pseudobulk_de,
             float(pseudobulk_padj_cutoff),
             float(pseudobulk_log2fc_cutoff),
         )
-        feature_data = self._collect_feature_data(export_genes)
+        feature_data = self._collect_feature_data(export_features)
         feature_encodings = self._resolve_feature_encodings(feature_data, feature_encoding, feature_sparse_zero_threshold)
         embedded_features_by_modality: Dict[str, List[str]] = {
             modality_name: [] for modality_name in modality_names
@@ -3095,9 +3080,9 @@ class SpatialDataset:
             # Build feature values for this section
             section_features_dense = {}
             section_features_sparse = {}
-            for gene, gdata in feature_data.items():
+            for feature, gdata in feature_data.items():
                 section_vals = gdata["values"][idx]
-                mode = feature_encodings.get(gene, "dense")
+                mode = feature_encodings.get(feature, "dense")
                 payload = self._serialize_feature_section_values(
                     section_vals=np.asarray(section_vals),
                     mode=mode,
@@ -3106,9 +3091,9 @@ class SpatialDataset:
                     b64_encoder=_b64,
                 )
                 if "sparse" in payload:
-                    section_features_sparse[gene] = payload["sparse"]
+                    section_features_sparse[feature] = payload["sparse"]
                 else:
-                    section_features_dense[gene] = payload["dense"]
+                    section_features_dense[feature] = payload["dense"]
             default_modality_section_features[section.section_id] = {
                 "features": section_features_dense,
                 "features_sparse": section_features_sparse,
@@ -3216,8 +3201,8 @@ class SpatialDataset:
 
         # Build embedded feature metadata for the default modality.
         features_meta = {}
-        for gene, gdata in feature_data.items():
-            features_meta[gene] = {
+        for feature, gdata in feature_data.items():
+            features_meta[feature] = {
                 "vmin": gdata["vmin"],
                 "vmax": gdata["vmax"],
             }
@@ -3286,35 +3271,13 @@ class SpatialDataset:
                 "sections": modality_section_features,
             }
         marker_features_by_modality = {
-            modality_name: _pseudobulk_de_marker_genes(
+            modality_name: _pseudobulk_de_marker_features(
                 modality_payload,
                 float(pseudobulk_padj_cutoff),
                 float(pseudobulk_log2fc_cutoff),
             )
             for modality_name, modality_payload in pseudobulk_de_by_modality.items()
         }
-
-        def _flatten_marker_features(payload: Any) -> List[str]:
-            flattened: List[str] = []
-            if not isinstance(payload, dict):
-                return flattened
-            for by_category in payload.values():
-                if not isinstance(by_category, dict):
-                    continue
-                for values in by_category.values():
-                    if isinstance(values, list):
-                        flattened.extend(str(value) for value in values if str(value))
-            return flattened
-
-        def _analytics_features_for_modality(modality_name: str) -> List[str]:
-            available = set(features_by_modality.get(modality_name) or [])
-            requested = requested_features_by_modality.get(modality_name) or []
-            markers = _flatten_marker_features(marker_features_by_modality.get(modality_name))
-            return [
-                feature
-                for feature in dict.fromkeys([*requested, *markers])
-                if feature in available
-            ]
 
         category_feature_means_by_modality: Dict[str, Optional[dict]] = {
             modality_name: None for modality_name in modality_names
@@ -3326,40 +3289,48 @@ class SpatialDataset:
             modality_name: [] for modality_name in modality_names
         }
 
-        if int(category_means_n_genes) > 0:
-            for modality_name in analytics_modality_names:
-                features_for_means = _analytics_features_for_modality(modality_name)
-                category_feature_means_by_modality[modality_name] = _category_feature_means_from_pseudobulk_de(
-                    pseudobulk_de_by_modality.get(modality_name),
-                    features_for_means,
-                    int(category_means_n_genes),
-                )
+        def _category_mean_features_for_modality(modality_name: str) -> List[str]:
+            embedded = [
+                str(feature)
+                for feature in (embedded_features_by_modality.get(modality_name) or [])
+                if str(feature)
+            ]
+            if embedded:
+                return embedded
+            return [
+                str(feature)
+                for feature in (requested_features_by_modality.get(modality_name) or [])
+                if str(feature)
+            ]
 
-        if int(gene_correlation_top_n) > 0:
+        for modality_name in analytics_modality_names:
+            features_for_means = _category_mean_features_for_modality(modality_name)
+            category_feature_means_by_modality[modality_name] = _category_feature_means_from_pseudobulk_de(
+                pseudobulk_de_by_modality.get(modality_name),
+                features_for_means,
+            )
+
+        if int(feature_correlation_top_n) > 0:
             for modality_name in analytics_modality_names:
-                features_for_correlations = _analytics_features_for_modality(modality_name)
+                features_for_correlations = [
+                    str(feature)
+                    for feature in (embedded_features_by_modality.get(modality_name) or [])
+                    if str(feature)
+                ]
                 mean_payload = category_feature_means_by_modality.get(modality_name)
-                required_feature_count = len([feature for feature in features_for_correlations if str(feature)])
-                available_mean_count = len((mean_payload or {}).get("genes") or [])
-                if required_feature_count and available_mean_count < required_feature_count:
-                    mean_payload = _category_feature_means_from_pseudobulk_de(
-                        pseudobulk_de_by_modality.get(modality_name),
-                        features_for_correlations,
-                        max(required_feature_count, int(category_means_n_genes)),
-                    )
                 feature_correlations_by_modality[modality_name] = _compute_feature_correlations_from_category_means(
                     mean_payload,
                     features_for_correlations,
-                    top_n=int(gene_correlation_top_n),
+                    top_n=int(feature_correlation_top_n),
                 )
 
-        if int(spatial_variable_genes_n) > 0:
+        if int(spatial_variable_features_n) > 0:
             for modality_name in analytics_modality_names:
                 modality_adata = _adata_for_pseudobulk_modality(modality_name)
                 spatial_variable_features_by_modality[modality_name] = _compute_morans_i_for_features(
                     modality_adata,
                     list(features_by_modality.get(modality_name) or []),
-                    n_features=int(spatial_variable_genes_n),
+                    n_features=int(spatial_variable_features_n),
                     modality_name=modality_name,
                 )
 
@@ -3372,7 +3343,7 @@ class SpatialDataset:
                 "primary_modality": primary_pseudobulk_modality,
                 "min_replicates": max(2, int(pseudobulk_min_replicates)),
                 "min_cell_counts": int(pseudobulk_min_cell_counts),
-                "min_gene_counts": int(pseudobulk_min_gene_counts),
+                "min_feature_counts": int(pseudobulk_min_feature_counts),
                 "min_cells_per_pseudobulk": int(pseudobulk_min_cells_per_pseudobulk),
                 "n_cpus": max(1, int(pseudobulk_n_cpus)),
                 "diagnostics": "pairwise",
@@ -3454,7 +3425,7 @@ def _coerce_modality_var(uns_var: Any, expected_rows: int) -> Optional[pd.DataFr
     if df.shape[0] != expected_rows:
         return None
     if df.index.name is None:
-        for cand in ("protein", "gene", "feature", "name"):
+        for cand in ("protein", "feature", "name"):
             if cand in df.columns:
                 df = df.set_index(cand)
                 break

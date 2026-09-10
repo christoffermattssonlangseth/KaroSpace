@@ -7,7 +7,7 @@ PER SECTION as an overlay (open a sample → use the H&E Overlay controls or
 ✨ Auto-align). Coloured by the coarse `cluster` annotation, with cell
 morphology / QC metrics available as continuous colourings.
 
-~3.66M cells / 500 genes — writes a binary-sidecar viewer bundle and a matching
+~3.66M cells / 500 features — writes a binary-sidecar viewer bundle and a matching
 packaged .karospace.
 
 Usage:
@@ -44,7 +44,7 @@ SIDECAR_OUTPUT = "stroke_all.html"
 PACKAGE_OUTPUT = "stroke_all.karospace"
 # Must be a BARE filename: it's written next to the sidecar HTML and packaged by
 # name inside the .karospace archive (a full path is rejected for the package).
-GENE_AUX_PATH = "stroke_all.genes.json"
+FEATURE_MANIFEST_PATH = "stroke_all.features.json"
 
 PRIMARY_COLOR = "cluster"
 ADDITIONAL_COLORS = [
@@ -116,31 +116,23 @@ def main() -> None:
         section_images = None
 
     common_kwargs = dict(
-        color=PRIMARY_COLOR,
+        main_cell_annotation=PRIMARY_COLOR,
         title="Stroke (dMCAO) — all samples",
         min_panel_size=120,
         spot_size="auto",
         downsample=10_000_000,
         theme="light",
         outline_by=None,
-        additional_colors=ADDITIONAL_COLORS,
-        genes=[],
-        use_hvgs=False,
-        gene_storage="sidecar",
-        gene_sidecar_format="binary-v1",
-        gene_encoding="auto",
-        gene_value_encoding="uint8",
-        gene_aux_path=GENE_AUX_PATH,
-        gene_sidecar_shard_size=128,
-        marker_genes_groupby=CLUSTER_COLUMNS,
-        marker_genes_top_n=30,
-        neighbor_stats_groupby=CLUSTER_COLUMNS,
+        cell_annotations=ADDITIONAL_COLORS,
+        features=[],
+        feature_storage="sidecar",
+                feature_encoding="auto",
+        feature_value_encoding="uint8",
+        feature_manifest_path=FEATURE_MANIFEST_PATH,
+        feature_sidecar_shard_size=128,
+        neighbor_stats_annotations=CLUSTER_COLUMNS,
         neighbor_stats_permutations=0,
-        cluster_de_groupby=CLUSTER_COLUMNS,
-        cluster_de_top_n=20,
-        cluster_de_method="t-test",
-        cluster_de_layer=None,
-        interaction_markers_groupby=None,
+        pseudobulk_additional_annotations=CLUSTER_COLUMNS,
         section_images=section_images,
         section_images_max_px=4096,
     )

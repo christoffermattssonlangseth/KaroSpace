@@ -64,7 +64,7 @@ def _to_dense_counts(matrix) -> np.ndarray:
 
 
 def _cell_count_mask(matrix, min_cell_counts: int) -> np.ndarray:
-    """Return cells meeting a raw total-count threshold without densifying cells x genes."""
+    """Return cells meeting a raw total-count threshold without densifying cells x features."""
     threshold = max(0, int(min_cell_counts))
     if threshold == 0:
         return np.ones(int(matrix.shape[0]), dtype=bool)
@@ -73,62 +73,62 @@ def _cell_count_mask(matrix, min_cell_counts: int) -> np.ndarray:
     return np.isfinite(totals) & (totals >= threshold)
 
 
-def _filter_pseudobulk_genes(
+def _filter_pseudobulk_features(
     counts: np.ndarray,
     metadata: pd.DataFrame,
-    min_gene_counts: int,
+    min_feature_counts: int,
 ) -> Tuple[np.ndarray, pd.DataFrame]:
-    """Drop genes below a raw aggregate-count threshold for one DESeq2 fit."""
-    threshold = max(0, int(min_gene_counts))
+    """Drop features below a raw aggregate-count threshold for one DESeq2 fit."""
+    threshold = max(0, int(min_feature_counts))
     if threshold == 0:
         return counts, metadata
     totals = np.asarray(counts, dtype=float).sum(axis=0)
     keep = np.isfinite(totals) & (totals >= threshold)
     filtered_counts = np.asarray(counts)[:, keep]
     filtered_meta = metadata.copy()
-    gene_names = [str(g) for g in metadata.attrs.get("gene_names", [])]
-    filtered_meta.attrs["gene_names"] = [
-        gene for gene, include in zip(gene_names, keep) if include
+    feature_names = [str(g) for g in metadata.attrs.get("feature_names", [])]
+    filtered_meta.attrs["feature_names"] = [
+        feature for feature, include in zip(feature_names, keep) if include
     ]
     return filtered_counts, filtered_meta
 
 
-def _positive_fraction(matrix, mask: np.ndarray, gene_indices: Sequence[int]) -> List[Optional[float]]:
+def _positive_fraction(matrix, mask: np.ndarray, feature_indices: Sequence[int]) -> List[Optional[float]]:
     if not mask.any():
-        return [None for _ in gene_indices]
+        return [None for _ in feature_indices]
     subset = matrix[mask]
     if sp.issparse(subset):
-        subset = subset[:, list(gene_indices)]
+        subset = subset[:, list(feature_indices)]
         counts = np.asarray((subset > 0).sum(axis=0)).ravel()
     else:
-        subset = np.asarray(subset)[:, list(gene_indices)]
+        subset = np.asarray(subset)[:, list(feature_indices)]
         counts = np.count_nonzero(subset > 0, axis=0)
     denom = int(mask.sum())
     return [float(v) / denom for v in counts]
 
 
-def _expression_prefilter_gene_names(
+def _expression_prefilter_feature_names(
     expression_matrix,
     source_mask: np.ndarray,
     reference_mask: np.ndarray,
     var_names: Sequence[str],
-    candidate_gene_names: Sequence[str],
+    candidate_feature_names: Sequence[str],
     min_pct_expressed: float,
 ) -> List[str]:
-    """Return candidate genes expressed in at least one side of a contrast."""
+    """Return candidate features expressed in at least one side of a contrast."""
     min_pct = _normalize_pct_threshold(min_pct_expressed)
-    candidate_names = [str(gene) for gene in candidate_gene_names]
+    candidate_names = [str(feature) for feature in candidate_feature_names]
     if min_pct <= 0 or not candidate_names:
         return candidate_names
 
-    gene_to_idx = {str(gene): idx for idx, gene in enumerate(var_names)}
+    feature_to_idx = {str(feature): idx for idx, feature in enumerate(var_names)}
     valid_names: List[str] = []
     valid_indices: List[int] = []
-    for gene in candidate_names:
-        idx = gene_to_idx.get(gene)
+    for feature in candidate_names:
+        idx = feature_to_idx.get(feature)
         if idx is None:
             continue
-        valid_names.append(gene)
+        valid_names.append(feature)
         valid_indices.append(idx)
     if not valid_names:
         return []
@@ -136,7 +136,7 @@ def _expression_prefilter_gene_names(
     pct_source = _positive_fraction(expression_matrix, source_mask, valid_indices)
     pct_reference = _positive_fraction(expression_matrix, reference_mask, valid_indices)
     keep: List[str] = []
-    for gene, source_value, reference_value in zip(valid_names, pct_source, pct_reference):
+    for feature, source_value, reference_value in zip(valid_names, pct_source, pct_reference):
         source_pct = float(source_value) if source_value is not None and np.isfinite(source_value) else 0.0
         reference_pct = (
             float(reference_value)
@@ -144,22 +144,22 @@ def _expression_prefilter_gene_names(
             else 0.0
         )
         if source_pct >= min_pct or reference_pct >= min_pct:
-            keep.append(gene)
+            keep.append(feature)
     return keep
 
 
-def _filter_deseq2_result_genes(
+def _filter_deseq2_result_features(
     results_df: pd.DataFrame,
-    gene_names: Optional[Sequence[str]],
+    feature_names: Optional[Sequence[str]],
 ) -> pd.DataFrame:
-    """Filter a PyDESeq2 result table to contrast-testable genes."""
-    if gene_names is None:
+    """Filter a PyDESeq2 result table to contrast-testable features."""
+    if feature_names is None:
         return results_df
-    requested = [str(gene) for gene in gene_names]
+    requested = [str(feature) for feature in feature_names]
     if not requested:
         return results_df.iloc[0:0].copy()
     requested_set = set(requested)
-    keep = [str(gene) in requested_set for gene in results_df.index]
+    keep = [str(feature) in requested_set for feature in results_df.index]
     if not any(keep):
         return results_df.iloc[0:0].copy()
     return results_df.loc[keep].copy()
@@ -253,7 +253,7 @@ def _format_duration(seconds: float) -> str:
 
 def _estimate_shared_deseq2_fit_seconds(
     n_samples: int,
-    n_genes: int,
+    n_features: int,
     design_columns: int,
     n_cpus: int = 1,
 ) -> float:
@@ -262,11 +262,11 @@ def _estimate_shared_deseq2_fit_seconds(
     This is a workload heuristic, not a benchmark: DESeq2 convergence, BLAS,
     available memory, and CPU speed can substantially change the duration.
     """
-    sample_gene_millions = (max(1, int(n_samples)) * max(1, int(n_genes))) / 1_000_000.0
+    sample_feature_millions = (max(1, int(n_samples)) * max(1, int(n_features))) / 1_000_000.0
     design_factor = 1.0 + 0.08 * max(0, int(design_columns) - 2)
     workers = max(1, int(n_cpus))
     parallel_speedup = 1.0 + 0.75 * (workers - 1)
-    central_seconds = max(60.0, 6.0 * sample_gene_millions * design_factor / parallel_speedup)
+    central_seconds = max(60.0, 6.0 * sample_feature_millions * design_factor / parallel_speedup)
     return central_seconds
 
 
@@ -274,7 +274,7 @@ def _compute_pseudobulk_sample_diagnostics(
     pair_counts: np.ndarray,
     pair_meta: pd.DataFrame,
     *,
-    max_genes: int = 1000,
+    max_features: int = 1000,
 ) -> Dict[str, Any]:
     counts = np.array(pair_counts, dtype=float, copy=True)
     counts[~np.isfinite(counts)] = 0
@@ -292,8 +292,8 @@ def _compute_pseudobulk_sample_diagnostics(
         feature_idx = np.arange(log_cpm.shape[1])
     else:
         feature_idx = np.flatnonzero(finite_var)
-    if feature_idx.size > int(max_genes):
-        order = np.argsort(variances[feature_idx])[::-1][: int(max_genes)]
+    if feature_idx.size > int(max_features):
+        order = np.argsort(variances[feature_idx])[::-1][: int(max_features)]
         feature_idx = feature_idx[order]
 
     matrix = log_cpm[:, feature_idx]
@@ -357,14 +357,14 @@ def _compute_pseudobulk_sample_diagnostics(
     }
 
 
-def _compute_category_gene_means_from_aggregate(
+def _compute_category_feature_means_from_aggregate(
     aggregate: np.ndarray,
     pb_meta: pd.DataFrame,
     categories: Sequence[str],
-    gene_names: Sequence[str],
+    feature_names: Sequence[str],
 ) -> Dict[str, Any]:
     """Summarize category-level means from replicate-level pseudobulk counts."""
-    genes = [str(g) for g in gene_names]
+    features = [str(g) for g in feature_names]
     category_means: Dict[str, List[Optional[float]]] = {}
     category_cells: Dict[str, int] = {}
     aggregate = np.asarray(aggregate, dtype=float)
@@ -390,7 +390,7 @@ def _compute_category_gene_means_from_aggregate(
             means = per_sample_means[mask].mean(axis=0)
             category_means[category] = [_json_float(v, 6) for v in means]
         else:
-            category_means[category] = [0.0 for _ in genes]
+            category_means[category] = [0.0 for _ in features]
 
     if "_pb_replicate" in pb_meta:
         replicate_values = pb_meta["_pb_replicate"].astype(str).to_numpy()
@@ -403,14 +403,14 @@ def _compute_category_gene_means_from_aggregate(
         if replicate_means:
             background = [_json_float(v, 6) for v in np.vstack(replicate_means).mean(axis=0)]
         else:
-            background = [0.0 for _ in genes]
+            background = [0.0 for _ in features]
     elif valid_rows.any():
         background = [_json_float(v, 6) for v in per_sample_means[valid_rows].mean(axis=0)]
     else:
-        background = [0.0 for _ in genes]
+        background = [0.0 for _ in features]
 
     return {
-        "genes": genes,
+        "features": features,
         "categories": [str(c) for c in categories],
         "means": category_means,
         "background": background,
@@ -425,7 +425,7 @@ def _fit_deseq2_pair(
     source: str,
     reference: str,
     fit_type: str = "parametric",
-    min_gene_counts: int = 0,
+    min_feature_counts: int = 0,
     n_cpus: int = 1,
 ) -> pd.DataFrame:
     try:
@@ -437,11 +437,11 @@ def _fit_deseq2_pair(
             "pydeseq2 support or run `pip install pydeseq2`."
         ) from exc
 
-    counts, metadata = _filter_pseudobulk_genes(counts, metadata, min_gene_counts)
-    gene_names = [str(g) for g in metadata.attrs["gene_names"]]
-    if not gene_names:
+    counts, metadata = _filter_pseudobulk_features(counts, metadata, min_feature_counts)
+    feature_names = [str(g) for g in metadata.attrs["feature_names"]]
+    if not feature_names:
         return pd.DataFrame(columns=["log2FoldChange", "pvalue", "padj", "stat", "baseMean"])
-    counts_df = pd.DataFrame(counts, index=metadata.index, columns=gene_names)
+    counts_df = pd.DataFrame(counts, index=metadata.index, columns=feature_names)
     meta = metadata[["_pb_replicate", "_pb_group"]].copy()
     meta["_pb_replicate"] = pd.Categorical(meta["_pb_replicate"])
     meta["_pb_group"] = pd.Categorical(
@@ -495,7 +495,7 @@ def _fit_deseq2_shared_categories(
     categories: Sequence[str],
     *,
     fit_type: str = "parametric",
-    min_gene_counts: int = 0,
+    min_feature_counts: int = 0,
     n_cpus: int = 1,
 ) -> Tuple[Any, np.ndarray, pd.DataFrame]:
     """Fit one replicate-adjusted DESeq2 model for every retained category.
@@ -512,12 +512,12 @@ def _fit_deseq2_shared_categories(
             "pydeseq2 support or run `pip install pydeseq2`."
         ) from exc
 
-    fit_counts, fit_meta = _filter_pseudobulk_genes(counts, metadata, min_gene_counts)
-    gene_names = [str(gene) for gene in fit_meta.attrs.get("gene_names", [])]
-    if not gene_names:
-        raise ValueError("no genes meet the raw pseudobulk count threshold")
+    fit_counts, fit_meta = _filter_pseudobulk_features(counts, metadata, min_feature_counts)
+    feature_names = [str(feature) for feature in fit_meta.attrs.get("feature_names", [])]
+    if not feature_names:
+        raise ValueError("no features meet the raw pseudobulk count threshold")
 
-    counts_df = pd.DataFrame(fit_counts, index=fit_meta.index, columns=gene_names)
+    counts_df = pd.DataFrame(fit_counts, index=fit_meta.index, columns=feature_names)
     design_meta = fit_meta[["_pb_replicate", "_pb_group"]].copy()
     design_meta["_pb_replicate"] = pd.Categorical(design_meta["_pb_replicate"].astype(str))
     design_meta["_pb_group"] = pd.Categorical(
@@ -554,7 +554,7 @@ def _fit_deseq2_sample_metadata(
     categories: Sequence[str],
     *,
     fit_type: str = "parametric",
-    min_gene_counts: int = 0,
+    min_feature_counts: int = 0,
     n_cpus: int = 1,
 ) -> Tuple[Any, np.ndarray, pd.DataFrame]:
     """Fit one sample-level DESeq2 model for metadata fixed per replicate."""
@@ -566,12 +566,12 @@ def _fit_deseq2_sample_metadata(
             "pydeseq2 support or run `pip install pydeseq2`."
         ) from exc
 
-    fit_counts, fit_meta = _filter_pseudobulk_genes(counts, metadata, min_gene_counts)
-    gene_names = [str(gene) for gene in fit_meta.attrs.get("gene_names", [])]
-    if not gene_names:
-        raise ValueError("no genes meet the raw pseudobulk count threshold")
+    fit_counts, fit_meta = _filter_pseudobulk_features(counts, metadata, min_feature_counts)
+    feature_names = [str(feature) for feature in fit_meta.attrs.get("feature_names", [])]
+    if not feature_names:
+        raise ValueError("no features meet the raw pseudobulk count threshold")
 
-    counts_df = pd.DataFrame(fit_counts, index=fit_meta.index, columns=gene_names)
+    counts_df = pd.DataFrame(fit_counts, index=fit_meta.index, columns=feature_names)
     design_meta = fit_meta[["_pb_group"]].copy()
     design_meta["_pb_group"] = pd.Categorical(
         design_meta["_pb_group"].astype(str),
@@ -605,7 +605,7 @@ def _deseq2_shared_contrast(
     dds: Any,
     contrast: np.ndarray,
     n_cpus: int = 1,
-    gene_names: Optional[Sequence[str]] = None,
+    feature_names: Optional[Sequence[str]] = None,
 ) -> pd.DataFrame:
     """Evaluate one numeric contrast from an already fitted DESeq2 dataset."""
     try:
@@ -616,8 +616,8 @@ def _deseq2_shared_contrast(
             "pydeseq2 support or run `pip install pydeseq2`."
         ) from exc
     vector = np.asarray(contrast, dtype=float)
-    selected_genes = None if gene_names is None else [str(gene) for gene in gene_names]
-    if selected_genes is not None and not selected_genes:
+    selected_features = None if feature_names is None else [str(feature) for feature in feature_names]
+    if selected_features is not None and not selected_features:
         return pd.DataFrame(
             columns=["log2FoldChange", "pvalue", "padj", "stat", "baseMean"]
         )
@@ -641,7 +641,7 @@ def _deseq2_shared_contrast(
             except TypeError:
                 stats = DeseqStats(dds, contrast=vector, n_cpus=max(1, int(n_cpus)))
         stats.summary()
-    return _filter_deseq2_result_genes(stats.results_df, selected_genes)
+    return _filter_deseq2_result_features(stats.results_df, selected_features)
 
 
 def _reverse_deseq2_result(result: pd.DataFrame) -> pd.DataFrame:
@@ -702,8 +702,8 @@ def _fit_deseq2_design(
         ) from exc
 
     if dds is None:
-        gene_names = [str(g) for g in metadata.attrs["gene_names"]]
-        counts_df = pd.DataFrame(counts, index=metadata.index, columns=gene_names)
+        feature_names = [str(g) for g in metadata.attrs["feature_names"]]
+        counts_df = pd.DataFrame(counts, index=metadata.index, columns=feature_names)
         design_metadata = metadata.drop(columns=["n_cells", "_pb_replicate", "_pb_group"], errors="ignore").copy()
         for column in design_metadata.columns:
             design_metadata[column] = pd.Categorical(design_metadata[column].astype(str))
@@ -764,7 +764,7 @@ def compute_pseudobulk_complex_design_de(
     replicate: str,
     counts_layer: Optional[str] = "counts",
     min_cell_counts: int = 0,
-    min_gene_counts: int = 0,
+    min_feature_counts: int = 0,
     min_cells: int = 20,
     min_replicates: int = 2,
     min_pct_expressed: float = 0.0,
@@ -836,15 +836,15 @@ def compute_pseudobulk_complex_design_de(
     pb_meta["_pb_replicate"] = pb_meta[replicate].astype(str)
     primary_variable = variables[-1]
     pb_meta["_pb_group"] = pb_meta[primary_variable].astype(str)
-    pb_meta.attrs["gene_names"] = [str(g) for g in adata.var_names]
-    aggregate, pb_meta = _filter_pseudobulk_genes(
+    pb_meta.attrs["feature_names"] = [str(g) for g in adata.var_names]
+    aggregate, pb_meta = _filter_pseudobulk_features(
         aggregate,
         pb_meta,
-        min_gene_counts,
+        min_feature_counts,
     )
     if aggregate.shape[1] == 0:
         print(
-            "  Warning: complex pseudobulk DE was skipped: no genes meet the raw pseudobulk count threshold.",
+            "  Warning: complex pseudobulk DE was skipped: no features meet the raw pseudobulk count threshold.",
             flush=True,
         )
         return None
@@ -888,7 +888,7 @@ def compute_pseudobulk_complex_design_de(
     fitted_dds = None
     skipped = max(0, len(coefficient_names) - int(max_coefficients))
     print(
-        f"    - complex pseudobulk DE: fitting {len(pb_meta)} samples, {aggregate.shape[1]} genes, "
+        f"    - complex pseudobulk DE: fitting {len(pb_meta)} samples, {aggregate.shape[1]} features, "
         f"{min(len(coefficient_names), int(max_coefficients))} coefficient contrast(s)",
         flush=True,
     )
@@ -989,7 +989,7 @@ def _empty_result(
         "available": False,
         "reason": reason,
         "method": "pseudobulk-deseq2",
-        "genes": [],
+        "features": [],
         "log2foldchanges": [],
         "pvals": [],
         "pvals_adj": [],
@@ -1025,7 +1025,7 @@ def _empty_interaction_result(
         "available": False,
         "reason": reason,
         "method": "pseudobulk-deseq2-contact",
-        "genes": [],
+        "features": [],
         "log2foldchanges": [],
         "pvals": [],
         "pvals_adj": [],
@@ -1102,12 +1102,12 @@ def _format_result(
     if "baseMean" not in work.columns:
         work["baseMean"] = np.nan
 
-    work["_gene"] = [str(idx) for idx in work.index]
+    work["_feature"] = [str(idx) for idx in work.index]
     work = work[np.isfinite(work["log2FoldChange"].to_numpy(dtype=float))]
     if work.empty:
         return {
             "available": True,
-            "genes": [],
+            "features": [],
             "log2foldchanges": [],
             "pvals": [],
             "pvals_adj": [],
@@ -1118,15 +1118,15 @@ def _format_result(
             **base_payload,
         }
 
-    gene_to_idx = {str(g): i for i, g in enumerate(var_names)}
-    gene_indices = [gene_to_idx.get(g) for g in work["_gene"]]
-    valid_positions = [i for i, idx in enumerate(gene_indices) if idx is not None]
-    if len(valid_positions) != len(gene_indices):
+    feature_to_idx = {str(g): i for i, g in enumerate(var_names)}
+    feature_indices = [feature_to_idx.get(g) for g in work["_feature"]]
+    valid_positions = [i for i, idx in enumerate(feature_indices) if idx is not None]
+    if len(valid_positions) != len(feature_indices):
         work = work.iloc[valid_positions]
-        gene_indices = [gene_indices[i] for i in valid_positions]
+        feature_indices = [feature_indices[i] for i in valid_positions]
 
-    pct_source = _positive_fraction(expression_matrix, source_mask, gene_indices)
-    pct_reference = _positive_fraction(expression_matrix, reference_mask, gene_indices)
+    pct_source = _positive_fraction(expression_matrix, source_mask, feature_indices)
+    pct_reference = _positive_fraction(expression_matrix, reference_mask, feature_indices)
     work["_pct_source"] = pct_source
     work["_pct_reference"] = pct_reference
 
@@ -1134,7 +1134,7 @@ def _format_result(
     work["_pvalue_sort"] = work["pvalue"].fillna(np.inf)
     work["_abs_lfc"] = np.abs(work["log2FoldChange"].to_numpy(dtype=float))
     work = work.sort_values(
-        ["_padj_sort", "_pvalue_sort", "_abs_lfc", "_gene"],
+        ["_padj_sort", "_pvalue_sort", "_abs_lfc", "_feature"],
         ascending=[True, True, False, True],
     )
     pct_source = [work["_pct_source"].iloc[i] for i in range(len(work))]
@@ -1142,7 +1142,7 @@ def _format_result(
 
     result = {
         "available": True,
-        "genes": work["_gene"].astype(str).tolist(),
+        "features": work["_feature"].astype(str).tolist(),
         "log2foldchanges": [_json_compact_float(v, 6) for v in work["log2FoldChange"]],
         "pvals": [_json_compact_float(v, 6) for v in work["pvalue"]],
         "pvals_adj": [_json_compact_float(v, 6) for v in work["padj"]],
@@ -1155,8 +1155,8 @@ def _format_result(
     return result
 
 
-def _count_threshold_passing_genes(result: Dict[str, Any], *, direction: str = "absolute") -> int:
-    """Count DE genes satisfying the result's display/embed thresholds."""
+def _count_threshold_passing_features(result: Dict[str, Any], *, direction: str = "absolute") -> int:
+    """Count DE features satisfying the result's display/embed thresholds."""
     if not result or result.get("available") is False:
         return 0
     log2fc = result.get("log2foldchanges") or []
@@ -1188,24 +1188,24 @@ def _format_threshold_passing_log(
     log2fc_cutoff: float,
     direction: str = "absolute",
 ) -> str:
-    count = _count_threshold_passing_genes(result, direction=direction)
+    count = _count_threshold_passing_features(result, direction=direction)
     log2fc_clause = (
         f"log2FC >= {float(log2fc_cutoff):g}"
         if direction == "positive"
         else f"|log2FC| >= {float(log2fc_cutoff):g}"
     )
     return (
-        f"{count} genes pass the DE thresholds "
+        f"{count} features pass the DE thresholds "
         f"(padj < {float(padj_cutoff):g} and {log2fc_clause})"
     )
 
 
-def _truncate_gene_result(result: Dict[str, Any], top_n: int) -> Dict[str, Any]:
+def _truncate_feature_result(result: Dict[str, Any], top_n: int) -> Dict[str, Any]:
     if int(top_n) < 1:
         return result
-    n = min(int(top_n), len(result.get("genes") or []))
+    n = min(int(top_n), len(result.get("features") or []))
     fields = [
-        "genes",
+        "features",
         "log2foldchanges",
         "pvals",
         "pvals_adj",
@@ -1267,9 +1267,9 @@ def compute_pseudobulk_interaction_markers(
     neighbor_n_cells: Optional[Sequence[int]] = None,
     counts_layer: Optional[str] = "counts",
     min_cell_counts: int = 0,
-    min_gene_counts: int = 0,
+    min_feature_counts: int = 0,
     top_targets: int = 8,
-    top_genes: int = 20,
+    top_features: int = 20,
     min_cells: int = 30,
     min_neighbors: int = 1,
     min_replicates: int = 2,
@@ -1325,7 +1325,7 @@ def compute_pseudobulk_interaction_markers(
         for rep in sorted(set(ctx_reps[valid_reps].astype(str)))
     }
     top_targets = int(top_targets)
-    top_genes = int(top_genes)
+    top_features = int(top_features)
     min_cells = int(min_cells)
     min_neighbors = int(min_neighbors)
     min_replicates = int(min_replicates)
@@ -1507,7 +1507,7 @@ def compute_pseudobulk_interaction_markers(
                 },
                 index=[f"pb_{i}" for i in range(len(ordered_keys))],
             )
-            pair_meta.attrs["gene_names"] = [str(g) for g in adata.var_names]
+            pair_meta.attrs["feature_names"] = [str(g) for g in adata.var_names]
 
             try:
                 log_step(
@@ -1515,7 +1515,7 @@ def compute_pseudobulk_interaction_markers(
                     f"({len(paired_reps)} paired replicate"
                     f"{'s' if len(paired_reps) != 1 else ''}, "
                     f"{pair_counts.shape[0]} pseudobulk samples, "
-                    f"{pair_counts.shape[1]} genes)",
+                    f"{pair_counts.shape[1]} features)",
                     level=2,
                 )
                 sample_diagnostics = _compute_pseudobulk_sample_diagnostics(pair_counts, pair_meta)
@@ -1525,7 +1525,7 @@ def compute_pseudobulk_interaction_markers(
                     "contact+",
                     "contact-",
                     fit_type=str(fit_type or "parametric"),
-                    min_gene_counts=min_gene_counts,
+                    min_feature_counts=min_feature_counts,
                     n_cpus=n_cpus,
                 )
                 formatted = _format_result(
@@ -1534,7 +1534,7 @@ def compute_pseudobulk_interaction_markers(
                     reference_mask=reference_cell_mask,
                     expression_matrix=expression_matrix,
                     var_names=adata.var_names,
-                    top_n=top_genes,
+                    top_n=top_features,
                     n_source=n_pos,
                     n_reference=n_neg,
                     n_replicates=len(paired_reps),
@@ -1552,9 +1552,9 @@ def compute_pseudobulk_interaction_markers(
                 formatted["min_cells_required"] = int(min_cells)
                 formatted["min_replicates_required"] = required_min_replicates
                 formatted.update(meta)
-                source_result[target_name] = _truncate_gene_result(formatted, top_genes)
+                source_result[target_name] = _truncate_feature_result(formatted, top_features)
                 log_detail(
-                    f"Stored top {min(top_genes, len(formatted.get('genes') or []))} marker genes "
+                    f"Stored top {min(top_features, len(formatted.get('features') or []))} marker features "
                     "plus diagnostics for this source-target interaction.",
                     level=3,
                 )
@@ -1592,7 +1592,7 @@ def compute_pseudobulk_sample_metadata_de(
     pairwise_categories: Optional[Sequence[str]] = None,
     counts_layer: Optional[str] = "counts",
     min_cell_counts: int = 0,
-    min_gene_counts: int = 0,
+    min_feature_counts: int = 0,
     min_cells: int = 20,
     min_replicates: int = 2,
     min_pct_expressed: float = 0.0,
@@ -1700,8 +1700,8 @@ def compute_pseudobulk_sample_metadata_de(
         },
         index=[f"pb_{index}" for index in range(len(sample_keys))],
     )
-    pb_meta.attrs["gene_names"] = [str(gene) for gene in adata.var_names]
-    aggregate_summary = _compute_category_gene_means_from_aggregate(
+    pb_meta.attrs["feature_names"] = [str(feature) for feature in adata.var_names]
+    aggregate_summary = _compute_category_feature_means_from_aggregate(
         aggregate, pb_meta, categories, adata.var_names,
     )
     log_detail(
@@ -1739,7 +1739,7 @@ def compute_pseudobulk_sample_metadata_de(
     model_positions = np.flatnonzero(model_mask.to_numpy())
     model_counts = aggregate[model_positions]
     model_meta = pb_meta.iloc[model_positions].copy()
-    model_meta.attrs["gene_names"] = [str(gene) for gene in adata.var_names]
+    model_meta.attrs["feature_names"] = [str(feature) for feature in adata.var_names]
     design_rank, design_columns = _sample_metadata_design_rank(model_meta)
     residual_df = int(len(model_meta) - design_rank)
     if design_rank < design_columns or residual_df <= 0:
@@ -1758,22 +1758,22 @@ def compute_pseudobulk_sample_metadata_de(
 
     model_replicates = set(model_meta["_pb_replicate"].astype(str))
     model_cell_mask = valid & rep_values.astype(str).isin(model_replicates).to_numpy()
-    fit_counts, fit_meta = _filter_pseudobulk_genes(
+    fit_counts, fit_meta = _filter_pseudobulk_features(
         model_counts,
         model_meta,
-        min_gene_counts,
+        min_feature_counts,
     )
-    if not fit_meta.attrs.get("gene_names"):
+    if not fit_meta.attrs.get("feature_names"):
         log_warning(
-            f"sample-metadata pseudobulk DE for '{annotation_key}' was skipped: no genes meet "
-            f"min_gene_counts={max(0, int(min_gene_counts))}.",
+            f"sample-metadata pseudobulk DE for '{annotation_key}' was skipped: no features meet "
+            f"min_feature_counts={max(0, int(min_feature_counts))}.",
             level=2,
         )
         return None
 
     log_detail(
         "Fitting sample-level DESeq2 model "
-        f"(~ {annotation_key}; {fit_counts.shape[0]} pseudobulk samples, {fit_counts.shape[1]} genes).",
+        f"(~ {annotation_key}; {fit_counts.shape[0]} pseudobulk samples, {fit_counts.shape[1]} features).",
         level=2,
     )
     fit_started = time.perf_counter()
@@ -1783,7 +1783,7 @@ def compute_pseudobulk_sample_metadata_de(
             fit_meta,
             retained_categories,
             fit_type=str(fit_type or "parametric"),
-            min_gene_counts=0,
+            min_feature_counts=0,
             n_cpus=n_cpus,
         )
     except Exception as exc:
@@ -1811,8 +1811,8 @@ def compute_pseudobulk_sample_metadata_de(
         n_replicates: int,
         source_mask: np.ndarray,
         reference_mask: np.ndarray,
-        fit_gene_count: int,
-        test_gene_count: int,
+        fit_feature_count: int,
+        test_feature_count: int,
     ) -> Dict[str, Any]:
         formatted = _format_result(
             raw_result,
@@ -1834,9 +1834,9 @@ def compute_pseudobulk_sample_metadata_de(
         )
         formatted.update(model_info)
         formatted["contrast_type"] = contrast_type
-        formatted["min_pct_prefilter_gene_count"] = int(fit_gene_count)
-        formatted["min_pct_retained_gene_count"] = int(test_gene_count)
-        formatted["min_pct_removed_gene_count"] = int(max(0, fit_gene_count - test_gene_count))
+        formatted["min_pct_prefilter_feature_count"] = int(fit_feature_count)
+        formatted["min_pct_retained_feature_count"] = int(test_feature_count)
+        formatted["min_pct_removed_feature_count"] = int(max(0, fit_feature_count - test_feature_count))
         return formatted
 
     def run_sample_contrast(
@@ -1848,20 +1848,20 @@ def compute_pseudobulk_sample_metadata_de(
         reference_mask: np.ndarray,
     ) -> Dict[str, Any]:
         source_mask = category_cell_mask(source)
-        fit_gene_names = [str(gene) for gene in fit_meta.attrs.get("gene_names", [])]
-        test_gene_names = _expression_prefilter_gene_names(
+        fit_feature_names = [str(feature) for feature in fit_meta.attrs.get("feature_names", [])]
+        test_feature_names = _expression_prefilter_feature_names(
             expression_matrix,
             source_mask,
             reference_mask,
             adata.var_names,
-            fit_gene_names,
+            fit_feature_names,
             min_pct_expressed,
         )
         raw_result = _deseq2_shared_contrast(
             dds,
             contrast,
             n_cpus=1,
-            gene_names=test_gene_names,
+            feature_names=test_feature_names,
         )
         return format_sample_result(
             raw_result,
@@ -1869,8 +1869,8 @@ def compute_pseudobulk_sample_metadata_de(
             n_replicates=n_replicates,
             source_mask=source_mask,
             reference_mask=reference_mask,
-            fit_gene_count=len(fit_gene_names),
-            test_gene_count=len(test_gene_names),
+            fit_feature_count=len(fit_feature_names),
+            test_feature_count=len(test_feature_names),
         )
 
     selected_retained = [category for category in selected_pairwise_categories if category in retained_categories]
@@ -1896,11 +1896,11 @@ def compute_pseudobulk_sample_metadata_de(
             return
         log_step(f"[{progress}] {label}: {status}", level=3)
         if _normalize_pct_threshold(min_pct_expressed) > 0:
-            retained_count = int(formatted.get("min_pct_retained_gene_count") or 0)
-            prefilter_count = int(formatted.get("min_pct_prefilter_gene_count") or 0)
+            retained_count = int(formatted.get("min_pct_retained_feature_count") or 0)
+            prefilter_count = int(formatted.get("min_pct_prefilter_feature_count") or 0)
             log_detail(
                 f"Minimum % cells retained {retained_count} "
-                f"of {prefilter_count} fitted genes for reported DE results",
+                f"of {prefilter_count} fitted features for reported DE results",
                 level=4,
             )
         log_detail(
@@ -1988,7 +1988,7 @@ def compute_pseudobulk_sample_metadata_de(
     log_detail(
         f"{len(selected_retained)} selected sample-metadata categories -> {directed_pairs} "
         f"category-versus-category contrasts from {len(unique_pairs)} fitted pairwise comparison"
-        f"{'s' if len(unique_pairs) != 1 else ''}; output feeds Raw table, Genes, and Pathway Enrichment.",
+        f"{'s' if len(unique_pairs) != 1 else ''}; output feeds Raw table, Features, and Pathway Enrichment.",
         level=2,
     )
     for source, reference in unique_pairs:
@@ -2111,7 +2111,7 @@ def compute_pseudobulk_sample_metadata_de(
         level=2,
     )
     results["_summary"] = {
-        "category_gene_means": aggregate_summary,
+        "category_feature_means": aggregate_summary,
         "replicate": str(replicate),
         "annotation_key": str(annotation_key),
         "counts_layer": counts_layer_used,
@@ -2133,7 +2133,7 @@ def _compute_pseudobulk_group_de_shared(
     pairwise_categories: Optional[Sequence[str]] = None,
     counts_layer: Optional[str] = "counts",
     min_cell_counts: int = 0,
-    min_gene_counts: int = 0,
+    min_feature_counts: int = 0,
     min_cells: int = 20,
     min_replicates: int = 2,
     min_pct_expressed: float = 0.0,
@@ -2232,8 +2232,8 @@ def _compute_pseudobulk_group_de_shared(
         },
         index=[f"pb_{index}" for index in range(len(sample_keys))],
     )
-    pb_meta.attrs["gene_names"] = [str(gene) for gene in adata.var_names]
-    aggregate_summary = _compute_category_gene_means_from_aggregate(
+    pb_meta.attrs["feature_names"] = [str(feature) for feature in adata.var_names]
+    aggregate_summary = _compute_category_feature_means_from_aggregate(
         aggregate, pb_meta, categories, adata.var_names,
     )
     log_detail(
@@ -2277,7 +2277,7 @@ def _compute_pseudobulk_group_de_shared(
     model_positions = np.flatnonzero(model_mask.to_numpy())
     model_counts = aggregate[model_positions]
     model_meta = pb_meta.iloc[model_positions].copy()
-    model_meta.attrs["gene_names"] = [str(gene) for gene in adata.var_names]
+    model_meta.attrs["feature_names"] = [str(feature) for feature in adata.var_names]
     design_rank, design_columns = _shared_category_design_rank(model_meta)
     residual_df = int(len(model_meta) - design_rank)
     if design_rank < design_columns or residual_df <= 0:
@@ -2308,21 +2308,21 @@ def _compute_pseudobulk_group_de_shared(
         count=adata.n_obs,
     )
 
-    fit_counts, fit_meta = _filter_pseudobulk_genes(
+    fit_counts, fit_meta = _filter_pseudobulk_features(
         model_counts,
         model_meta,
-        min_gene_counts,
+        min_feature_counts,
     )
-    if not fit_meta.attrs.get("gene_names"):
+    if not fit_meta.attrs.get("feature_names"):
         log_warning(
-            f"shared pseudobulk DE for '{annotation_key}' was skipped: no genes meet "
-            f"min_gene_counts={max(0, int(min_gene_counts))}.",
+            f"shared pseudobulk DE for '{annotation_key}' was skipped: no features meet "
+            f"min_feature_counts={max(0, int(min_feature_counts))}.",
             level=2,
         )
         return None
     log_detail(
-        f"Shared-fit gene filter: min_gene_counts={max(0, int(min_gene_counts))}; "
-        f"retained {fit_counts.shape[1]} of {model_counts.shape[1]} genes before DESeq2 fitting",
+        f"Shared-fit feature filter: min_feature_counts={max(0, int(min_feature_counts))}; "
+        f"retained {fit_counts.shape[1]} of {model_counts.shape[1]} features before DESeq2 fitting",
         level=2,
     )
     estimate = _estimate_shared_deseq2_fit_seconds(
@@ -2343,7 +2343,7 @@ def _compute_pseudobulk_group_de_shared(
             fit_meta,
             retained_categories,
             fit_type=str(fit_type or "parametric"),
-            min_gene_counts=0,
+            min_feature_counts=0,
             n_cpus=n_cpus,
         )
     except Exception as exc:
@@ -2357,7 +2357,7 @@ def _compute_pseudobulk_group_de_shared(
     )
     log_detail(
         f"Shared DESeq2 fit output: {len(retained_categories)} categories, "
-        f"{fit_counts.shape[0]} pseudobulk samples, {fit_counts.shape[1]} genes "
+        f"{fit_counts.shape[0]} pseudobulk samples, {fit_counts.shape[1]} features "
         f"(~ {replicate} + {annotation_key}; design rank {design_rank}/{design_columns})",
         level=2,
     )
@@ -2378,8 +2378,8 @@ def _compute_pseudobulk_group_de_shared(
         n_replicates: int,
         source_mask: np.ndarray,
         reference_mask: np.ndarray,
-        fit_gene_count: int,
-        test_gene_count: int,
+        fit_feature_count: int,
+        test_feature_count: int,
     ) -> Dict[str, Any]:
         formatted = _format_result(
             raw_result,
@@ -2400,9 +2400,9 @@ def _compute_pseudobulk_group_de_shared(
         )
         formatted.update(model_info)
         formatted["contrast_type"] = contrast_type
-        formatted["min_pct_prefilter_gene_count"] = int(fit_gene_count)
-        formatted["min_pct_retained_gene_count"] = int(test_gene_count)
-        formatted["min_pct_removed_gene_count"] = int(max(0, fit_gene_count - test_gene_count))
+        formatted["min_pct_prefilter_feature_count"] = int(fit_feature_count)
+        formatted["min_pct_retained_feature_count"] = int(test_feature_count)
+        formatted["min_pct_removed_feature_count"] = int(max(0, fit_feature_count - test_feature_count))
         return formatted
 
     def evaluate_contrast(
@@ -2419,20 +2419,20 @@ def _compute_pseudobulk_group_de_shared(
         n_reference = int(np.count_nonzero(reference_mask))
         label = f"{source} vs {reference}" if reference != "__rest__" else f"{source} vs balanced rest"
         try:
-            fit_gene_names = [str(gene) for gene in fit_meta.attrs.get("gene_names", [])]
-            test_gene_names = _expression_prefilter_gene_names(
+            fit_feature_names = [str(feature) for feature in fit_meta.attrs.get("feature_names", [])]
+            test_feature_names = _expression_prefilter_feature_names(
                 expression_matrix,
                 source_mask,
                 reference_mask,
                 adata.var_names,
-                fit_gene_names,
+                fit_feature_names,
                 min_pct_expressed,
             )
             raw_result = _deseq2_shared_contrast(
                 dds,
                 contrast,
                 n_cpus=1,
-                gene_names=test_gene_names,
+                feature_names=test_feature_names,
             )
             formatted = format_shared_result(
                 raw_result,
@@ -2440,8 +2440,8 @@ def _compute_pseudobulk_group_de_shared(
                 n_replicates=n_replicates,
                 source_mask=source_mask,
                 reference_mask=reference_mask,
-                fit_gene_count=len(fit_gene_names),
-                test_gene_count=len(test_gene_names),
+                fit_feature_count=len(fit_feature_names),
+                test_feature_count=len(test_feature_names),
             )
             return source, reference, formatted, label, None, "shared DESeq2 contrast returned"
         except Exception as exc:
@@ -2471,20 +2471,20 @@ def _compute_pseudobulk_group_de_shared(
         forward_label = f"{source} vs {reference}"
         reverse_label = f"{reference} vs {source}"
         try:
-            fit_gene_names = [str(gene) for gene in fit_meta.attrs.get("gene_names", [])]
-            test_gene_names = _expression_prefilter_gene_names(
+            fit_feature_names = [str(feature) for feature in fit_meta.attrs.get("feature_names", [])]
+            test_feature_names = _expression_prefilter_feature_names(
                 expression_matrix,
                 source_mask,
                 reference_mask,
                 adata.var_names,
-                fit_gene_names,
+                fit_feature_names,
                 min_pct_expressed,
             )
             raw_result = _deseq2_shared_contrast(
                 dds,
                 contrast,
                 n_cpus=1,
-                gene_names=test_gene_names,
+                feature_names=test_feature_names,
             )
             forward = format_shared_result(
                 raw_result,
@@ -2492,8 +2492,8 @@ def _compute_pseudobulk_group_de_shared(
                 n_replicates=n_replicates,
                 source_mask=source_mask,
                 reference_mask=reference_mask,
-                fit_gene_count=len(fit_gene_names),
-                test_gene_count=len(test_gene_names),
+                fit_feature_count=len(fit_feature_names),
+                test_feature_count=len(test_feature_names),
             )
             reverse = format_shared_result(
                 _reverse_deseq2_result(raw_result),
@@ -2501,8 +2501,8 @@ def _compute_pseudobulk_group_de_shared(
                 n_replicates=n_replicates,
                 source_mask=reference_mask,
                 reference_mask=source_mask,
-                fit_gene_count=len(fit_gene_names),
-                test_gene_count=len(test_gene_names),
+                fit_feature_count=len(fit_feature_names),
+                test_feature_count=len(test_feature_names),
             )
             return [
                 (source, reference, forward, forward_label, None, "shared DESeq2 contrast returned"),
@@ -2546,11 +2546,11 @@ def _compute_pseudobulk_group_de_shared(
             return
         log_step(f"[{progress}] {label}: {status}", level=3)
         if _normalize_pct_threshold(min_pct_expressed) > 0:
-            retained_count = int(formatted.get("min_pct_retained_gene_count") or 0)
-            prefilter_count = int(formatted.get("min_pct_prefilter_gene_count") or 0)
+            retained_count = int(formatted.get("min_pct_retained_feature_count") or 0)
+            prefilter_count = int(formatted.get("min_pct_prefilter_feature_count") or 0)
             log_detail(
                 f"Minimum % cells retained {retained_count} "
-                f"of {prefilter_count} fitted genes for reported DE results",
+                f"of {prefilter_count} fitted features for reported DE results",
                 level=4,
             )
         direction = "positive" if formatted.get("contrast_type") == "balanced_rest" else "absolute"
@@ -2717,7 +2717,7 @@ def _compute_pseudobulk_group_de_shared(
     log_detail(
         f"{len(selected_retained)} selected categories -> {directed_pairs} category-versus-category "
         f"contrasts from {len(unique_pairs)} fitted pairwise comparison"
-        f"{'s' if len(unique_pairs) != 1 else ''}; output feeds Raw table, Genes, and Pathway Enrichment.",
+        f"{'s' if len(unique_pairs) != 1 else ''}; output feeds Raw table, Features, and Pathway Enrichment.",
         level=2,
     )
     for source, reference in unique_pairs:
@@ -2781,7 +2781,7 @@ def _compute_pseudobulk_group_de_shared(
         level=2,
     )
     results["_summary"] = {
-        "category_gene_means": aggregate_summary,
+        "category_feature_means": aggregate_summary,
         "replicate": str(replicate),
         "annotation_key": str(annotation_key),
         "counts_layer": counts_layer_used,
@@ -2803,7 +2803,7 @@ def compute_pseudobulk_group_de(
     pairwise_categories: Optional[Sequence[str]] = None,
     counts_layer: Optional[str] = "counts",
     min_cell_counts: int = 0,
-    min_gene_counts: int = 0,
+    min_feature_counts: int = 0,
     min_cells: int = 20,
     min_replicates: int = 2,
     min_pct_expressed: float = 0.0,
@@ -2825,7 +2825,7 @@ def compute_pseudobulk_group_de(
         pairwise_categories=pairwise_categories,
         counts_layer=counts_layer,
         min_cell_counts=min_cell_counts,
-        min_gene_counts=min_gene_counts,
+        min_feature_counts=min_feature_counts,
         min_cells=min_cells,
         min_replicates=min_replicates,
         min_pct_expressed=min_pct_expressed,
@@ -2852,13 +2852,13 @@ def compute_cell_level_group_markers(
 
     Fallback for :func:`compute_pseudobulk_group_de` when pseudobulk DESeq2 DE
     cannot run (e.g. a single biological replicate). It emits the SAME payload
-    schema — ``{category: {"__rest__": {...}}, "_summary": {"category_gene_means":
+    schema — ``{category: {"__rest__": {...}}, "_summary": {"category_feature_means":
     {...}}}`` — so the viewer's marker and category-mean panels populate
     identically, no client changes needed.
 
-    Per-gene group/rest means and variances are accumulated from per-category
-    sparse column sums, so the full cell x gene matrix is never densified (some
-    datasets have tens of thousands of genes).
+    Per-feature group/rest means and variances are accumulated from per-category
+    sparse column sums, so the full cell x feature matrix is never densified (some
+    datasets have tens of thousands of features).
     """
     from scipy import stats as _stats
 
@@ -2889,8 +2889,8 @@ def compute_cell_level_group_markers(
     if matrix.shape[0] != n_total:
         return None
 
-    genes = [str(gene) for gene in adata.var_names]
-    n_genes = len(genes)
+    features = [str(feature) for feature in adata.var_names]
+    n_features = len(features)
 
     def _sum_sumsq(indices: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         sub = matrix[indices]
@@ -2908,8 +2908,8 @@ def compute_cell_level_group_markers(
     cat_sum: Dict[str, np.ndarray] = {}
     cat_sumsq: Dict[str, np.ndarray] = {}
     cat_n: Dict[str, int] = {}
-    total_sum = np.zeros(n_genes, dtype=float)
-    total_sumsq = np.zeros(n_genes, dtype=float)
+    total_sum = np.zeros(n_features, dtype=float)
+    total_sumsq = np.zeros(n_features, dtype=float)
     for category in categories:
         idx = np.flatnonzero(labels == category)
         cat_n[category] = int(idx.size)
@@ -2930,12 +2930,12 @@ def compute_cell_level_group_markers(
     overall_mean = total_sum / max(n_total, 1)
     payload: Dict[str, Dict[str, Dict[str, Any]]] = {}
     category_means: Dict[str, List[Optional[float]]] = {}
-    kept_gene_idx: set = set()
+    kept_feature_idx: set = set()
 
     for category in categories:
         n1 = cat_n[category]
         if n1 == 0:
-            category_means[category] = [0.0 for _ in range(n_genes)]
+            category_means[category] = [0.0 for _ in range(n_features)]
             continue
         s1 = cat_sum[category]
         mean1 = s1 / n1
@@ -2960,7 +2960,7 @@ def compute_cell_level_group_markers(
             )
             pval = 2.0 * _stats.t.sf(np.abs(tstat), df)
         pval = np.asarray(pval, dtype=float)
-        # Genes with no variance in both groups carry no signal.
+        # Features with no variance in both groups carry no signal.
         pval[~np.isfinite(pval)] = 1.0
         pval = np.clip(pval, 0.0, 1.0)
         log2fc = np.log2(mean1 + eps) - np.log2(mean2 + eps)
@@ -2974,10 +2974,10 @@ def compute_cell_level_group_markers(
         order = sorted(
             significant.tolist(), key=lambda i: (padj[i], -abs(log2fc[i]))
         )[:top_n]
-        kept_gene_idx.update(order)
+        kept_feature_idx.update(order)
         payload[category] = {
             "__rest__": {
-                "genes": [genes[i] for i in order],
+                "features": [features[i] for i in order],
                 "pvals_adj": [_json_float(padj[i], 6) for i in order],
                 "pvalue": [_json_float(pval[i], 6) for i in order],
                 "log2foldchanges": [_json_float(log2fc[i], 4) for i in order],
@@ -2988,12 +2988,12 @@ def compute_cell_level_group_markers(
     if not payload:
         return None
 
-    # Restrict the category-mean summary to retained marker genes so the embedded
-    # payload scales with marker count, not total gene count.
-    summary_idx = sorted(kept_gene_idx)
+    # Restrict the category-mean summary to retained marker features so the embedded
+    # payload scales with marker count, not total feature count.
+    summary_idx = sorted(kept_feature_idx)
     payload["_summary"] = {
-        "category_gene_means": {
-            "genes": [genes[i] for i in summary_idx],
+        "category_feature_means": {
+            "features": [features[i] for i in summary_idx],
             "categories": categories,
             "means": {
                 category: [values[i] for i in summary_idx]

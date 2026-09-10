@@ -34,11 +34,6 @@ dataset = load_spatial_data(
 
 print(f"Loaded {dataset.n_sections} sections with {dataset.n_cells:,} total cells")
 print(f"Available annotation columns: {dataset.obs_columns[:10]}...")  # first 10
-
-# Choose gene source for expression:
-# - True: use highly variable genes (if present, capped to 20)
-# - False: use the explicit genes list below
-USE_HVGS = True
 OUTLINE_BY = ""
 
 # Export to HTML with full features
@@ -57,10 +52,10 @@ export_to_html(
     cell_annotations=[
     ],
 
-    # Pre-load specific genes for expression visualization
-    # These will be available in the gene input field
+    # Pre-load specific features for expression visualization
+    # These will be available in the feature input field
     features=[
-        # Example marker genes - replace with your genes of interest
+        # Example marker features - replace with your features of interest
         "Arg1",
         #"C3",
         "Cd74",
@@ -88,23 +83,12 @@ export_to_html(
        # "Snap25",
        #"Vtn"
     ],
-    use_hvgs=USE_HVGS,
-    hvg_limit=20,
-
-    # Compute marker genes for these categorical annotation columns
-    # (appears in the Color panel under "Marker genes")
-    marker_gene_annotations=[
-       'gmm_CC_10'
-
-    ],
-    marker_genes_top_n=50,
     # Force permutation z-scores (auto mode disables permutations for very large datasets).
     neighbor_stats_permutations=25,
     neighbor_stats_seed=42,
     # Contact-conditioned interaction markers (source near target vs source not near target).
-    interaction_marker_annotations=None,
     interaction_markers_top_targets=6,
-    interaction_markers_top_genes=15,
+    interaction_markers_top_features=15,
     interaction_markers_min_cells=30,
     interaction_markers_min_neighbors=1,
 )
@@ -112,11 +96,11 @@ export_to_html(
 # The viewer now supports:
 # 1. Filter by course (peak_I, peak_II, peak_III) or other metadata
 # 2. Switch between different annotation columns
-# 3. View gene expression for pre-loaded genes
+# 3. View feature expression for pre-loaded features
 # 4. Click to expand sections with zoom/pan
 # 5. Toggle categories on/off in the legend
 
 print("\nDone! Open Merfish_coronal.html in a browser.")
 print("Use the filter chips to show only specific courses (e.g., peak_III)")
 print("Use the Annotation selector to switch between different annotations")
-print("Type a gene name to view expression (must be in the genes list)")
+print("Type a feature name to view expression (must be in the features list)")

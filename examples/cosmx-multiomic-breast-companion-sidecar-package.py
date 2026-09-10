@@ -59,8 +59,7 @@ print(f"Loaded {dataset.n_sections} sections with {dataset.n_cells:,} total cell
 print(f"Detected modalities: {list(dataset.modalities.keys())}")
 
 # Common export settings
-# Note: marker_gene_annotations and other analytics columns will automatically
-# pick up precomputed values from adata.uns['karospace_companion'] if available.
+# Precomputed analytics are picked up from adata.uns['karospace_companion'] if available.
 common_kwargs = dict(
     main_cell_annotation=PRIMARY_ANNOTATION,
     title="CosMx Multiomic Breast Cancer (Companion)",
@@ -71,8 +70,6 @@ common_kwargs = dict(
     
     # Feature discovery
     features=[],
-    use_hvgs=False, # Often companion files already have preferred genes or markers
-    hvg_limit=50,
     
     # Storage and encoding
     feature_storage="sidecar",
@@ -82,15 +79,11 @@ common_kwargs = dict(
     feature_sidecar_shard_size=128,
     
     # Analytics - set these to the columns used during companion precomputation
-    marker_gene_annotations=[
-        "leiden_rna",
-        "leiden_protein",
-    ],
     neighbor_stats_annotations=[
         "leiden_rna",
         "leiden_protein",
     ],
-    pseudobulk_de_annotations=[
+    pseudobulk_additional_annotations=[
         "leiden_rna",
         "leiden_protein",
     ],
@@ -115,7 +108,7 @@ export_to_html(
 
 print(f"\nSuccess! Wrote companion-powered viewer:")
 print(f"  1. Sidecar Viewer: {SIDECAR_OUTPUT}")
-print(f"  2. Gene Manifest: {FEATURE_MANIFEST_PATH}")
+print(f"  2. Feature Manifest: {FEATURE_MANIFEST_PATH}")
 print(f"  3. Shard Directory: {Path(FEATURE_MANIFEST_PATH).with_suffix('')}/")
 print(f"  4. KaroSpace Package: {PACKAGE_OUTPUT}")
 print(f"  5. Local Loader: {Path(PACKAGE_OUTPUT).with_suffix('.loader.html')}")

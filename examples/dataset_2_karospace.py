@@ -46,7 +46,7 @@ ANNOTATIONS = [
 ]
 
 PRIMARY_ANNOTATION = "celltype_major"
-ADDITIONAL_ANNOTATIONS = ANNOTATIONS + LEIDEN + GMM + ["total_counts", "n_genes_by_counts"]
+ADDITIONAL_ANNOTATIONS = ANNOTATIONS + LEIDEN + GMM + ["total_counts"]
 # Run per-cluster analytics on every clustering + the main annotations.
 CLUSTER_COLUMNS = ["celltype_major", "astro_subclass", "cytetype_annotation_leiden_0.2"] + LEIDEN + GMM
 
@@ -79,23 +79,18 @@ def main() -> None:
         outline_by=None,
         cell_annotations=ADDITIONAL_ANNOTATIONS,
         features=[],
-        use_hvgs=False,
         feature_storage="sidecar",
         feature_encoding="auto",
         feature_value_encoding="uint8",
         feature_manifest_path=FEATURE_MANIFEST_PATH,
         feature_sidecar_shard_size=128,
-        marker_gene_annotations=CLUSTER_COLUMNS,
-        marker_genes_top_n=30,
         neighbor_stats_annotations=CLUSTER_COLUMNS,
         neighbor_stats_permutations=0,
         neighbor_stats_seed=42,
-        pseudobulk_de_annotations=CLUSTER_COLUMNS,
-        pseudobulk_de_top_n=20,
-        pseudobulk_de_method="t-test",
-        pseudobulk_de_layer=None,
-        pseudobulk_de_min_cells=20,
-        interaction_marker_annotations=None,
+        pseudobulk_additional_annotations=CLUSTER_COLUMNS,
+        pseudobulk_embed_top_n_per_comparison=20,
+        pseudobulk_counts_layer=None,
+        pseudobulk_min_cells_per_pseudobulk=20,
     )
 
     print("Exporting binary-sidecar viewer...")

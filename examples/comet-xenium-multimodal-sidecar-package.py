@@ -3,7 +3,7 @@ Export a KaroSpace viewer for the COMET multimodal Xenium dataset.
 
 This is a 4-core tissue microarray (hepatocellular carcinoma / non-tumour HCC
 liver / tonsil / hepatocellular adenoma) profiled with BOTH:
-  * RNA   — 5,001-gene Xenium panel (adata.X)
+  * RNA   — 5,001-feature Xenium panel (adata.X)
   * Protein — 16-channel COMET immunofluorescence (adata.obsm['protein'],
     channel names in adata.uns['protein_var'], e.g. DAPI, CK8, CD45, HepPar1)
 
@@ -108,7 +108,7 @@ def build_spatial_graph(adata, section_col: str, spatial_key: str = "spatial",
     """Build a per-section symmetric kNN spatial graph into
     adata.obsp['spatial_connectivities'].
 
-    The exporter's spatially-variable-genes step (Moran's I) only *reads* a graph
+    The exporter's spatially-variable-features step (Moran's I) only *reads* a graph
     from obsp — unlike neighbor stats, it never builds one from coordinates. This
     plain h5ad ships no graph, so we build one here. Edges are added within each
     section only, so Moran's I never draws spurious links between the 4 cores.
@@ -197,7 +197,7 @@ def main() -> None:
     clean_protein_channel_names(dataset)
 
     # The exporter's Moran's I step needs a spatial graph in obsp (it won't build
-    # one). Add a per-section kNN graph so spatially variable genes populate.
+    # one). Add a per-section kNN graph so spatially variable features populate.
     if "spatial_connectivities" not in dataset.adata.obsp:
         print("Building spatial neighbour graph for Moran's I...")
         build_spatial_graph(dataset.adata, section_col="sample_id", spatial_key="spatial")
@@ -221,22 +221,17 @@ def main() -> None:
         outline_by=None,
         cell_annotations=ADDITIONAL_ANNOTATIONS,
         features=[],
-        use_hvgs=False,
         # Extra (protein) modality requires sidecar storage.
         feature_storage="sidecar",
         feature_encoding="auto",
         feature_value_encoding="uint8",
         feature_sidecar_shard_size=128,
         # Cluster analytics (computed here — this is a plain, non-companion h5ad).
-        marker_gene_annotations=CLUSTER_COLUMNS,
-        marker_genes_top_n=30,
         neighbor_stats_annotations=CLUSTER_COLUMNS,
         neighbor_stats_permutations=0,
-        pseudobulk_de_annotations=CLUSTER_COLUMNS,
-        pseudobulk_de_top_n=20,
-        pseudobulk_de_method="t-test",
-        pseudobulk_de_layer=None,
-        interaction_marker_annotations=None,
+        pseudobulk_additional_annotations=CLUSTER_COLUMNS,
+        pseudobulk_embed_top_n_per_comparison=20,
+        pseudobulk_counts_layer=None,
         # RNA panel + 16-channel COMET protein.
         modalities=["rna", "protein"],
         # H&E overlays.

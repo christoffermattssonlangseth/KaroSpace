@@ -1,15 +1,15 @@
 """
-Example usage of KaroSpace with sidecar-based gene loading.
+Example usage of KaroSpace with sidecar-based feature loading.
 
 This script demonstrates how to load Xenium spatial transcriptomics data
-and export it to an interactive HTML viewer plus an auxiliary gene JSON file.
+and export it to an interactive HTML viewer plus an auxiliary feature JSON file.
 """
 
 import os
 import sys
 from pathlib import Path
 
-# Prefer the local repo checkout over any older site-packages install.
+# Prefer the local repo checkout for this example.
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -35,7 +35,6 @@ if H5AD_PATH.startswith("/path/to/"):
 
 PRIMARY_CLUSTER = "CellCharter_10"
 ANALYTICS_COLUMNS = [PRIMARY_CLUSTER, "CellCharter_5", "leiden_0.5"]
-USE_HVGS = False
 ENABLE_ANALYTICS = True
 
 # Load the dataset
@@ -87,30 +86,23 @@ export_to_html(
         "Ptgds",
         "Serpina3n",
     ],
-    use_hvgs=USE_HVGS,
-    hvg_limit=200,
-    gene_correlation_top_n=10,
-    category_means_n_genes=500,
+    feature_correlation_top_n=10,
     feature_storage="sidecar",
     feature_manifest_path="mouseBrainXenium5k.features.json",
-    marker_gene_annotations=ANALYTICS_COLUMNS if ENABLE_ANALYTICS else None,
-    marker_genes_top_n=30,
     neighbor_stats_annotations=ANALYTICS_COLUMNS if ENABLE_ANALYTICS else None,
     neighbor_stats_permutations=0,
     neighbor_stats_seed=42,
-    pseudobulk_de_annotations=ANALYTICS_COLUMNS if ENABLE_ANALYTICS else None,
-    pseudobulk_de_top_n=20,
-    pseudobulk_de_method="t-test",
-    pseudobulk_de_layer="normalized",
-    pseudobulk_de_min_cells=20,
-    interaction_marker_annotations=None,
+    pseudobulk_additional_annotations=ANALYTICS_COLUMNS if ENABLE_ANALYTICS else None,
+    pseudobulk_embed_top_n_per_comparison=20,
+    pseudobulk_counts_layer="normalized",
+    pseudobulk_min_cells_per_pseudobulk=20,
     interaction_markers_top_targets=6,
-    interaction_markers_top_genes=15,
+    interaction_markers_top_features=15,
     interaction_markers_min_cells=30,
     interaction_markers_min_neighbors=1,
 )
 
 print("\nDone! Open mouseBrainXenium5k.html through a local web server.")
-print("This export also writes mouseBrainXenium5k.features.json for lazy downstream gene loading.")
+print("This export also writes mouseBrainXenium5k.features.json for lazy downstream feature loading.")
 print("Example: python -m http.server 8765")
 print("Then open: http://127.0.0.1:8765/mouseBrainXenium5k.html")

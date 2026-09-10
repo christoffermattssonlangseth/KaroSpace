@@ -22,8 +22,6 @@ H5AD_PATH = os.environ.get(
     "MANA_H5AD_PATH",
     '/tmp/rrmap.companion.ready.h5ad',#"/Volumes/processing2/RRmap/data/RRmap_metadata_fixed_update.h5ad",
 )
-
-USE_HVGS = False
 OUTLINE_BY = "stage"
 PRIMARY_ANNOTATION = "anno_L2"
 SIDECAR_OUTPUT = "RRMap-sidecar.html"
@@ -96,27 +94,14 @@ common_kwargs = dict(
         "Ptgds",
         "Serpina3n",
     ],
-    use_hvgs=USE_HVGS,
-    hvg_limit=50,
     feature_storage="sidecar",
     feature_encoding="auto",
     feature_value_encoding="uint8",
     feature_manifest_path=FEATURE_MANIFEST_PATH,
-    marker_gene_annotations=[
-        "anno_L3",
-        "anno_L2",
-        "anno_L1",
-        "leiden_3.5",
-        "compartment_mana",
-        "stage",
-        "condition",
-    ],
-    marker_genes_top_n=50,
     neighbor_stats_permutations=25,
     neighbor_stats_seed=42,
-    interaction_marker_annotations=None,
     interaction_markers_top_targets=6,
-    interaction_markers_top_genes=15,
+    interaction_markers_top_features=15,
     interaction_markers_min_cells=30,
     interaction_markers_min_neighbors=1,
 )

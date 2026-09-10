@@ -1,15 +1,15 @@
 """
-Example usage of KaroSpace with sidecar-based gene loading.
+Example usage of KaroSpace with sidecar-based feature loading.
 
 This script demonstrates how to load Xenium spatial transcriptomics data
-and export it to an interactive HTML viewer plus an auxiliary gene JSON file.
+and export it to an interactive HTML viewer plus an auxiliary feature JSON file.
 """
 
 import os
 import sys
 from pathlib import Path
 
-# Prefer the local repo checkout over any older site-packages install.
+# Prefer the local repo checkout for this example.
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -39,11 +39,6 @@ dataset = load_spatial_data(
 
 print(f"Loaded {dataset.n_sections} sections with {dataset.n_cells:,} total cells")
 print(f"Available annotation columns: {dataset.obs_columns[:10]}...")
-
-# Choose gene source for expression:
-# - True: use highly variable genes (if present, capped to hvg_limit)
-# - False: use the explicit genes list below for embedded startup genes only
-USE_HVGS = False
 OUTLINE_BY = "condition"
 ENABLE_ANALYTICS = True
 
@@ -78,27 +73,21 @@ export_to_html(
      #   "Ptgds",
      #   "Serpina3n",
     ],
-    use_hvgs=USE_HVGS,
-    hvg_limit=200,
     feature_storage="sidecar",
     feature_manifest_path="BALO.features.json",
-    marker_gene_annotations=['leiden_0.5'] if ENABLE_ANALYTICS else None,
-    marker_genes_top_n=50,
     neighbor_stats_permutations=25 if ENABLE_ANALYTICS else 0,
-    pseudobulk_de_annotations=["leiden_2"],
-    pseudobulk_de_top_n=20,
-    pseudobulk_de_method="t-test",
-    pseudobulk_de_layer="normalized",
-    pseudobulk_de_min_cells=20,
+    pseudobulk_additional_annotations=["leiden_2"],
+    pseudobulk_embed_top_n_per_comparison=20,
+    pseudobulk_counts_layer="normalized",
+    pseudobulk_min_cells_per_pseudobulk=20,
     neighbor_stats_seed=42,
-    interaction_marker_annotations=None,
     interaction_markers_top_targets=6,
-    interaction_markers_top_genes=15,
+    interaction_markers_top_features=15,
     interaction_markers_min_cells=30,
     interaction_markers_min_neighbors=1,
 )
 
 print("\nDone! Open BALO.html through a local web server.")
-print("This export also writes BALO.features.json for lazy downstream gene loading.")
+print("This export also writes BALO.features.json for lazy downstream feature loading.")
 print("Example: python -m http.server 8765")
 print("Then open: http://127.0.0.1:8765/BALO.html")
