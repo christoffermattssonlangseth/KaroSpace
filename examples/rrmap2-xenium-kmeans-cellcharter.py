@@ -3,7 +3,7 @@ KaroSpace export for the RRMAP2 Xenium "all samples" kmeans-separated object,
 annotated + filtered + processed with CellCharter (companion-ready).
 
 Colours by ALL leiden resolutions and ALL CellCharter resolutions; because the
-file is companion-ready, the per-cluster analytics (marker genes / DE / neighbor
+file is companion-ready, the per-cluster analytics (marker features / DE / neighbor
 enrichment) for every clustering are cheap precomputed lookups.
 
 ~1.42M cells across 54 samples — writes a binary-sidecar viewer bundle and a
@@ -82,24 +82,19 @@ def main() -> None:
         outline_by=None,
         cell_annotations=ADDITIONAL_ANNOTATIONS,
         features=[],
-        use_hvgs=False,
         feature_storage="sidecar",
         feature_encoding="auto",
         feature_value_encoding="uint8",
         feature_manifest_path=FEATURE_MANIFEST_PATH,
         feature_sidecar_shard_size=128,
         # All clusterings get analytics (cheap precomputed companion lookups).
-        marker_gene_annotations=ALL_CLUSTERINGS,
-        marker_genes_top_n=30,
         neighbor_stats_annotations=ALL_CLUSTERINGS,
         neighbor_stats_permutations=0,
         neighbor_stats_seed=42,
-        pseudobulk_de_annotations=ALL_CLUSTERINGS,
-        pseudobulk_de_top_n=20,
-        pseudobulk_de_method="t-test",
-        pseudobulk_de_layer=None,
-        pseudobulk_de_min_cells=20,
-        interaction_marker_annotations=None,
+        pseudobulk_additional_annotations=ALL_CLUSTERINGS,
+        pseudobulk_embed_top_n_per_comparison=20,
+        pseudobulk_counts_layer=None,
+        pseudobulk_min_cells_per_pseudobulk=20,
     )
 
     print("Exporting binary-sidecar viewer...")

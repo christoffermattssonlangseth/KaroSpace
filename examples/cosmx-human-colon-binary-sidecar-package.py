@@ -64,8 +64,6 @@ common_kwargs = dict(
     outline_by=None,
     cell_annotations=ADDITIONAL_ANNOTATIONS,
     features=[],
-    use_hvgs=False,
-    hvg_limit=50,
     feature_storage="sidecar",
     feature_encoding="auto",
     feature_value_encoding="uint16",
@@ -73,17 +71,13 @@ common_kwargs = dict(
     feature_sidecar_shard_size=16,
     # This dataset does not expose a usable cell-type/cluster annotation in obs,
     # so keep the initial view quantitative and skip category-based analytics.
-    marker_gene_annotations=None,
-    marker_genes_top_n=30,
     neighbor_stats_annotations=None,
     neighbor_stats_permutations=0,
     neighbor_stats_seed=42,
-    pseudobulk_de_annotations=None,
-    pseudobulk_de_top_n=20,
-    pseudobulk_de_method="t-test",
-    pseudobulk_de_layer=None,
-    pseudobulk_de_min_cells=20,
-    interaction_marker_annotations=None,
+    pseudobulk_additional_annotations=None,
+    pseudobulk_embed_top_n_per_comparison=20,
+    pseudobulk_counts_layer=None,
+    pseudobulk_min_cells_per_pseudobulk=20,
 )
 
 export_to_html(

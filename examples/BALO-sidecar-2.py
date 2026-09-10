@@ -16,7 +16,6 @@ H5AD_PATH = os.environ.get(
 )
 
 PRIMARY_CLUSTER = "leiden_2_names_sub"
-USE_HVGS = False
 ENABLE_ANALYTICS = True
 
 dataset = load_spatial_data(
@@ -46,27 +45,20 @@ export_to_html(
         "run",
     ],
     features=[],
-    use_hvgs=USE_HVGS,
-    hvg_limit=200,
     feature_storage="sidecar",
     feature_manifest_path="BALO.features.json",
-    marker_gene_annotations=[PRIMARY_CLUSTER] if
-ENABLE_ANALYTICS else None,
-    marker_genes_top_n=30,
     neighbor_stats_annotations=[PRIMARY_CLUSTER] if
 ENABLE_ANALYTICS else None,
     neighbor_stats_permutations=0,
     neighbor_stats_seed=42,
-    pseudobulk_de_annotations=[PRIMARY_CLUSTER] if ENABLE_ANALYTICS
+    pseudobulk_additional_annotations=[PRIMARY_CLUSTER] if ENABLE_ANALYTICS
 else None,
-    pseudobulk_de_top_n=20,
-    pseudobulk_de_method="t-test",
-    pseudobulk_de_layer="normalized",
-    pseudobulk_de_min_cells=20,
-    interaction_marker_annotations=None,
+    pseudobulk_embed_top_n_per_comparison=20,
+    pseudobulk_counts_layer="normalized",
+    pseudobulk_min_cells_per_pseudobulk=20,
 )
 
 print("\nDone! Open BALO.html through a local web server.")
-print("This export also writes BALO.features.json for lazy downstream gene loading.")
+print("This export also writes BALO.features.json for lazy downstream feature loading.")
 print("Example: python -m http.server 8765")
 print("Then open: http://127.0.0.1:8765/BALO.html")

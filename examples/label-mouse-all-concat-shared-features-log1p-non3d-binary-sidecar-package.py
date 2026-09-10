@@ -1,7 +1,7 @@
 """
 Example usage of KaroSpace with binary sidecar and .karospace export targets.
 
-This script is configured for the LABEL Mouse All Concat Shared Genes Log1p Non3D companion-ready h5ad and writes:
+This script is configured for the LABEL Mouse All Concat Shared Features Log1p Non3D companion-ready h5ad and writes:
 1. an unpacked binary sidecar viewer bundle
 2. a packaged .karospace bundle with matching settings
 """
@@ -21,8 +21,8 @@ os.environ.setdefault("MPLCONFIGDIR", "/tmp/karospace-mpl-cache")
 from karospace import export_to_html, load_spatial_data
 
 H5AD_PATH = os.environ.get(
-    "LABEL_MOUSE_ALL_CONCAT_SHARED_GENES_LOG1P_NON3D_H5AD_PATH",
-    "/Users/chrislangseth/Downloads/LABEL_mouse_all_concat_shared_genes_log1p_non3d.companion.ready.h5ad",
+    "LABEL_MOUSE_ALL_CONCAT_SHARED_FEATURES_LOG1P_NON3D_H5AD_PATH",
+    "/Users/chrislangseth/Downloads/LABEL_mouse_all_concat_shared_features_log1p_non3d.companion.ready.h5ad",
 )
 
 PRIMARY_ANNOTATION = "clusters"
@@ -31,14 +31,14 @@ ADDITIONAL_ANNOTATIONS = [
     "organ_standardized",
     "sample_id",
 ]
-SIDECAR_OUTPUT = "label-mouse-all-concat-shared-genes-log1p-non3d-binary-sidecar.html"
-PACKAGE_OUTPUT = "label-mouse-all-concat-shared-genes-log1p-non3d-binary.karospace"
-FEATURE_MANIFEST_PATH = "label-mouse-all-concat-shared-genes-log1p-non3d-binary.features.json"
+SIDECAR_OUTPUT = "label-mouse-all-concat-shared-features-log1p-non3d-binary-sidecar.html"
+PACKAGE_OUTPUT = "label-mouse-all-concat-shared-features-log1p-non3d-binary.karospace"
+FEATURE_MANIFEST_PATH = "label-mouse-all-concat-shared-features-log1p-non3d-binary.features.json"
 
 if not Path(H5AD_PATH).exists():
     raise SystemExit(
-        "LABEL Mouse All Concat Shared Genes Log1p Non3D h5ad not found. Set LABEL_MOUSE_ALL_CONCAT_SHARED_GENES_LOG1P_NON3D_H5AD_PATH before running "
-        "examples/label-mouse-all-concat-shared-genes-log1p-non3d-binary-sidecar-package.py."
+        "LABEL Mouse All Concat Shared Features Log1p Non3D h5ad not found. Set LABEL_MOUSE_ALL_CONCAT_SHARED_FEATURES_LOG1P_NON3D_H5AD_PATH before running "
+        "examples/label-mouse-all-concat-shared-features-log1p-non3d-binary-sidecar-package.py."
     )
 
 dataset = load_spatial_data(
@@ -56,26 +56,18 @@ print(f"Available annotation columns: {dataset.obs_columns[:10]}...")
 
 common_kwargs = dict(
     main_cell_annotation=PRIMARY_ANNOTATION,
-    title="LABEL Mouse All Concat Shared Genes Log1p Non3D",
+    title="LABEL Mouse All Concat Shared Features Log1p Non3D",
     min_panel_size=120,
     spot_size="auto",
     downsample=10_000_000,
     outline_by=None,
     cell_annotations=ADDITIONAL_ANNOTATIONS,
     features=[],
-    use_hvgs=False,
-    hvg_limit=50,
     feature_storage="sidecar",
     feature_encoding="auto",
     feature_value_encoding="uint16",
     feature_manifest_path=FEATURE_MANIFEST_PATH,
     feature_sidecar_shard_size=16,
-    marker_gene_annotations=[
-        "clusters",
-        "Subregion",
-        "organ_standardized",
-    ],
-    marker_genes_top_n=30,
     neighbor_stats_annotations=[
         "clusters",
         "Subregion",
@@ -83,15 +75,13 @@ common_kwargs = dict(
     ],
     neighbor_stats_permutations=0,
     neighbor_stats_seed=42,
-    pseudobulk_de_annotations=[
+    pseudobulk_additional_annotations=[
         "clusters",
         "Subregion",
     ],
-    pseudobulk_de_top_n=20,
-    pseudobulk_de_method="t-test",
-    pseudobulk_de_layer=None,
-    pseudobulk_de_min_cells=20,
-    interaction_marker_annotations=None,
+    pseudobulk_embed_top_n_per_comparison=20,
+    pseudobulk_counts_layer=None,
+    pseudobulk_min_cells_per_pseudobulk=20,
 )
 
 export_to_html(

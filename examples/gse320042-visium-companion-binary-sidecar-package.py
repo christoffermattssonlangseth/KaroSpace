@@ -22,7 +22,7 @@ from karospace import export_to_html, load_spatial_data
 
 H5AD_PATH = os.environ.get(
     "GSE320042_VISIUM_COMPANION_H5AD_PATH",
-    "/Users/chrislangseth/work/karolinska_institutet/projects/KaroSpaceDataWrangling/data/GSE320042_visium/processed_split/GSE320042_visium_only_processed_hvg_umap_leiden.companion.ready.h5ad",
+    "/Users/chrislangseth/work/karolinska_institutet/projects/KaroSpaceDataWrangling/data/GSE320042_visium/processed_split/GSE320042_visium_only_processed_highly_variable_feature_umap_leiden.companion.ready.h5ad",
 )
 
 PRIMARY_ANNOTATION = "leiden_0_6"
@@ -62,30 +62,22 @@ common_kwargs = dict(
     outline_by=None,
     cell_annotations=ADDITIONAL_ANNOTATIONS,
     features=[],
-    use_hvgs=False,
-    hvg_limit=50,
     feature_storage="sidecar",
     feature_encoding="auto",
     feature_value_encoding="uint16",
     feature_manifest_path=FEATURE_MANIFEST_PATH,
     feature_sidecar_shard_size=16,
-    marker_gene_annotations=[
-        "leiden_0_6",
-    ],
-    marker_genes_top_n=30,
     neighbor_stats_annotations=[
         "leiden_0_6",
     ],
     neighbor_stats_permutations=0,
     neighbor_stats_seed=42,
-    pseudobulk_de_annotations=[
+    pseudobulk_additional_annotations=[
         "leiden_0_6",
     ],
-    pseudobulk_de_top_n=20,
-    pseudobulk_de_method="t-test",
-    pseudobulk_de_layer=None,
-    pseudobulk_de_min_cells=20,
-    interaction_marker_annotations=None,
+    pseudobulk_embed_top_n_per_comparison=20,
+    pseudobulk_counts_layer=None,
+    pseudobulk_min_cells_per_pseudobulk=20,
 )
 
 export_to_html(

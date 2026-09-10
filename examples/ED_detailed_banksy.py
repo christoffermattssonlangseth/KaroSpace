@@ -5,7 +5,7 @@ section per sample (by sample_NewNAME).
 
 Per collaborator request:
   - sections grouped by sample_NewNAME (friendly names, e.g. CT1-045148)
-  - patient identifiers exposed as metadata (pID = new IDs, patient_id = old)
+  - patient identifiers exposed as metadata (pID = display IDs, patient_id = source IDs)
   - condition / status removed
   - colour options limited to: cell_annotation_detailed, cell_class, banksy
     (cell_subclass, cellcharter, leiden removed)
@@ -76,20 +76,15 @@ def main() -> None:
         outline_by=None,
         cell_annotations=ADDITIONAL_ANNOTATIONS,
         features=[],
-        use_hvgs=False,
         feature_storage="sidecar",
         feature_encoding="auto",
         feature_value_encoding="uint8",
         feature_sidecar_shard_size=128,
-        marker_gene_annotations=CLUSTER_COLUMNS,
-        marker_genes_top_n=30,
         neighbor_stats_annotations=CLUSTER_COLUMNS,
         neighbor_stats_permutations=0,
-        pseudobulk_de_annotations=CLUSTER_COLUMNS,
-        pseudobulk_de_top_n=20,
-        pseudobulk_de_method="t-test",
-        pseudobulk_de_layer=None,
-        interaction_marker_annotations=None,
+        pseudobulk_additional_annotations=CLUSTER_COLUMNS,
+        pseudobulk_embed_top_n_per_comparison=20,
+        pseudobulk_counts_layer=None,
     )
 
     # The sidecar writes its feature manifest next to the HTML (full path is fine);

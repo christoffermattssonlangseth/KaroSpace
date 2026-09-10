@@ -34,11 +34,6 @@ dataset = load_spatial_data(
 
 print(f"Loaded {dataset.n_sections} sections with {dataset.n_cells:,} total cells")
 print(f"Available annotation columns: {dataset.obs_columns[:10]}...")  # first 10
-
-# Choose gene source for expression:
-# - True: use highly variable genes (if present, capped to 20)
-# - False: use the explicit genes list below
-USE_HVGS = False
 OUTLINE_BY = "course"
 
 # Export to HTML with full features
@@ -60,10 +55,10 @@ export_to_html(
        'region_annotation',
     ],
 
-    # Pre-load specific genes for expression visualization
-    # These will be available in the gene input field
+    # Pre-load specific features for expression visualization
+    # These will be available in the feature input field
     features=[
-        # Example marker genes - replace with your genes of interest
+        # Example marker features - replace with your features of interest
          # A1
     "H2-D1", "B2m", "C4b", "Gfap", "Serpina3n",
 
@@ -78,27 +73,16 @@ export_to_html(
     "Laptm5", "Lgmn", "Ly86", "Man2b1", "Mpeg1", "Olfml3", "Plek", "Prdx6",
     "Rpl18a", "S100a6", "Vsir"
     ],
-    use_hvgs=USE_HVGS,
-    hvg_limit=500,
-
-    # Compute marker genes for these categorical annotation columns
-    # (appears in the Color panel under "Marker genes")
-    marker_gene_annotations=[
-        'leiden_0.5',
-       'leiden_0.75', 'leiden_1', 'leiden_1.5', 'leiden_2', 'leiden_2.5',
-       'region_annotation','re_annotation_regions'
-    ],
-    marker_genes_top_n=50,
 )
 
 # The viewer now supports:
 # 1. Filter by course (peak_I, peak_II, peak_III) or other metadata
 # 2. Switch between different annotation columns
-# 3. View gene expression for pre-loaded genes
+# 3. View feature expression for pre-loaded features
 # 4. Click to expand sections with zoom/pan
 # 5. Toggle categories on/off in the legend
 
 print("\nDone! Open ST-BRICHOS.html in a browser.")
 print("Use the filter chips to show only specific courses (e.g., peak_III)")
 print("Use the Annotation selector to switch between different annotations")
-print("Type a gene name to view expression (must be in the genes list)")
+print("Type a feature name to view expression (must be in the features list)")

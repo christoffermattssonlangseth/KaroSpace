@@ -40,7 +40,13 @@ def _parse_section_rotations_arg(raw: str) -> Optional[Dict[str, float]]:
 
 def _run_export_cli(argv=None):
     parser = argparse.ArgumentParser(
-        description="Generate HTML viewer for multimodal spatial data"
+        description="Generate HTML viewer for multimodal spatial data",
+        epilog=(
+            "Value conventions: use 'auto' for automatic decisions, 'off' to disable "
+            "analysis modes, 'none' where an option documents a nullable string value, "
+            "an empty string for empty comma-separated/JSON values, and 0 for numeric "
+            "disable switches."
+        ),
     )
     io_args = parser.add_argument_group("Input/output")
     dataset_args = parser.add_argument_group("Dataset loading and coordinates")
@@ -48,6 +54,7 @@ def _run_export_cli(argv=None):
     viewer_args = parser.add_argument_group("Viewer layout")
     feature_args = parser.add_argument_group("Feature content and storage")
     pseudobulk_args = parser.add_argument_group("Pseudobulk DE")
+    pathway_args = parser.add_argument_group("Pathway enrichment")
     neighborhood_args = parser.add_argument_group("Neighborhoods and interactions")
     overlay_args = parser.add_argument_group("Images, deconvolution, and utilities")
 
@@ -158,7 +165,7 @@ def _run_export_cli(argv=None):
         dest="section_metadata",
         help=(
             "Comma-separated obs columns to use as section metadata and visual filter chips "
-            "(e.g. strain,region,Batch,Slide). Empty disables section metadata."
+            "(e.g. strain,region,Batch,Slide). An empty string disables section metadata."
         ),
     )
     metadata_args.add_argument(
@@ -214,15 +221,9 @@ def _run_export_cli(argv=None):
         type=str,
         default=None,
         help=(
-            "Metadata column used to paint panel outlines. Use 'None' to disable outlines. "
-            "When the column is embedded as metadata/annotation, outlines reuse that palette. (default: None)"
+            "Metadata column used to paint panel outlines. Use 'none' to disable outlines. "
+            "When the column is embedded as metadata/annotation, outlines reuse that palette. (default: none)"
         )
-    )
-    viewer_args.add_argument(
-        "--outline-by",
-        dest="outline_by",
-        type=str,
-        help=argparse.SUPPRESS,
     )
     viewer_args.add_argument(
         "--viewer-info-html",
@@ -313,7 +314,7 @@ def _run_export_cli(argv=None):
         help=(
             "Comma-separated obs columns to compute neighbor composition stats for. "
             "Use 'auto' (default) to include --main-cell-annotation and --cell-annotations; "
-            "empty disables standalone neighbor enrichment unless interaction markers need it."
+            "an empty string disables standalone neighbor enrichment unless interaction markers need it."
         )
     )
     pseudobulk_args.add_argument(
@@ -322,7 +323,7 @@ def _run_export_cli(argv=None):
         default="auto",
         help=(
             "Category pseudobulk DE mode. Use 'auto' to analyze --main-cell-annotation "
-            "and --pseudobulk-additional-annotations, or 'None' to disable. (default: auto)"
+            "and --pseudobulk-additional-annotations, or 'off' to disable. (default: auto)"
         )
     )
     pseudobulk_args.add_argument(
@@ -356,14 +357,14 @@ def _run_export_cli(argv=None):
             "In zsh/bash, wrap the whole JSON value in single quotes so inner double "
             "quotes are preserved. "
             "All retained categories remain in the shared DESeq2 fit and balanced-rest "
-            "contrasts still run for every category. Empty includes all categories."
+            "contrasts still run for every category. An empty string includes all categories."
         ),
     )
     pseudobulk_args.add_argument(
         "--pseudobulk-counts-layer",
         type=str,
         default="counts",
-        help="AnnData layer containing raw counts for pseudobulk DE. Use 'None' for adata.X. (default: counts)"
+        help="AnnData layer containing raw counts for pseudobulk DE. Use 'none' for adata.X. (default: counts)"
     )
     pseudobulk_args.add_argument(
         "--pseudobulk-modalities",
@@ -387,18 +388,12 @@ def _run_export_cli(argv=None):
         "--pseudobulk-min-feature-counts",
         type=int,
         default=0,
-        dest="pseudobulk_min_gene_counts",
+        dest="pseudobulk_min_feature_counts",
         metavar="N",
         help=(
             "Exclude features with fewer than this many total raw pseudobulk counts in the shared DESeq2 fit. "
             "Use 0 to disable. (default: 0)"
         ),
-    )
-    pseudobulk_args.add_argument(
-        "--pseudobulk-min-gene-counts",
-        type=int,
-        dest="pseudobulk_min_gene_counts",
-        help=argparse.SUPPRESS,
     )
     pseudobulk_args.add_argument(
         "--pseudobulk-min-cells-per-pseudobulk",
@@ -464,7 +459,16 @@ def _run_export_cli(argv=None):
         default="parametric",
         help="PyDESeq2 dispersion trend fit type. Use 'mean' to avoid parametric trend fallback warnings. (default: parametric)"
     )
-    pseudobulk_args.add_argument(
+    pathway_args.add_argument(
+        "--pathway",
+        type=str,
+        default="auto",
+        help=(
+            "Pathway enrichment mode. Use 'auto' to run ORA/GSEA after pseudobulk DE, "
+            "or 'off' to disable. (default: auto)"
+        ),
+    )
+    pathway_args.add_argument(
         "--pathway-gmt",
         type=str,
         default="",
@@ -474,25 +478,25 @@ def _run_export_cli(argv=None):
             "then falls back to GSEApy/Enrichr."
         ),
     )
-    pseudobulk_args.add_argument(
+    pathway_args.add_argument(
         "--pathway-organism",
         type=str,
         default="Mouse",
         help="Organism used for default Reactome loading, e.g. Human or Mouse. (default: Mouse)",
     )
-    pseudobulk_args.add_argument(
+    pathway_args.add_argument(
         "--pathway-top-n",
         type=int,
         default=10,
         help="Maximum ORA/GSEA pathways stored per direction and comparison. (default: 10)",
     )
-    pseudobulk_args.add_argument(
+    pathway_args.add_argument(
         "--pathway-min-overlap",
         type=int,
         default=3,
-        help="Minimum pathway/query gene overlap for ORA/GSEA reporting. (default: 3)",
+        help="Minimum pathway/query feature overlap for ORA/GSEA reporting. (default: 3)",
     )
-    pseudobulk_args.add_argument(
+    pathway_args.add_argument(
         "--pathway-gsea-permutations",
         type=int,
         default=100,
@@ -510,7 +514,7 @@ def _run_export_cli(argv=None):
         default="auto",
         help=(
             "Contact-conditioned pseudobulk marker mode. Use 'auto' to analyze --main-cell-annotation "
-            "and --pseudobulk-additional-annotations, or 'None' to disable. (default: auto)"
+            "and --pseudobulk-additional-annotations, or 'off' to disable. (default: auto)"
         )
     )
     neighborhood_args.add_argument(
@@ -523,15 +527,9 @@ def _run_export_cli(argv=None):
         "--interaction-markers-top-features",
         type=int,
         default=20,
-        dest="interaction_markers_top_genes",
+        dest="interaction_markers_top_features",
         metavar="N",
         help="Number of top DE features to keep per source-target interaction. (default: 20)"
-    )
-    neighborhood_args.add_argument(
-        "--interaction-markers-top-genes",
-        type=int,
-        dest="interaction_markers_top_genes",
-        help=argparse.SUPPRESS,
     )
     neighborhood_args.add_argument(
         "--interaction-markers-min-cells",
@@ -555,43 +553,17 @@ def _run_export_cli(argv=None):
         "--feature-correlation-top-n",
         type=int,
         default=5,
-        dest="gene_correlation_top_n",
+        dest="feature_correlation_top_n",
         metavar="N",
         help="Number of top correlated features to show per embedded feature in the discovery panel. Use 0 to disable. (default: 5)"
-    )
-    feature_args.add_argument(
-        "--gene-correlation-top-n",
-        type=int,
-        dest="gene_correlation_top_n",
-        help=argparse.SUPPRESS,
-    )
-    feature_args.add_argument(
-        "--category-means-n-features",
-        type=int,
-        default=500,
-        dest="category_means_n_genes",
-        metavar="N",
-        help="Maximum embedded pseudobulk-DE features to expose in category mean summaries. Use 0 to disable. (default: 500)"
-    )
-    feature_args.add_argument(
-        "--category-means-n-genes",
-        type=int,
-        dest="category_means_n_genes",
-        help=argparse.SUPPRESS,
     )
     feature_args.add_argument(
         "--spatial-variable-features-n",
         type=int,
         default=20,
-        dest="spatial_variable_genes_n",
+        dest="spatial_variable_features_n",
         metavar="N",
         help="Number of top variable features to score with Moran's I spatial autocorrelation. Requires spatial graph in obsp. Use 0 to disable. (default: 20)"
-    )
-    feature_args.add_argument(
-        "--spatial-variable-genes-n",
-        type=int,
-        dest="spatial_variable_genes_n",
-        help=argparse.SUPPRESS,
     )
     viewer_args.add_argument(
         "--scalebar-unit",
@@ -622,7 +594,7 @@ def _run_export_cli(argv=None):
 
     if args.pseudobulk_min_cell_counts < 0:
         parser.error("--pseudobulk-min-cell-counts must be >= 0")
-    if args.pseudobulk_min_gene_counts < 0:
+    if args.pseudobulk_min_feature_counts < 0:
         parser.error("--pseudobulk-min-feature-counts must be >= 0")
     if args.pseudobulk_n_cpus < 1:
         parser.error("--pseudobulk-n-cpus must be >= 1")
@@ -674,7 +646,7 @@ def _run_export_cli(argv=None):
                     display += " (default)"
                 print(f"  - {display}: {int(entry.get('n_features') or 0):,} features")
         else:
-            print(f"Features: {report['n_genes']:,}")
+            print(f"Features: {report['n_features']:,}")
         print("Available cell metadata (adata.obs):")
         for entry in report["metadata"]:
             examples = ", ".join(json.dumps(value, ensure_ascii=False) for value in entry["examples"])
@@ -735,15 +707,16 @@ def _run_export_cli(argv=None):
 
     def _parse_auto_or_none(value: str, option_name: str) -> Optional[str]:
         text = str(value or "").strip().lower()
-        if text in {"", "auto"}:
+        if text in {"", "auto", "true", "yes", "on", "1"}:
             return "auto"
-        if text in {"none", "null"}:
+        if text in {"none", "null", "false", "no", "off", "0"}:
             return None
-        print(f"Error: {option_name} must be 'auto' or 'None'", file=sys.stderr)
+        print(f"Error: {option_name} must be 'auto' or 'off'", file=sys.stderr)
         sys.exit(2)
 
     pseudobulk_mode = _parse_auto_or_none(args.pseudobulk, "--pseudobulk")
     interaction_markers_mode = _parse_auto_or_none(args.interaction_markers, "--interaction-markers")
+    pathway_mode = _parse_auto_or_none(args.pathway, "--pathway")
     pseudobulk_additional_annotations = _parse_csv(args.pseudobulk_additional_annotations)
     pseudobulk_modalities = _parse_csv(args.pseudobulk_modalities)
     pseudobulk_annotation_columns = [
@@ -875,7 +848,7 @@ def _run_export_cli(argv=None):
         neighbor_stats_annotations=neighbor_stats_annotations,
         neighbor_stats_seed=args.neighbor_stats_seed,
         interaction_markers_top_targets=args.interaction_markers_top_targets,
-        interaction_markers_top_genes=args.interaction_markers_top_genes,
+        interaction_markers_top_features=args.interaction_markers_top_features,
         interaction_markers_min_cells=args.interaction_markers_min_cells,
         interaction_markers_min_neighbors=args.interaction_markers_min_neighbors,
         pseudobulk=pseudobulk_mode,
@@ -885,7 +858,7 @@ def _run_export_cli(argv=None):
         pseudobulk_counts_layer=_parse_optional_layer(args.pseudobulk_counts_layer),
         pseudobulk_modalities=pseudobulk_modalities,
         pseudobulk_min_cell_counts=args.pseudobulk_min_cell_counts,
-        pseudobulk_min_gene_counts=args.pseudobulk_min_gene_counts,
+        pseudobulk_min_feature_counts=args.pseudobulk_min_feature_counts,
         pseudobulk_min_cells_per_pseudobulk=args.pseudobulk_min_cells_per_pseudobulk,
         pseudobulk_min_replicates=args.pseudobulk_min_replicates,
         pseudobulk_min_pct_expressed=args.pseudobulk_min_pct_expressed,
@@ -895,6 +868,7 @@ def _run_export_cli(argv=None):
         pseudobulk_deseq2_fit_type=args.pseudobulk_deseq2_fit_type,
         pseudobulk_n_cpus=args.pseudobulk_n_cpus,
         pseudobulk_embed_top_n_per_comparison=args.pseudobulk_embed_top_n_per_comparison,
+        pathway=pathway_mode,
         pathway_gmt=pathway_gmt,
         pathway_organism=pathway_organism,
         pathway_top_n=args.pathway_top_n,
@@ -903,9 +877,8 @@ def _run_export_cli(argv=None):
         interaction_markers=interaction_markers_mode,
         section_rotations=section_rotations,
         deconvolutions=deconvolutions,
-        gene_correlation_top_n=args.gene_correlation_top_n,
-        category_means_n_genes=args.category_means_n_genes,
-        spatial_variable_genes_n=args.spatial_variable_genes_n,
+        feature_correlation_top_n=args.feature_correlation_top_n,
+        spatial_variable_features_n=args.spatial_variable_features_n,
         scalebar_unit=args.scalebar_unit,
         section_images=section_images,
         section_images_max_px=args.section_images_max_px,

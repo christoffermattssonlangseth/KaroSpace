@@ -16,7 +16,7 @@ from karospace import load_spatial_data, export_to_html
 
 # Path to your h5ad file
 # Update this path to point to your EAE/MANA data
-H5AD_PATH = '/Users/christoffer/work/spatialist/talbot_xenium/data/talbot_xenium_skin_annotated-with-hvg.h5ad'#'/Volumes/processing2/RRmap/data/EAE_proseg_clustered_louvain_leiden_all_sections_annotated_rotated_scVI_mana_embedding_clustered.h5ad'
+H5AD_PATH = '/Users/christoffer/work/spatialist/talbot_xenium/data/talbot_xenium_skin_annotated-with-highly_variable_feature.h5ad'#'/Volumes/processing2/RRmap/data/EAE_proseg_clustered_louvain_leiden_all_sections_annotated_rotated_scVI_mana_embedding_clustered.h5ad'
 
 # Load the dataset
 # - section_key: column in adata.obs that identifies each section
@@ -34,11 +34,6 @@ dataset = load_spatial_data(
 
 print(f"Loaded {dataset.n_sections} sections with {dataset.n_cells:,} total cells")
 print(f"Available annotation columns: {dataset.obs_columns[:10]}...")  # first 10
-
-# Choose gene source for expression:
-# - True: use highly variable genes (if present, capped to 20)
-# - False: use the explicit genes list below
-USE_HVGS = True
 OUTLINE_BY = "course"
 
 # Export to HTML with full features
@@ -60,33 +55,22 @@ export_to_html(
        'leiden_3.5', 'leiden_4', 'cytetype_annotation_leiden_4',
     ],
 
-    # Pre-load specific genes for expression visualization
-    # These will be available in the gene input field
+    # Pre-load specific features for expression visualization
+    # These will be available in the feature input field
     features=[
-        # Example marker genes - replace with your genes of interest
+        # Example marker features - replace with your features of interest
          # A1
     ],
-    use_hvgs=USE_HVGS,
-    hvg_limit=50,
-
-    # Compute marker genes for these categorical annotation columns
-    # (appears in the Color panel under "Marker genes")
-    marker_gene_annotations=[
-       'leiden_0.5',
-       'leiden_1', 'leiden_1.5', 'leiden_2', 'leiden_2.5', 'leiden_3',
-       'leiden_3.5', 'leiden_4', 'cytetype_annotation_leiden_4',
-    ],
-    marker_genes_top_n=50,
 )
 
 # The viewer now supports:
 # 1. Filter by course (peak_I, peak_II, peak_III) or other metadata
 # 2. Switch between different annotation columns
-# 3. View gene expression for pre-loaded genes
+# 3. View feature expression for pre-loaded features
 # 4. Click to expand sections with zoom/pan
 # 5. Toggle categories on/off in the legend
 
 print("\nDone! Open skin-talbot.html in a browser.")
 print("Use the filter chips to show only specific courses (e.g., peak_III)")
 print("Use the Annotation selector to switch between different annotations")
-print("Type a gene name to view expression (must be in the genes list)")
+print("Type a feature name to view expression (must be in the features list)")

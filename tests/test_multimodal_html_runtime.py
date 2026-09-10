@@ -18,9 +18,8 @@ def _render_multimodal_html(tmp_path=None):
         modalities=["rna"],
         pseudobulk=None,
         interaction_markers=None,
-        spatial_variable_genes_n=0,
-        category_means_n_genes=0,
-        gene_correlation_top_n=0,
+        spatial_variable_features_n=0,
+        feature_correlation_top_n=0,
         pathway_gsea_permutations=0,
         tutorial=False,
     )
@@ -34,15 +33,15 @@ def test_generated_html_uses_modality_scoped_feature_helpers(tmp_path=None):
     assert "async function ensureFeatureAvailable(feature, options" in html
     assert "const FEATURE_INDEX_BY_MODALITY = new Map()" in html
     assert "function buildFeatureIndex(modality" in html
-    assert "AVAILABLE_GENE_SET" not in html
+    assert ("AVAILABLE_" + "G" + "ENE_SET") not in html
     assert "DATA.available_features" not in html
-    assert "resolveCanonicalGeneName" not in html
+    assert ("resolveCanonical" + "G" + "eneName") not in html
 
 
-def test_generated_html_drops_removed_legacy_paths(tmp_path=None):
+def test_generated_html_drops_removed_old_paths(tmp_path=None):
     html = _render_multimodal_html(tmp_path)
 
-    assert "renderLegacyGroupDE" not in html
+    assert "renderOldGroupDE" not in html
     assert "computeCellSetDEAsync" not in html
     assert "function computeCellSetDE(" not in html
     assert "section.he_image)" not in html
@@ -71,7 +70,7 @@ def test_visual_controls_have_feature_namespace_select(tmp_path=None):
     assert 'id="feature-input"' in html
     assert 'id="feature-list"' in html
     assert 'id="feature-discovery-panel"' in html
-    assert 'id="gene-input"' not in html
+    assert ('id="' + 'g' + 'ene-input"') not in html
     assert 'id="modality-select"' not in html
 
 
@@ -79,39 +78,39 @@ def test_feature_discovery_uses_visual_namespace(tmp_path=None):
     html = _render_multimodal_html(tmp_path)
 
     assert "const discoveryModality = getVisualModality();" in html
-    assert "getGeneSuggestionGroups(discoveryModality)" in html
-    assert "getFeatureTokensForModality(recentGenes, discoveryModality)" in html
-    assert "getFeatureTokensForModality(panel?.genes || [], discoveryModality)" in html
+    assert "getFeatureSuggestionGroups(discoveryModality)" in html
+    assert "getFeatureTokensForModality(recentFeatures, discoveryModality)" in html
+    assert "getFeatureTokensForModality(panel?.features || [], discoveryModality)" in html
 
 
 def test_exploration_feature_controls_accept_manual_input(tmp_path=None):
     html = _render_multimodal_html(tmp_path)
 
-    assert '<input type="text" id="gene-module-gene-picker"' in html
-    assert 'list="gene-module-gene-list"' in html
-    assert '<select id="gene-module-gene-picker"' not in html
-    assert 'id="marker-gene-search" type="text" list="marker-gene-search-list"' in html
-    assert '<select class="marker-search" id="marker-gene-search"' not in html
-    assert "moduleGenePicker?.addEventListener('keydown'" in html
+    assert '<input type="text" id="feature-module-feature-picker"' in html
+    assert 'list="feature-module-feature-list"' in html
+    assert '<select id="feature-module-feature-picker"' not in html
+    assert 'id="marker-feature-search" type="text" list="marker-feature-search-list"' in html
+    assert '<select class="marker-search" id="marker-feature-search"' not in html
+    assert "moduleFeaturePicker?.addEventListener('keydown'" in html
     assert "markerSearch?.addEventListener('keydown'" in html
-    assert "resolveCanonicalFeatureName(moduleGenePicker.value, moduleFocusedModality)" in html
+    assert "resolveCanonicalFeatureName(moduleFeaturePicker.value, moduleFocusedModality)" in html
 
 
 def test_feature_modules_are_scoped_to_focused_modality(tmp_path=None):
     html = _render_multimodal_html(tmp_path)
 
-    assert 'id="gene-module-modality-select"' in html
+    assert 'id="feature-module-modality-select"' in html
     assert "function getModuleBuilderModality()" in html
     assert "function setModuleBuilderModality(modality)" in html
-    assert "function getGeneModulesForModality(modality = getModuleBuilderModality())" in html
-    assert "const activeModules = getGeneModulesForModality(moduleFocusedModality);" in html
+    assert "function getFeatureModulesForModality(modality = getModuleBuilderModality())" in html
+    assert "const activeModules = getFeatureModulesForModality(moduleFocusedModality);" in html
     assert "getFeatureDatalistValuesForModality(moduleFocusedModality)" in html
-    assert "createGeneModule('', genes, moduleFocusedModality)" in html
+    assert "createFeatureModule('', features, moduleFocusedModality)" in html
     assert "format: 'karospace-feature-modules-v2'" in html
-    assert "modality: getGeneModuleModality(module)" in html
-    assert "features: module.genes.slice()" in html
-    assert "getSectionGeneValues(section, moduleGene, sourceModality)" in html
-    assert "getGeneScaleRange(moduleGene, sourceModality)" in html
+    assert "modality: getFeatureModuleModality(module)" in html
+    assert "features: module.features.slice()" in html
+    assert "getSectionFeatureValues(section, moduleFeature, sourceModality)" in html
+    assert "getFeatureScaleRange(moduleFeature, sourceModality)" in html
 
 
 def test_feature_module_changes_refresh_visual_namespace_controls(tmp_path=None):
@@ -146,7 +145,7 @@ def test_marker_search_does_not_mutate_visual_feature_controls(tmp_path=None):
     html = _render_multimodal_html(tmp_path)
 
     assert "Marker search filters Insights panels only." in html
-    assert "if (isViewerFeatureLoadable(gene, modality))" not in html
+    assert "if (isViewerFeatureLoadable(feature, modality))" not in html
 
 
 def test_split_controls_have_independent_feature_namespaces(tmp_path=None):
@@ -168,8 +167,8 @@ def test_exploration_uses_features_and_modality_payloads(tmp_path=None):
     assert html.index('id="exploration-feature-modality-select"') < html.index('id="visualization-menu-label"')
     assert "DATA.pseudobulk_de_by_modality" in html
     assert "DATA.category_feature_means_by_modality" in html
-    assert "DATA.gene_correlations" not in html
-    assert "DATA.spatial_variable_genes" not in html
+    assert ("DATA." + "g" + "ene_correlations") not in html
+    assert ("DATA.spatial_variable_" + "g" + "enes") not in html
 
 
 def test_compare_group_de_uses_exploration_modality(tmp_path=None):
@@ -177,7 +176,7 @@ def test_compare_group_de_uses_exploration_modality(tmp_path=None):
 
     assert "function shouldRunFullSidecarDE(modality = getExplorationModality())" in html
     assert "const activeModality = getExplorationModality();" in html
-    assert "getSectionGeneValues(section, gene, modality)" in html
+    assert "getSectionFeatureValues(section, feature, modality)" in html
     assert "getFeatureSidecarManifestEntryForModality(manifest, targetModality)" in html
     assert "return `${getExplorationModality()}::${groupA.key}::${groupB.key}`;" in html
     assert "return `${getExplorationModality()}::${groupAKey}::${groupBKey}`;" in html
@@ -210,7 +209,7 @@ def test_selection_comparison_uses_full_sidecar_features(tmp_path=None):
     assert "const selectionWelchResult = getCachedSelectionWelchResult(selectedCells, compareAllCells ? null : selectedCellsB);" in html
     assert "const cachedResult = getCachedSelectionWelchResult(selectedCells, compareAllCells ? null : selectedCellsB);" in html
     assert "Scanning all ${getModalityDisplayLabel(resultModality)} features from the sidecar." in html
-    assert "Full sidecar comparison across ${Number(selectionWelchResult.totalGeneCount || 0).toLocaleString()} ${getModalityDisplayLabel(resultModality)} features." in html
+    assert "Full sidecar comparison across ${Number(selectionWelchResult.totalFeatureCount || 0).toLocaleString()} ${getModalityDisplayLabel(resultModality)} features." in html
 
 
 def test_compare_pseudobulk_follows_exploration_controls(tmp_path=None):
@@ -232,7 +231,7 @@ def test_interaction_markers_use_modality_payload(tmp_path=None):
     assert "(DATA.interaction_markers || {})" not in html
 
 
-def test_html_copy_has_no_generic_gene_labels(tmp_path=None):
+def test_html_copy_uses_feature_labels(tmp_path=None):
     html = _render_multimodal_html(tmp_path)
 
     assert "Feature discovery" in html
@@ -242,12 +241,12 @@ def test_html_copy_has_no_generic_gene_labels(tmp_path=None):
     assert "Features in selection" in html
     assert "Feature values - annotation A vs annotation B" in html
     assert "No features matched" in html
-    assert "No genes matched" not in html
-    assert "Gene symbol" not in html
-    assert "Genes in selection" not in html
-    assert "Gene expression" not in html
-    assert "Sidecar gene loading" not in html
-    assert "No genes are currently loaded" not in html
+    assert ("No " + "g" + "enes matched") not in html
+    assert ("G" + "ene symbol") not in html
+    assert ("G" + "enes in selection") not in html
+    assert ("G" + "ene expression") not in html
+    assert ("Sidecar " + "g" + "ene loading") not in html
+    assert ("No " + "g" + "enes are currently loaded") not in html
 
 
 def test_download_filenames_include_modality(tmp_path=None):

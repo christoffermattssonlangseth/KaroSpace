@@ -1,7 +1,7 @@
 """
 Example usage of KaroSpace with binary sidecar and .karospace export targets.
 
-This script is configured for the autism 485-gene companion-ready h5ad and writes:
+This script is configured for the GSE248904 All Samples Variable Features companion-ready h5ad and writes:
 1. an unpacked binary sidecar viewer bundle
 2. a packaged .karospace bundle with matching settings
 """
@@ -21,30 +21,34 @@ os.environ.setdefault("MPLCONFIGDIR", "/tmp/karospace-mpl-cache")
 from karospace import export_to_html, load_spatial_data
 
 H5AD_PATH = os.environ.get(
-    "AUTISM_485GENES_H5AD_PATH",
-    "/Volumes/processing2/autism/autism_concatenated_filtered_sparse_485genes.companion.ready.h5ad",
+    "GSE248904_ALL_SAMPLES_highly variable feature_H5AD_PATH",
+    "/Users/chrislangseth/Downloads/GSE248904_All_Samples_highly variable feature.companion.ready.h5ad",
 )
 
-PRIMARY_ANNOTATION = "tangram_cell_type"
+PRIMARY_ANNOTATION = "Subregion"
 ADDITIONAL_ANNOTATIONS = [
-    "anatomical_region",
+    "clusters",
+    "Treatment",
+    "Organ_Full_Name",
 ]
-SIDECAR_OUTPUT = "autism-485genes-binary-sidecar.html"
-PACKAGE_OUTPUT = "autism-485genes-binary.karospace"
-FEATURE_MANIFEST_PATH = "autism-485genes-binary.features.json"
+SIDECAR_OUTPUT = "gse248904-all-samples-highly_variable_feature-binary-sidecar.html"
+PACKAGE_OUTPUT = "gse248904-all-samples-highly_variable_feature-binary.karospace"
+FEATURE_MANIFEST_PATH = "gse248904-all-samples-highly_variable_feature-binary.features.json"
 
 if not Path(H5AD_PATH).exists():
     raise SystemExit(
-        "Autism 485-gene h5ad not found. Set AUTISM_485GENES_H5AD_PATH "
-        "before running examples/autism-485genes-binary-sidecar-package.py."
+        "GSE248904 All Samples Variable Features h5ad not found. Set GSE248904_ALL_SAMPLES_highly variable feature_H5AD_PATH before running "
+        "examples/gse248904-all-samples-highly_variable_feature-binary-sidecar-package.py."
     )
 
 dataset = load_spatial_data(
     H5AD_PATH,
-    section_key="slide",
+    section_key="Sample",
     spatial_key="spatial",
     section_metadata=[
-        "slide",
+        "Sample",
+        "Treatment",
+        "batch",
     ],
 )
 
@@ -53,31 +57,35 @@ print(f"Available annotation columns: {dataset.obs_columns[:10]}...")
 
 common_kwargs = dict(
     main_cell_annotation=PRIMARY_ANNOTATION,
-    title="Autism 485 Genes",
+    title="GSE248904 All Samples Variable Features",
     min_panel_size=120,
     spot_size="auto",
     downsample=10_000_000,
     outline_by=None,
     cell_annotations=ADDITIONAL_ANNOTATIONS,
     features=[],
-    use_hvgs=False,
-    hvg_limit=50,
     feature_storage="sidecar",
     feature_encoding="auto",
-    feature_value_encoding="uint8",
+    feature_value_encoding="uint16",
     feature_manifest_path=FEATURE_MANIFEST_PATH,
     feature_sidecar_shard_size=16,
-    marker_gene_annotations=[PRIMARY_ANNOTATION] + ADDITIONAL_ANNOTATIONS,
-    marker_genes_top_n=30,
-    neighbor_stats_annotations=[PRIMARY_ANNOTATION] + ADDITIONAL_ANNOTATIONS,
+    neighbor_stats_annotations=[
+        "clusters",
+        "Treatment",
+        "Organ_Full_Name",
+        "Subregion"
+    ],
     neighbor_stats_permutations=0,
     neighbor_stats_seed=42,
-    pseudobulk_de_annotations=[PRIMARY_ANNOTATION] + ADDITIONAL_ANNOTATIONS,
-    pseudobulk_de_top_n=20,
-    pseudobulk_de_method="t-test",
-    pseudobulk_de_layer=None,
-    pseudobulk_de_min_cells=20,
-    interaction_marker_annotations=None,
+    pseudobulk_additional_annotations=[
+        "clusters",
+        "Treatment",
+        "Organ_Full_Name",
+        "Subregion"
+    ],
+    pseudobulk_embed_top_n_per_comparison=20,
+    pseudobulk_counts_layer=None,
+    pseudobulk_min_cells_per_pseudobulk=20,
 )
 
 export_to_html(
@@ -99,4 +107,7 @@ print(f"Wrote packaged binary viewer: {PACKAGE_OUTPUT}")
 print(f"  - local opener: {Path(PACKAGE_OUTPUT).with_suffix('.loader.html')}")
 print("Share either route:")
 print(f"  - local web server flow: {SIDECAR_OUTPUT} + {FEATURE_MANIFEST_PATH} + shard directory")
-print(f"  - no-install local package flow: {PACKAGE_OUTPUT} + {Path(PACKAGE_OUTPUT).with_suffix('.loader.html')}")
+print(
+    "  - no-install local package flow: "
+    f"{PACKAGE_OUTPUT} + {Path(PACKAGE_OUTPUT).with_suffix('.loader.html')}"
+)

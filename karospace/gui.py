@@ -287,8 +287,8 @@ class KaroSpaceExportGUI:
         self.min_panel_size = tk.StringVar(value="150")
         self.spot_size = tk.StringVar(value="auto")
         self.downsample = tk.StringVar(value="")
-        self.gene_correlation_top_n = tk.StringVar(value="5")
-        self.spatial_variable_genes_n = tk.StringVar(value="20")
+        self.feature_correlation_top_n = tk.StringVar(value="5")
+        self.spatial_variable_features_n = tk.StringVar(value="20")
         self.feature_encoding = tk.StringVar(value="auto")
         self.feature_storage = tk.StringVar(value="embedded")
         self.feature_manifest_path = tk.StringVar(value="")
@@ -296,7 +296,7 @@ class KaroSpaceExportGUI:
         self.neighbor_permutations = tk.StringVar(value="auto")
         self.neighbor_stats_seed = tk.StringVar(value="0")
         self.interaction_markers_top_targets = tk.StringVar(value="5")
-        self.interaction_markers_top_genes = tk.StringVar(value="20")
+        self.interaction_markers_top_features = tk.StringVar(value="20")
         self.interaction_markers_min_cells = tk.StringVar(value="30")
         self.interaction_markers_min_neighbors = tk.StringVar(value="1")
         self.status_text = tk.StringVar(value="Ready.")
@@ -641,9 +641,9 @@ class KaroSpaceExportGUI:
         features_opts = ttk.Frame(features_group, style="Card.TFrame")
         features_opts.pack(fill="x", pady=(10, 0))
         ttk.Label(features_opts, text="Corr. top N").pack(side="left", padx=(0, 4))
-        ttk.Entry(features_opts, textvariable=self.gene_correlation_top_n, width=6).pack(side="left")
+        ttk.Entry(features_opts, textvariable=self.feature_correlation_top_n, width=6).pack(side="left")
         ttk.Label(features_opts, text="Moran features N").pack(side="left", padx=(12, 4))
-        ttk.Entry(features_opts, textvariable=self.spatial_variable_genes_n, width=6).pack(side="left")
+        ttk.Entry(features_opts, textvariable=self.spatial_variable_features_n, width=6).pack(side="left")
 
         advanced_group = ttk.LabelFrame(advanced_tab, text="Advanced Options", padding=12, style="Card.TLabelframe")
         advanced_group.pack(fill="x", pady=(0, 10))
@@ -713,7 +713,7 @@ class KaroSpaceExportGUI:
             row=0, column=1, sticky="ew", padx=(8, 16), pady=4
         )
         ttk.Label(interaction_group, text="Top features").grid(row=0, column=2, sticky="w", pady=4)
-        ttk.Entry(interaction_group, textvariable=self.interaction_markers_top_genes).grid(row=0, column=3, sticky="ew", pady=4)
+        ttk.Entry(interaction_group, textvariable=self.interaction_markers_top_features).grid(row=0, column=3, sticky="ew", pady=4)
         ttk.Label(interaction_group, text="Min cells").grid(row=1, column=0, sticky="w", pady=4)
         ttk.Entry(interaction_group, textvariable=self.interaction_markers_min_cells).grid(
             row=1, column=1, sticky="ew", padx=(8, 16), pady=4
@@ -892,7 +892,7 @@ class KaroSpaceExportGUI:
                 "gmm_mana_15",
                 "gmm_mana_20",
             ]
-            pancreas_genes = [
+            pancreas_features = [
                 "Arg1",
                 "Cd74",
                 "Cldn11",
@@ -912,7 +912,7 @@ class KaroSpaceExportGUI:
                 "Serpina3n",
             ]
             self.cell_annotations_editor.set_items(pancreas_colors)
-            self.features_editor.set_items(pancreas_genes)
+            self.features_editor.set_items(pancreas_features)
 
             self.neighbor_stats_auto.set(False)
             self.neighbor_stats_annotations_editor.set_items(["leiden_2"])
@@ -920,7 +920,7 @@ class KaroSpaceExportGUI:
             self.neighbor_stats_seed.set("42")
 
             self.interaction_markers_top_targets.set("6")
-            self.interaction_markers_top_genes.set("15")
+            self.interaction_markers_top_features.set("15")
             self.interaction_markers_min_cells.set("30")
             self.interaction_markers_min_neighbors.set("1")
 
@@ -947,7 +947,7 @@ class KaroSpaceExportGUI:
             self.neighbor_stats_seed.set("0")
 
             self.interaction_markers_top_targets.set("4")
-            self.interaction_markers_top_genes.set("10")
+            self.interaction_markers_top_features.set("10")
             self.interaction_markers_min_cells.set("20")
             self.interaction_markers_min_neighbors.set("1")
 
@@ -974,7 +974,7 @@ class KaroSpaceExportGUI:
             self.neighbor_stats_seed.set("0")
 
             self.interaction_markers_top_targets.set("5")
-            self.interaction_markers_top_genes.set("20")
+            self.interaction_markers_top_features.set("20")
             self.interaction_markers_min_cells.set("30")
             self.interaction_markers_min_neighbors.set("1")
 
@@ -1253,8 +1253,8 @@ class KaroSpaceExportGUI:
         if feature_manifest_path_raw:
             feature_manifest_path = str(Path(feature_manifest_path_raw).expanduser())
 
-        feature_correlation_top_n = _parse_non_negative_int("Corr. top N", self.gene_correlation_top_n.get())
-        spatial_variable_features_n = _parse_non_negative_int("Moran features N", self.spatial_variable_genes_n.get())
+        feature_correlation_top_n = _parse_non_negative_int("Corr. top N", self.feature_correlation_top_n.get())
+        spatial_variable_features_n = _parse_non_negative_int("Moran features N", self.spatial_variable_features_n.get())
         cell_annotations = _unique(self.cell_annotations_editor.get_items())
         features = _unique(self.features_editor.get_items())
         outline_by = self.outline_by.get().strip() or None
@@ -1278,8 +1278,8 @@ class KaroSpaceExportGUI:
             "metadata_labels": metadata_labels,
             "cell_annotations": cell_annotations,
             "features": features,
-            "gene_correlation_top_n": feature_correlation_top_n,
-            "spatial_variable_genes_n": spatial_variable_features_n,
+            "feature_correlation_top_n": feature_correlation_top_n,
+            "spatial_variable_features_n": spatial_variable_features_n,
             "feature_encoding": self.feature_encoding.get().strip() or "auto",
             "feature_storage": feature_storage,
             "feature_manifest_path": feature_manifest_path,
@@ -1287,7 +1287,7 @@ class KaroSpaceExportGUI:
             "neighbor_stats_permutations": _parse_neighbor_permutations(self.neighbor_permutations.get()),
             "neighbor_stats_seed": int(self.neighbor_stats_seed.get().strip() or "0"),
             "interaction_markers_top_targets": _parse_positive_int("Interaction top targets", self.interaction_markers_top_targets.get()),
-            "interaction_markers_top_genes": _parse_positive_int("Interaction top features", self.interaction_markers_top_genes.get()),
+            "interaction_markers_top_features": _parse_positive_int("Interaction top features", self.interaction_markers_top_features.get()),
             "interaction_markers_min_cells": _parse_positive_int("Interaction min cells", self.interaction_markers_min_cells.get()),
             "interaction_markers_min_neighbors": _parse_positive_int(
                 "Interaction min neighbors",

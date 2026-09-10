@@ -18,7 +18,7 @@ REACTOME_GMT_ENV = "KAROSPACE_REACTOME_GMT"
 PATHWAY_CACHE_DIR_ENV = "KAROSPACE_PATHWAY_CACHE_DIR"
 
 
-def _clean_gene(value: Any) -> str:
+def _clean_feature(value: Any) -> str:
     return str(value or "").strip()
 
 
@@ -34,7 +34,7 @@ def _dedupe(values: Iterable[str]) -> List[str]:
     seen = set()
     result: List[str] = []
     for value in values:
-        token = _clean_gene(value)
+        token = _clean_feature(value)
         if not token:
             continue
         key = token.lower()
@@ -47,7 +47,7 @@ def _dedupe(values: Iterable[str]) -> List[str]:
 
 def _parse_gmt_file(path: Union[str, Path]) -> Dict[str, List[str]]:
     file_path = Path(path).expanduser()
-    gene_sets: Dict[str, List[str]] = {}
+    feature_sets: Dict[str, List[str]] = {}
     with file_path.open("r", encoding="utf-8", errors="replace") as handle:
         for line in handle:
             parts = line.rstrip("\n\r").split("\t")
@@ -56,10 +56,10 @@ def _parse_gmt_file(path: Union[str, Path]) -> Dict[str, List[str]]:
             term = parts[0].strip()
             if not term:
                 continue
-            genes = _dedupe(parts[2:])
-            if genes:
-                gene_sets[term] = genes
-    return gene_sets
+            features = _dedupe(parts[2:])
+            if features:
+                feature_sets[term] = features
+    return feature_sets
 
 
 def _safe_path_token(value: str) -> str:
@@ -105,23 +105,23 @@ def _load_default_reactome_gmt(
     for source_detail, path in _default_reactome_gmt_candidates(organism, library):
         if not path.is_file():
             continue
-        gene_sets = _parse_gmt_file(path)
-        if not gene_sets:
+        feature_sets = _parse_gmt_file(path)
+        if not feature_sets:
             continue
-        return gene_sets, {
+        return feature_sets, {
             "source": "reactome",
             "source_detail": source_detail,
             "library": library,
             "organism": organism,
             "path": str(path),
             "cached": source_detail in {"cache", "bundled", "env"},
-            "gene_set_count": len(gene_sets),
+            "feature_set_count": len(feature_sets),
         }
     return None
 
 
 def _write_gmt_cache(
-    gene_sets: Mapping[str, Sequence[str]],
+    feature_sets: Mapping[str, Sequence[str]],
     organism: str,
     library: str,
 ) -> Optional[Path]:
@@ -131,11 +131,11 @@ def _write_gmt_cache(
         cache_path = cache_dir / _reactome_cache_filename(organism, library)
         tmp_path = cache_path.with_suffix(cache_path.suffix + ".tmp")
         with tmp_path.open("w", encoding="utf-8") as handle:
-            for term in sorted(gene_sets):
-                genes = _dedupe(gene_sets[term])
-                if not genes:
+            for term in sorted(feature_sets):
+                features = _dedupe(feature_sets[term])
+                if not features:
                     continue
-                handle.write("\t".join([str(term), "Reactome pathway", *genes]) + "\n")
+                handle.write("\t".join([str(term), "Reactome pathway", *features]) + "\n")
         tmp_path.replace(cache_path)
         return cache_path
     except Exception:
@@ -176,35 +176,35 @@ def _load_reactome_from_gseapy(organism: str = DEFAULT_REACTOME_ORGANISM) -> Tup
             raw_sets = gp.get_library(library_name, organism=organism)
     except Exception as exc:
         raise RuntimeError(
-            "Default Reactome gene sets were not found in the bundled/cache GMT paths "
+            "Default Reactome feature sets were not found in the bundled/cache GMT paths "
             "and could not be downloaded from Enrichr. Pass --pathway-gmt with a local "
             f"GMT file, set {REACTOME_GMT_ENV}, or pre-populate {PATHWAY_CACHE_DIR_ENV}."
         ) from exc
-    gene_sets: Dict[str, List[str]] = {}
-    for term, genes in dict(raw_sets).items():
-        cleaned = _dedupe(genes)
+    feature_sets: Dict[str, List[str]] = {}
+    for term, features in dict(raw_sets).items():
+        cleaned = _dedupe(features)
         if cleaned:
-            gene_sets[str(term)] = cleaned
-    if not gene_sets:
-        raise RuntimeError(f"No genes were loaded from Reactome library '{library_name}'.")
-    cache_path = _write_gmt_cache(gene_sets, organism, library_name)
-    return gene_sets, {
+            feature_sets[str(term)] = cleaned
+    if not feature_sets:
+        raise RuntimeError(f"No features were loaded from Reactome library '{library_name}'.")
+    cache_path = _write_gmt_cache(feature_sets, organism, library_name)
+    return feature_sets, {
         "source": "reactome",
         "source_detail": "enrichr",
         "library": library_name,
         "organism": organism,
         "cached": False,
         "cache_path": str(cache_path) if cache_path is not None else None,
-        "gene_set_count": len(gene_sets),
+        "feature_set_count": len(feature_sets),
     }
 
 
-def load_pathway_gene_sets(
+def load_pathway_feature_sets(
     pathway_gmt: Optional[Union[str, Sequence[str]]] = None,
     *,
     organism: str = DEFAULT_REACTOME_ORGANISM,
 ) -> Tuple[Dict[str, List[str]], Dict[str, Any]]:
-    """Load pathway gene sets from GMT files or the default Reactome library."""
+    """Load pathway feature sets from GMT files or the default Reactome library."""
     organism = str(organism or DEFAULT_REACTOME_ORGANISM).strip() or DEFAULT_REACTOME_ORGANISM
     if pathway_gmt is None or pathway_gmt == "":
         cached = _load_default_reactome_gmt(organism=organism)
@@ -219,39 +219,39 @@ def load_pathway_gene_sets(
         token = str(raw_path or "").strip()
         if not token:
             continue
-        gene_sets = _parse_gmt_file(token)
+        feature_sets = _parse_gmt_file(token)
         prefix = Path(token).expanduser().stem
-        for term, genes in gene_sets.items():
+        for term, features in feature_sets.items():
             key = term if term not in combined else f"{prefix}:{term}"
-            combined[key] = genes
+            combined[key] = features
         loaded_files.append(str(Path(token).expanduser()))
     if not combined:
-        raise RuntimeError("No pathway gene sets were loaded from --pathway-gmt.")
+        raise RuntimeError("No pathway feature sets were loaded from --pathway-gmt.")
     return combined, {
         "source": "gmt",
         "files": loaded_files,
-        "gene_set_count": len(combined),
+        "feature_set_count": len(combined),
     }
 
 
-def _match_gene_sets(
-    gene_sets: Mapping[str, Sequence[str]],
-    universe_genes: Sequence[str],
+def _match_feature_sets(
+    feature_sets: Mapping[str, Sequence[str]],
+    universe_features: Sequence[str],
     *,
     min_overlap: int,
     max_size: int,
 ) -> Dict[str, List[str]]:
-    universe = [_clean_gene(gene) for gene in universe_genes if _clean_gene(gene)]
-    lower_to_gene = {gene.lower(): gene for gene in universe}
+    universe = [_clean_feature(feature) for feature in universe_features if _clean_feature(feature)]
+    lower_to_feature = {feature.lower(): feature for feature in universe}
     matched: Dict[str, List[str]] = {}
-    for term, genes in gene_sets.items():
+    for term, features in feature_sets.items():
         values = []
         seen = set()
-        for gene in genes:
-            raw = _clean_gene(gene)
+        for feature in features:
+            raw = _clean_feature(feature)
             if not raw:
                 continue
-            match = lower_to_gene.get(raw.lower())
+            match = lower_to_feature.get(raw.lower())
             if not match or match in seen:
                 continue
             seen.add(match)
@@ -261,8 +261,8 @@ def _match_gene_sets(
     return matched
 
 
-def _result_gene_table(result: Mapping[str, Any]) -> List[Dict[str, Any]]:
-    genes = result.get("genes") if isinstance(result.get("genes"), list) else []
+def _result_feature_table(result: Mapping[str, Any]) -> List[Dict[str, Any]]:
+    features = result.get("features") if isinstance(result.get("features"), list) else []
     log2fc = result.get("log2foldchanges") if isinstance(result.get("log2foldchanges"), list) else []
     pvals_adj = result.get("pvals_adj") if isinstance(result.get("pvals_adj"), list) else []
     pvals = result.get("pvals") if isinstance(result.get("pvals"), list) else []
@@ -271,8 +271,8 @@ def _result_gene_table(result: Mapping[str, Any]) -> List[Dict[str, Any]]:
     pct_reference = result.get("pct_reference") if isinstance(result.get("pct_reference"), list) else []
 
     rows: List[Dict[str, Any]] = []
-    for idx, gene in enumerate(genes):
-        token = _clean_gene(gene)
+    for idx, feature in enumerate(features):
+        token = _clean_feature(feature)
         if not token:
             continue
         fc = _finite_float(log2fc[idx] if idx < len(log2fc) else None)
@@ -288,7 +288,7 @@ def _result_gene_table(result: Mapping[str, Any]) -> List[Dict[str, Any]]:
         source_pct = _finite_float(pct_source[idx] if idx < len(pct_source) else None)
         reference_pct = _finite_float(pct_reference[idx] if idx < len(pct_reference) else None)
         rows.append({
-            "gene": token,
+            "feature": token,
             "log2fc": fc,
             "padj": padj,
             "pval": pval,
@@ -310,7 +310,7 @@ def _ora_rows(
     min_overlap: int,
     top_n: int,
 ) -> List[Dict[str, Any]]:
-    universe = {str(row["gene"]) for row in rows}
+    universe = {str(row["feature"]) for row in rows}
     def _passes_pct(row: Mapping[str, Any]) -> bool:
         if min_pct_expressed <= 0:
             return True
@@ -320,7 +320,7 @@ def _ora_rows(
 
     if direction == "up":
         query = {
-            str(row["gene"])
+            str(row["feature"])
             for row in rows
             if row.get("padj") is not None
             and row.get("log2fc") is not None
@@ -330,7 +330,7 @@ def _ora_rows(
         }
     else:
         query = {
-            str(row["gene"])
+            str(row["feature"])
             for row in rows
             if row.get("padj") is not None
             and row.get("log2fc") is not None
@@ -345,11 +345,11 @@ def _ora_rows(
     raw: List[Dict[str, Any]] = []
     M = len(universe)
     n = len(query)
-    for term, genes in matched_sets.items():
-        pathway_genes = set(genes)
-        K = len(pathway_genes)
-        overlap_genes = sorted(query & pathway_genes)
-        k = len(overlap_genes)
+    for term, features in matched_sets.items():
+        pathway_features = set(features)
+        K = len(pathway_features)
+        overlap_features = sorted(query & pathway_features)
+        k = len(overlap_features)
         if k < int(min_overlap):
             continue
         pval = float(hypergeom.sf(k - 1, M, K, n))
@@ -367,7 +367,7 @@ def _ora_rows(
             "overlap": k,
             "query_size": n,
             "pathway_size": K,
-            "genes": overlap_genes,
+            "features": overlap_features,
         })
 
     if not raw:
@@ -385,16 +385,16 @@ def _ora_rows(
 
 
 def _running_enrichment_score(scores: np.ndarray, hit_mask: np.ndarray) -> Tuple[float, np.ndarray]:
-    n_genes = int(scores.size)
+    n_features = int(scores.size)
     n_hits = int(hit_mask.sum())
-    if n_genes == 0 or n_hits == 0 or n_hits == n_genes:
-        return 0.0, np.zeros(n_genes, dtype=float)
+    if n_features == 0 or n_hits == 0 or n_hits == n_features:
+        return 0.0, np.zeros(n_features, dtype=float)
     weights = np.abs(scores)
     hit_weight_sum = float(weights[hit_mask].sum())
     if hit_weight_sum <= 0:
         weights = np.ones_like(scores)
         hit_weight_sum = float(n_hits)
-    running = np.where(hit_mask, weights / hit_weight_sum, -1.0 / float(n_genes - n_hits))
+    running = np.where(hit_mask, weights / hit_weight_sum, -1.0 / float(n_features - n_hits))
     cumulative = np.cumsum(running)
     max_es = float(cumulative.max())
     min_es = float(cumulative.min())
@@ -403,10 +403,10 @@ def _running_enrichment_score(scores: np.ndarray, hit_mask: np.ndarray) -> Tuple
 
 def _fast_enrichment_score(scores: np.ndarray, hit_indices: Sequence[int]) -> Tuple[float, int]:
     """Compute weighted GSEA ES without allocating a full running profile."""
-    n_genes = int(scores.size)
+    n_features = int(scores.size)
     hits = np.asarray(hit_indices, dtype=np.int64)
     n_hits = int(hits.size)
-    if n_genes == 0 or n_hits == 0 or n_hits >= n_genes:
+    if n_features == 0 or n_hits == 0 or n_hits >= n_features:
         return 0.0, 0
 
     weights = np.abs(scores)
@@ -418,7 +418,7 @@ def _fast_enrichment_score(scores: np.ndarray, hit_indices: Sequence[int]) -> Tu
 
     hit_cumsum = np.cumsum(hit_weights / hit_weight_sum)
     hit_order = np.arange(n_hits, dtype=np.int64)
-    miss_penalty = 1.0 / float(n_genes - n_hits)
+    miss_penalty = 1.0 / float(n_features - n_hits)
     misses_before_or_at_hit = hits - hit_order
 
     running_at_hits = hit_cumsum - misses_before_or_at_hit * miss_penalty
@@ -432,7 +432,7 @@ def _fast_enrichment_score(scores: np.ndarray, hit_indices: Sequence[int]) -> Tu
     if abs(max_es) >= abs(min_es):
         return max_es, int(hits[max_pos])
     if min_pos >= n_hits:
-        return min_es, n_genes - 1
+        return min_es, n_features - 1
     return min_es, max(0, int(hits[min_pos]) - 1)
 
 
@@ -457,13 +457,13 @@ def _gsea_plot_payload(
     peak_idx: int,
 ) -> Dict[str, Any]:
     """Return compact data for a classic GSEA enrichment-profile plot."""
-    n_genes = int(len(scores))
-    profile_indices = _sample_indices(n_genes, 180, extra=[0, peak_idx, n_genes - 1])
-    metric_indices = _sample_indices(n_genes, 100, extra=[0, n_genes - 1])
+    n_features = int(len(scores))
+    profile_indices = _sample_indices(n_features, 180, extra=[0, peak_idx, n_features - 1])
+    metric_indices = _sample_indices(n_features, 100, extra=[0, n_features - 1])
     non_positive = np.flatnonzero(scores <= 0)
     zero_cross = int(non_positive[0]) if non_positive.size else None
     return {
-        "rank_count": n_genes,
+        "rank_count": n_features,
         "peak_rank": int(peak_idx),
         "zero_cross_rank": zero_cross,
         "hit_indices": [int(idx) for idx in hit_indices],
@@ -488,7 +488,7 @@ def _gsea_rows(
     seed: int,
 ) -> Dict[str, List[Dict[str, Any]]]:
     ranked = [
-        (str(row["gene"]), float(row["score"]))
+        (str(row["feature"]), float(row["score"]))
         for row in rows
         if row.get("score") is not None and np.isfinite(float(row["score"]))
     ]
@@ -496,9 +496,9 @@ def _gsea_rows(
     if len(ranked) < max(2, int(min_overlap)):
         return {"positive": [], "negative": []}
 
-    genes = [gene for gene, _score in ranked]
-    gene_index = {gene: idx for idx, gene in enumerate(genes)}
-    scores = np.asarray([score for _gene, score in ranked], dtype=float)
+    features = [feature for feature, _score in ranked]
+    feature_index = {feature: idx for idx, feature in enumerate(features)}
+    scores = np.asarray([score for _feature, score in ranked], dtype=float)
     rng = np.random.default_rng(int(seed))
     raw: List[Dict[str, Any]] = []
     pvals: List[float] = []
@@ -511,14 +511,14 @@ def _gsea_rows(
             return cached
         null_scores = np.empty(n_perm, dtype=float)
         for perm_idx in range(n_perm):
-            random_hits = np.sort(rng.choice(len(genes), size=int(hit_count), replace=False))
+            random_hits = np.sort(rng.choice(len(features), size=int(hit_count), replace=False))
             null_scores[perm_idx], _peak_idx = _fast_enrichment_score(scores, random_hits)
         null_cache[int(hit_count)] = null_scores
         return null_scores
 
-    for term, pathway_genes in matched_sets.items():
-        hit_indices = sorted(gene_index[gene] for gene in pathway_genes if gene in gene_index)
-        if len(hit_indices) < int(min_overlap) or len(hit_indices) >= len(genes):
+    for term, pathway_features in matched_sets.items():
+        hit_indices = sorted(feature_index[feature] for feature in pathway_features if feature in feature_index)
+        if len(hit_indices) < int(min_overlap) or len(hit_indices) >= len(features):
             continue
         es, peak_idx = _fast_enrichment_score(scores, hit_indices)
         if es == 0:
@@ -538,10 +538,10 @@ def _gsea_rows(
             pval = 1.0
             nes = float(es)
         if es >= 0:
-            leading = [genes[idx] for idx in hit_indices if idx <= peak_idx]
+            leading = [features[idx] for idx in hit_indices if idx <= peak_idx]
             direction = "positive"
         else:
-            leading = [genes[idx] for idx in hit_indices if idx >= peak_idx]
+            leading = [features[idx] for idx in hit_indices if idx >= peak_idx]
             direction = "negative"
         raw.append({
             "term": str(term),
@@ -600,7 +600,7 @@ def _jsonify_pathway_row(entry: Mapping[str, Any]) -> Dict[str, Any]:
 
 def enrich_pseudobulk_result(
     result: Mapping[str, Any],
-    gene_sets: Mapping[str, Sequence[str]],
+    feature_sets: Mapping[str, Sequence[str]],
     *,
     top_n: int = 20,
     min_overlap: int = 3,
@@ -611,13 +611,13 @@ def enrich_pseudobulk_result(
     """Compute compact ORA and preranked GSEA summaries for one DE result."""
     if not isinstance(result, Mapping) or result.get("available") is False:
         return None
-    rows = _result_gene_table(result)
+    rows = _result_feature_table(result)
     if len(rows) < max(2, int(min_overlap)):
         return None
-    universe_genes = [row["gene"] for row in rows]
-    matched_sets = _match_gene_sets(
-        gene_sets,
-        universe_genes,
+    universe_features = [row["feature"] for row in rows]
+    matched_sets = _match_feature_sets(
+        feature_sets,
+        universe_features,
         min_overlap=int(min_overlap),
         max_size=int(max_pathway_size),
     )
@@ -664,7 +664,7 @@ def enrich_pseudobulk_result(
         "ora": ora,
         "gsea": gsea,
         "tested_pathways": int(len(matched_sets)),
-        "universe_size": int(len(universe_genes)),
+        "universe_size": int(len(universe_features)),
     }
 
 
@@ -716,20 +716,20 @@ def add_pathway_enrichment_to_pseudobulk_de(
     try:
         if progress_callback is not None:
             progress_callback({
-                "event": "gene_sets_loading",
+                "event": "feature_sets_loading",
                 "source": "reactome" if pathway_gmt is None or pathway_gmt == "" else "gmt",
                 "organism": organism,
                 "gmt_count": 0 if pathway_gmt is None or pathway_gmt == "" else (
                     1 if isinstance(pathway_gmt, str) else len(list(pathway_gmt))
                 ),
             })
-        gene_sets, source_info = load_pathway_gene_sets(pathway_gmt, organism=organism)
+        feature_sets, source_info = load_pathway_feature_sets(pathway_gmt, organism=organism)
     except Exception as exc:
-        settings["reason"] = "pathway_gene_sets_unavailable"
+        settings["reason"] = "pathway_feature_sets_unavailable"
         settings["error"] = str(exc)
         if progress_callback is not None:
             progress_callback({
-                "event": "gene_sets_failed",
+                "event": "feature_sets_failed",
                 "reason": settings["reason"],
                 "error": str(exc),
             })
@@ -738,7 +738,7 @@ def add_pathway_enrichment_to_pseudobulk_de(
     settings["available"] = True
     if progress_callback is not None:
         progress_callback({
-            "event": "gene_sets_loaded",
+            "event": "feature_sets_loaded",
             **source_info,
         })
 
@@ -746,7 +746,7 @@ def add_pathway_enrichment_to_pseudobulk_de(
         submit_index, annotation_col, source, reference, result = item
         enrichment = enrich_pseudobulk_result(
             result,
-            gene_sets,
+            feature_sets,
             top_n=int(top_n),
             min_overlap=int(min_overlap),
             max_pathway_size=int(max_pathway_size),

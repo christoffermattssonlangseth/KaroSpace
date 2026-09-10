@@ -9,7 +9,7 @@ companion-ready h5ad and writes:
 What the h5ad exposes for coloring:
   - leiden               (21 transcriptional clusters)
   - cellcharter_domains  (26 spatial domains; the canonical CellCharter track)
-  - all panel genes (streamed to the binary feature sidecar)
+  - all panel features (streamed to the binary feature sidecar)
   - sample_id, which doubles as the per-section tumor/grade label:
         DCIS_IDC_Grade1, IDC_Grade2, IDC_Grade3
 
@@ -54,7 +54,7 @@ PRIMARY_ANNOTATION = "leiden"
 ADDITIONAL_ANNOTATIONS = ["leiden", "cellcharter_domains", "sample_id"]
 
 # Categorical annotations used for analytics. These are exactly the columns the
-# companion was prepared on, so the export reuses the precomputed marker genes /
+# companion was prepared on, so the export reuses the precomputed marker features /
 # pseudobulk DE (instant, computed on the `normalized` layer) instead of recomputing
 # on the raw-count X. `sample_id` is intentionally NOT here: it is the per-section
 # tumor/grade label (metadata + color), not an insights DE section_key.
@@ -122,24 +122,18 @@ common_kwargs = dict(
     section_images=SECTION_IMAGES,
     section_images_max_px=4096,
     features=[],
-    use_hvgs=False,
-    hvg_limit=50,
     feature_storage="sidecar",
     feature_encoding="auto",
     feature_value_encoding="uint8",
     feature_manifest_path=FEATURE_MANIFEST_PATH,
     feature_sidecar_shard_size=128,
-    marker_gene_annotations=ANNOTATION_GROUPBYS,
-    marker_genes_top_n=30,
     neighbor_stats_annotations=ANNOTATION_GROUPBYS,
     neighbor_stats_permutations=0,
     neighbor_stats_seed=42,
-    pseudobulk_de_annotations=ANNOTATION_GROUPBYS,
-    pseudobulk_de_top_n=20,
-    pseudobulk_de_method="t-test",
-    pseudobulk_de_layer=None,
-    pseudobulk_de_min_cells=20,
-    interaction_marker_annotations=None,
+    pseudobulk_additional_annotations=ANNOTATION_GROUPBYS,
+    pseudobulk_embed_top_n_per_comparison=20,
+    pseudobulk_counts_layer=None,
+    pseudobulk_min_cells_per_pseudobulk=20,
 )
 
 export_to_html(

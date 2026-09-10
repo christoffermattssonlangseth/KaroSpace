@@ -1,7 +1,7 @@
 """
 Example usage of KaroSpace with binary sidecar and .karospace export targets.
 
-This script is configured for the autism 315-gene companion-ready h5ad and writes:
+This script is configured for the autism 485-feature companion-ready h5ad and writes:
 1. an unpacked binary sidecar viewer bundle
 2. a packaged .karospace bundle with matching settings
 """
@@ -21,22 +21,22 @@ os.environ.setdefault("MPLCONFIGDIR", "/tmp/karospace-mpl-cache")
 from karospace import export_to_html, load_spatial_data
 
 H5AD_PATH = os.environ.get(
-    "AUTISM_315GENES_H5AD_PATH",
-    "/Volumes/processing2/autism/autism_concatenated_filtered_sparse_315genes.companion.ready.h5ad",
+    "AUTISM_485FEATURES_H5AD_PATH",
+    "/Volumes/processing2/autism/autism_concatenated_filtered_sparse_485features.companion.ready.h5ad",
 )
 
 PRIMARY_ANNOTATION = "tangram_cell_type"
 ADDITIONAL_ANNOTATIONS = [
     "anatomical_region",
 ]
-SIDECAR_OUTPUT = "autism-315genes-binary-sidecar.html"
-PACKAGE_OUTPUT = "autism-315genes-binary.karospace"
-FEATURE_MANIFEST_PATH = "autism-315genes-binary.features.json"
+SIDECAR_OUTPUT = "autism-485features-binary-sidecar.html"
+PACKAGE_OUTPUT = "autism-485features-binary.karospace"
+FEATURE_MANIFEST_PATH = "autism-485features-binary.features.json"
 
 if not Path(H5AD_PATH).exists():
     raise SystemExit(
-        "Autism 315-gene h5ad not found. Set AUTISM_315GENES_H5AD_PATH "
-        "before running examples/autism-315genes-binary-sidecar-package.py."
+        "Autism 485-feature h5ad not found. Set AUTISM_485FEATURES_H5AD_PATH "
+        "before running examples/autism-485features-binary-sidecar-package.py."
     )
 
 dataset = load_spatial_data(
@@ -53,31 +53,25 @@ print(f"Available annotation columns: {dataset.obs_columns[:10]}...")
 
 common_kwargs = dict(
     main_cell_annotation=PRIMARY_ANNOTATION,
-    title="Autism 315 Genes",
+    title="Autism 485 Features",
     min_panel_size=120,
     spot_size="auto",
     downsample=10_000_000,
     outline_by=None,
     cell_annotations=ADDITIONAL_ANNOTATIONS,
     features=[],
-    use_hvgs=False,
-    hvg_limit=50,
     feature_storage="sidecar",
     feature_encoding="auto",
     feature_value_encoding="uint8",
     feature_manifest_path=FEATURE_MANIFEST_PATH,
     feature_sidecar_shard_size=16,
-    marker_gene_annotations=[PRIMARY_ANNOTATION] + ADDITIONAL_ANNOTATIONS,
-    marker_genes_top_n=30,
     neighbor_stats_annotations=[PRIMARY_ANNOTATION] + ADDITIONAL_ANNOTATIONS,
     neighbor_stats_permutations=0,
     neighbor_stats_seed=42,
-    pseudobulk_de_annotations=[PRIMARY_ANNOTATION] + ADDITIONAL_ANNOTATIONS,
-    pseudobulk_de_top_n=20,
-    pseudobulk_de_method="t-test",
-    pseudobulk_de_layer=None,
-    pseudobulk_de_min_cells=20,
-    interaction_marker_annotations=None,
+    pseudobulk_additional_annotations=[PRIMARY_ANNOTATION] + ADDITIONAL_ANNOTATIONS,
+    pseudobulk_embed_top_n_per_comparison=20,
+    pseudobulk_counts_layer=None,
+    pseudobulk_min_cells_per_pseudobulk=20,
 )
 
 export_to_html(
