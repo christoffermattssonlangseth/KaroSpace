@@ -12554,7 +12554,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const bx = x + pad, by = y + pad + lineH + gap;
             const steps = Math.max(1, Math.round(barH));
             for (let i = 0; i < steps; i++) {{
-                ctx.fillStyle = magma(1 - i / (steps - 1 || 1));
+                ctx.fillStyle = expressionColor(1 - i / (steps - 1 || 1));
                 ctx.fillRect(bx, by + i, barW, 1);
             }}
             ctx.strokeStyle = panelBorder; ctx.lineWidth = px;
@@ -15280,7 +15280,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 vmin: scale.vmin,
                 vmax: scale.vmax,
                 swatchClass: 'split-legend-swatch-bar',
-                swatchBackground: `linear-gradient(0deg, ${{magma(0)}}, ${{magma(0.5)}}, ${{magma(1)}})`,
+                swatchBackground: `linear-gradient(0deg, ${{expressionColor(0)}}, ${{expressionColor(0.5)}}, ${{expressionColor(1)}})`,
                 categories: null,
             }};
         }}
@@ -15414,7 +15414,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         if (!Number.isFinite(raw)) return [140, 140, 140];
         const t = clamp01((raw - runtime.vmin) / (runtime.vmax - runtime.vmin));
-        return magmaRgb(t);
+        return expressionRgb(t);
     }}
 
     // Get values for a section
@@ -18317,7 +18317,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     color = rgbToCss(getOverviewBlendCellRgb(runtime, i));
                 }} else if (config.is_continuous) {{
                     const t = (val - config.vmin) / (config.vmax - config.vmin);
-                    color = magma(Math.max(0, Math.min(1, t)));
+                    color = expressionColor(Math.max(0, Math.min(1, t)));
                 }} else {{
                     isSpotlightCategory = (hasSpotlight && catInfo.catName === activeSpotlight) ||
                                           (hasNeighborFocusUMAP && neighborNetworkFocusCategories.has(catInfo.catName));
@@ -22685,10 +22685,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     if (!Number.isFinite(raw)) return cellInactiveCss;
                     return Math.round(raw) === runtime.catIdx ? cellCss : cellInactiveCss;
                 }}
-                // Feature: must compute per cell (magma colormap)
+                // Feature: must compute per cell with the active expression colormap.
                 if (!Number.isFinite(raw)) return 'rgb(140,140,140)';
                 const t = clamp01((raw - runtime.vmin) / (runtime.vmax - runtime.vmin));
-                return magma(t);
+                return expressionColor(t);
             }}
 
             if (splitFeatureDensity) {{
@@ -22887,7 +22887,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 let isSelectedCat = false;
                 if (config.is_continuous) {{
                     const t = (val - config.vmin) / (config.vmax - config.vmin);
-                    color = magma(Math.max(0, Math.min(1, t)));
+                    color = expressionColor(Math.max(0, Math.min(1, t)));
                 }} else {{
                     const catInfo = getCategoricalValueInfo(config, val);
                     if (!catInfo || hiddenCategories.has(catInfo.catName)) continue;
@@ -23311,7 +23311,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         <span class="cell-tooltip-value">n/a</span>`;
             }}
             const t = (val - config.vmin) / (config.vmax - config.vmin);
-            const color = magma(Math.max(0, Math.min(1, t)));
+            const color = expressionColor(Math.max(0, Math.min(1, t)));
             return `<span class="cell-tooltip-color" style="background: ${{color}}"></span>
                     <span class="cell-tooltip-label">${{colorLabel}}:</span>
                     <span class="cell-tooltip-value">${{val.toFixed(3)}}</span>`;
@@ -23508,7 +23508,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 pixels[px + 3] = 0;
                 continue;
             }}
-            const rgb = magmaRgb(t);
+            const rgb = expressionRgb(t);
             pixels[px] = rgb[0];
             pixels[px + 1] = rgb[1];
             pixels[px + 2] = rgb[2];
@@ -23931,7 +23931,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 }}
                 if (!Number.isFinite(raw)) return 'rgb(140,140,140)';
                 const t = clamp01((raw - runtime.vmin) / (runtime.vmax - runtime.vmin));
-                return magma(t);
+                return expressionColor(t);
             }}
 
             if (splitFeatureDensity) {{
@@ -24153,7 +24153,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 let isSelectedCat = false;
                 if (config.is_continuous) {{
                     const t = (val - config.vmin) / (config.vmax - config.vmin);
-                    color = magma(Math.max(0, Math.min(1, t)));
+                    color = expressionColor(Math.max(0, Math.min(1, t)));
                 }} else {{
                     const catInfo = getCategoricalValueInfo(config, val);
                     if (!catInfo || hiddenCategories.has(catInfo.catName)) continue;
@@ -24365,7 +24365,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             colorbar.height = 150 * dpr;
             ctx.scale(dpr, dpr);
             for (let i = 0; i < 150; i++) {{
-                ctx.fillStyle = magma(1 - i / 149);
+                ctx.fillStyle = expressionColor(1 - i / 149);
                 ctx.fillRect(0, i, 16, 1);
             }}
         }} else {{
