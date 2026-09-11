@@ -171,6 +171,25 @@ def test_exploration_uses_features_and_modality_payloads(tmp_path=None):
     assert ("DATA.spatial_variable_" + "g" + "enes") not in html
 
 
+def test_insights_has_separate_statistics_menu(tmp_path=None):
+    html = _render_multimodal_html(tmp_path)
+
+    assert 'id="insights-mode-statistics" data-insights-mode="statistics"' in html
+    assert 'id="exploration-embedded-warning"' in html
+    assert "embedded cells and features inside this HTML file" in html
+    assert "classList.toggle('hidden', mode !== 'exploration')" in html
+    assert "exploration: {" in html
+    assert "features: ['distribution']" in html
+    assert "compare: ['groups', 'regions', 'selection', 'river']" in html
+    assert "statistics: {" in html
+    assert "features: ['means', 'de-features', 'spatial']" in html
+    assert "compare: ['cell-de', 'complex-contrast']" in html
+    assert "neighbors: ['enrichment', 'interactions', 'dispersion']" in html
+    assert "getInsightsModeForLeaf(topLevel, subtab)" in html
+    assert ">Per cell<" not in html
+    assert ">Per sample<" not in html
+
+
 def test_compare_group_de_uses_exploration_modality(tmp_path=None):
     html = _render_multimodal_html(tmp_path)
 

@@ -2669,6 +2669,28 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             gap: 6px;
         }}
         .insights-panel-section label {{ font-size: 10px; color: var(--muted-color); }}
+        .exploration-embedded-warning {{
+            display: flex;
+            align-items: flex-start;
+            gap: 7px;
+            margin-bottom: 10px;
+            padding: 8px 9px;
+            border: 1px solid color-mix(in srgb, var(--warning-border) 68%, var(--border-color));
+            border-radius: 6px;
+            background: var(--warning-bg);
+            color: var(--warning-text);
+            font-size: 11px;
+            line-height: 1.35;
+        }}
+        .exploration-embedded-warning.hidden {{
+            display: none;
+        }}
+        .exploration-embedded-warning-icon {{
+            flex: 0 0 auto;
+            font-size: 14px;
+            line-height: 1;
+            color: var(--warning-border);
+        }}
         .insights-search {{
             padding: 6px 8px;
             border: 1px solid var(--border-color);
@@ -2786,6 +2808,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         .insights-tree-node.is-sibling-hidden,
         .insights-tree-leaf.is-sibling-hidden {{
+            display: none;
+        }}
+        .insights-tree-node.is-unavailable,
+        .insights-tree-leaf.is-unavailable {{
             display: none;
         }}
         .insights-tree-leaf {{
@@ -7090,7 +7116,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             <button class="legend-toggle active" id="legend-toggle" title="Toggle legend panel" data-help="Show or hide the legend panel with annotation keys, category toggles, and spotlight controls.">
                 Legend
             </button>
-            <button class="insights-toggle" id="insights-toggle" title="Toggle Insights panel" data-help="Insights opens Overview, Features, Compare, and Neighbors views for the current dataset and selection state.">
+            <button class="insights-toggle" id="insights-toggle" title="Toggle Insights panel" data-help="Insights opens Selection, Region, Module, Exploration, and Statistics views for the current dataset and selection state.">
                 Insights
             </button>
         </div>
@@ -8647,7 +8673,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let samplesMetaSortBy = '';
     let insightsTopLevelTab = 'overview';
     let insightsOverviewTab = 'summary';
-    let insightsFeaturesTab = 'de-features';
+    let insightsFeaturesTab = 'distribution';
     const featureSubtabViews = {{
         'de-features': 'list',
         spatial: 'list',
@@ -9377,9 +9403,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             if (legend?.classList.contains('collapsed')) toggleLegendPanel?.();
             if (typeof renderLegend === 'function') renderLegend('legend');
         }};
-        const openTutorialVisualizationLeafMenu = (topLevel, subtab, nestedBranch = null) => {{
+        const openTutorialVisualizationLeafMenu = (topLevel, subtab, nestedBranch = null, mode = null) => {{
             if (typeof closeModal === 'function') closeModal();
-            if (typeof openInsightsMode === 'function') openInsightsMode('exploration');
+            const targetMode = mode || getInsightsModeForLeaf(topLevel, subtab);
+            if (typeof openInsightsMode === 'function') openInsightsMode(targetMode);
             topLevel = normalizeInsightsTopLevelName(topLevel);
             insightsTreeOpen = true;
             insightsTreeOpenBranch = topLevel;
@@ -9499,17 +9526,21 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'Use it for signatures, custom marker lists, or repeated feature-set review.'
             ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); if (typeof setInsightsMode === 'function') setInsightsMode('module'); }}, nextLabel: tryIt }}),
             step('Insights Exploration mode', ['#insights-mode-exploration', '#insights-exploration-panel'], [
-                'Exploration is the main navigation mode for built-in summaries.',
-                'It contains overview, feature, compare, pathway, neighborhood, and export-oriented analysis panels.'
+                'Exploration is the main navigation mode for summaries computed from the cells embedded in the HTML file.',
+                'It contains overview, feature distribution, cell comparison, and annotation relationship panels.'
             ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); }}, nextLabel: tryIt }}),
+            step('Insights Statistics mode', ['#insights-mode-statistics', '#insights-exploration-panel'], [
+                'Statistics contains precomputed analyses generated from the raw dataset before the HTML file was created.',
+                'It contains marker features, spatial features, per-sample distributions, sample-level comparisons, and neighborhood statistics.'
+            ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('statistics'); }}, nextLabel: tryIt }}),
             step('Insights Selection', ['#insights-selection-panel.insights-panel-mode'], [
                 'Selection summarizes the active cells selection by section and main annotation.'
             ], {{ action: () => {{ if (typeof closeModal === 'function') closeModal(); setTutorialFirstGridRandomSelection({{ areaFraction: 0.03, minCells: 8, maxCells: 80, attempts: 28 }}); if (typeof openInsightsMode === 'function') openInsightsMode('selection'); updateSelectionInfo?.(); }}, nextLabel: tryIt }}),
             step('Selection Find More', ['[data-selection-find-more]', '#insights-selection-panel'], [
-                'Use the Find More button to reach the Exploration panel and find feature markers of your selection.'
+                'Use the Find More button to reach Exploration > Compare > Selections for the active selection.'
             ], {{ action: () => {{ tutorialSelectionFindMoreClicked = false; if (typeof closeModal === 'function') closeModal(); if (typeof openInsightsMode === 'function') openInsightsMode('selection'); updateSelectionInfo?.(); }}, nextLabel: tryIt }}),
             step('Selection feature markers', ['#compare-selection-panel .selection-summary-title-row'], [
-                'Compare > Per cell > Selections is the detailed workspace for marker features of the active selection.',
+                'Compare > Selections is the detailed workspace for marker features of the active selection.',
                 'The search icon starts the marker-feature calculation for the selected cells.'
             ], {{ action: () => {{ tutorialSelectionMarkersClicked = false; selectionWelchButtonHidden = false; selectionWelchRunRequested = false; selectionWelchRunning = false; openTutorialInsightsPanel('compare', 'selection'); updateSelectionInfo?.(); }}, onNext: () => safeTutorialClick('[data-find-welch-markers]'), nextLabel: tryIt }}),
             step('Selection composition comparison', ['#compare-selection-panel .selection-comparison-composition', '#compare-selection-panel .selection-summary-row', '#compare-selection-panel'], [
@@ -9630,14 +9661,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'Import uploads a modules JSON file and restores saved module definitions.'
             ], {{ action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('module'); }}, nextLabel: tryIt }}),
             step('Exploration annotation selector', ['#exploration-annotation-select', '#exploration-annotation-label'], [
-                'The Exploration tab allows you to explore the statistics of the selected annotation without changing the spatial panel viewing window.'
+                'The Exploration and Statistics tabs use this selector to choose the active annotation without changing the spatial panel viewing window.'
             ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); }}, nextLabel: tryIt }}),
             step('Visualization menu tree', ['[data-insights-tree]', '[data-insights-tree-root]'], [
                 'The Visualization menu is the navigation tree.'
             ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); }}, onNext: () => {{ const tree = document.querySelector('[data-insights-tree]'); if (!tree?.classList.contains('is-open')) safeTutorialClick('[data-insights-tree-root]'); }}, nextLabel: tryIt }}),
             step('Visualization menu options', ['.insights-tree-panel-content', '[data-insights-tree]'], [
-                'The menu options open Overview, Features, Compare, and Neighbors panels.',
-                'Overview summarizes section composition and metadata trends; Features focuses marker, spatial, distribution, and mean-value feature views; Compare contains selection, region, annotation, pseudobulk, and relationship comparisons; Neighbors contains spatial adjacency, interaction, and dispersion analyses.'
+                'Exploration menu options open Overview, cell-based Features, and cell-based Compare panels.',
+                'Statistics menu options open precomputed marker, spatial, per-sample, pseudobulk, and neighborhood panels.'
             ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); const tree = document.querySelector('[data-insights-tree]'); if (!tree?.classList.contains('is-open')) safeTutorialClick('[data-insights-tree-root]'); }}, nextLabel: tryIt }}),
             step('Open Overview > Summary', '[data-insights-tree-leaf="summary"][data-insights-tree-parent="overview"]', [
                 'Open Visualization, then Overview, then Summary to inspect annotation composition across section metadata.',
@@ -9663,8 +9694,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             step('Overview Sections view switch', '.samples-view-icon-toggle', [
                 'The section composition switch changes the same data between stacked bars and a heatmap.'
             ], {{ action: () => openTutorialInsightsPanel('overview', 'sections'), scrollDelay: 720, nextLabel: tryIt }}),
-            step('Open Features > Markers', '[data-insights-tree-leaf="de-features"][data-insights-tree-parent="features"]', [
-                'Open Visualization, then Features, then Markers to inspect exported pseudobulk marker features.'
+            step('Open Statistics > Features > Markers', '[data-insights-tree-leaf="de-features"][data-insights-tree-parent="features"]', [
+                'Open Statistics, then Visualization, then Features, then Markers to inspect exported pseudobulk marker features.'
             ], {{ action: () => openTutorialVisualizationLeafMenu('features', 'de-features'), task: 'Click Markers in the Features options.', nextLabel: tryIt }}),
             step('Features Markers panel', ['#marker-features', '#features-tab-de-features-content'], [
                 'The marker panel lists pseudobulk-derived marker features by category when available.',
@@ -9673,8 +9704,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             step('Features Markers view switch', '[data-feature-subtab-toggle="de-features"]', [
                 'The marker view switch changes between a compact feature list and a heatmap.'
             ], {{ action: () => openTutorialInsightsPanel('features', 'de-features'), scrollDelay: 720, nextLabel: tryIt }}),
-            step('Open Features > Spatial', '[data-insights-tree-leaf="spatial"][data-insights-tree-parent="features"]', [
-                'Open Visualization, then Features, then Spatial to inspect spatially variable features.'
+            step('Open Statistics > Features > Spatial', '[data-insights-tree-leaf="spatial"][data-insights-tree-parent="features"]', [
+                'Open Statistics, then Visualization, then Features, then Spatial to inspect spatially variable features.'
             ], {{ action: () => openTutorialVisualizationLeafMenu('features', 'spatial'), task: 'Click Spatial in the Features options.', nextLabel: tryIt }}),
             step('Features Spatial panel', ['#spatially-variable-features', '#features-tab-spatial-content'], [
                 'The Spatial features panel shows Moran Index rankings computed at export.',
@@ -9683,10 +9714,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             step('Features Spatial view switch', '[data-feature-subtab-toggle="spatial"]', [
                 'The Spatial panel can be shown as a ranked list or as a graph.'
             ], {{ action: () => openTutorialInsightsPanel('features', 'spatial'), nextLabel: tryIt }}),
-            step('Open Features > Distribution > Per cell', '[data-insights-tree-leaf="distribution"][data-insights-tree-parent="features"]', [
-                'Open Visualization, then Features, then Distribution, then Per cell to inspect feature distributions.',
+            step('Open Features > Distribution', '[data-insights-tree-leaf="distribution"][data-insights-tree-parent="features"]', [
+                'Open Visualization, then Features, then Distribution to inspect feature distributions.',
                 'All calculation in this section is done on cells embedded in the HTML file.'
-            ], {{ action: () => openTutorialVisualizationLeafMenu('features', 'distribution', 'distribution'), task: 'Click Per cell in the Features > Distribution options.', nextLabel: tryIt }}),
+            ], {{ action: () => openTutorialVisualizationLeafMenu('features', 'distribution'), task: 'Click Distribution in the Features options.', nextLabel: tryIt }}),
             step('Features Distribution per cell search', '.marker-feature-search-wrap', [
                 'Enter or select a feature in the Search control.'
             ], {{ action: () => openTutorialInsightsPanel('features', 'distribution'), task: 'Enter or select a feature in Search.', requiresInsightsFeatureSelected: true, nextLabel: tryIt }}),
@@ -9699,10 +9730,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             step('Features Distribution per cell view switch', '.samples-view-toggle[data-feature-subtab-toggle="distribution"]', [
                 'The distribution view switch changes between a table and a violin/boxplot.'
             ], {{ action: () => openTutorialInsightsPanel('features', 'distribution'), prepareDelay: 420, scrollDelay: 520, spotlightPadding: 2, nextLabel: tryIt }}),
-            step('Open Features > Distribution > Per sample', '[data-insights-tree-leaf="means"][data-insights-tree-parent="features"]', [
-                'Open Visualization, then Features, then Distribution, then Per sample to inspect pseudobulk statistics.',
+            step('Open Statistics > Features > Distribution', '[data-insights-tree-leaf="means"][data-insights-tree-parent="features"]', [
+                'Open Statistics, then Visualization, then Features, then Distribution to inspect pseudobulk statistics.',
                 'All calculation in this section is done on the raw data before the creation of the HTML file.'
-            ], {{ action: () => openTutorialVisualizationLeafMenu('features', 'means', 'distribution'), task: 'Click Per sample in the Features > Distribution options.', nextLabel: tryIt }}),
+            ], {{ action: () => openTutorialVisualizationLeafMenu('features', 'means'), task: 'Click Distribution in the Features options.', nextLabel: tryIt }}),
             step('Features Distribution per sample search', '.marker-feature-search-wrap', [
                 'Enter or select a feature in the Search control before inspecting the per-sample means panel.'
             ], {{ action: () => openTutorialInsightsPanel('features', 'means'), task: 'Enter or select a feature in Search.', requiresInsightsFeatureSelected: true, nextLabel: tryIt }}),
@@ -9712,30 +9743,30 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             step('Features Distribution per sample view switch', '.samples-view-toggle[data-feature-subtab-toggle="means"]', [
                 'The per-sample means view can switch between category means and a barplot.'
             ], {{ action: () => openTutorialInsightsPanel('features', 'means'), prepareDelay: 420, scrollDelay: 520, spotlightPadding: 2, nextLabel: tryIt }}),
-            step('Open Compare > Per cell > Selections', '[data-insights-tree-leaf="selection"][data-insights-tree-parent="compare"]', [
-                'Open Visualization, then Compare, then Per cell, then Selections to analyze selected cells.'
-            ], {{ action: () => openTutorialVisualizationLeafMenu('compare', 'selection', 'quick'), task: 'Click Selections in Compare > Per cell.', nextLabel: tryIt }}),
+            step('Open Compare > Selections', '[data-insights-tree-leaf="selection"][data-insights-tree-parent="compare"]', [
+                'Open Visualization, then Compare, then Selections to analyze selected cells.'
+            ], {{ action: () => openTutorialVisualizationLeafMenu('compare', 'selection'), task: 'Click Selections in Compare.', nextLabel: tryIt }}),
             step('Compare Selections panel', ['#compare-selection-panel', '#compare-tab-selection-content'], [
                 'Selection comparison summarizes current lasso/query selections.',
                 'Click the search icon to see a comparison between 2 selections'
             ], {{ action: () => openTutorialInsightsPanel('compare', 'selection'), nextLabel: tryIt }}),
-            step('Open Compare > Per cell > Regions', '[data-insights-tree-leaf="regions"][data-insights-tree-parent="compare"]', [
-                'Open Visualization, then Compare, then Per cell, then Regions to compare saved Regions.'
-            ], {{ action: () => openTutorialVisualizationLeafMenu('compare', 'regions', 'quick'), task: 'Click Regions in Compare > Per cell.', nextLabel: tryIt }}),
+            step('Open Compare > Regions', '[data-insights-tree-leaf="regions"][data-insights-tree-parent="compare"]', [
+                'Open Visualization, then Compare, then Regions to compare saved Regions.'
+            ], {{ action: () => openTutorialVisualizationLeafMenu('compare', 'regions'), task: 'Click Regions in Compare.', nextLabel: tryIt }}),
             step('Compare Regions panel', ['#region-comparison', '#compare-tab-regions-content'], [
                 'Region comparison uses user-created Regions.',
                 'Click the search icon to see a comparison between 2 regions'
             ], {{ action: () => openTutorialInsightsPanel('compare', 'regions'), nextLabel: tryIt }}),
-            step('Open Compare > Per cell > Annotations', '[data-insights-tree-leaf="groups"][data-insights-tree-parent="compare"]', [
-                'Open Visualization, then Compare, then Per cell, then Annotations to compare annotation values.'
-            ], {{ action: () => openTutorialVisualizationLeafMenu('compare', 'groups', 'quick'), task: 'Click Annotations in Compare > Per cell.', nextLabel: tryIt }}),
+            step('Open Compare > Annotations', '[data-insights-tree-leaf="groups"][data-insights-tree-parent="compare"]', [
+                'Open Visualization, then Compare, then Annotations to compare annotation values.'
+            ], {{ action: () => openTutorialVisualizationLeafMenu('compare', 'groups'), task: 'Click Annotations in Compare.', nextLabel: tryIt }}),
             step('Compare Cell Annotations panel', '#compare-tab-groups-content .insights-panel-section', [
                 'Annotation comparison is a per-cell comparison between categories in the selected annotation.',
                 'Click the search icon to see a comparison between 2 annotations'
             ], {{ action: () => {{ invalidateGroupDEState?.(false); openTutorialInsightsPanel('compare', 'groups'); }}, nextLabel: tryIt }}),
-            step('Open Compare > Per sample > Simple design', '[data-insights-tree-leaf="cell-de"][data-insights-tree-parent="compare"]', [
-                'Open Visualization, then Compare, then Per sample, then Simple design to inspect pseudobulk category contrasts.'
-            ], {{ action: () => openTutorialVisualizationLeafMenu('compare', 'cell-de', 'precise'), task: 'Click Simple design in Compare > Per sample.', nextLabel: tryIt }}),
+            step('Open Statistics > Compare > Simple design', '[data-insights-tree-leaf="cell-de"][data-insights-tree-parent="compare"]', [
+                'Open Statistics, then Visualization, then Compare, then Simple design to inspect pseudobulk category contrasts.'
+            ], {{ action: () => openTutorialVisualizationLeafMenu('compare', 'cell-de'), task: 'Click Simple design in Compare.', nextLabel: tryIt }}),
             step('Compare Simple design panel', ['#pseudobulk-de-results .comparison-info', '#pseudobulk-de-results .agg-group', '#pseudobulk-de-results .agg-group-meta'], [
                 'Simple design contains category-versus-category pseudobulk DE results when they were exported.',
                 'The panel can contain warnings, marker tables, MA/volcano plots, sample diagnostics, and pathway enrichment.'
@@ -9762,8 +9793,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             step('Compare Relationships controls', ['#river-right', '#river-swap', '#river-export'], [
                 'The Relationships controls choose the second annotation, reverse the direction, and export the correspondence table.'
             ], {{ action: () => openTutorialInsightsPanel('compare', 'river'), combineTargets: true, prepareDelay: 420, scrollDelay: 520, nextLabel: tryIt }}),
-            step('Open Neighbors > Enrichment', '[data-insights-tree-leaf="enrichment"][data-insights-tree-parent="neighbors"]', [
-                'Open Visualization, then Neighbors, then Enrichment to inspect spatial adjacency enrichment.'
+            step('Open Statistics > Neighbors > Enrichment', '[data-insights-tree-leaf="enrichment"][data-insights-tree-parent="neighbors"]', [
+                'Open Statistics, then Visualization, then Neighbors, then Enrichment to inspect spatial adjacency enrichment.'
             ], {{ action: () => openTutorialVisualizationLeafMenu('neighbors', 'enrichment'), task: 'Click Enrichment in Neighbors.', nextLabel: tryIt }}),
             step('Neighbors Enrichment panel', ['#neighbor-stats', '#neighbors-tab-enrichment-content'], [
                 'Enrichment summarizes which annotation categories are observed near each other more or less often than expected.'
@@ -9771,8 +9802,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             step('Neighbors Enrichment view switch', '.neighbor-view-buttons', [
                 'The Enrichment switch changes between table, network, and chord views.'
             ], {{ action: () => openTutorialInsightsPanel('neighbors', 'enrichment'), nextLabel: tryIt }}),
-            step('Open Neighbors > Interactions', '[data-insights-tree-leaf="interactions"][data-insights-tree-parent="neighbors"]', [
-                'Open Visualization, then Neighbors, then Interactions to inspect contact-conditioned marker features.'
+            step('Open Statistics > Neighbors > Interactions', '[data-insights-tree-leaf="interactions"][data-insights-tree-parent="neighbors"]', [
+                'Open Statistics, then Visualization, then Neighbors, then Interactions to inspect contact-conditioned marker features.'
             ], {{ action: () => openTutorialVisualizationLeafMenu('neighbors', 'interactions'), task: 'Click Interactions in Neighbors.', nextLabel: tryIt }}),
             step('Neighbors Interactions panel', ['#neighbors-tab-interactions-content', '#interaction-browser'], [
                 'Interactions compares source cells based on which target categories they touch.',
@@ -9781,8 +9812,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             step('Neighbors Interactions controls', ['#interaction-source', '#interaction-search'], [
                 'The Interactions controls choose the source category and filter target names.'
             ], {{ action: () => openTutorialInsightsPanel('neighbors', 'interactions'), combineTargets: true, prepareDelay: 420, scrollDelay: 520, nextLabel: tryIt }}),
-            step('Open Neighbors > Dispersion', '[data-insights-tree-leaf="dispersion"][data-insights-tree-parent="neighbors"]', [
-                'Open Visualization, then Neighbors, then Dispersion to inspect whole-section spatial patterning.'
+            step('Open Statistics > Neighbors > Dispersion', '[data-insights-tree-leaf="dispersion"][data-insights-tree-parent="neighbors"]', [
+                'Open Statistics, then Visualization, then Neighbors, then Dispersion to inspect whole-section spatial patterning.'
             ], {{ action: () => openTutorialVisualizationLeafMenu('neighbors', 'dispersion'), task: 'Click Dispersion in Neighbors.', nextLabel: tryIt }}),
             step('Neighbors Dispersion panel', ['#dispersion-panel', '#neighbors-tab-dispersion-content'], [
                 'Dispersion summarizes whether categories look clustered, dispersed, or close to random across all cells.',
@@ -9858,9 +9889,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 	            ['Module feature picker', 'Module'],
             ['Exploration annotation selector', 'Exploration'],
             ['Open Overview > Summary', 'Exploration > Overview'],
-            ['Open Features > Markers', 'Exploration > Features'],
-            ['Open Compare > Per cell > Selections', 'Exploration > Compare'],
-            ['Open Neighbors > Enrichment', 'Exploration > Neighbors'],
+            ['Open Features > Distribution', 'Exploration > Features'],
+            ['Open Compare > Selections', 'Exploration > Compare'],
+            ['Open Statistics > Features > Distribution', 'Statistics > Features'],
+            ['Open Statistics > Compare > Simple design', 'Statistics > Compare'],
+            ['Open Statistics > Neighbors > Enrichment', 'Statistics > Neighbors'],
             ['Finish the tutorial', 'Finish']
         ]);
         const chaptersAfterModuleWithoutTasks = new Set([
@@ -9868,7 +9901,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             'Exploration > Overview',
             'Exploration > Features',
             'Exploration > Compare',
-            'Exploration > Neighbors',
+            'Statistics > Features',
+            'Statistics > Compare',
+            'Statistics > Neighbors',
             'Finish',
         ]);
         let currentChapter = 'Introduction';
@@ -10383,18 +10418,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const map = {{
             'Open Overview > Summary': ['overview', 'summary', null],
             'Open Overview > Sections': ['overview', 'sections', null],
-            'Open Features > Markers': ['features', 'de-features', null],
-            'Open Features > Spatial': ['features', 'spatial', null],
-            'Open Features > Distribution > Per cell': ['features', 'distribution', 'distribution'],
-            'Open Features > Distribution > Per sample': ['features', 'means', 'distribution'],
-            'Open Compare > Per cell > Selections': ['compare', 'selection', 'quick'],
-            'Open Compare > Per cell > Regions': ['compare', 'regions', 'quick'],
-            'Open Compare > Per cell > Annotations': ['compare', 'groups', 'quick'],
-            'Open Compare > Per sample > Simple design': ['compare', 'cell-de', 'precise'],
+            'Open Features > Distribution': ['features', 'distribution', null],
+            'Open Statistics > Features > Markers': ['features', 'de-features', null],
+            'Open Statistics > Features > Spatial': ['features', 'spatial', null],
+            'Open Statistics > Features > Distribution': ['features', 'means', null],
+            'Open Compare > Selections': ['compare', 'selection', null],
+            'Open Compare > Regions': ['compare', 'regions', null],
+            'Open Compare > Annotations': ['compare', 'groups', null],
+            'Open Statistics > Compare > Simple design': ['compare', 'cell-de', null],
             'Open Compare > Relationships': ['compare', 'river', null],
-            'Open Neighbors > Enrichment': ['neighbors', 'enrichment', null],
-            'Open Neighbors > Interactions': ['neighbors', 'interactions', null],
-            'Open Neighbors > Dispersion': ['neighbors', 'dispersion', null],
+            'Open Statistics > Neighbors > Enrichment': ['neighbors', 'enrichment', null],
+            'Open Statistics > Neighbors > Interactions': ['neighbors', 'interactions', null],
+            'Open Statistics > Neighbors > Dispersion': ['neighbors', 'dispersion', null],
         }};
         const spec = map[title];
         if (!spec) return false;
@@ -10702,7 +10737,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
             insightsTopLevelTab = 'overview';
             insightsOverviewTab = 'summary';
-            insightsFeaturesTab = 'de-features';
+            insightsFeaturesTab = 'distribution';
             insightsCompareTab = 'groups';
             insightsNeighborsTab = 'enrichment';
             insightsTreeOpen = false;
@@ -11174,7 +11209,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function openTutorialInsightsPanel(topLevel, subtab) {{
         if (typeof closeModal === 'function') closeModal();
-        if (typeof openInsightsMode === 'function') openInsightsMode('exploration');
+        if (typeof openInsightsMode === 'function') openInsightsMode(getInsightsModeForLeaf(topLevel, subtab));
         if (typeof activateInsightsSubtab === 'function') activateInsightsSubtab(topLevel, subtab);
     }}
 
@@ -22087,7 +22122,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             umapSummary.classList.toggle('expanded', selectionSummaryExpanded);
             umapSummary.classList.toggle('minimized', selectionSummaryMinimized && hasSelection);
             const findMoreHtml = hasSelection
-                ? `<div class="selection-summary-find-more-row"><button class="icon-btn selection-summary-find-more" type="button" data-selection-find-more title="Find more in Compare > Per cell > Selections"><span>Find more</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path><path d="m13 6 6 6-6 6"></path></svg></button></div>`
+                ? `<div class="selection-summary-find-more-row"><button class="icon-btn selection-summary-find-more" type="button" data-selection-find-more title="Find more in Compare > Selections"><span>Find more</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path><path d="m13 6 6 6-6 6"></path></svg></button></div>`
                 : '';
             umapSummary.innerHTML = renderSelectionSummaryHtml(summary, {{
                 hideHeader: true,
@@ -24567,6 +24602,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return normalizeInsightsTopLevelName(topLevel) === 'features' ? 'features' : topLevel;
     }}
 
+    const INSIGHTS_MODE_VALUES = ['selection', 'region', 'module', 'exploration', 'statistics'];
+    const INSIGHTS_ANALYSIS_MODES = ['exploration', 'statistics'];
     const INSIGHTS_TOP_LEVEL_TABS = ['overview', 'features', 'compare', 'neighbors'];
     const INSIGHTS_SUBTABS = {{
         overview: ['summary', 'sections'],
@@ -24574,16 +24611,101 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         compare: ['groups', 'regions', 'selection', 'cell-de', 'complex-contrast', 'river'],
         neighbors: ['enrichment', 'interactions', 'dispersion'],
     }};
+    const INSIGHTS_MODE_TOP_LEVEL_TABS = {{
+        exploration: ['overview', 'features', 'compare'],
+        statistics: ['features', 'compare', 'neighbors'],
+    }};
+    const INSIGHTS_MODE_SUBTABS = {{
+        exploration: {{
+            overview: ['summary', 'sections'],
+            features: ['distribution'],
+            compare: ['groups', 'regions', 'selection', 'river'],
+            neighbors: [],
+        }},
+        statistics: {{
+            overview: [],
+            features: ['means', 'de-features', 'spatial'],
+            compare: ['cell-de', 'complex-contrast'],
+            neighbors: ['enrichment', 'interactions', 'dispersion'],
+        }},
+    }};
+    const INSIGHTS_MODE_DEFAULTS = {{
+        exploration: {{
+            topLevel: 'overview',
+            overview: 'summary',
+            features: 'distribution',
+            compare: 'groups',
+            neighbors: 'enrichment',
+        }},
+        statistics: {{
+            topLevel: 'features',
+            overview: 'summary',
+            features: 'means',
+            compare: 'cell-de',
+            neighbors: 'enrichment',
+        }},
+    }};
+
+    function getInsightsAnalysisMode(mode = insightsMode) {{
+        return mode === 'statistics' ? 'statistics' : 'exploration';
+    }}
+
+    function getAllowedInsightsTopLevelTabs(mode = getInsightsAnalysisMode()) {{
+        return INSIGHTS_MODE_TOP_LEVEL_TABS[getInsightsAnalysisMode(mode)] || INSIGHTS_TOP_LEVEL_TABS;
+    }}
+
+    function getAllowedInsightsSubtabs(topLevel, mode = getInsightsAnalysisMode()) {{
+        const normalizedTopLevel = normalizeInsightsTopLevelName(topLevel);
+        const analysisMode = getInsightsAnalysisMode(mode);
+        return INSIGHTS_MODE_SUBTABS[analysisMode]?.[normalizedTopLevel] || [];
+    }}
+
+    function isInsightsSubtabAllowed(topLevel, subtab, mode = getInsightsAnalysisMode()) {{
+        const normalizedTopLevel = normalizeInsightsTopLevelName(topLevel);
+        return getAllowedInsightsTopLevelTabs(mode).includes(normalizedTopLevel)
+            && getAllowedInsightsSubtabs(normalizedTopLevel, mode).includes(subtab);
+    }}
+
+    function getInsightsModeForLeaf(topLevel, subtab) {{
+        const normalizedTopLevel = normalizeInsightsTopLevelName(topLevel);
+        if (isInsightsSubtabAllowed(normalizedTopLevel, subtab, 'statistics')) return 'statistics';
+        return 'exploration';
+    }}
+
+    function selectDefaultInsightsLeafForMode(mode = getInsightsAnalysisMode()) {{
+        const analysisMode = getInsightsAnalysisMode(mode);
+        const defaults = INSIGHTS_MODE_DEFAULTS[analysisMode] || INSIGHTS_MODE_DEFAULTS.exploration;
+        const topLevel = defaults.topLevel;
+        const subtab = defaults[topLevel];
+        insightsTopLevelTab = topLevel;
+        setActiveInsightsSubtab(topLevel, subtab);
+        insightsTreeSelectedLeaf = {{ topLevel, subtab }};
+        insightsTreeOpen = false;
+        insightsTreeOpenBranch = null;
+        insightsTreeOpenCompareBranch = null;
+        insightsTreeOpenFeaturesBranch = null;
+    }}
 
     function normalizeInsightsTabsState() {{
+        const analysisMode = getInsightsAnalysisMode();
+        const defaults = INSIGHTS_MODE_DEFAULTS[analysisMode] || INSIGHTS_MODE_DEFAULTS.exploration;
+        const allowedTopLevelTabs = getAllowedInsightsTopLevelTabs(analysisMode);
         insightsTopLevelTab = normalizeInsightsTopLevelName(insightsTopLevelTab);
         if (insightsTreeOpenBranch) insightsTreeOpenBranch = normalizeInsightsTopLevelName(insightsTreeOpenBranch);
         if (insightsTreeSelectedLeaf) insightsTreeSelectedLeaf.topLevel = normalizeInsightsTopLevelName(insightsTreeSelectedLeaf.topLevel);
-        if (!INSIGHTS_TOP_LEVEL_TABS.includes(insightsTopLevelTab)) insightsTopLevelTab = 'overview';
-        if (!INSIGHTS_SUBTABS.overview.includes(insightsOverviewTab)) insightsOverviewTab = 'summary';
-        if (!INSIGHTS_SUBTABS.features.includes(insightsFeaturesTab)) insightsFeaturesTab = 'de-features';
-        if (!INSIGHTS_SUBTABS.compare.includes(insightsCompareTab)) insightsCompareTab = 'groups';
-        if (!INSIGHTS_SUBTABS.neighbors.includes(insightsNeighborsTab)) insightsNeighborsTab = 'enrichment';
+        if (!allowedTopLevelTabs.includes(insightsTopLevelTab)) insightsTopLevelTab = defaults.topLevel;
+        if (!getAllowedInsightsSubtabs('overview', analysisMode).includes(insightsOverviewTab)) insightsOverviewTab = defaults.overview;
+        if (!getAllowedInsightsSubtabs('features', analysisMode).includes(insightsFeaturesTab)) insightsFeaturesTab = defaults.features;
+        if (!getAllowedInsightsSubtabs('compare', analysisMode).includes(insightsCompareTab)) insightsCompareTab = defaults.compare;
+        if (!getAllowedInsightsSubtabs('neighbors', analysisMode).includes(insightsNeighborsTab)) insightsNeighborsTab = defaults.neighbors;
+        if (insightsTreeOpenBranch && !allowedTopLevelTabs.includes(insightsTreeOpenBranch)) {{
+            insightsTreeOpenBranch = null;
+            insightsTreeOpenCompareBranch = null;
+            insightsTreeOpenFeaturesBranch = null;
+        }}
+        if (insightsTreeSelectedLeaf && !isInsightsSubtabAllowed(insightsTreeSelectedLeaf.topLevel, insightsTreeSelectedLeaf.subtab, analysisMode)) {{
+            insightsTreeSelectedLeaf = null;
+        }}
     }}
 
     function getActiveInsightsSubtab(topLevel) {{
@@ -24620,7 +24742,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }};
     const INSIGHTS_TREE_LEAF_LABELS = {{
         overview: {{ summary: 'Summary', sections: 'Sections' }},
-        features: {{ 'de-features': 'Markers', spatial: 'Spatial', distribution: 'Per cell', means: 'Per sample' }},
+        features: {{ 'de-features': 'Markers', spatial: 'Spatial', distribution: 'Distribution', means: 'Distribution' }},
         compare: {{ groups: 'Annotations', regions: 'Regions', selection: 'Selections', 'cell-de': 'Simple design', 'complex-contrast': 'Complex design', river: 'Relationships' }},
         neighbors: {{ enrichment: 'Enrichment', interactions: 'Interactions', dispersion: 'Dispersion' }},
     }};
@@ -24628,21 +24750,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function getInsightsTreePath(topLevel, subtab) {{
         topLevel = normalizeInsightsTopLevelName(topLevel);
         const path = [INSIGHTS_TREE_TOP_LABELS[topLevel] || topLevel];
-        if (topLevel === 'compare') {{
-            const group = ['groups', 'regions', 'selection'].includes(subtab)
-                ? 'Per cell'
-                : (['cell-de', 'complex-contrast'].includes(subtab) ? 'Per sample' : 'Relationships');
-            if (group !== 'Relationships') path.push(group);
-        }}
-        if (topLevel === 'features' && ['distribution', 'means'].includes(subtab)) {{
-            path.push('Distribution');
-        }}
         const leaf = INSIGHTS_TREE_LEAF_LABELS[topLevel]?.[subtab];
         if (leaf) path.push(leaf);
         return path;
     }}
 
     function syncInsightsTree() {{
+        const analysisMode = getInsightsAnalysisMode();
+        const allowedTopLevelTabs = getAllowedInsightsTopLevelTabs(analysisMode);
         document.querySelectorAll('[data-insights-tree]').forEach((tree) => {{
             tree.classList.toggle('is-open', insightsTreeOpen);
             tree.classList.toggle('has-selection', !!insightsTreeSelectedLeaf);
@@ -24656,8 +24771,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }});
         document.querySelectorAll('[data-insights-tree-node]').forEach((node) => {{
             const topLevel = normalizeInsightsTopLevelName(node.getAttribute('data-insights-tree-node') || 'overview');
+            const isAvailable = allowedTopLevelTabs.includes(topLevel);
             const isOpen = insightsTreeOpen && insightsTreeOpenBranch === topLevel;
             const hideSibling = insightsTreeOpen && !!insightsTreeOpenBranch && !isOpen;
+            node.classList.toggle('is-unavailable', !isAvailable);
             node.classList.toggle('is-open', isOpen);
             node.classList.toggle('is-sibling-hidden', hideSibling);
             node.querySelector('[data-insights-tree-branch]')?.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
@@ -24683,6 +24800,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         document.querySelectorAll('[data-insights-tree-leaf]').forEach((leaf) => {{
             const topLevel = normalizeInsightsTopLevelName(leaf.getAttribute('data-insights-tree-parent') || 'overview');
             const subtab = leaf.getAttribute('data-insights-tree-leaf') || '';
+            const isAvailable = isInsightsSubtabAllowed(topLevel, subtab, analysisMode);
             const hideRelationship = topLevel === 'compare'
                 && subtab === 'river'
                 && insightsTreeOpen
@@ -24693,6 +24811,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 && insightsTreeOpen
                 && insightsTreeOpenBranch === 'features'
                 && !!insightsTreeOpenFeaturesBranch;
+            leaf.classList.toggle('is-unavailable', !isAvailable);
             leaf.classList.toggle('is-selected', insightsTreeSelectedLeaf?.topLevel === topLevel && insightsTreeSelectedLeaf?.subtab === subtab);
             leaf.classList.toggle('is-sibling-hidden', hideRelationship || hideFeaturesDirectLeaf);
         }});
@@ -24716,7 +24835,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function syncInsightsModeClasses() {{
-        const mode = ['selection', 'region', 'module', 'exploration'].includes(insightsMode) ? insightsMode : 'exploration';
+        const mode = INSIGHTS_MODE_VALUES.includes(insightsMode) ? insightsMode : 'exploration';
         document.querySelectorAll('[data-insights-mode]').forEach((btn) => {{
             btn.classList.toggle('active', btn.getAttribute('data-insights-mode') === mode);
             if (btn.id === 'insights-mode-region') btn.setAttribute('aria-expanded', mode === 'region' ? 'true' : 'false');
@@ -24724,12 +24843,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         document.getElementById('insights-selection-panel')?.classList.toggle('active', mode === 'selection');
         document.getElementById('region-section')?.classList.toggle('active', mode === 'region');
         document.getElementById('insights-module-panel')?.classList.toggle('active', mode === 'module');
-        document.getElementById('insights-exploration-panel')?.classList.toggle('active', mode === 'exploration');
+        document.getElementById('insights-exploration-panel')?.classList.toggle('active', INSIGHTS_ANALYSIS_MODES.includes(mode));
+        document.getElementById('exploration-embedded-warning')?.classList.toggle('hidden', mode !== 'exploration');
         document.getElementById('insights-panel')?.classList.toggle('region-panel-open', mode === 'region');
     }}
 
     function setInsightsMode(mode) {{
-        insightsMode = ['selection', 'region', 'module', 'exploration'].includes(mode) ? mode : 'exploration';
+        insightsMode = INSIGHTS_MODE_VALUES.includes(mode) ? mode : 'exploration';
+        if (INSIGHTS_ANALYSIS_MODES.includes(insightsMode)
+            && (!insightsTreeSelectedLeaf || !isInsightsSubtabAllowed(insightsTreeSelectedLeaf.topLevel, insightsTreeSelectedLeaf.subtab, insightsMode))) {{
+            selectDefaultInsightsLeafForMode(insightsMode);
+        }}
         syncInsightsModeClasses();
         if (insightsMode === 'selection') {{
             updateSelectionInfo();
@@ -24813,9 +24937,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function activateInsightsTopLevelTab(topLevel, focusSubtab = null) {{
         topLevel = normalizeInsightsTopLevelName(topLevel);
-        if (!INSIGHTS_TOP_LEVEL_TABS.includes(topLevel)) return;
+        if (!getAllowedInsightsTopLevelTabs().includes(topLevel)) return;
         insightsTopLevelTab = topLevel;
-        if (focusSubtab && INSIGHTS_SUBTABS[topLevel]?.includes(focusSubtab)) {{
+        if (focusSubtab && getAllowedInsightsSubtabs(topLevel).includes(focusSubtab)) {{
             setActiveInsightsSubtab(topLevel, focusSubtab);
         }}
         renderActiveInsightsPanel();
@@ -24823,7 +24947,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function activateInsightsSubtab(topLevel, subtab) {{
         topLevel = normalizeInsightsTopLevelName(topLevel);
-        if (!INSIGHTS_SUBTABS[topLevel]?.includes(subtab)) return;
+        if (!isInsightsSubtabAllowed(topLevel, subtab)) return;
         insightsTopLevelTab = topLevel;
         setActiveInsightsSubtab(topLevel, subtab);
         insightsTreeSelectedLeaf = {{ topLevel, subtab }};
@@ -25573,6 +25697,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <button class="insights-mode-btn" id="insights-mode-region" data-insights-mode="region" type="button" aria-expanded="false" aria-controls="region-section">Region</button>
                     <button class="insights-mode-btn" id="insights-mode-module" data-insights-mode="module" type="button">Module</button>
                     <button class="insights-mode-btn" id="insights-mode-exploration" data-insights-mode="exploration" type="button">Exploration</button>
+                    <button class="insights-mode-btn" id="insights-mode-statistics" data-insights-mode="statistics" type="button">Statistics</button>
                 </div>
             </div>
             <div class="region-section" id="region-section">
@@ -25606,6 +25731,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <label for="exploration-feature-modality-select">Focused modality</label>
                     <select id="exploration-feature-modality-select"></select>
                 </div>
+                <div class="exploration-embedded-warning" id="exploration-embedded-warning" role="note">
+                    <span class="exploration-embedded-warning-icon" aria-hidden="true">&#9888;</span>
+                    <span>All visualizations and calculations in this section are based on embedded cells and features inside this HTML file and are therefore not representative of the overall dataset.</span>
+                </div>
                 <div class="insights-panel-section">
                     <label id="visualization-menu-label">Select</label>
                     <div class="insights-tree" data-insights-tree aria-labelledby="visualization-menu-label">
@@ -25622,35 +25751,20 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                                 <div class="insights-tree-node" data-insights-tree-node="features">
                                     <button class="insights-tab insights-tree-trigger has-children" type="button" data-insights-tree-branch="features" aria-expanded="false"><span data-insights-tree-label>Features</span></button>
                                     <div class="insights-tree-children"><div class="insights-tree-children-content">
-                                        <div class="insights-tree-node" data-insights-tree-features-node="distribution">
-                                            <button class="insights-tab insights-tree-trigger has-children" type="button" data-insights-tree-features-branch="distribution" aria-expanded="false">Distribution</button>
-                                            <div class="insights-tree-children"><div class="insights-tree-children-content">
-                                                <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="distribution" data-insights-tree-parent="features">Per cell</button>
-                                                <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="means" data-insights-tree-parent="features">Per sample</button>
-                                            </div></div>
-                                        </div>
-                                        <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="de-features" data-insights-tree-parent="features" data-insights-tree-features-direct-leaf>Markers</button>
-                                        <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="spatial" data-insights-tree-parent="features" data-insights-tree-features-direct-leaf>Spatial</button>
+                                        <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="distribution" data-insights-tree-parent="features">Distribution</button>
+                                        <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="means" data-insights-tree-parent="features">Distribution</button>
+                                        <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="de-features" data-insights-tree-parent="features">Markers</button>
+                                        <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="spatial" data-insights-tree-parent="features">Spatial</button>
                                     </div></div>
                                 </div>
                                 <div class="insights-tree-node" data-insights-tree-node="compare">
                                     <button class="insights-tab insights-tree-trigger has-children" type="button" data-insights-tree-branch="compare" aria-expanded="false"><span data-insights-tree-label>Compare</span></button>
                                     <div class="insights-tree-children"><div class="insights-tree-children-content">
-                                        <div class="insights-tree-node" data-insights-tree-compare-node="quick">
-                                            <button class="insights-tab insights-tree-trigger has-children" type="button" data-insights-tree-compare-branch="quick" aria-expanded="false">Per cell</button>
-                                            <div class="insights-tree-children"><div class="insights-tree-children-content">
-                                                <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="selection" data-insights-tree-parent="compare">Selections</button>
-                                                <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="regions" data-insights-tree-parent="compare">Regions</button>
-                                                <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="groups" data-insights-tree-parent="compare">Annotations</button>
-                                            </div></div>
-                                        </div>
-                                        <div class="insights-tree-node" data-insights-tree-compare-node="precise">
-                                            <button class="insights-tab insights-tree-trigger has-children" type="button" data-insights-tree-compare-branch="precise" aria-expanded="false">Per sample</button>
-                                            <div class="insights-tree-children"><div class="insights-tree-children-content">
-                                                <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="cell-de" data-insights-tree-parent="compare">Simple design</button>
-                                                <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="complex-contrast" data-insights-tree-parent="compare">Complex design</button>
-                                            </div></div>
-                                        </div>
+                                        <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="selection" data-insights-tree-parent="compare">Selections</button>
+                                        <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="regions" data-insights-tree-parent="compare">Regions</button>
+                                        <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="groups" data-insights-tree-parent="compare">Annotations</button>
+                                        <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="cell-de" data-insights-tree-parent="compare">Simple design</button>
+                                        <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="complex-contrast" data-insights-tree-parent="compare">Complex design</button>
                                         <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="river" data-insights-tree-parent="compare">Relationships</button>
                                     </div></div>
                                 </div>
@@ -25834,6 +25948,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 setInsightsMode(mode);
             }});
         }});
+        if (INSIGHTS_ANALYSIS_MODES.includes(insightsMode) && !insightsTreeSelectedLeaf) {{
+            selectDefaultInsightsLeafForMode(insightsMode);
+        }}
         syncInsightsModeClasses();
 
         const explorationAnnotationSelect = document.getElementById('exploration-annotation-select');
@@ -35374,7 +35491,7 @@ def export_to_html(
             log_step("Computing pathway enrichment")
             log_detail(
                 "Running ORA on significant DE features and preranked GSEA on retained ranked features; "
-                "output feeds Insights > Exploration > Compare > Per sample > Simple design > Pathway Enrichment."
+                "output feeds Insights > Statistics > Compare > Simple design > Pathway Enrichment."
             )
             log_detail("Parameters:")
             if pathway_gmt:

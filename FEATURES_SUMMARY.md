@@ -108,12 +108,13 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 - Selection mode shows compact summaries for active lasso, UMAP, or cell search selections.
 - Region mode stores, selects, groups, imports, exports, recolors, and deletes user-created spatial regions or cell sets.
 - Module mode creates feature modules and displays module scores like feature layers.
-- Exploration mode contains the Visualization menu tree and the built-in analysis panels.
+- Exploration mode contains Visualization panels computed from cells embedded in the HTML file.
+- Statistics mode contains Visualization panels precomputed from the raw dataset before HTML export.
 
 ## 13. Selection Workflow
 
 - The Selection summary reports active selected cells by section and main annotation.
-- Find More opens the full `Compare > Per cell > Selections` workflow.
+- Find More opens the full `Compare > Selections` workflow.
 - Selection marker features are calculated from selected cells using a two-sided Welch test.
 - The selection comparison panel displays composition and feature-value summaries.
 - Feature-value summaries show mean value and percent detected for displayed features.
@@ -136,13 +137,16 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 - Module scores can be loaded into the spatial viewer like feature layers.
 - Module definitions can be imported or exported as JSON.
 
-## 16. Exploration Menu
+## 16. Exploration And Statistics Menus
 
-- The Visualization menu tree opens Overview, Features, Compare, and Neighbors panels.
+- The Exploration Visualization menu tree opens Overview, Features, and Compare panels based on cells embedded in the HTML file.
 - Overview summarizes section composition and metadata trends.
-- Features focuses marker features, spatial features, per-cell distributions, and per-sample/category means in the selected feature namespace.
-- Compare contains selection, region, annotation, pseudobulk, pathway, and relationship comparisons.
-- Neighbors contains spatial adjacency enrichment, interaction markers, and dispersion analysis.
+- Features contains the selected feature distribution across cells.
+- Compare contains selection, region, annotation, and relationship comparisons.
+- The Statistics Visualization menu tree opens precomputed Features, Compare, and Neighbors panels from the raw dataset.
+- Statistics Features contains per-sample/category feature distributions, marker features, and spatial features in the selected feature namespace.
+- Statistics Compare contains sample-level pseudobulk comparisons.
+- Statistics Neighbors contains spatial adjacency enrichment, interaction markers, and dispersion analysis.
 
 ## 17. Exploration > Overview
 
@@ -152,25 +156,25 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 - `Overview > Sections` compares section-level composition.
 - Section composition can be shown as stacked bars or a heatmap.
 
-## 18. Exploration > Features
+## 18. Exploration And Statistics > Features
 
-- `Features > Markers` lists pseudobulk-derived marker features by category when available.
-- Marker features can be displayed as compact lists or heatmaps.
-- `Features > Spatial` shows Moran Index rankings computed at export for each selected modality.
-- Spatial features can be displayed as a ranked list or graph.
-- `Features > Distribution > Per cell` summarizes value distributions across categories for a selected feature.
+- `Exploration > Features > Distribution` summarizes value distributions across categories for a selected feature.
 - Per-cell distribution calculations use cells embedded in the HTML.
 - Per-cell distributions can be shown as a table or violin/boxplot.
-- `Features > Distribution > Per sample` uses pseudobulk/category mean summaries for selected features.
+- `Statistics > Features > Distribution` uses pseudobulk/category mean summaries for selected features.
 - Per-sample/category means can be shown as a table or barplot.
+- `Statistics > Features > Markers` lists pseudobulk-derived marker features by category when available.
+- Marker features can be displayed as compact lists or heatmaps.
+- `Statistics > Features > Spatial` shows Moran Index rankings computed at export for each selected modality.
+- Spatial features can be displayed as a ranked list or graph.
 - The feature namespace selector scopes marker, spatial, distribution, mean, and correlation panels to one modality or module namespace.
 
-## 19. Exploration > Compare
+## 19. Exploration And Statistics > Compare
 
-- `Compare > Per cell > Selections` analyzes active lasso/cell selections and is the detailed view behind Selection Find More.
-- `Compare > Per cell > Regions` compares saved region annotations and can run region comparisons similar to selection comparisons.
-- `Compare > Per cell > Annotations` compares categories within the selected annotation using per-cell summaries.
-- `Compare > Per sample > Simple design` displays category-versus-category pseudobulk DE when exported.
+- `Exploration > Compare > Selections` analyzes active lasso/cell selections and is the detailed view behind Selection Find More.
+- `Exploration > Compare > Regions` compares saved region annotations and can run region comparisons similar to selection comparisons.
+- `Exploration > Compare > Annotations` compares categories within the selected annotation using per-cell summaries.
+- `Statistics > Compare > Simple design` displays category-versus-category pseudobulk DE when exported.
 - Simple design includes raw tables, markers, MA plots, volcano plots, PCA, distance matrix diagnostics, and pathway enrichment.
 - Simple design metrics can be shown as Raw table, Features, and Samples views.
 - Pseudobulk DE can be exported for selected modalities with `pseudobulk_modalities` / `--pseudobulk-modalities`; the default is the dataset default modality.
@@ -185,9 +189,9 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 - GSEA uses the retained ranked gene list after model and percent-detected filtering.
 - GSEA profiles can be selected from a pathway dropdown and are displayed as enrichment-profile plots with hits and ranked-metric context.
 - ORA and GSEA sections can switch between plot and raw table and include download buttons.
-- `Compare > Relationships` shows how categories from two annotations map to each other, with controls to select the second annotation, swap direction, and export the correspondence table.
+- `Exploration > Compare > Relationships` shows how categories from two annotations map to each other, with controls to select the second annotation, swap direction, and export the correspondence table.
 
-## 20. Exploration > Neighbors
+## 20. Statistics > Neighbors
 
 - `Neighbors > Enrichment` summarizes which annotation categories are spatially adjacent more or less often than expected.
 - `Neighbors > Interactions` has a modality selector for contact-conditioned marker features when multiple interaction marker payloads were exported.
