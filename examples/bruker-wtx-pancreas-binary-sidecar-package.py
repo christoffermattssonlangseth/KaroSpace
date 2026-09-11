@@ -70,7 +70,7 @@ common_kwargs = dict(
     ],
     neighbor_stats_permutations=0,
     neighbor_stats_seed=42,
-    pseudobulk_additional_annotations=[
+    statistics_additional_annotations=[
         "cluster",
     ],
     pseudobulk_embed_top_n_per_comparison=20,

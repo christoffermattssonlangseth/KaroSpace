@@ -229,7 +229,8 @@ def main() -> None:
         # Cluster analytics (computed here — this is a plain, non-companion h5ad).
         neighbor_stats_annotations=CLUSTER_COLUMNS,
         neighbor_stats_permutations=0,
-        pseudobulk_additional_annotations=CLUSTER_COLUMNS,
+        statistics_additional_annotations=CLUSTER_COLUMNS,
+        pseudobulk="auto",
         pseudobulk_embed_top_n_per_comparison=20,
         pseudobulk_counts_layer=None,
         # RNA panel + 16-channel COMET protein.

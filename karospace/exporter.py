@@ -3520,6 +3520,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             border-bottom: 1px solid var(--border-color);
             min-width: 0;
         }}
+        .agg-group-title.comparison-marker-title {{
+            cursor: pointer;
+            border-radius: 3px;
+        }}
+        .agg-group-title.comparison-marker-title:hover {{
+            background: color-mix(in srgb, var(--accent-strong) 6%, transparent);
+        }}
+        .agg-group-title.comparison-marker-title.is-spotlit {{
+            background: color-mix(in srgb, var(--accent-color, #4a9eff) 15%, transparent);
+        }}
         .agg-group-meta {{ font-size: 10px; color: var(--muted-color); margin-bottom: 4px; }}
         .agg-row {{
             display: flex;
@@ -4236,35 +4246,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             color: var(--text-color);
         }}
         .pseudobulk-de-plot-export {{ margin-left: auto; }}
-        .de-method-badge {{
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            margin-left: 8px;
-            padding: 1px 9px;
-            border-radius: 999px;
-            font-size: 11px;
-            font-weight: 600;
-            line-height: 1.6;
-            vertical-align: middle;
-            border: 1px solid var(--border-color);
-            cursor: help;
-            white-space: nowrap;
-        }}
-        .de-method-badge.de-method-deseq2 {{
-            background: var(--accent-fill);
-            color: var(--accent-on-fill);
-            border-color: transparent;
-        }}
-        .de-method-badge.de-method-welch {{
-            background: color-mix(in srgb, #e2a400 18%, var(--input-bg));
-            color: var(--text-color);
-            border-color: color-mix(in srgb, #e2a400 55%, var(--border-color));
-        }}
-        .de-method-badge .de-method-badge-note {{
-            font-weight: 400;
-            opacity: 0.85;
-        }}
         .pseudobulk-de-panel-mode-switch,
         .neighbor-view-buttons,
         .pathway-panel-mode-switch {{
@@ -7798,20 +7779,83 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
     function getModalityPayload(payloadName, modality = getExplorationModality()) {{
         let root = DATA[payloadName];
+        if (payloadName === 'wilcoxon_de_by_modality') root = DATA.wilcoxon_de_by_modality;
         if (payloadName === 'pseudobulk_de_by_modality') root = DATA.pseudobulk_de_by_modality;
         else if (payloadName === 'interaction_markers_by_modality') root = DATA.interaction_markers_by_modality;
-        else if (payloadName === 'marker_features_by_modality') root = DATA.marker_features_by_modality;
-        else if (payloadName === 'category_feature_means_by_modality') root = DATA.category_feature_means_by_modality;
+        else if (payloadName === 'marker_features_by_method_by_modality') root = DATA.marker_features_by_method_by_modality;
+        else if (payloadName === 'category_feature_means_by_method_by_modality') root = DATA.category_feature_means_by_method_by_modality;
         else if (payloadName === 'feature_correlations_by_modality') root = DATA.feature_correlations_by_modality;
         else if (payloadName === 'spatial_variable_features_by_modality') root = DATA.spatial_variable_features_by_modality;
         if (!root || typeof root !== 'object') return null;
         return root[modality] || null;
     }}
+    function hasNonEmptyStatisticsPayload(payload) {{
+        return !!(payload && typeof payload === 'object' && Object.values(payload).some((groups) => (
+            groups && typeof groups === 'object' && Object.keys(groups).some((key) => !String(key).startsWith('_'))
+        )));
+    }}
+    function getStatisticsMethodOptions(modality = getExplorationModality(), payloadKind = 'de') {{
+        const options = [];
+        if (payloadKind === 'markers') {{
+            const byMethod = getModalityPayload('marker_features_by_method_by_modality', modality) || {{}};
+            if (byMethod.wilcoxon && Object.keys(byMethod.wilcoxon).length) options.push('wilcoxon');
+            if (byMethod.pseudobulk && Object.keys(byMethod.pseudobulk).length) options.push('pseudobulk');
+            return options;
+        }}
+        if (payloadKind === 'means') {{
+            const byMethod = getModalityPayload('category_feature_means_by_method_by_modality', modality) || {{}};
+            if (byMethod.wilcoxon) options.push('wilcoxon');
+            if (byMethod.pseudobulk) options.push('pseudobulk');
+            return options;
+        }}
+        if (hasNonEmptyStatisticsPayload(getModalityPayload('wilcoxon_de_by_modality', modality))) options.push('wilcoxon');
+        if (hasNonEmptyStatisticsPayload(getModalityPayload('pseudobulk_de_by_modality', modality))) options.push('pseudobulk');
+        return options;
+    }}
+    function getActiveStatisticsMethod(panelKey = 'compare', modality = getExplorationModality(), payloadKind = 'de') {{
+        const options = getStatisticsMethodOptions(modality, payloadKind);
+        const current = statisticsMethodByPanel[panelKey] || 'wilcoxon';
+        if (options.includes(current)) return current;
+        const next = options.includes('wilcoxon') ? 'wilcoxon' : (options[0] || 'wilcoxon');
+        statisticsMethodByPanel[panelKey] = next;
+        return next;
+    }}
+    function renderStatisticsMethodSelect(panelKey, modality = getExplorationModality(), payloadKind = 'de') {{
+        const options = getStatisticsMethodOptions(modality, payloadKind);
+        if (options.length < 2) return '';
+        const active = getActiveStatisticsMethod(panelKey, modality, payloadKind);
+        const labelFor = (method) => method === 'pseudobulk' ? 'Pseudobulk DESeq2' : 'Wilcoxon';
+        return `<div class="pseudobulk-de-select-row statistics-method-row"><div><label>Method</label><select class="statistics-method-select" data-statistics-method-panel="${{escapeHtml(panelKey)}}">${{options.map((method) => `<option value="${{escapeHtml(method)}}"${{method === active ? ' selected' : ''}}>${{escapeHtml(labelFor(method))}}</option>`).join('')}}</select></div></div>`;
+    }}
+    function bindStatisticsMethodSelects(container, rerender) {{
+        container.querySelectorAll('.statistics-method-select[data-statistics-method-panel]').forEach((select) => {{
+            select.addEventListener('change', () => {{
+                const panel = select.getAttribute('data-statistics-method-panel') || 'compare';
+                statisticsMethodByPanel[panel] = select.value || 'wilcoxon';
+                if (typeof rerender === 'function') rerender();
+            }});
+        }});
+    }}
+    function getStatisticsDEPayloadForMethod(method = getActiveStatisticsMethod('compare'), modality = getPseudobulkPanelModality()) {{
+        return method === 'pseudobulk'
+            ? (getModalityPayload('pseudobulk_de_by_modality', modality) || {{}})
+            : (getModalityPayload('wilcoxon_de_by_modality', modality) || {{}});
+    }}
+    function getMarkerFeaturesPayloadForMethod(method = getActiveStatisticsMethod('markers'), modality = getExplorationModality()) {{
+        const byMethod = getModalityPayload('marker_features_by_method_by_modality', modality);
+        if (byMethod && typeof byMethod === 'object' && byMethod[method]) return byMethod[method] || {{}};
+        return {{}};
+    }}
+    function getCategoryFeatureMeansPayloadForMethod(method = getActiveStatisticsMethod('means'), modality = getExplorationModality()) {{
+        const byMethod = getModalityPayload('category_feature_means_by_method_by_modality', modality);
+        if (byMethod && typeof byMethod === 'object' && byMethod[method]) return byMethod[method] || null;
+        return null;
+    }}
     function getExplorationPseudobulkDEPayload(modality = getExplorationModality()) {{
-        return getModalityPayload('pseudobulk_de_by_modality', modality) || {{}};
+        return getStatisticsDEPayloadForMethod(getActiveStatisticsMethod('markers', modality, 'de'), modality) || {{}};
     }}
     function getPseudobulkDEPayloadForModality(modality = getPseudobulkPanelModality()) {{
-        return getModalityPayload('pseudobulk_de_by_modality', modality) || {{}};
+        return getStatisticsDEPayloadForMethod(getActiveStatisticsMethod('compare', modality, 'de'), modality) || {{}};
     }}
     function getPseudobulkPathwaySettingsForModality(modality = getPseudobulkPanelModality()) {{
         const root = DATA.pathway_settings_by_modality && typeof DATA.pathway_settings_by_modality === 'object'
@@ -7836,10 +7880,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             .filter((modality) => modalityHasPseudobulkDE(modality));
     }}
     function getExplorationMarkerFeaturesPayload(modality = getExplorationModality()) {{
-        return getModalityPayload('marker_features_by_modality', modality) || {{}};
+        return getMarkerFeaturesPayloadForMethod(getActiveStatisticsMethod('markers', modality, 'markers'), modality) || {{}};
     }}
     function getMarkerFeaturesPayloadForModality(modality = getExplorationModality()) {{
-        return getModalityPayload('marker_features_by_modality', modality) || {{}};
+        return getMarkerFeaturesPayloadForMethod(getActiveStatisticsMethod('markers', modality, 'markers'), modality) || {{}};
     }}
     function getInteractionMarkersPayloadForModality(modality = getInteractionsModality()) {{
         return getModalityPayload('interaction_markers_by_modality', modality) || {{}};
@@ -7868,7 +7912,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return current;
     }}
     function getExplorationCategoryFeatureMeansPayload(modality = getExplorationModality()) {{
-        return getModalityPayload('category_feature_means_by_modality', modality) || null;
+        return getCategoryFeatureMeansPayloadForMethod(getActiveStatisticsMethod('means', modality, 'means'), modality) || null;
     }}
     function getExplorationFeatureCorrelationsPayload(modality = getExplorationModality()) {{
         return getModalityPayload('feature_correlations_by_modality', modality) || {{}};
@@ -8418,20 +8462,50 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             body: 'Differential analysis uses one shared fit model across replicate and annotation, while statistical tests are calculated category-versus-category. Features not detected in a minimal percentage of cells in at least one category are removed from reported DE results. Model and statistical tests are calculated using DESeq2 and multiple testing correction is applied to the retained result features using your method of choice. The table values report log2 fold-change, p-values, adjusted p-values, DESeq2 score and rank, base_mean, and percent detected. Marker features are ordered by adjusted pvalue then log2FC.',
             formula: 'fit model: ~ replicate + annotation; reported feature filter: max(% detected in A, % detected in B) >= min_pct; statistical test: DESeq2 category A vs category B; padj: retained p-values adjusted with the selected correction method; marker order: padj ascending, then log2FC'
         }},
+        wilcoxon_marker_features: {{
+            title: 'Wilcoxon marker features',
+            body: 'Marker features are computed with cell-level Wilcoxon rank-sum tests for the selected annotation and focused modality. Category marker lists use category-versus-rest rankings; Simple design uses category-versus-category rankings for Annotation A and Annotation B. Features must pass the minimum detected-cell fraction and are reported after multiple-testing correction.',
+            formula: 'test: Wilcoxon rank-sum on normalized/log-transformed per-cell values; filter: max(% detected in A, % detected in B) >= min_pct; displayed features: padj < padj_cutoff and |log2FC| >= log2fc_cutoff'
+        }},
+        pseudobulk_marker_features: {{
+            title: 'Pseudobulk marker features',
+            body: 'Marker features are computed from replicate-level pseudobulk DESeq2 contrasts. Cells are summed by biological replicate and annotation category, one shared model is fit per annotation, and category-vs-rest or category-vs-category contrasts are extracted. Features shown as markers pass the minimum detected-cell fraction, adjusted p-value, and absolute log2FC thresholds.',
+            formula: 'model = ~ replicate + annotation; filter: max(% detected in A, % detected in B) >= min_pct; displayed features: padj < padj_cutoff and |log2FC| >= log2fc_cutoff'
+        }},
+        wilcoxon_simple_de_section: {{
+            title: 'Wilcoxon differential analysis',
+            body: 'This Simple design section is based on the selected cell-level Wilcoxon category-vs-category contrast. KaroSpace compares per-cell normalized/log-transformed feature values between Annotation A and Annotation B, applies the minimum detected-cell filter, then adjusts p-values across retained result features.',
+            formula: 'test: Wilcoxon rank-sum for Annotation A vs Annotation B; retained features: max(% detected cells in A, B) >= min_pct; DE features: padj < padj_cutoff and |log2FC| >= log2fc_cutoff'
+        }},
         pseudobulk_simple_de_section: {{
             title: 'Pseudobulk differential analysis',
             body: 'This section is based on the selected Simple design category-vs-category pseudobulk DESeq2 contrast. Cells are grouped by biological replicate and annotation, raw counts are summed into pseudobulk samples, and a shared DESeq2 model is fit for the annotation. The selected Annotation A and Annotation B are then extracted as a pairwise contrast. Features shown as DE pass the minimum percent-detected result filter, then pass the adjusted p-value and absolute log2FC thresholds.',
             formula: 'model = ~ replicate + annotation; retained features: max(% detected cells in A, B) >= min_pct after DESeq2 statistics; DE features: padj < padj_cutoff and |log2FC| >= log2fc_cutoff'
+        }},
+        wilcoxon_simple_de_table: {{
+            title: 'Wilcoxon feature table',
+            body: 'The table lists features from the selected Annotation A versus Annotation B Wilcoxon contrast that pass the current thresholds. Rows are sorted by adjusted p-value, then p-value and log2FC. Feature buttons are disabled only when that feature vector is not available in the HTML or sidecar.',
+            formula: 'displayed rows: padj < padj_cutoff and |log2FC| >= log2fc_cutoff; row direction/color follows sign(log2FC)'
         }},
         pseudobulk_simple_de_table: {{
             title: 'Differential feature table',
             body: 'The table lists features from the selected Annotation A versus Annotation B contrast that pass the current DE thresholds. Rows are sorted by adjusted p-value, then p-value and log2FC. Feature buttons are disabled only when that feature vector is not available in the HTML or sidecar.',
             formula: 'displayed rows: padj < padj_cutoff and |log2FC| >= log2fc_cutoff; row direction/color follows sign(log2FC)'
         }},
+        wilcoxon_ma_plot: {{
+            title: 'Wilcoxon MA plot',
+            body: 'The MA plot uses every feature returned for the selected Wilcoxon pairwise contrast. The x-axis is the mean feature value reported with the contrast and the y-axis is log2FC for Annotation A versus Annotation B. Red points have adjusted p-value below 0.1; grey points do not.',
+            formula: 'x = reported mean feature value; y = log2FC(A/B); red if padj < 0.1, grey if padj >= 0.1'
+        }},
         pseudobulk_ma_plot: {{
             title: 'MA plot',
             body: 'The MA plot uses every feature returned for the fitted pairwise contrast. The x-axis is DESeq2 baseMean and the y-axis is log2FC for Annotation A versus Annotation B. Red points have adjusted p-value below 0.1; grey points do not.',
             formula: 'x = baseMean; y = log2FC(A/B); red if padj < 0.1, grey if padj >= 0.1'
+        }},
+        wilcoxon_volcano_plot: {{
+            title: 'Wilcoxon volcano plot',
+            body: 'The volcano plot uses every feature returned for the selected Wilcoxon pairwise contrast. The x-axis is log2FC and the y-axis is -log10 adjusted p-value. Grey points fail either the adjusted p-value or log2FC threshold. Colored points pass both thresholds; positive log2FC is colored as Annotation A and negative log2FC is colored as Annotation B.',
+            formula: 'x = log2FC(A/B); y = -log10(padj); colored if padj < padj_cutoff and |log2FC| >= log2fc_cutoff'
         }},
         pseudobulk_volcano_plot: {{
             title: 'Volcano plot',
@@ -8508,6 +8582,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function renderCalcInfoButton(key, label = 'Calculation details') {{
         if (!CALC_INFO[key]) return '';
         return `<button class="calc-info-btn" type="button" data-calc-info="${{escapeHtml(key)}}" title="${{escapeHtml(label)}}" aria-label="${{escapeHtml(label)}}">!</button>`;
+    }}
+
+    function getAnalysisCalcInfoKey(method, subject) {{
+        const prefix = method === 'pseudobulk' ? 'pseudobulk' : 'wilcoxon';
+        if (subject === 'marker_features') return `${{prefix}}_marker_features`;
+        if (subject === 'simple_section') return `${{prefix}}_simple_de_section`;
+        if (subject === 'simple_table') return `${{prefix}}_simple_de_table`;
+        if (subject === 'ma_plot') return `${{prefix}}_ma_plot`;
+        if (subject === 'volcano_plot') return `${{prefix}}_volcano_plot`;
+        return 'de_features';
     }}
 
     function formatReproducibilityValue(value) {{
@@ -8646,6 +8730,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     let pseudobulkDeSourceCategory = null;
     let pseudobulkDeReferenceCategory = null;
     let pseudobulkDeResultMode = 'raw';
+    let statisticsMethodByPanel = {{
+        markers: 'wilcoxon',
+        means: 'wilcoxon',
+        compare: 'wilcoxon'
+    }};
     let clusterDETableExpanded = false;
     let pathwayEnrichmentMode = 'ora';
     let pathwayViewMode = 'plot';
@@ -9695,10 +9784,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'The section composition switch changes the same data between stacked bars and a heatmap.'
             ], {{ action: () => openTutorialInsightsPanel('overview', 'sections'), scrollDelay: 720, nextLabel: tryIt }}),
             step('Open Statistics > Features > Markers', '[data-insights-tree-leaf="de-features"][data-insights-tree-parent="features"]', [
-                'Open Statistics, then Visualization, then Features, then Markers to inspect exported pseudobulk marker features.'
+                'Open Statistics, then Visualization, then Features, then Markers to inspect exported marker features.'
             ], {{ action: () => openTutorialVisualizationLeafMenu('features', 'de-features'), task: 'Click Markers in the Features options.', nextLabel: tryIt }}),
             step('Features Markers panel', ['#marker-features', '#features-tab-de-features-content'], [
-                'The marker panel lists pseudobulk-derived marker features by category when available.',
+                'The marker panel lists Wilcoxon-derived marker features by category by default.',
                 'Features that were not embedded may be shown but disabled for direct feature-value viewing.'
             ], {{ action: () => openTutorialInsightsPanel('features', 'de-features'), nextLabel: tryIt }}),
             step('Features Markers view switch', '[data-feature-subtab-toggle="de-features"]', [
@@ -16097,8 +16186,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function scoreModalSelectionMarkerFeatures(section, selectedCellIndices) {{
         const typeSummary = getModalSelectionTypeSummary(section, selectedCellIndices);
         if (!typeSummary) return [];
-        const byColor = (DATA.marker_features || {{}})[typeSummary.annotationCol];
-        if (!byColor || typeof byColor !== 'object') return [];
 
         const ranked = new Map();
         typeSummary.entries.forEach((entry) => {{
@@ -17340,10 +17427,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function buildMarkerFeaturesCsv(annotationCol, modality = getExplorationModality()) {{
+        const method = getActiveStatisticsMethod('markers', modality, 'markers');
+        const payload = getStatisticsDEPayloadForMethod(method, modality);
         const pseudobulkKey = getPseudobulkDEColorKey(annotationCol, modality);
-        const byColor = getPseudobulkDEPayloadForModality(modality)[pseudobulkKey] || null;
+        const byColor = payload[pseudobulkKey] || payload[annotationCol] || null;
         if (!byColor || typeof byColor !== 'object') return '';
-        const rows = [['modality', 'annotation_column', 'category', 'reference', 'rank', 'feature', 'base_mean', 'log2fc', 'pvalue', 'padj', 'score', 'pct_source', 'pct_reference']];
+        const rows = [['method', 'modality', 'annotation_column', 'category', 'reference', 'rank', 'feature', 'base_mean', 'log2fc', 'pvalue', 'padj', 'score', 'pct_source', 'pct_reference']];
         Object.entries(byColor).forEach(([sourceCategory, bucket]) => {{
             if (String(sourceCategory).startsWith('_') || !bucket || typeof bucket !== 'object') return;
             const comparisons = bucket.__rest__
@@ -17353,6 +17442,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const entries = getPseudobulkDETableEntries(result);
                 entries.forEach((entry, idx) => {{
                     rows.push([
+                        method,
                         modality,
                         annotationCol,
                         sourceCategory,
@@ -17379,7 +17469,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function exportMarkerFeaturesCsv(annotationCol = currentAnnotation, modality = getExplorationModality()) {{
         const csvText = buildMarkerFeaturesCsv(annotationCol, modality);
         if (!csvText) {{
-            alert('No pseudobulk DE features are available for this annotation to export.');
+            alert('No marker features are available for this annotation to export.');
             return;
         }}
         const colorLabel = sanitizeFilenamePart(annotationCol || 'color');
@@ -19606,38 +19696,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             && Object.keys(groups).some((key) => !String(key).startsWith('_')));
     }}
 
-    function getPseudobulkDEMethodBadge(annotationCol, modality = getPseudobulkPanelModality()) {{
-        // Distinguish a true DESeq2 pseudobulk fit (>=2 biological replicates)
-        // from the single-sample Welch fallback so the descriptive marker
-        // ranking is never misread as a formal DESeq2 result. Discriminator is
-        // written into _summary.category_feature_means.source by pseudobulk.py.
-        if (!annotationCol || !hasPseudobulkDEForAnnotation(annotationCol, modality)) return '';
-        const key = getPseudobulkDEColorKey(annotationCol, modality);
-        const groups = getPseudobulkDEPayloadForModality(modality)[key] || {{}};
-        const summary = groups._summary || {{}};
-        const source = String(
-            (summary.category_feature_means && summary.category_feature_means.source)
-            || summary.source
-            || ''
-        );
-        if (source.indexOf('cell_welch') === 0) {{
-            return '<span class="de-method-badge de-method-welch" title="Single-sample data (fewer than 2 biological replicates): per-cluster markers were computed with a Welch t-test, treating each cell as a replicate and testing each category vs the rest. This is a descriptive marker ranking, NOT a DESeq2 pseudobulk result — p-values are anti-conservative (pseudoreplication). Use for marker discovery, not formal inference.">Cluster markers &middot; Welch <span class="de-method-badge-note">(single-sample, descriptive)</span></span>';
-        }}
-        if (source.indexOf('companion') === 0) {{
-            const isWilcoxon = source.indexOf('wilcoxon') !== -1;
-            const methodLabel = isWilcoxon ? 'Wilcoxon' : 't-test';
-            return '<span class="de-method-badge de-method-welch" title="Precomputed by KaroSpaceCompanion: per-cluster markers from a cell-level ' + methodLabel + ' (each cell treated as a replicate, category vs category). This is a descriptive marker ranking, NOT a DESeq2 pseudobulk result — use for marker discovery, not formal inference.">Cluster markers &middot; ' + methodLabel + ' <span class="de-method-badge-note">(cell-level, descriptive)</span></span>';
-        }}
-        return '<span class="de-method-badge de-method-deseq2" title="Pseudobulk differential expression: cells summed into per-replicate pseudobulk samples and fit with DESeq2 (~ replicate + annotation), then evaluated as a category-vs-category contrast.">Pseudobulk DE &middot; DESeq2</span>';
-    }}
-
     function renderPseudobulkDEWarning(annotationCol, modality = getExplorationModality()) {{
         if (!annotationCol || hasPseudobulkDEForAnnotation(annotationCol, modality)) return '';
         const availableColors = getAvailablePseudobulkDEColors(modality);
         const chips = availableColors.length
             ? availableColors.map((color) => renderAggChip(formatMetadataLabel(color), 'color-mix(in srgb, #e2a400 18%, #ffffff)')).join('')
             : renderAggChip('none', 'color-mix(in srgb, #e2a400 18%, #ffffff)');
-        return `<div class="features-warning">No pseudobulk DE features available for this annotation in ${{escapeHtml(getModalityDisplayLabel(modality))}}.<br>Available DE for: ${{chips}}</div>`;
+        return `<div class="features-warning">No marker statistics are available for this annotation in ${{escapeHtml(getModalityDisplayLabel(modality))}}.<br>Available statistics for: ${{chips}}</div>`;
     }}
 
     function renderFeaturesDetailsWarnings() {{
@@ -19872,7 +19937,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!config || config.is_continuous) {{
             return {{
                 title: 'Suggestions unavailable',
-                subtitle: 'Switch to a categorical annotation to use pseudobulk DE feature suggestions.',
+            subtitle: 'Switch to a categorical annotation to use marker feature suggestions.',
                 groups: [],
                 hiddenCount: 0,
             }};
@@ -19886,7 +19951,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 : ` No ${{getModalityDisplayLabel(modality)}} marker features are embedded in this viewer.`;
             return {{
                 title: `Suggested from ${{formatMetadataLabel(currentAnnotation)}}`,
-                subtitle: `No pseudobulk DE features are available for the active color.${{availableLabel}}`,
+                subtitle: `No marker features are available for the active color.${{availableLabel}}`,
                 groups: [],
                 hiddenCount: 0,
             }};
@@ -19906,7 +19971,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         return {{
             title: `Suggested from ${{formatMetadataLabel(currentAnnotation)}}`,
-            subtitle: groups.length ? '' : 'No pseudobulk DE features are available for the active color.',
+            subtitle: groups.length ? '' : 'No marker features are available for the active color.',
             groups: groups.slice(0, FEATURE_DISCOVERY_SUGGESTION_GROUP_LIMIT),
             hiddenCount: Math.max(0, groups.length - FEATURE_DISCOVERY_SUGGESTION_GROUP_LIMIT),
         }};
@@ -25176,7 +25241,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 </div>
             `;
         }} else if (!deResult.available && deResult.reason === 'no_loaded_features') {{
-            resultHtml = '<div class="agg-group-meta">No features are currently loaded for region DE. Load features in the Features tab or click pseudobulk DE features first.</div>';
+            resultHtml = '<div class="agg-group-meta">No features are currently loaded for region DE. Load features in the Features tab or click marker features first.</div>';
         }} else if (!deResult.available) {{
             resultHtml = '<div class="agg-group-meta">Choose two different regions to compare.</div>';
         }} else if (!displayedQuickResults.length) {{
@@ -25816,7 +25881,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <div class="insights-panel-section" id="features-search-section">
                         <label for="marker-feature-search">Search</label>
                         <div class="marker-feature-search-wrap">
-                            <input class="marker-search" id="marker-feature-search" type="text" list="marker-feature-search-list" placeholder="All features" autocomplete="off" spellcheck="false" aria-label="Search pseudobulk features">
+                            <input class="marker-search" id="marker-feature-search" type="text" list="marker-feature-search-list" placeholder="All features" autocomplete="off" spellcheck="false" aria-label="Search marker features">
                             <datalist id="marker-feature-search-list">${{renderInsightsFeatureSearchDatalistOptions()}}</datalist>
                             <button class="marker-feature-clear-btn" id="marker-feature-search-clear" type="button" title="Clear selected feature" aria-label="Clear selected feature">&times;</button>
                         </div>
@@ -25824,8 +25889,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <div class="insights-tab-content active" id="features-tab-de-features-content">
                         <div class="samples-view-toggle feature-subtab-view-toggle" data-feature-subtab-toggle="de-features"></div>
                         <div class="feature-subtab-action-row" id="marker-features-action-row">
-                            <button class="selection-summary-compare-btn icon-only" type="button" id="marker-features-export-btn" title="Download pseudobulk DE features CSV" aria-label="Download pseudobulk DE features CSV">${{LEGEND_EXPORT_ICON}}</button>
-                            <span id="marker-features-calc-info">${{renderCalcInfoButton('de_features')}}</span>
+                            <button class="selection-summary-compare-btn icon-only" type="button" id="marker-features-export-btn" title="Download marker features CSV" aria-label="Download marker features CSV">${{LEGEND_EXPORT_ICON}}</button>
+                            <span id="marker-features-calc-info">${{renderCalcInfoButton('wilcoxon_marker_features')}}</span>
                         </div>
                         <div class="marker-features" id="marker-features"></div>
                     </div>
@@ -26394,6 +26459,26 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         updateSelectionInfo();
         renderFeatureDiscoveryPanel();
         renderActiveInsightsPanel();
+    }}
+
+    function toggleAnnotationCategorySpotlight(annotationCol, category) {{
+        const col = String(annotationCol || '');
+        const cat = String(category ?? '');
+        if (!col || !cat) return false;
+        const onThisAnnotation = !currentFeature && currentAnnotation === col;
+        const alreadySpotlit = linkedSpotlightEnabled
+            && spotlightPinnedCategory === cat
+            && onThisAnnotation;
+        if (!alreadySpotlit && !onThisAnnotation) {{
+            setViewerColorColumn(col);
+        }}
+        linkedSpotlightEnabled = true;
+        neighborNetworkFocusCategories = null;
+        spotlightPinnedCategory = alreadySpotlit ? null : cat;
+        spotlightHoverCategory = null;
+        updateAllLegendSpotlightClasses();
+        rerenderForSpotlightChange();
+        return !alreadySpotlit;
     }}
 
     function getRiverColumns() {{
@@ -27439,16 +27524,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const calcInfo = document.getElementById('marker-features-calc-info');
         const selectedFeature = getInsightsSelectedFeature();
         const modality = getExplorationModality();
+        const activeMarkerMethod = getActiveStatisticsMethod('markers', modality, 'markers');
+        const methodSelectHtml = renderStatisticsMethodSelect('markers', modality, 'markers');
         const markers = getExplorationMarkerFeaturesPayload(modality);
         const viewMode = getFeatureSubtabView(subtab);
-        if (calcInfo) calcInfo.innerHTML = renderCalcInfoButton(viewMode === 'graph' ? 'de_heatmap' : 'de_features');
+        if (calcInfo) calcInfo.innerHTML = renderCalcInfoButton(viewMode === 'graph' ? 'de_heatmap' : getAnalysisCalcInfoKey(activeMarkerMethod, 'marker_features'));
         renderFeaturesDetailsWarnings();
 
         const markerColorCol = explorationColorCol || currentAnnotation;
         const annotationMeta = DATA.annotations_meta?.[markerColorCol];
         if (!annotationMeta || annotationMeta.is_continuous) {{
             if (exportBtn) exportBtn.disabled = true;
-            container.innerHTML = toggleHtml + '<div class="marker-empty">Pseudobulk DE features are available for categorical annotations only.</div>';
+            container.innerHTML = methodSelectHtml + toggleHtml + '<div class="marker-empty">Marker features are available for categorical annotations only.</div>';
+            bindStatisticsMethodSelects(container, renderMarkerFeatures);
             bindFeatureSubtabViewToggle(container, subtab, renderMarkerFeatures);
             return;
         }}
@@ -27459,7 +27547,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const groupMarkers = markers[markerColorCol] || markers[markerPseudobulkKey] || {{}};
         if (!hasDEForColor) {{
             if (exportBtn) exportBtn.disabled = true;
-            container.innerHTML = '';
+            container.innerHTML = methodSelectHtml;
+            bindStatisticsMethodSelects(container, renderMarkerFeatures);
             return;
         }}
         if (exportBtn) {{
@@ -27488,7 +27577,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const heatmapControls = selectedFeature
                 ? ''
                 : `<div class="marker-heatmap-controls"><label for="marker-heatmap-topn">Top N features per category</label><input id="marker-heatmap-topn" type="number" min="1" max="10000" step="1" value="${{Math.max(1, Math.min(10000, Number(markerHeatmapTopN) || 3))}}" aria-label="Top N marker features per category to display"></div>`;
-            container.innerHTML = heatmapControls + toggleHtml + buildFeatureDEHeatmap(heatmapData, markerColorCol);
+            container.innerHTML = methodSelectHtml + heatmapControls + toggleHtml + buildFeatureDEHeatmap(heatmapData, markerColorCol);
+            bindStatisticsMethodSelects(container, renderMarkerFeatures);
             bindFeatureSubtabViewToggle(container, subtab, renderMarkerFeatures);
             bindPseudobulkDEPlotInteractions(container, renderMarkerFeatures);
             container.querySelector('#marker-heatmap-topn')?.addEventListener('change', () => {{
@@ -27529,11 +27619,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         modality,
                         showMeta: false,
                         title: loadable
-                            ? 'Load pseudobulk DE feature into the viewer'
+                            ? 'Load marker feature into the viewer'
                             : 'This category-vs-balanced-rest feature is not available for feature-value viewing',
                     }});
                 }}).join('')}}</div>`
-                : '<div class="marker-empty">No pseudobulk DE features found.</div>';
+                : '<div class="marker-empty">No marker features found.</div>';
             const isSpotlit = linkedSpotlightEnabled && spotlightPinnedCategory === key;
             return `
                 <div class="marker-group">
@@ -27545,12 +27635,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         if (rows.length === 0) {{
             if (exportBtn) exportBtn.disabled = false;
-            container.innerHTML = toggleHtml + '<div class="marker-empty">No pseudobulk DE features match your selection.</div>';
+            container.innerHTML = methodSelectHtml + toggleHtml + '<div class="marker-empty">No marker features match your selection.</div>';
+            bindStatisticsMethodSelects(container, renderMarkerFeatures);
             bindFeatureSubtabViewToggle(container, subtab, renderMarkerFeatures);
             return;
         }}
 
-        container.innerHTML = toggleHtml + rows.join('');
+        container.innerHTML = methodSelectHtml + toggleHtml + rows.join('');
+        bindStatisticsMethodSelects(container, renderMarkerFeatures);
         bindFeatureSubtabViewToggle(container, subtab, renderMarkerFeatures);
         bindFeatureActivateButtons(container, renderMarkerFeatures);
 
@@ -27558,26 +27650,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             title.addEventListener('click', (event) => {{
                 const cat = title.getAttribute('data-marker-category');
                 if (!cat) return;
-                // The spotlight is validated against getColorConfig().categories,
-                // which follows the map's active coloring (currentAnnotation, or a
-                // continuous feature scale when currentFeature is set). If the map is
-                // showing a feature or a different annotation than this markers panel,
-                // a pinned category from here would be silently rejected. So bring
-                // the map onto this marker annotation (dropping any active feature)
-                // first, then toggle the category spotlight.
-                const onThisAnnotation = !currentFeature && currentAnnotation === markerColorCol;
-                const alreadySpotlit = linkedSpotlightEnabled
-                    && spotlightPinnedCategory === cat
-                    && onThisAnnotation;
-                if (!alreadySpotlit && !onThisAnnotation) {{
-                    setViewerColorColumn(markerColorCol);
-                }}
-                linkedSpotlightEnabled = true;
-                neighborNetworkFocusCategories = null;
-                spotlightPinnedCategory = alreadySpotlit ? null : cat;
-                spotlightHoverCategory = null;
-                updateAllLegendSpotlightClasses();
-                rerenderForSpotlightChange();
+                toggleAnnotationCategorySpotlight(markerColorCol, cat);
                 renderMarkerFeatures();
             }});
         }});
@@ -28006,8 +28079,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }}
 
     function getPseudobulkFeatureMeansPayload(annotationCol, modality = getExplorationModality()) {{
+        const method = getActiveStatisticsMethod('means', modality, 'means');
+        const methodPayload = getStatisticsDEPayloadForMethod(method, modality);
         const pseudobulkKey = getPseudobulkDEColorKey(annotationCol, modality);
-        const summary = getExplorationPseudobulkDEPayload(modality)[pseudobulkKey]?._summary?.category_feature_means;
+        const summary = methodPayload[pseudobulkKey]?._summary?.category_feature_means;
         const summaryFeatures = Array.isArray(summary?.features) ? summary.features.map(feature => String(feature)) : [];
         if (summaryFeatures.length && summary?.means) {{
             return {{
@@ -28034,9 +28109,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const selectedCol = explorationColorCol || currentAnnotation || '';
         const featureRaw = getInsightsSelectedFeature();
         const modality = getExplorationModality();
-        if (!hasPseudobulkDEForAnnotation(selectedCol, modality) || !featureRaw) {{
+        const methodSelectHtml = renderStatisticsMethodSelect('means', modality, 'means');
+        if (!getStatisticsMethodOptions(modality, 'means').length || !featureRaw) {{
             setInsightsFeatureSubtabContentVisibility(subtab, false);
-            container.innerHTML = '';
+            container.innerHTML = methodSelectHtml;
+            bindStatisticsMethodSelects(container, renderPseudobulkFeatureMeans);
             return;
         }}
         setInsightsFeatureSubtabContentVisibility(subtab, true);
@@ -28055,13 +28132,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         const payload = getPseudobulkFeatureMeansPayload(selectedCol, modality);
         if (!payload) {{
-            container.innerHTML = toggleHtml + '<div class="marker-empty">No pseudobulk-derived category means are available.</div>';
+            container.innerHTML = methodSelectHtml + toggleHtml + '<div class="marker-empty">No category means are available.</div>';
+            bindStatisticsMethodSelects(container, renderPseudobulkFeatureMeans);
             bindFeatureSubtabViewToggle(container, subtab, renderPseudobulkFeatureMeans);
             return;
         }}
         const features = payload.features;
         if (!features.includes(featureRaw)) {{
-            container.innerHTML = toggleHtml + '<div class="marker-empty">No pseudobulk-derived category means are available for the selected feature.</div>';
+            container.innerHTML = methodSelectHtml + toggleHtml + '<div class="marker-empty">No category means are available for the selected feature.</div>';
+            bindStatisticsMethodSelects(container, renderPseudobulkFeatureMeans);
             bindFeatureSubtabViewToggle(container, subtab, renderPseudobulkFeatureMeans);
             return;
         }}
@@ -28100,8 +28179,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             `;
         }}).join('');
 
+        const methodLabel = getActiveStatisticsMethod('means', modality, 'means') === 'pseudobulk' ? 'Pseudobulk-derived' : 'Wilcoxon marker';
         const listHtml = `
-            <div class="feature-distribution-summary">Pseudobulk-derived category means for <strong>${{escapeHtml(selectedFeature)}}</strong> in ${{escapeHtml(getModalityDisplayLabel(modality))}}. Background mean: ${{Number.isFinite(background) ? background.toFixed(4) : 'n/a'}}.</div>
+            <div class="feature-distribution-summary">${{methodLabel}} category means for <strong>${{escapeHtml(selectedFeature)}}</strong> in ${{escapeHtml(getModalityDisplayLabel(modality))}}. Background mean: ${{Number.isFinite(background) ? background.toFixed(4) : 'n/a'}}.</div>
             <table class="feature-distribution-table">
                 <thead>
                     <tr><th>Category</th><th>Mean</th><th>Cells</th></tr>
@@ -28110,10 +28190,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             </table>
         `;
         const graphHtml = `
-            <div class="feature-distribution-summary">Pseudobulk-derived category means for <strong>${{escapeHtml(selectedFeature)}}</strong> in ${{escapeHtml(getModalityDisplayLabel(modality))}}. Background mean: ${{Number.isFinite(background) ? background.toFixed(4) : 'n/a'}}.</div>
+            <div class="feature-distribution-summary">${{methodLabel}} category means for <strong>${{escapeHtml(selectedFeature)}}</strong> in ${{escapeHtml(getModalityDisplayLabel(modality))}}. Background mean: ${{Number.isFinite(background) ? background.toFixed(4) : 'n/a'}}.</div>
             ${{buildPseudobulkMeanDeviationPlot(meanRows, background, selectedCol)}}
         `;
-        container.innerHTML = toggleHtml + (isGraphView ? graphHtml : listHtml);
+        container.innerHTML = methodSelectHtml + toggleHtml + (isGraphView ? graphHtml : listHtml);
+        bindStatisticsMethodSelects(container, renderPseudobulkFeatureMeans);
         bindFeatureSubtabViewToggle(container, subtab, renderPseudobulkFeatureMeans);
 
         container.querySelectorAll('[data-pseudobulk-mean-category]').forEach((row) => {{
@@ -28323,12 +28404,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const expanded = !!clusterDEMarkerExpanded[key];
             const visibleEntries = expanded ? entries : entries.slice(0, 30);
             const remaining = Math.max(0, entries.length - visibleEntries.length);
+            const isSpotlit = linkedSpotlightEnabled && spotlightPinnedCategory === String(enrichedCategory ?? '');
             const link = entries.length > 30
                 ? `<button type="button" class="pseudobulk-de-more-link" data-pseudobulk-de-marker-more="${{escapeHtml(key)}}">${{expanded ? 'Hide extra features' : `Show more (${{remaining.toLocaleString()}})`}}</button>`
                 : '';
             return `
             <div class="agg-group">
-                <div class="agg-group-title">
+                <div class="agg-group-title comparison-marker-title${{isSpotlit ? ' is-spotlit' : ''}}" data-pseudobulk-de-marker-annotation="${{escapeHtml(annotationCol)}}" data-pseudobulk-de-marker-category="${{escapeHtml(enrichedCategory)}}" title="Click to color the map by this annotation and highlight this cluster">
                     <span class="agg-group-title-main">${{renderAggCategoryChip(annotationCol, enrichedCategory)}}</span>
                     <span class="agg-group-title-actions"><span class="agg-chip agg-count-chip">${{entries.length.toLocaleString()}} features</span></span>
                 </div>
@@ -28485,19 +28567,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         `;
     }}
 
-    function wrapPseudobulkDEVolcanoPlot(volcanoHtml) {{
+    function wrapPseudobulkDEVolcanoPlot(volcanoHtml, calcInfoKey = 'pseudobulk_volcano_plot') {{
         if (!volcanoHtml) return '';
         const exportButton = `<button class="icon-btn pseudobulk-de-plot-export" type="button" data-pseudobulk-de-download-plot="volcano" title="Download volcano as SVG" aria-label="Download volcano as SVG">${{LEGEND_EXPORT_ICON}}</button>`;
         return `
             <div class="pseudobulk-de-plot-panel pseudobulk-de-volcano-panel" data-pseudobulk-de-plot="volcano">
-                <div class="pseudobulk-de-figure-title"><span>Volcano</span>${{renderCalcInfoButton('pseudobulk_volcano_plot')}}</div>
+                <div class="pseudobulk-de-figure-title"><span>Volcano</span>${{renderCalcInfoButton(calcInfoKey)}}</div>
                 <div class="pseudobulk-de-volcano-container">${{volcanoHtml}}</div>
                 <div class="pseudobulk-de-plot-actions">${{exportButton}}</div>
             </div>
         `;
     }}
 
-    function buildMAPlot(features, baseMean, log2fc, pvals, pvalsAdj, pctSource = [], pctReference = [], minPctCutoff = 0, padjCutoff = 0.05, log2fcCutoff = 0.5, annotationCol = null, sourceCategory = null, referenceCategory = null, modality = getPseudobulkPanelModality()) {{
+    function buildMAPlot(features, baseMean, log2fc, pvals, pvalsAdj, pctSource = [], pctReference = [], minPctCutoff = 0, padjCutoff = 0.05, log2fcCutoff = 0.5, annotationCol = null, sourceCategory = null, referenceCategory = null, modality = getPseudobulkPanelModality(), calcInfoKey = 'pseudobulk_ma_plot') {{
         if (!features.length) return '';
         const maPadjThreshold = 0.1;
         const W = 390, H = 180, ml = 38, mr = 10, mt = 8, mb = 24;
@@ -28559,7 +28641,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             buildPseudobulkDESummaryItem('adj. p < 0.1', '#d94f4f', counts.red),
             '</div>',
         ].join('');
-        return wrapPseudobulkDEPlot('MA Plot', 'Mean feature value vs log\u2082FC; adjusted p-value controls coloring', parts.join('') + summary, true, 'ma-plot', 'pseudobulk_ma_plot');
+        return wrapPseudobulkDEPlot('MA Plot', 'Mean feature value vs log\u2082FC; adjusted p-value controls coloring', parts.join('') + summary, true, 'ma-plot', calcInfoKey);
     }}
 
     function buildPseudobulkPCAPlot(sampleInfo, annotationCol) {{
@@ -29076,7 +29158,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         );
         const entries = getPseudobulkDETableEntries(result);
         if (!entries.length) {{
-            alert('No pseudobulk DE features are available for this comparison.');
+            alert('No differential features are available for this comparison.');
             return;
         }}
         const stem = getPseudobulkDEFilenameStem();
@@ -29694,6 +29776,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function renderPseudobulkDEResultSection(annotationCol, sourceCategory, referenceCategory, modality = getPseudobulkPanelModality()) {{
         const result = getPairwisePseudobulkDEResult(annotationCol, sourceCategory, referenceCategory, modality);
+        const activeMethod = getActiveStatisticsMethod('compare', modality, 'de');
+        const activeMethodLabel = activeMethod === 'pseudobulk' ? 'Pseudobulk DE' : 'Wilcoxon';
+        const tableCalcInfoKey = getAnalysisCalcInfoKey(activeMethod, 'simple_table');
+        const maCalcInfoKey = getAnalysisCalcInfoKey(activeMethod, 'ma_plot');
+        const volcanoCalcInfoKey = getAnalysisCalcInfoKey(activeMethod, 'volcano_plot');
         if (!result) {{
             return '';
         }}
@@ -29713,7 +29800,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
             return `
                 <div class="agg-group">
-                    <div class="agg-group-title">Pseudobulk DE</div>
+                    <div class="agg-group-title">${{activeMethodLabel}}</div>
                     <div class="agg-group-meta">${{escapeHtml(detail)}}</div>
                 </div>
             `;
@@ -29736,8 +29823,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!features.length) {{
             return `
                 <div class="agg-group">
-                    <div class="agg-group-title">Pseudobulk DE</div>
-                    <div class="agg-group-meta">No pseudobulk DE features were returned for this comparison.</div>
+                    <div class="agg-group-title">${{activeMethodLabel}}</div>
+                    <div class="agg-group-meta">No differential features were returned for this comparison.</div>
                 </div>
             `;
         }}
@@ -29805,7 +29892,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const tablePanel = `
             <div class="pseudobulk-de-plot-panel pseudobulk-de-table-panel">
                 <div class="pseudobulk-de-figure-title">
-                    <span>Differential Feature Table</span>${{renderCalcInfoButton('pseudobulk_simple_de_table')}}
+                    <span>Differential Feature Table</span>${{renderCalcInfoButton(tableCalcInfoKey)}}
                 </div>
                 ${{tableHtml}}
                 <div class="pseudobulk-de-table-actions">
@@ -29815,20 +29902,21 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             </div>
         `;
         const featurePanels = [
-            buildMAPlot(features, baseMean, log2fc, pvals, pvalsAdj, pctSource, pctReference, minPctCutoff, padjCutoff, log2fcCutoff, annotationCol, sourceCategory, referenceCategory, modality),
-            wrapPseudobulkDEVolcanoPlot(volcanoHtml),
+            buildMAPlot(features, baseMean, log2fc, pvals, pvalsAdj, pctSource, pctReference, minPctCutoff, padjCutoff, log2fcCutoff, annotationCol, sourceCategory, referenceCategory, modality, maCalcInfoKey),
+            wrapPseudobulkDEVolcanoPlot(volcanoHtml, volcanoCalcInfoKey),
         ].filter(Boolean).join('');
-        const samplePanels = [
+        const includeSampleMode = getActiveStatisticsMethod('compare', modality, 'de') === 'pseudobulk';
+        const samplePanels = includeSampleMode ? [
             buildPseudobulkPCAPlot(sampleInfo, annotationCol),
             buildPseudobulkDistanceHeatmap(sampleInfo, annotationCol),
-        ].filter(Boolean).join('');
-        if (!['raw', 'features', 'samples'].includes(pseudobulkDeResultMode)) pseudobulkDeResultMode = 'raw';
+        ].filter(Boolean).join('') : '';
+        if (!['raw', 'features', 'samples'].includes(pseudobulkDeResultMode) || (!includeSampleMode && pseudobulkDeResultMode === 'samples')) pseudobulkDeResultMode = 'raw';
         const modeButton = (mode, label) => `<button type="button" class="legend-btn${{pseudobulkDeResultMode === mode ? ' active' : ''}}" data-pseudobulk-de-result-mode="${{mode}}">${{escapeHtml(label)}}</button>`;
         const modeSwitch = `
             <div class="pseudobulk-de-panel-mode-switch" role="group" aria-label="Pseudobulk DE result view">
                 ${{modeButton('raw', 'Raw table')}}
                 ${{modeButton('features', 'Features')}}
-                ${{modeButton('samples', 'Samples')}}
+                ${{includeSampleMode ? modeButton('samples', 'Samples') : ''}}
             </div>
         `;
         const diagnosticPlots = `
@@ -29838,9 +29926,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             <div class="pseudobulk-de-mode-panel" data-pseudobulk-de-mode-panel="features"${{pseudobulkDeResultMode === 'features' ? '' : ' hidden'}}>
                 <div class="pseudobulk-de-plot-grid">${{featurePanels || '<div class="agg-group-meta">No feature-level plots are available.</div>'}}</div>
             </div>
-            <div class="pseudobulk-de-mode-panel" data-pseudobulk-de-mode-panel="samples"${{pseudobulkDeResultMode === 'samples' ? '' : ' hidden'}}>
+            ${{includeSampleMode ? `<div class="pseudobulk-de-mode-panel" data-pseudobulk-de-mode-panel="samples"${{pseudobulkDeResultMode === 'samples' ? '' : ' hidden'}}>
                 <div class="pseudobulk-de-plot-grid">${{samplePanels || '<div class="agg-group-meta">No pseudobulk sample diagnostics are available.</div>'}}</div>
-            </div>
+            </div>` : ''}}
         `;
 
         return `
@@ -29917,6 +30005,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!container) return;
 
         const {{ availableGroupbys, categories, modality }} = syncPseudobulkDEControls();
+        const activeMethod = getActiveStatisticsMethod('compare', modality, 'de');
+        const methodSelectHtml = renderStatisticsMethodSelect('compare', modality, 'de');
+        const activeMethodLabel = activeMethod === 'pseudobulk' ? 'Pseudobulk DESeq2' : 'Wilcoxon';
         const selectedAnnotation = pseudobulkDeGroupby && availableGroupbys.includes(pseudobulkDeGroupby)
             ? pseudobulkDeGroupby
             : null;
@@ -29928,7 +30019,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     'color-mix(in srgb, #eab308 18%, var(--input-bg))'
                 )).join('')
                 : renderAggChip('none', 'color-mix(in srgb, #eab308 18%, var(--input-bg))');
-            container.innerHTML = `<div class="pseudobulk-comparison-warning"><strong>Pseudobulk warning.</strong> No pseudobulk DE result is available for this comparison in ${{escapeHtml(getModalityDisplayLabel(modality))}}.<br>Available comparison: ${{comparisonChips}}</div>`;
+            container.innerHTML = `${{methodSelectHtml}}<div class="pseudobulk-comparison-warning"><strong>Statistics warning.</strong> No ${{escapeHtml(activeMethodLabel)}} result is available for this comparison in ${{escapeHtml(getModalityDisplayLabel(modality))}}.<br>Available comparison: ${{comparisonChips}}</div>`;
+            bindStatisticsMethodSelects(container, renderPseudobulkDE);
             return;
         }}
         if (!pseudobulkDeGroupby) {{
@@ -29987,6 +30079,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const conditionMetadata = formatMetadataLabel(pseudobulkDeGroupby);
         const modelFormula = String(contrastResult?.model_formula || `~ ${{replicateMetadata}} + ${{conditionMetadata}}`);
         const pseudobulkSettings = DATA.pseudobulk_settings || {{}};
+        const wilcoxonSettings = DATA.wilcoxon_settings || {{}};
         const minReplicates = Math.max(1, Number(
             contrastResult?.min_replicates_required ?? pseudobulkSettings.min_replicates ?? 2
         ) || 2);
@@ -30017,7 +30110,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             contrastResult?.log2fc_cutoff ?? pseudobulkSettings.log2fc_cutoff,
             0.5
         );
-        const contrastInfo = `
+        const contrastInfo = activeMethod === 'pseudobulk' ? `
             <div class="comparison-info-warning"><strong>Warning.</strong> If annotations were defined from the same feature patterns being tested here, DE results can be inflated by double dipping. Interpret these marker features as exploratory unless the annotations were defined independently or validated on independent data.</div>
             <div class="comparison-info">
                 <strong>DESeq2 contrast.</strong> Model: ${{escapeHtml(modelFormula)}}.
@@ -30030,6 +30123,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 </div>
             </div>
             ${{minPct > 0 ? `<div class="comparison-info-warning"><strong>Warning.</strong> Features detected in less than ${{formatScaleNumber(100 * minPct)}}% of cells in both selected annotations are removed before DESeq2 statistical testing.${{minPctRemovalCountText}}</div>` : ''}}
+        ` : `
+            <div class="comparison-info-warning"><strong>Warning.</strong> If annotations were defined from the same feature patterns being tested here, marker statistics can be inflated by double dipping. Interpret these Wilcoxon marker features as exploratory unless the annotations were defined independently or validated on independent data.</div>
+            <div class="comparison-info">
+                <strong>Wilcoxon contrast.</strong> Cell-level rank-sum comparison for ${{escapeHtml(conditionMetadata)}}.
+                <div class="comparison-info-settings">
+                    <span><code>--wilcoxon-min-cells-per-group</code> ≥ ${{Number(wilcoxonSettings.min_cells_per_group ?? 20).toLocaleString()}}</span>
+                    <span><code>--wilcoxon-p-adjust-method</code> = ${{escapeHtml(String(contrastResult?.p_adjust_method || wilcoxonSettings.p_adjust_method || 'fdr_bh'))}}</span>
+                    <span><code>--wilcoxon-min-pct-expressed</code> ≥ ${{formatScaleNumber(100 * Number(contrastResult?.min_pct_expressed ?? wilcoxonSettings.min_pct_expressed ?? 0))}}%</span>
+                    <span><code>--wilcoxon-padj-cutoff</code> &lt; ${{formatScaleNumber(padjCutoff)}}</span>
+                    <span><code>--wilcoxon-log2fc-cutoff</code> |log₂FC| ≥ ${{formatScaleNumber(log2fcCutoff)}}</span>
+                </div>
+            </div>
         `;
 
         const markerSummary = renderComparisonMarkerSummary(
@@ -30038,24 +30143,28 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             pseudobulkDeReferenceCategory,
             modality
         );
+        const markerCalcInfoKey = getAnalysisCalcInfoKey(activeMethod, 'marker_features');
+        const sectionCalcInfoKey = getAnalysisCalcInfoKey(activeMethod, 'simple_section');
         const markerSection = markerSummary
-            ? `<div class="selection-summary-title">Pseudobulk marker features${{renderCalcInfoButton('de_features')}}</div>${{markerSummary}}`
+            ? `<div class="selection-summary-title">${{activeMethodLabel}} marker features${{renderCalcInfoButton(markerCalcInfoKey)}}</div>${{markerSummary}}`
             : '';
-        const pathwaySection = renderClusterPAResultSection(
+        const pathwaySection = activeMethod === 'pseudobulk' ? renderClusterPAResultSection(
             pseudobulkDeGroupby,
             pseudobulkDeSourceCategory,
             pseudobulkDeReferenceCategory,
             modality
-        );
+        ) : '';
 
         container.innerHTML = `
+            ${{methodSelectHtml}}
             ${{controlsHtml}}
             ${{contrastInfo}}
             ${{markerSection}}
-            <div class="selection-summary-title" id="pseudobulk-de-section-title">Pseudobulk feature differential analysis${{renderCalcInfoButton('de_features')}}${{getPseudobulkDEMethodBadge(pseudobulkDeGroupby, modality)}}</div>
+            <div class="selection-summary-title" id="pseudobulk-de-section-title">${{activeMethod === 'pseudobulk' ? 'Pseudobulk' : 'Wilcoxon'}} feature differential analysis${{renderCalcInfoButton(sectionCalcInfoKey)}}</div>
             ${{renderPseudobulkDEResultSection(pseudobulkDeGroupby, pseudobulkDeSourceCategory, pseudobulkDeReferenceCategory, modality)}}
             ${{pathwaySection ? '<div class="selection-summary-title" id="pathway-enrichment-title">Pathway Enrichment' + renderCalcInfoButton('pathway_enrichment_section') + '</div>' + pathwaySection : ''}}
         `;
+        bindStatisticsMethodSelects(container, renderPseudobulkDE);
 
         const sourceSelect = container.querySelector('#pseudobulk-de-source');
         const referenceSelect = container.querySelector('#pseudobulk-de-reference');
@@ -30101,6 +30210,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const key = button.getAttribute('data-pseudobulk-de-marker-more') || '';
                 if (!key) return;
                 clusterDEMarkerExpanded[key] = !clusterDEMarkerExpanded[key];
+                renderPseudobulkDE();
+            }});
+        }});
+        container.querySelectorAll('[data-pseudobulk-de-marker-category]').forEach((title) => {{
+            title.addEventListener('click', () => {{
+                const annotationCol = title.getAttribute('data-pseudobulk-de-marker-annotation') || pseudobulkDeGroupby;
+                const cat = title.getAttribute('data-pseudobulk-de-marker-category') || '';
+                if (!annotationCol || !cat) return;
+                toggleAnnotationCategorySpotlight(annotationCol, cat);
                 renderPseudobulkDE();
             }});
         }});
@@ -32762,7 +32880,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 : `${{g}} is shown in DE results but its feature vector is unavailable for ${{getModalityDisplayLabel(modality)}}`;
             return `<span class="${{cls}}"${{activateAttr}} title="${{escapeHtml(title)}}">${{escapeHtml(g)}}</span>`;
         }}).join(', ');
-        const sourceMarkerLabel = sourceMarkers.length ? renderInlineFeatureLinks(sourceMarkers) : 'No pseudobulk DE features available.';
+            const sourceMarkerLabel = sourceMarkers.length ? renderInlineFeatureLinks(sourceMarkers) : 'No interaction marker features available.';
         const sourceN = (nCells[sourceIdx] ?? 0).toLocaleString();
         const degreeLabel = Number.isFinite(meanDegree[sourceIdx]) ? meanDegree[sourceIdx].toFixed(2) : '0.00';
         const withContactMarkers = topEntries.filter(entry => !!entry.contact).length;
@@ -32805,7 +32923,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 <div class="agg-group-meta">n=${{sourceN}} | mean degree=${{degreeLabel}} | neighbor edges=${{formatNeighborCount(total)}}</div>
                 <div class="agg-group-meta">Source DE features: ${{sourceMarkerLabel}}</div>
                 <div class="agg-group-meta">Contact-conditioned DE features available for ${{withContactMarkers}}/${{topEntries.length}} shown targets in ${{escapeHtml(getModalityDisplayLabel(modality))}}.</div>
-                ${{hasInteractionMarkers ? '' : '<div class="agg-group-meta">Contact DE features not precomputed for this annotation (use pseudobulk_additional_annotations during export for extra annotations).</div>'}}
+            ${{hasInteractionMarkers ? '' : '<div class="agg-group-meta">Contact marker features not precomputed for this annotation (use statistics_additional_annotations during export for extra annotations).</div>'}}
             </div>
             <table class="trend-table">
                 <thead>
@@ -34851,12 +34969,20 @@ def export_to_html(
     feature_manifest_path: Optional[str] = None,
     feature_sidecar_shard_size: int = FEATURE_SIDECAR_SHARD_SIZE,
     feature_sparse_zero_threshold: float = 0.8,
-    pseudobulk: Optional[str] = "auto",
-    pseudobulk_additional_annotations: Optional[List[str]] = None,
+    statistics_additional_annotations: Optional[List[str]] = None,
+    statistics_modalities: Optional[Union[str, Sequence[str]]] = None,
+    wilcoxon_layer: Optional[str] = None,
+    wilcoxon_min_cells_per_group: int = 20,
+    wilcoxon_min_pct_expressed: float = 0.0,
+    wilcoxon_p_adjust_method: str = "fdr_bh",
+    wilcoxon_padj_cutoff: float = 0.05,
+    wilcoxon_log2fc_cutoff: float = 1,
+    wilcoxon_embed_top_n_per_comparison: int = 2,
+    wilcoxon_top_n_per_category: int = 300,
+    statistics_simple_contrast_categories: Any = None,
+    pseudobulk: Optional[str] = None,
     pseudobulk_replicate_annotation: Optional[str] = None,
-    pseudobulk_simple_constrast_categories: Any = None,
     pseudobulk_counts_layer: Optional[str] = "counts",
-    pseudobulk_modalities: Optional[Union[str, Sequence[str]]] = None,
     pseudobulk_min_cell_counts: int = 0,
     pseudobulk_min_feature_counts: int = 0,
     pseudobulk_min_cells_per_pseudobulk: int = 20,
@@ -34956,27 +35082,51 @@ def export_to_html(
     spatial_variable_features_n : int
         Number of top variable features to score with Moran's I spatial autocorrelation
         (default 20). Requires a spatial weight matrix in adata.obsp. Set to 0 to disable.
+    statistics_additional_annotations : list, optional
+        Additional annotation columns to analyze with default Wilcoxon statistics
+        and optional secondary pseudobulk/interaction statistics.
+    statistics_modalities : str or list, optional
+        Modality names to run statistics on. Defaults to the dataset default
+        modality, usually "rna". Use "all" or ["all"] for all detected modalities.
+    wilcoxon_layer : str, optional
+        Deprecated compatibility option. Wilcoxon statistics now use
+        ``layers["normalized"]`` when present; otherwise raw values are copied
+        from ``layers["counts"]`` or ``adata.X`` and Scanpy-normalized/log1p
+        transformed before ranking.
+    wilcoxon_min_cells_per_group : int
+        Minimum cells required in each category for Wilcoxon marker statistics.
+    wilcoxon_min_pct_expressed : float
+        Minimum fraction of cells with a positive feature value required in at
+        least one compared group before Wilcoxon results are reported.
+    wilcoxon_p_adjust_method : str
+        Multiple-testing correction method for Wilcoxon p-values.
+    wilcoxon_padj_cutoff : float
+        Adjusted p-value cutoff used for Wilcoxon marker display and embedding.
+    wilcoxon_log2fc_cutoff : float
+        Absolute log2 fold-change cutoff used for Wilcoxon marker display and
+        embedding.
+    wilcoxon_embed_top_n_per_comparison : int
+        Maximum significant Wilcoxon features to auto-embed per comparison in
+        embedded mode.
+    wilcoxon_top_n_per_category : int
+        Maximum Wilcoxon result rows retained per category/rest or pairwise
+        comparison.
     pseudobulk : str, optional
-        Category pseudobulk DE mode. Use "auto" to analyze the main cells annotation and
-        pseudobulk_additional_annotations, or None/"None" to disable.
-    pseudobulk_additional_annotations : list, optional
-        Additional annotation columns to analyze with category pseudobulk DE.
+        Secondary category pseudobulk DE mode. Use "auto" to run DESeq2 analyses,
+        or None/"None"/"off" to disable. Default: None.
     pseudobulk_replicate_annotation : str, optional
         Obs annotation used as the biological replicate for pseudobulk analyses.
         Defaults to the dataset section_key annotation.
-    pseudobulk_simple_constrast_categories : list or dict, optional
+    statistics_simple_contrast_categories : list or dict, optional
         Categories to include in Simple design category-versus-category contrasts.
         Use a flat list only when one annotation is analyzed. With
-        pseudobulk_additional_annotations, pass a dict keyed by annotation name
+        statistics_additional_annotations, pass a dict keyed by annotation name
         or a nested list matching [main_cell_annotation, *additional]. All
-        retained categories remain in the shared DESeq2 fit, and each retained
+        retained categories remain available, and each retained
         category receives a balanced-rest contrast.
     pseudobulk_counts_layer : str, optional
         Raw-count AnnData layer for pseudobulk aggregation. Defaults to "counts";
         falls back to adata.X with a warning if absent.
-    pseudobulk_modalities : str or list, optional
-        Modality names to run pseudobulk DE on. Defaults to the dataset default
-        modality, usually "rna". Use "all" or ["all"] for all detected modalities.
     pseudobulk_min_cell_counts : int
         Exclude cells below this total raw-count threshold before pseudobulk
         aggregation. Zero disables filtering.
@@ -35044,8 +35194,7 @@ def export_to_html(
     interaction_markers_top_features : int
         Number of top DE features to keep per source-target interaction.
     interaction_markers_min_cells : int
-        Minimum cells required per replicate in both contact+ and contact-
-        pseudobulk samples.
+        Minimum source cells required in both contact+ and contact- groups.
     interaction_markers_min_neighbors : int
         Minimum target neighbors to classify source cells as contact+.
     interaction_markers : str, optional
@@ -35213,6 +35362,9 @@ def export_to_html(
     effective_pseudobulk_embed_top_n_per_comparison = (
         0 if feature_storage == "sidecar" else int(pseudobulk_embed_top_n_per_comparison)
     )
+    effective_wilcoxon_embed_top_n_per_comparison = (
+        0 if feature_storage == "sidecar" else int(wilcoxon_embed_top_n_per_comparison)
+    )
     sidecar_features: List[str] = []
     resolved_feature_manifest_path: Optional[Path] = None
     resolved_feature_sidecar_dir: Optional[Path] = None
@@ -35252,9 +35404,9 @@ def export_to_html(
     pseudobulk_enabled = _analysis_mode_enabled(pseudobulk, "pseudobulk")
     interaction_markers_enabled = _analysis_mode_enabled(interaction_markers, "interaction_markers")
     pathway_enabled = _analysis_mode_enabled(pathway, "pathway")
-    selected_pseudobulk_modalities = _normalize_modality_selection(
-        pseudobulk_modalities,
-        option_name="pseudobulk_modalities",
+    selected_statistics_modalities = _normalize_modality_selection(
+        statistics_modalities,
+        option_name="statistics_modalities",
         default_to_all=False,
     )
     resolved_pseudobulk_replicate_annotation = (
@@ -35284,6 +35436,12 @@ def export_to_html(
         raise ValueError("pseudobulk_n_cpus must be >= 1")
     if int(pseudobulk_embed_top_n_per_comparison) < 0:
         raise ValueError("pseudobulk_embed_top_n_per_comparison must be >= 0")
+    if int(wilcoxon_min_cells_per_group) < 1:
+        raise ValueError("wilcoxon_min_cells_per_group must be >= 1")
+    if int(wilcoxon_embed_top_n_per_comparison) < 0:
+        raise ValueError("wilcoxon_embed_top_n_per_comparison must be >= 0")
+    if int(wilcoxon_top_n_per_category) < 1:
+        raise ValueError("wilcoxon_top_n_per_category must be >= 1")
     if int(pathway_top_n) < 1:
         raise ValueError("pathway_top_n must be >= 1")
     if int(pathway_min_overlap) < 1:
@@ -35293,12 +35451,21 @@ def export_to_html(
     correction_method = str(pseudobulk_p_adjust_method or "fdr_bh").strip().lower().replace("-", "_")
     if correction_method not in {"fdr_bh", "bh", "benjamini_hochberg", "bonferroni", "bonf", "holm", "holm_bonferroni", "none", "raw", "pvalue", "pvalues"}:
         raise ValueError("pseudobulk_p_adjust_method must be one of: fdr_bh, bonferroni, holm, none")
+    wilcoxon_correction_method = str(wilcoxon_p_adjust_method or "fdr_bh").strip().lower().replace("-", "_")
+    if wilcoxon_correction_method not in {"fdr_bh", "bh", "benjamini_hochberg", "bonferroni", "bonf", "holm", "holm_bonferroni", "none", "raw", "pvalue", "pvalues"}:
+        raise ValueError("wilcoxon_p_adjust_method must be one of: fdr_bh, bonferroni, holm, none")
     if float(pseudobulk_min_pct_expressed) < 0:
         raise ValueError("pseudobulk_min_pct_expressed must be >= 0")
+    if float(wilcoxon_min_pct_expressed) < 0:
+        raise ValueError("wilcoxon_min_pct_expressed must be >= 0")
     if not 0 <= float(pseudobulk_padj_cutoff) <= 1:
         raise ValueError("pseudobulk_padj_cutoff must be between 0 and 1")
+    if not 0 <= float(wilcoxon_padj_cutoff) <= 1:
+        raise ValueError("wilcoxon_padj_cutoff must be between 0 and 1")
     if float(pseudobulk_log2fc_cutoff) < 0:
         raise ValueError("pseudobulk_log2fc_cutoff must be >= 0")
+    if float(wilcoxon_log2fc_cutoff) < 0:
+        raise ValueError("wilcoxon_log2fc_cutoff must be >= 0")
     fit_type = str(pseudobulk_deseq2_fit_type or "parametric").strip().lower()
     if fit_type not in {"parametric", "mean"}:
         raise ValueError("pseudobulk_deseq2_fit_type must be one of: parametric, mean")
@@ -35334,13 +35501,14 @@ def export_to_html(
         neighbor_stats_permutations = 0 if int(dataset.adata.n_obs) >= 200_000 else 20
 
     companion_analytics = dataset.get_companion_analytics()
-    pseudobulk_analysis_annotations = []
-    for col in [annotation, *(pseudobulk_additional_annotations or [])]:
-        if col and col not in pseudobulk_analysis_annotations:
-            pseudobulk_analysis_annotations.append(col)
-    pseudobulk_de_annotations = list(pseudobulk_analysis_annotations) if pseudobulk_enabled else []
+    statistics_analysis_annotations = []
+    for col in [annotation, *(statistics_additional_annotations or [])]:
+        if col and col not in statistics_analysis_annotations:
+            statistics_analysis_annotations.append(col)
+    wilcoxon_de_annotations = list(statistics_analysis_annotations)
+    pseudobulk_de_annotations = list(statistics_analysis_annotations) if pseudobulk_enabled else []
     interaction_annotation_candidates = []
-    for col in [annotation, *(cell_annotations or [])]:
+    for col in [annotation, *(statistics_additional_annotations or [])]:
         if col and col not in interaction_annotation_candidates:
             interaction_annotation_candidates.append(col)
     interaction_marker_annotations = (
@@ -35352,7 +35520,7 @@ def export_to_html(
     )
     if neighbor_stats_annotations is None:
         neighbor_stats_annotations = []
-        for col in [*interaction_annotation_candidates, *analytics_annotations]:
+        for col in [annotation, *(cell_annotations or []), *interaction_annotation_candidates, *analytics_annotations]:
             if col and col not in neighbor_stats_annotations:
                 neighbor_stats_annotations.append(col)
     else:
@@ -35377,7 +35545,7 @@ def export_to_html(
     log_detail(
         f"Pseudobulk={'on' if pseudobulk_enabled else 'off'}; "
         f"interaction markers={'on' if interaction_markers_enabled else 'off'}; "
-        f"pseudobulk modalities={', '.join(selected_pseudobulk_modalities) or 'none'}; "
+        f"statistics modalities={', '.join(selected_statistics_modalities) or 'none'}; "
         f"neighbor stats columns={', '.join(neighbor_stats_annotations or []) or 'none'}."
     )
     if bool(tutorial):
@@ -35392,11 +35560,21 @@ def export_to_html(
         features=embedded_features,
         feature_encoding=feature_encoding,
         feature_sparse_zero_threshold=feature_sparse_zero_threshold,
+        statistics_additional_annotations=statistics_additional_annotations,
+        statistics_modalities=selected_statistics_modalities,
+        wilcoxon_de_annotations=wilcoxon_de_annotations,
+        wilcoxon_layer=wilcoxon_layer,
+        wilcoxon_min_cells_per_group=wilcoxon_min_cells_per_group,
+        wilcoxon_min_pct_expressed=wilcoxon_min_pct_expressed,
+        wilcoxon_p_adjust_method=wilcoxon_correction_method,
+        wilcoxon_padj_cutoff=wilcoxon_padj_cutoff,
+        wilcoxon_log2fc_cutoff=wilcoxon_log2fc_cutoff,
+        wilcoxon_embed_top_n_per_comparison=effective_wilcoxon_embed_top_n_per_comparison,
+        wilcoxon_top_n_per_category=wilcoxon_top_n_per_category,
         pseudobulk_de_annotations=pseudobulk_de_annotations,
         pseudobulk_replicate_annotation=resolved_pseudobulk_replicate_annotation,
-        pseudobulk_simple_constrast_categories=pseudobulk_simple_constrast_categories,
+        statistics_simple_contrast_categories=statistics_simple_contrast_categories,
         pseudobulk_counts_layer=pseudobulk_counts_layer,
-        pseudobulk_modalities=selected_pseudobulk_modalities,
         pseudobulk_min_cell_counts=pseudobulk_min_cell_counts,
         pseudobulk_min_feature_counts=pseudobulk_min_feature_counts,
         pseudobulk_min_cells_per_pseudobulk=pseudobulk_min_cells_per_pseudobulk,
@@ -35473,7 +35651,7 @@ def export_to_html(
         _embed_section_images(data, section_images, max_px=section_images_max_px)
         log_detail("Section image overlay payload stored in the HTML data.")
 
-    pathway_modality_names = list(dict.fromkeys(selected_pseudobulk_modalities or [default_modality_name]))
+    pathway_modality_names = list(dict.fromkeys(selected_statistics_modalities or [default_modality_name]))
 
     def _is_pathway_supported_modality(modality_name: str) -> bool:
         if not available_modalities:
@@ -35483,6 +35661,19 @@ def export_to_html(
         if not value_kind:
             return modality_name == default_modality_name
         return value_kind in {"counts", "count", "expression", "rna", "feature"}
+
+    if pathway_enabled and not pseudobulk_enabled:
+        log_warning(
+            "Pathway enrichment skipped because pseudobulk DE is disabled; "
+            "Wilcoxon-ranked features are not used for pathway enrichment."
+        )
+        pathway_enabled = False
+    if pathway_enabled and not any((data.get("pseudobulk_de_by_modality") or {}).get(name) for name in pathway_modality_names):
+        log_warning(
+            "Pathway enrichment skipped because no pseudobulk DE results are available; "
+            "Wilcoxon-ranked features are not used for pathway enrichment."
+        )
+        pathway_enabled = False
 
     if pathway_enabled:
         try:
@@ -35696,7 +35887,6 @@ def export_to_html(
     data["features_by_modality"] = features_by_modality
     data["requested_features_by_modality"] = requested_features_by_modality
     data["default_modality"] = default_modality_name if modality_descriptors else None
-    data.setdefault("category_feature_means_by_modality", {})
     data.setdefault("feature_correlations_by_modality", {})
     data.setdefault("spatial_variable_features_by_modality", {})
     data.setdefault("pathway_settings_by_modality", {})
@@ -35795,12 +35985,20 @@ def export_to_html(
                 "feature_manifest_path": str(feature_manifest_path) if feature_manifest_path else None,
                 "feature_sidecar_shard_size": int(feature_sidecar_shard_size),
                 "feature_sparse_zero_threshold": float(feature_sparse_zero_threshold),
+                "statistics_additional_annotations": statistics_additional_annotations,
+                "statistics_modalities": statistics_modalities,
+                "wilcoxon_expression_source": wilcoxon_layer or "auto(normalized,raw_log1p)",
+                "wilcoxon_min_cells_per_group": int(wilcoxon_min_cells_per_group),
+                "wilcoxon_min_pct_expressed": float(wilcoxon_min_pct_expressed),
+                "wilcoxon_p_adjust_method": wilcoxon_correction_method,
+                "wilcoxon_padj_cutoff": float(wilcoxon_padj_cutoff),
+                "wilcoxon_log2fc_cutoff": float(wilcoxon_log2fc_cutoff),
+                "wilcoxon_embed_top_n_per_comparison": int(wilcoxon_embed_top_n_per_comparison),
+                "wilcoxon_top_n_per_category": int(wilcoxon_top_n_per_category),
                 "pseudobulk": pseudobulk,
-                "pseudobulk_additional_annotations": pseudobulk_additional_annotations,
                 "pseudobulk_replicate_annotation": pseudobulk_replicate_annotation,
-                "pseudobulk_simple_constrast_categories": pseudobulk_simple_constrast_categories,
+                "statistics_simple_contrast_categories": statistics_simple_contrast_categories,
                 "pseudobulk_counts_layer": pseudobulk_counts_layer,
-                "pseudobulk_modalities": pseudobulk_modalities,
                 "pseudobulk_min_cell_counts": int(pseudobulk_min_cell_counts),
                 "pseudobulk_min_feature_counts": int(pseudobulk_min_feature_counts),
                 "pseudobulk_min_cells_per_pseudobulk": int(pseudobulk_min_cells_per_pseudobulk),
@@ -35852,8 +36050,10 @@ def export_to_html(
                 "section_metadata": list(data.get("section_metadata") or []),
                 "section_metadata_extra": list(data.get("section_metadata_extra") or []),
                 "pseudobulk_enabled": bool(pseudobulk_enabled),
+                "wilcoxon_de_annotations": list(wilcoxon_de_annotations),
+                "statistics_modalities": list(selected_statistics_modalities),
+                "wilcoxon_settings": data.get("wilcoxon_settings"),
                 "pseudobulk_de_annotations": list(pseudobulk_de_annotations),
-                "pseudobulk_modalities": list(selected_pseudobulk_modalities),
                 "pseudobulk_replicate_annotation": data.get("pseudobulk_replicate_annotation"),
                 "pseudobulk_settings": data.get("pseudobulk_settings"),
                 "pathway_settings_by_modality": data.get("pathway_settings_by_modality"),

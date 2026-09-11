@@ -168,9 +168,43 @@ def test_exploration_uses_features_and_modality_payloads(tmp_path=None):
     assert html.index('id="exploration-annotation-select"') < html.index('id="exploration-feature-modality-select"')
     assert html.index('id="exploration-feature-modality-select"') < html.index('id="visualization-menu-label"')
     assert "DATA.pseudobulk_de_by_modality" in html
-    assert "DATA.category_feature_means_by_modality" in html
+    assert "DATA.wilcoxon_de_by_modality" in html
+    assert "DATA.marker_features_by_method_by_modality" in html
+    assert "DATA.category_feature_means_by_method_by_modality" in html
     assert ("DATA." + "g" + "ene_correlations") not in html
     assert ("DATA.spatial_variable_" + "g" + "enes") not in html
+
+
+def test_statistics_method_selector_runtime_is_available(tmp_path=None):
+    html = _render_multimodal_html(tmp_path)
+
+    assert "let statisticsMethodByPanel" in html
+    assert "function getStatisticsMethodOptions" in html
+    assert "function getActiveStatisticsMethod" in html
+    assert "statistics-method-select" in html
+    assert "activeMethod === 'pseudobulk' ? 'Pseudobulk' : 'Wilcoxon'" in html
+
+
+def test_simple_design_marker_chips_can_spotlight_categories(tmp_path=None):
+    html = _render_multimodal_html(tmp_path)
+
+    assert "function toggleAnnotationCategorySpotlight(annotationCol, category)" in html
+    assert "data-pseudobulk-de-marker-annotation" in html
+    assert "data-pseudobulk-de-marker-category" in html
+    assert "toggleAnnotationCategorySpotlight(annotationCol, cat);" in html
+    assert "toggleAnnotationCategorySpotlight(markerColorCol, cat);" in html
+
+
+def test_simple_design_calc_info_matches_active_analysis_method(tmp_path=None):
+    html = _render_multimodal_html(tmp_path)
+
+    assert "wilcoxon_marker_features" in html
+    assert "wilcoxon_simple_de_section" in html
+    assert "wilcoxon_simple_de_table" in html
+    assert "function getAnalysisCalcInfoKey(method, subject)" in html
+    assert "getAnalysisCalcInfoKey(activeMethod, 'simple_section')" in html
+    assert "getAnalysisCalcInfoKey(activeMethod, 'simple_table')" in html
+    assert "getAnalysisCalcInfoKey(activeMethod, 'volcano_plot')" in html
 
 
 def test_insights_has_separate_statistics_menu(tmp_path=None):
@@ -241,7 +275,6 @@ def test_compare_pseudobulk_follows_exploration_controls(tmp_path=None):
     assert "return getExplorationModality();" in html
     assert "function setPseudobulkPanelModality" not in html
     assert "getPseudobulkDEPayloadForModality" in html
-    assert "(DATA.pseudobulk_de || {})" not in html
 
 
 def test_interaction_markers_use_modality_payload(tmp_path=None):
@@ -249,7 +282,6 @@ def test_interaction_markers_use_modality_payload(tmp_path=None):
 
     assert 'id="interaction-marker-modality-select"' in html
     assert "DATA.interaction_markers_by_modality" in html
-    assert "(DATA.interaction_markers || {})" not in html
 
 
 def test_html_copy_uses_feature_labels(tmp_path=None):
@@ -258,7 +290,7 @@ def test_html_copy_uses_feature_labels(tmp_path=None):
     assert "Feature discovery" in html
     assert "Marker features" in html
     assert "Spatial features" in html
-    assert "Pseudobulk feature differential analysis" in html
+    assert "activeMethod === 'pseudobulk' ? 'Pseudobulk' : 'Wilcoxon'" in html
     assert "Features in selection" in html
     assert "Feature values - annotation A vs annotation B" in html
     assert "No features matched" in html
@@ -277,4 +309,4 @@ def test_download_filenames_include_modality(tmp_path=None):
     assert "sanitizeFilenamePart(getPseudobulkPanelModality()" in html
     assert "karospace-pseudobulk-de-features-${modName}-" in html
     assert "['modality', 'feature', 'base_mean'" in html
-    assert "['modality', 'annotation_column', 'category', 'reference', 'rank', 'feature'" in html
+    assert "['method', 'modality', 'annotation_column', 'category', 'reference', 'rank', 'feature'" in html

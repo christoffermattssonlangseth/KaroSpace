@@ -72,7 +72,7 @@ common_kwargs = dict(
     ],
     neighbor_stats_permutations=0,
     neighbor_stats_seed=42,
-    pseudobulk_additional_annotations=["annot",
+    statistics_additional_annotations=["annot",
  'seurat_clusters', 'SCT_snn_res.0.5', 'annot', 'sample_condition', 'bio_origin','subgroups','annot_short'
     ],
     pseudobulk_embed_top_n_per_comparison=20,

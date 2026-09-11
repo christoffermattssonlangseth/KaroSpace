@@ -207,7 +207,7 @@ def main() -> None:
         # requesting them reuses uns/karospace_companion instead of recomputing.
         neighbor_stats_annotations=ANALYTICS_COLUMNS,
         neighbor_stats_permutations=0,
-        pseudobulk_additional_annotations=ANALYTICS_COLUMNS,
+        statistics_additional_annotations=ANALYTICS_COLUMNS,
         section_images=section_images,
         section_images_max_px=4096,
     )

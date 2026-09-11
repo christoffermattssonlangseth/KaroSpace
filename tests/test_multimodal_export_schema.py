@@ -99,7 +99,7 @@ def test_multimodal_export_uses_only_by_modality_payloads():
         features=["rna_a"],
         pseudobulk_de_annotations=[],
         interaction_marker_annotations=[],
-        pseudobulk_modalities=["rna", "protein"],
+        statistics_modalities=["rna", "protein"],
     )
 
     assert data["default_modality"] == "rna"
@@ -129,6 +129,172 @@ def test_multimodal_export_uses_only_by_modality_payloads():
         "pathway_settings",
     ]:
         assert removed_key not in data
+
+
+def test_default_statistics_use_wilcoxon_without_pseudobulk():
+    multimodal_dataset = _make_multimodal_dataset()
+    data = multimodal_dataset.to_json_data(
+        annotation="cell_type",
+        features=[],
+        statistics_additional_annotations=[],
+        statistics_modalities=["rna"],
+        wilcoxon_min_cells_per_group=1,
+        wilcoxon_padj_cutoff=1,
+        wilcoxon_log2fc_cutoff=0,
+        pseudobulk_de_annotations=[],
+        interaction_marker_annotations=[],
+    )
+
+    assert data["wilcoxon_de_by_modality"]["rna"]["cell_type"]
+    assert data["pseudobulk_de_by_modality"]["rna"] == {}
+    assert data["marker_features_by_method_by_modality"]["rna"]["wilcoxon"]["cell_type"]
+    assert "wilcoxon" in data["category_feature_means_by_method_by_modality"]["rna"]
+
+
+def test_wilcoxon_simple_contrast_categories_apply_without_pseudobulk():
+    obs = pd.DataFrame(
+        {
+            "section": pd.Categorical(["s1"] * 6),
+            "cell_type": pd.Categorical(["A", "A", "B", "B", "C", "C"]),
+        },
+        index=[f"cell{i}" for i in range(6)],
+    )
+    var = pd.DataFrame(index=["marker_a", "marker_b"])
+    x = np.asarray(
+        [
+            [9, 0],
+            [8, 0],
+            [0, 7],
+            [0, 6],
+            [5, 1],
+            [4, 1],
+        ],
+        dtype=np.float32,
+    )
+    adata = AnnData(X=x, obs=obs, var=var)
+    adata.layers["normalized"] = x
+    adata.obsm["spatial"] = np.asarray(
+        [[0, 0], [1, 0], [0, 1], [1, 1], [2, 0], [2, 1]],
+        dtype=np.float32,
+    )
+    dataset = SpatialDataset(
+        adata=adata,
+        sections=[SectionData("s1", adata.obsm["spatial"])],
+        section_key="section",
+        obs_columns=["section", "cell_type"],
+        var_names=list(var.index),
+        modalities={
+            "rna": Modality(
+                name="rna",
+                matrix=x,
+                var=var,
+                layers={"normalized": x},
+                value_kind="counts",
+                label="RNA",
+            )
+        },
+        default_modality="rna",
+    )
+    data = dataset.to_json_data(
+        annotation="cell_type",
+        features=[],
+        statistics_modalities=["rna"],
+        wilcoxon_min_cells_per_group=2,
+        wilcoxon_padj_cutoff=1,
+        wilcoxon_log2fc_cutoff=0,
+        pseudobulk_de_annotations=[],
+        statistics_simple_contrast_categories=["A", "B"],
+        interaction_marker_annotations=[],
+    )
+
+    wilcoxon = data["wilcoxon_de_by_modality"]["rna"]["cell_type"]
+    assert "B" in wilcoxon["A"]
+    assert "C" not in wilcoxon["A"]
+    assert "__rest__" in wilcoxon["C"]
+
+
+def test_interaction_markers_use_wilcoxon_method_by_default():
+    obs = pd.DataFrame(
+        {
+            "section": pd.Categorical(["s1"] * 6),
+            "cell_type": pd.Categorical(["A", "A", "A", "B", "B", "B"]),
+        },
+        index=[f"cell{i}" for i in range(6)],
+    )
+    var = pd.DataFrame(index=["marker_contact", "marker_other"])
+    x = np.asarray(
+        [
+            [8, 0],
+            [7, 0],
+            [0, 6],
+            [1, 4],
+            [1, 5],
+            [1, 6],
+        ],
+        dtype=np.float32,
+    )
+    adata = AnnData(X=x, obs=obs, var=var)
+    adata.layers["normalized"] = x
+    adata.obsm["spatial"] = np.asarray(
+        [[0, 0], [1, 0], [2, 0], [0, 1], [1, 1], [2, 1]],
+        dtype=np.float32,
+    )
+    graph = np.asarray(
+        [
+            [0, 1, 0, 1, 0, 0],
+            [1, 0, 0, 0, 1, 0],
+            [0, 0, 0, 0, 0, 0],
+            [1, 0, 0, 0, 1, 0],
+            [0, 1, 0, 1, 0, 1],
+            [0, 0, 0, 0, 1, 0],
+        ],
+        dtype=np.float32,
+    )
+    adata.obsp["spatial_connectivities"] = graph
+    multimodal_dataset = SpatialDataset(
+        adata=adata,
+        sections=[SectionData("s1", adata.obsm["spatial"])],
+        section_key="section",
+        obs_columns=["section", "cell_type"],
+        var_names=list(var.index),
+        modalities={
+            "rna": Modality(
+                name="rna",
+                matrix=x,
+                var=var,
+                layers={"normalized": x},
+                value_kind="counts",
+                label="RNA",
+            )
+        },
+        default_modality="rna",
+    )
+    data = multimodal_dataset.to_json_data(
+        annotation="cell_type",
+        features=[],
+        statistics_modalities=["rna"],
+        interaction_marker_annotations=["cell_type"],
+        interaction_markers_min_cells=1,
+        interaction_markers_min_neighbors=1,
+        interaction_markers_top_targets=2,
+        interaction_markers_top_features=2,
+        wilcoxon_min_cells_per_group=1,
+        wilcoxon_padj_cutoff=1,
+        wilcoxon_log2fc_cutoff=0,
+        pseudobulk_de_annotations=[],
+    )
+
+    payload = data["interaction_markers_by_modality"]["rna"]["cell_type"]
+    methods = [
+        result["method"]
+        for by_target in payload.values()
+        if isinstance(by_target, dict)
+        for result in by_target.values()
+        if isinstance(result, dict) and result.get("available")
+    ]
+    assert methods
+    assert set(methods) == {"cell-wilcoxon-contact"}
+    assert data["interaction_marker_settings"]["method"] == "cell-wilcoxon-contact"
 
 
 def test_inspect_input_reports_feature_counts_by_modality(tmp_path=None):
@@ -189,21 +355,29 @@ def test_cli_help_prefers_feature_named_options():
     output = stream.getvalue()
     assert "Feature content and storage:" in output
     assert "Pathway enrichment:" in output
+    assert "Statistics and differential features:" in output
+    assert "--statistics-additional-annotations" in output
+    assert "--statistics-modalities" in output
+    assert "--statistics-simple-contrast-categories" in output
+    assert "--wilcoxon-min-cells-per-group" in output
     assert "--pseudobulk-min-feature-counts" in output
+    assert "--pseudobulk-" + "additional-annotations" not in output
+    assert "--pseudobulk-" + "modalities" not in output
+    assert "--pseudobulk-" + "simple-constrast-categories" not in output
     assert "--interaction-markers-top-features" in output
     assert "--feature-correlation-top-n" in output
     assert "--spatial-variable-features-n" in output
     assert "--pathway" in output
     old_root = "".join(["g", "ene"])
     old_plural = "".join(["g", "enes"])
-    removed_feature_aliases = [
+    removed_feature_options = [
         f"--pseudobulk-min-{old_root}-counts",
         f"--interaction-markers-top-{old_plural}",
         f"--{old_root}-correlation-top-n",
         f"--category-means-n-{old_plural}",
         f"--spatial-variable-{old_plural}-n",
     ]
-    for option in removed_feature_aliases:
+    for option in removed_feature_options:
         assert option not in output
     assert "--category-means-n-features" not in output
 
@@ -278,7 +452,10 @@ def test_secondary_analytics_are_modality_scoped():
             features=["rna_a"],
             pseudobulk_de_annotations=["cell_type"],
             pseudobulk_replicate_annotation="replicate",
-            pseudobulk_modalities=["rna", "protein"],
+            statistics_modalities=["rna", "protein"],
+            wilcoxon_min_cells_per_group=1,
+            wilcoxon_padj_cutoff=1,
+            wilcoxon_log2fc_cutoff=0,
             pseudobulk_min_replicates=1,
             pseudobulk_min_cells_per_pseudobulk=1,
             spatial_variable_features_n=2,
@@ -293,16 +470,16 @@ def test_secondary_analytics_are_modality_scoped():
     protein_balanced_rest_log = protein_log.split("Preparing 1 pairwise", 1)[0]
     assert "log2FC >= 1" in protein_balanced_rest_log
     assert "|log2FC| >= 1" not in protein_balanced_rest_log
-    assert data["embedded_features_by_modality"]["protein"] == ["protein_a", "protein_b"]
+    assert set(data["embedded_features_by_modality"]["protein"]) == {"protein_a", "protein_b"}
     assert set(data["feature_state_by_modality"]["protein"]["features_meta"]) == {"protein_a", "protein_b"}
-    assert data["marker_features_by_modality"]["protein"]["cell_type"]["A"] == ["protein_a"]
+    assert data["marker_features_by_method_by_modality"]["protein"]["wilcoxon"]["cell_type"]["A"] == ["protein_a"]
 
-    assert set(data["category_feature_means_by_modality"]) == {"rna", "protein"}
+    assert set(data["category_feature_means_by_method_by_modality"]) == {"rna", "protein"}
     assert set(data["feature_correlations_by_modality"]) == {"rna", "protein"}
     assert set(data["spatial_variable_features_by_modality"]) == {"rna", "protein"}
 
     for modality, feature_name in [("rna", "rna_a"), ("protein", "protein_a")]:
-        means = data["category_feature_means_by_modality"][modality]
+        means = data["category_feature_means_by_method_by_modality"][modality]["wilcoxon"]
         assert means is not None
         assert means["features"] == data["embedded_features_by_modality"][modality]
         assert feature_name in means["features"]
@@ -346,7 +523,11 @@ def test_neighbor_and_interaction_annotations_include_cell_annotations():
         interaction_marker_annotations=["cell_type", "cell_state"],
         neighbor_stats_annotations=["cell_type", "cell_state"],
         pseudobulk_replicate_annotation="replicate",
-        pseudobulk_modalities=["rna", "protein"],
+        statistics_modalities=["rna", "protein"],
+        wilcoxon_min_cells_per_group=1,
+        wilcoxon_padj_cutoff=1,
+        wilcoxon_log2fc_cutoff=0,
+        wilcoxon_embed_top_n_per_comparison=0,
         pseudobulk_min_replicates=1,
         pseudobulk_min_cells_per_pseudobulk=1,
         interaction_markers_min_cells=1,
@@ -382,6 +563,7 @@ def test_export_defaults_analyze_neighbors_for_cell_annotations():
                 output_path="/private/tmp/karospace-export-defaults-capture.html",
                 main_cell_annotation="cell_type",
                 cell_annotations=["cell_state"],
+                statistics_additional_annotations=["cell_state"],
                 features=[],
                 modalities=["rna"],
                 pseudobulk=None,
@@ -494,7 +676,11 @@ def test_sidecar_category_means_use_sidecar_loadable_features(tmp_path=None):
         analytics_modalities=["rna", "protein"],
         pseudobulk_de_annotations=["cell_type"],
         pseudobulk_replicate_annotation="replicate",
-        pseudobulk_modalities=["rna", "protein"],
+        statistics_modalities=["rna", "protein"],
+        wilcoxon_min_cells_per_group=1,
+        wilcoxon_padj_cutoff=1,
+        wilcoxon_log2fc_cutoff=0,
+        wilcoxon_embed_top_n_per_comparison=0,
         pseudobulk_min_replicates=1,
         pseudobulk_min_cells_per_pseudobulk=1,
         pseudobulk_embed_top_n_per_comparison=0,
@@ -505,8 +691,8 @@ def test_sidecar_category_means_use_sidecar_loadable_features(tmp_path=None):
 
     assert data["embedded_features_by_modality"]["rna"] == []
     assert data["embedded_features_by_modality"]["protein"] == []
-    assert data["category_feature_means_by_modality"]["rna"]["features"] == ["rna_a", "rna_b"]
-    assert data["category_feature_means_by_modality"]["protein"]["features"] == ["protein_a", "protein_b"]
+    assert data["category_feature_means_by_method_by_modality"]["rna"]["wilcoxon"]["features"] == ["rna_a", "rna_b"]
+    assert data["category_feature_means_by_method_by_modality"]["protein"]["wilcoxon"]["features"] == ["protein_a", "protein_b"]
 
 
 def test_sidecar_export_passes_loadable_features_for_category_means():
@@ -567,7 +753,7 @@ def test_embedded_storage_includes_explicit_extra_modalities_without_sidecar(tmp
             modalities=["rna", "protein"],
             feature_storage="embedded",
             pseudobulk=None,
-            pseudobulk_modalities=["rna", "protein"],
+            statistics_modalities=["rna", "protein"],
             interaction_markers=None,
             spatial_variable_features_n=0,
             feature_correlation_top_n=0,
@@ -646,7 +832,7 @@ def test_neighbor_interaction_dispersion_logs_follow_computation_tree():
             interaction_marker_annotations=["cell_type", "cell_state"],
             neighbor_stats_annotations=["cell_type", "cell_state"],
             pseudobulk_replicate_annotation="replicate",
-            pseudobulk_modalities=["rna", "protein"],
+            statistics_modalities=["rna", "protein"],
             pseudobulk_min_replicates=1,
             pseudobulk_min_cells_per_pseudobulk=1,
             interaction_markers_min_cells=1,
@@ -657,14 +843,14 @@ def test_neighbor_interaction_dispersion_logs_follow_computation_tree():
 
     log_text = stream.getvalue()
     neighbor_idx = log_text.index("- Computing neighbor composition stats")
-    interaction_idx = log_text.index("- Computing contact-conditioned pseudobulk interaction markers")
+    interaction_idx = log_text.index("- Computing contact-conditioned Wilcoxon interaction markers")
     dispersion_idx = log_text.index("- Computing full-cell spatial dispersion")
     assert neighbor_idx < interaction_idx < dispersion_idx
 
     lines = log_text.splitlines()
     assert "  - Neighbor stats: annotation column cell_type" in lines
-    assert "    - A -> B: skipped, insufficient paired replicates (0; need >= 2)" in lines
-    assert "  - A -> B: skipped, insufficient paired replicates (0; need >= 2)" not in lines
+    assert "    ↳ Stored Wilcoxon interaction-marker payload: 2 source categories, layer=normalized." in lines
+    assert "insufficient paired replicates" not in log_text
 
     dispersion_rows = [line for line in lines if "cell_type: stored dispersion rows" in line]
     assert dispersion_rows == ["  ↳ cell_type: stored dispersion rows for 2 categories."]

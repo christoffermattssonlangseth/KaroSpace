@@ -53,7 +53,7 @@ def _run_export_cli(argv=None):
     metadata_args = parser.add_argument_group("Metadata and labels")
     viewer_args = parser.add_argument_group("Viewer layout")
     feature_args = parser.add_argument_group("Feature content and storage")
-    pseudobulk_args = parser.add_argument_group("Pseudobulk DE")
+    statistics_args = parser.add_argument_group("Statistics and differential features")
     pathway_args = parser.add_argument_group("Pathway enrichment")
     neighborhood_args = parser.add_argument_group("Neighborhoods and interactions")
     overlay_args = parser.add_argument_group("Images, deconvolution, and utilities")
@@ -317,25 +317,80 @@ def _run_export_cli(argv=None):
             "an empty string disables standalone neighbor enrichment unless interaction markers need it."
         )
     )
-    pseudobulk_args.add_argument(
-        "--pseudobulk",
-        type=str,
-        default="auto",
-        help=(
-            "Category pseudobulk DE mode. Use 'auto' to analyze --main-cell-annotation "
-            "and --pseudobulk-additional-annotations, or 'off' to disable. (default: auto)"
-        )
-    )
-    pseudobulk_args.add_argument(
-        "--pseudobulk-additional-annotations",
+    statistics_args.add_argument(
+        "--statistics-additional-annotations",
         type=str,
         default="",
         help=(
-            "Comma-separated additional annotation columns to analyze when pseudobulk is "
-            "enabled. --main-cell-annotation is included automatically."
+            "Comma-separated additional annotation columns to analyze with default "
+            "Wilcoxon statistics and optional secondary pseudobulk/interaction statistics. "
+            "--main-cell-annotation is included automatically."
+        ),
+    )
+    statistics_args.add_argument(
+        "--statistics-modalities",
+        type=str,
+        default="",
+        help=(
+            "Comma-separated modalities to run Wilcoxon, pseudobulk, and interaction "
+            "statistics on (e.g. 'rna,protein'). Use 'all' for all detected modalities. "
+            "Defaults to the dataset default modality."
+        ),
+    )
+    statistics_args.add_argument(
+        "--wilcoxon-min-cells-per-group",
+        type=int,
+        default=20,
+        help="Minimum cells required in each category for Wilcoxon marker statistics. (default: 20)",
+    )
+    statistics_args.add_argument(
+        "--wilcoxon-min-pct-expressed",
+        type=float,
+        default=0.0,
+        help="Minimum fraction of cells with a positive feature value in at least one compared group before reporting Wilcoxon results. Values >1 are interpreted as percentages. (default: 0)",
+    )
+    statistics_args.add_argument(
+        "--wilcoxon-p-adjust-method",
+        choices=["fdr_bh", "bonferroni", "holm", "none"],
+        default="fdr_bh",
+        help="Multiple-testing correction method for Wilcoxon p-values. (default: fdr_bh)",
+    )
+    statistics_args.add_argument(
+        "--wilcoxon-padj-cutoff",
+        type=float,
+        default=0.05,
+        help="Adjusted p-value cutoff for Wilcoxon marker display and embedding. (default: 0.05)",
+    )
+    statistics_args.add_argument(
+        "--wilcoxon-log2fc-cutoff",
+        type=float,
+        default=1,
+        help="Absolute log2FC cutoff for Wilcoxon marker display and embedding. (default: 1)",
+    )
+    statistics_args.add_argument(
+        "--wilcoxon-embed-top-n-per-comparison",
+        type=int,
+        default=2,
+        help="Maximum significant Wilcoxon features to auto-embed per comparison in embedded mode. (default: 2)",
+    )
+    statistics_args.add_argument(
+        "--wilcoxon-top-n-per-category",
+        type=int,
+        default=300,
+        help="Maximum Wilcoxon result rows retained per category/rest or pairwise comparison. (default: 300)",
+    )
+    statistics_args.add_argument(
+        "--pseudobulk",
+        type=str,
+        nargs="?",
+        const="auto",
+        default="off",
+        help=(
+            "Secondary category pseudobulk DE mode. Use 'auto' to run DESeq2 after "
+            "default Wilcoxon statistics, or 'off' to disable. (default: off)"
         )
     )
-    pseudobulk_args.add_argument(
+    statistics_args.add_argument(
         "--pseudobulk-replicate-annotation",
         type=str,
         default=None,
@@ -344,38 +399,29 @@ def _run_export_cli(argv=None):
             "Defaults to --section-key."
         )
     )
-    pseudobulk_args.add_argument(
-        "--pseudobulk-simple-constrast-categories",
+    statistics_args.add_argument(
+        "--statistics-simple-contrast-categories",
         type=str,
         default="",
         help=(
             "Categories to include in Simple design category-versus-category contrasts. "
-            "Use comma-separated categories only with one pseudobulk annotation. With "
-            "--pseudobulk-additional-annotations, use a JSON object keyed by annotation "
+            "Use comma-separated categories only with one statistics annotation. With "
+            "--statistics-additional-annotations, use a JSON object keyed by annotation "
             "or a nested JSON list in order [main-cell-annotation, additional...], e.g. "
             "'{\"Anno_L1\":[\"Astrocyte\",\"B cell\"],\"region\":[\"Cortex\"]}'. "
             "In zsh/bash, wrap the whole JSON value in single quotes so inner double "
             "quotes are preserved. "
-            "All retained categories remain in the shared DESeq2 fit and balanced-rest "
+            "All retained categories remain available and balanced-rest "
             "contrasts still run for every category. An empty string includes all categories."
         ),
     )
-    pseudobulk_args.add_argument(
+    statistics_args.add_argument(
         "--pseudobulk-counts-layer",
         type=str,
         default="counts",
         help="AnnData layer containing raw counts for pseudobulk DE. Use 'none' for adata.X. (default: counts)"
     )
-    pseudobulk_args.add_argument(
-        "--pseudobulk-modalities",
-        type=str,
-        default="",
-        help=(
-            "Comma-separated modalities to run pseudobulk DE on (e.g. 'rna,protein'). "
-            "Use 'all' for all detected modalities. Defaults to the dataset default modality."
-        ),
-    )
-    pseudobulk_args.add_argument(
+    statistics_args.add_argument(
         "--pseudobulk-min-cell-counts",
         type=int,
         default=0,
@@ -384,7 +430,7 @@ def _run_export_cli(argv=None):
             "Use 0 to disable. (default: 0)"
         ),
     )
-    pseudobulk_args.add_argument(
+    statistics_args.add_argument(
         "--pseudobulk-min-feature-counts",
         type=int,
         default=0,
@@ -395,7 +441,7 @@ def _run_export_cli(argv=None):
             "Use 0 to disable. (default: 0)"
         ),
     )
-    pseudobulk_args.add_argument(
+    statistics_args.add_argument(
         "--pseudobulk-min-cells-per-pseudobulk",
         dest="pseudobulk_min_cells_per_pseudobulk",
         type=int,
@@ -405,7 +451,7 @@ def _run_export_cli(argv=None):
             "the shared DESeq2 fit. (default: 20)"
         ),
     )
-    pseudobulk_args.add_argument(
+    statistics_args.add_argument(
         "--pseudobulk-n-cpus",
         type=int,
         default=1,
@@ -414,7 +460,7 @@ def _run_export_cli(argv=None):
             "parallel shared-fit contrasts. (default: 1)"
         ),
     )
-    pseudobulk_args.add_argument(
+    statistics_args.add_argument(
         "--pseudobulk-embed-top-n-per-comparison",
         type=int,
         default=2,
@@ -423,37 +469,37 @@ def _run_export_cli(argv=None):
             "Ignored by --feature-storage sidecar, where all feature vectors are written to the sidecar. (default: 2)"
         ),
     )
-    pseudobulk_args.add_argument(
+    statistics_args.add_argument(
         "--pseudobulk-min-replicates",
         type=int,
         default=2,
         help="Minimum paired replicates required for each reported pseudobulk contrast; at least 2 are always required. (default: 2)"
     )
-    pseudobulk_args.add_argument(
+    statistics_args.add_argument(
         "--pseudobulk-min-pct-expressed",
         type=float,
         default=0.0,
         help="Minimum fraction of cells with a positive feature value in at least one compared group before reporting DE results. Values >1 are interpreted as percentages. (default: 0)"
     )
-    pseudobulk_args.add_argument(
+    statistics_args.add_argument(
         "--pseudobulk-p-adjust-method",
         choices=["fdr_bh", "bonferroni", "holm", "none"],
         default="fdr_bh",
         help="Multiple-testing correction method for pseudobulk p-values. (default: fdr_bh)"
     )
-    pseudobulk_args.add_argument(
+    statistics_args.add_argument(
         "--pseudobulk-padj-cutoff",
         type=float,
         default=0.05,
         help="Adjusted p-value cutoff for volcano highlighting and DE table inclusion. (default: 0.05)"
     )
-    pseudobulk_args.add_argument(
+    statistics_args.add_argument(
         "--pseudobulk-log2fc-cutoff",
         type=float,
         default=1,
         help="Absolute log2FC cutoff for volcano highlighting and DE table inclusion. (default: 1)"
     )
-    pseudobulk_args.add_argument(
+    statistics_args.add_argument(
         "--pseudobulk-deseq2-fit-type",
         choices=["parametric", "mean"],
         default="parametric",
@@ -513,8 +559,8 @@ def _run_export_cli(argv=None):
         type=str,
         default="auto",
         help=(
-            "Contact-conditioned pseudobulk marker mode. Use 'auto' to analyze --main-cell-annotation "
-            "and --pseudobulk-additional-annotations, or 'off' to disable. (default: auto)"
+            "Contact-conditioned Wilcoxon marker mode. Use 'auto' to analyze --main-cell-annotation "
+            "and --statistics-additional-annotations, or 'off' to disable. (default: auto)"
         )
     )
     neighborhood_args.add_argument(
@@ -535,7 +581,7 @@ def _run_export_cli(argv=None):
         "--interaction-markers-min-cells",
         type=int,
         default=30,
-        help="Minimum cells required per replicate contact+ and contact- pseudobulk sample. (default: 30)"
+        help="Minimum cells required in both contact+ and contact- source-cell groups. (default: 30)"
     )
     neighborhood_args.add_argument(
         "--interaction-markers-min-neighbors",
@@ -600,6 +646,12 @@ def _run_export_cli(argv=None):
         parser.error("--pseudobulk-n-cpus must be >= 1")
     if args.pseudobulk_embed_top_n_per_comparison < 0:
         parser.error("--pseudobulk-embed-top-n-per-comparison must be >= 0")
+    if args.wilcoxon_min_cells_per_group < 1:
+        parser.error("--wilcoxon-min-cells-per-group must be >= 1")
+    if args.wilcoxon_embed_top_n_per_comparison < 0:
+        parser.error("--wilcoxon-embed-top-n-per-comparison must be >= 0")
+    if args.wilcoxon_top_n_per_category < 1:
+        parser.error("--wilcoxon-top-n-per-category must be >= 1")
     if args.pathway_top_n < 1:
         parser.error("--pathway-top-n must be >= 1")
     if args.pathway_min_overlap < 1:
@@ -607,6 +659,11 @@ def _run_export_cli(argv=None):
     if args.pathway_gsea_permutations < 0:
         parser.error("--pathway-gsea-permutations must be >= 0")
 
+    early_pseudobulk_token = str(args.pseudobulk or "").strip().lower()
+    early_pseudobulk_enabled = early_pseudobulk_token in {"", "auto", "true", "yes", "on", "1"}
+    early_pseudobulk_disabled = early_pseudobulk_token in {"none", "null", "false", "no", "off", "0"}
+    if not early_pseudobulk_enabled and not early_pseudobulk_disabled:
+        parser.error("--pseudobulk must be 'auto' or 'off'")
     # Check input file
     input_path = Path(args.input)
     if not input_path.exists():
@@ -623,7 +680,7 @@ def _run_export_cli(argv=None):
     from .data_loader import (
         inspect_input_file,
         load_spatial_data,
-        normalize_pseudobulk_simple_constrast_categories,
+        normalize_statistics_simple_contrast_categories,
     )
     from .exporter import export_to_html
 
@@ -717,17 +774,17 @@ def _run_export_cli(argv=None):
     pseudobulk_mode = _parse_auto_or_none(args.pseudobulk, "--pseudobulk")
     interaction_markers_mode = _parse_auto_or_none(args.interaction_markers, "--interaction-markers")
     pathway_mode = _parse_auto_or_none(args.pathway, "--pathway")
-    pseudobulk_additional_annotations = _parse_csv(args.pseudobulk_additional_annotations)
-    pseudobulk_modalities = _parse_csv(args.pseudobulk_modalities)
-    pseudobulk_annotation_columns = [
+    statistics_additional_annotations = _parse_csv(args.statistics_additional_annotations)
+    statistics_modalities = _parse_csv(args.statistics_modalities)
+    statistics_annotation_columns = [
         args.main_cell_annotation,
-        *(pseudobulk_additional_annotations or []),
+        *(statistics_additional_annotations or []),
     ]
     try:
-        pseudobulk_simple_constrast_categories = normalize_pseudobulk_simple_constrast_categories(
-            args.pseudobulk_simple_constrast_categories,
-            pseudobulk_annotation_columns,
-            option_name="--pseudobulk-simple-constrast-categories",
+        statistics_simple_contrast_categories = normalize_statistics_simple_contrast_categories(
+            args.statistics_simple_contrast_categories,
+            statistics_annotation_columns,
+            option_name="--statistics-simple-contrast-categories",
         )
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -844,6 +901,15 @@ def _run_export_cli(argv=None):
         feature_manifest_path=args.feature_manifest_path,
         feature_sidecar_shard_size=args.feature_sidecar_shard_size,
         feature_sparse_zero_threshold=args.feature_sparse_zero_threshold,
+        statistics_additional_annotations=statistics_additional_annotations,
+        statistics_modalities=statistics_modalities,
+        wilcoxon_min_cells_per_group=args.wilcoxon_min_cells_per_group,
+        wilcoxon_min_pct_expressed=args.wilcoxon_min_pct_expressed,
+        wilcoxon_p_adjust_method=args.wilcoxon_p_adjust_method,
+        wilcoxon_padj_cutoff=args.wilcoxon_padj_cutoff,
+        wilcoxon_log2fc_cutoff=args.wilcoxon_log2fc_cutoff,
+        wilcoxon_embed_top_n_per_comparison=args.wilcoxon_embed_top_n_per_comparison,
+        wilcoxon_top_n_per_category=args.wilcoxon_top_n_per_category,
         neighbor_stats_permutations=neighbor_perms,
         neighbor_stats_annotations=neighbor_stats_annotations,
         neighbor_stats_seed=args.neighbor_stats_seed,
@@ -852,11 +918,9 @@ def _run_export_cli(argv=None):
         interaction_markers_min_cells=args.interaction_markers_min_cells,
         interaction_markers_min_neighbors=args.interaction_markers_min_neighbors,
         pseudobulk=pseudobulk_mode,
-        pseudobulk_additional_annotations=pseudobulk_additional_annotations,
         pseudobulk_replicate_annotation=args.pseudobulk_replicate_annotation,
-        pseudobulk_simple_constrast_categories=pseudobulk_simple_constrast_categories,
+        statistics_simple_contrast_categories=statistics_simple_contrast_categories,
         pseudobulk_counts_layer=_parse_optional_layer(args.pseudobulk_counts_layer),
-        pseudobulk_modalities=pseudobulk_modalities,
         pseudobulk_min_cell_counts=args.pseudobulk_min_cell_counts,
         pseudobulk_min_feature_counts=args.pseudobulk_min_feature_counts,
         pseudobulk_min_cells_per_pseudobulk=args.pseudobulk_min_cells_per_pseudobulk,

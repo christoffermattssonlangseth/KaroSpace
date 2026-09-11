@@ -51,7 +51,7 @@ export_to_html(
 ENABLE_ANALYTICS else None,
     neighbor_stats_permutations=0,
     neighbor_stats_seed=42,
-    pseudobulk_additional_annotations=[PRIMARY_CLUSTER] if ENABLE_ANALYTICS
+    statistics_additional_annotations=[PRIMARY_CLUSTER] if ENABLE_ANALYTICS
 else None,
     pseudobulk_embed_top_n_per_comparison=20,
     pseudobulk_counts_layer="normalized",

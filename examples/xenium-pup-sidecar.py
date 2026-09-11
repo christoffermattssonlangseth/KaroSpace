@@ -31,7 +31,7 @@ if H5AD_PATH.startswith("/path/to/"):
 PRIMARY_CLUSTER = "leiden_0.5"
 ANALYTICS_COLUMNS = [PRIMARY_CLUSTER, "leiden_0.1", "leiden_1", "leiden_1.5", "leiden_2"]
 cell_annotations=ANALYTICS_COLUMNS[1:],
-pseudobulk_additional_annotations=ANALYTICS_COLUMNS,
+statistics_additional_annotations=ANALYTICS_COLUMNS,
 neighbor_stats_annotations=ANALYTICS_COLUMNS,
 OUTPUT_PATH = "xenium-mouse-pup-sidecar.html"
 FEATURE_MANIFEST_PATH = "xenium-mouse-pup-sidecar.features.json"
@@ -62,7 +62,7 @@ export_to_html(
       feature_storage="sidecar",
       feature_manifest_path=FEATURE_MANIFEST_PATH,
       feature_sidecar_shard_size=8,
-      pseudobulk_additional_annotations=ANALYTICS_COLUMNS,
+      statistics_additional_annotations=ANALYTICS_COLUMNS,
       pseudobulk_embed_top_n_per_comparison=20,
       pseudobulk_counts_layer="normalized",
       pseudobulk_min_cells_per_pseudobulk=20,
