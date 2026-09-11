@@ -36,6 +36,8 @@ def test_generated_html_uses_modality_scoped_feature_helpers(tmp_path=None):
     assert ("AVAILABLE_" + "G" + "ENE_SET") not in html
     assert "DATA.available_features" not in html
     assert ("resolveCanonical" + "G" + "eneName") not in html
+    assert "magma(" not in html
+    assert "magmaRgb(" not in html
 
 
 def test_generated_html_drops_removed_old_paths(tmp_path=None):
