@@ -73,12 +73,11 @@ common_kwargs = dict(
     ],
     neighbor_stats_permutations=0,
     neighbor_stats_seed=42,
-    # New-API pseudobulk DE, explicitly pointed at the 17-sample replicate column
-    # so DESeq2 actually runs. pseudobulk defaults to 'auto' (enabled); it takes
-    # 'auto'/None, not a bool.
+    # Optional pseudobulk DE, explicitly pointed at the 17-sample replicate column
+    # so DESeq2 actually runs. pseudobulk is off by default; use "auto" to enable it.
     pseudobulk="auto",
     pseudobulk_replicate_annotation="sample",
-    pseudobulk_additional_annotations=[
+    statistics_additional_annotations=[
         "majorCluster_final",
         "Region_banksy_major",
     ],

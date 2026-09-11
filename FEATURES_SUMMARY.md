@@ -145,7 +145,7 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 - Compare contains selection, region, annotation, and relationship comparisons.
 - The Statistics Visualization menu tree opens precomputed Features, Compare, and Neighbors panels from the raw dataset.
 - Statistics Features contains per-sample/category feature distributions, marker features, and spatial features in the selected feature namespace.
-- Statistics Compare contains sample-level pseudobulk comparisons.
+- Statistics Compare contains Wilcoxon category comparisons by default and optional sample-level pseudobulk comparisons.
 - Statistics Neighbors contains spatial adjacency enrichment, interaction markers, and dispersion analysis.
 
 ## 17. Exploration > Overview
@@ -161,9 +161,9 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 - `Exploration > Features > Distribution` summarizes value distributions across categories for a selected feature.
 - Per-cell distribution calculations use cells embedded in the HTML.
 - Per-cell distributions can be shown as a table or violin/boxplot.
-- `Statistics > Features > Distribution` uses pseudobulk/category mean summaries for selected features.
+- `Statistics > Features > Distribution` uses Wilcoxon/category mean summaries by default, or pseudobulk summaries when the secondary method is selected.
 - Per-sample/category means can be shown as a table or barplot.
-- `Statistics > Features > Markers` lists pseudobulk-derived marker features by category when available.
+- `Statistics > Features > Markers` lists Wilcoxon-derived marker features by category by default.
 - Marker features can be displayed as compact lists or heatmaps.
 - `Statistics > Features > Spatial` shows Moran Index rankings computed at export for each selected modality.
 - Spatial features can be displayed as a ranked list or graph.
@@ -174,14 +174,14 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 - `Exploration > Compare > Selections` analyzes active lasso/cell selections and is the detailed view behind Selection Find More.
 - `Exploration > Compare > Regions` compares saved region annotations and can run region comparisons similar to selection comparisons.
 - `Exploration > Compare > Annotations` compares categories within the selected annotation using per-cell summaries.
-- `Statistics > Compare > Simple design` displays category-versus-category pseudobulk DE when exported.
-- Simple design includes raw tables, markers, MA plots, volcano plots, PCA, distance matrix diagnostics, and pathway enrichment.
+- `Statistics > Compare > Simple design` displays category-versus-category Wilcoxon results by default and pseudobulk DE when exported.
+- Simple design includes raw tables, markers, MA plots, volcano plots, and, for pseudobulk results, PCA, distance matrix diagnostics, and pathway enrichment.
 - Simple design metrics can be shown as Raw table, Features, and Samples views.
-- Pseudobulk DE can be exported for selected modalities with `pseudobulk_modalities` / `--pseudobulk-modalities`; the default is the dataset default modality.
-- The Simple design modality selector switches between available modality-scoped pseudobulk results.
+- Statistics can be exported for selected modalities with `statistics_modalities` / `--statistics-modalities`; the default is the dataset default modality.
+- The Simple design method selector appears when both Wilcoxon and pseudobulk results are exported.
 - DE features are filtered with `padj < cutoff` and `abs(log2FC) >= cutoff`.
 - Features below the minimum percent-detected threshold in both compared groups are removed before `DeseqStats`, so they do not enter contrast-level multiple-testing correction.
-- The pseudobulk marker lists are ordered by adjusted p-value then log2FC and can expand from the first displayed rows.
+- Marker lists are ordered by adjusted p-value then log2FC and can expand from the first displayed rows.
 - MA and volcano plots show non-significant features, minimum-percent-detected filtered features, and significant features with updated legends.
 - Pathway Enrichment displays ORA pathways and GSEA enrichment in a separate panel for gene-compatible modalities.
 - ORA uses significant DE genes favoring the selected annotation.
@@ -198,23 +198,24 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 - Enrichment can be displayed as a table, network, or chord view.
 - Optional neighbor permutations add enrichment z-scores; with zero permutations, observed counts, shares, cell counts, and mean degree still remain available.
 - `Neighbors > Interactions` compares source cells based on which target categories they touch.
-- Interaction markers are contact-conditioned pseudobulk marker results when exported.
+- Interaction markers are contact-conditioned Wilcoxon marker results when exported.
 - Interaction controls choose the source category and filter target names.
 - `Neighbors > Dispersion` summarizes whether categories are clustered, dispersed, or close to random across all cells before HTML downsampling.
 - Dispersion complements immediate neighbor enrichment by describing whole-section spatial arrangement.
 
 ## 21. Exported Analytics
 
-- Pseudobulk DE uses raw counts grouped by replicate and annotation.
-- Pseudobulk DE and contact-conditioned interaction markers can run on selected modalities rather than always using the default RNA matrix.
+- Wilcoxon marker statistics use normalized data when available; otherwise raw data are copied, normalized to a fixed library size, and log-transformed before ranking.
+- Optional pseudobulk DE uses raw counts grouped by replicate and annotation.
+- Wilcoxon statistics, optional pseudobulk DE, and contact-conditioned interaction markers can run on selected modalities rather than always using the default RNA matrix.
 - Pathway enrichment is shown for gene-compatible modalities only; non-gene modalities report an unavailable state instead of an empty pathway panel.
 - Pseudobulk samples require at least `pseudobulk_min_cells_per_pseudobulk` cells before entering the shared DESeq2 fit.
-- Category-versus-category contrasts are extracted from a shared fit per annotation column.
+- Pseudobulk category-versus-category contrasts are extracted from a shared fit per annotation column.
 - Balanced-rest contrasts compare one category against the equally weighted mean of retained other categories.
 - Pairwise PCA and distance diagnostics are generated for selected pseudobulk comparisons.
 - ORA and GSEA are computed after Simple design pseudobulk DE and feed the Pathway Enrichment panel.
 - Spatially variable features are computed with Moran's I per selected modality for up to `spatial_variable_features_n` variable features on the full input cell set.
-- Category feature means are derived from pseudobulk DE feature summaries and feed per-sample/category distribution panels.
+- Category feature means are derived from the selected statistics method and feed per-sample/category distribution panels.
 - Feature correlations are computed from category means and feed related-feature suggestions.
 - Full-cell spatial dispersion is computed before HTML downsampling for the main cell annotation and requested `cell_annotations`.
 

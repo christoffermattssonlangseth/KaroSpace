@@ -75,6 +75,13 @@ def _parse_non_negative_int(name: str, token: str) -> int:
     return value
 
 
+def _parse_non_negative_float(name: str, token: str) -> float:
+    value = float(str(token).strip())
+    if value < 0:
+        raise ValueError(f"{name} must be >= 0.")
+    return value
+
+
 FIELD_HELP_TEXT = """Input / Output
 - Input (.h5ad): Path to an AnnData file. Use Browse or type a full path.
 - Output (.html): Path for the exported viewer HTML file.
@@ -103,7 +110,7 @@ Dataset Loading Options
 Annotation & Feature Content
 - Cells annotations: Comma/newline-separated obs columns to include in the annotation dropdown.
 - Features: Hand-picked feature names (comma/newline-separated) to pre-load for visualization.
-- In embedded mode, significant shared-fit pseudobulk DE features are embedded automatically up to the per-comparison cap.
+- In embedded mode, significant Wilcoxon marker features are embedded automatically up to the per-comparison cap.
 
 Advanced Options
 - Feature encoding: auto | dense | sparse.
@@ -117,8 +124,8 @@ Advanced Options
 - Interaction top features: Integer > 0.
 - Interaction min cells: Integer > 0.
 - Interaction min neighbors: Integer > 0.
-- Pseudobulk DE uses one shared replicate + annotation fit for each selected annotation, with category-versus-category and balanced-rest contrasts. Non-embedded DE features remain visible but cannot be clicked for visualization.
-- Interaction markers use the same pseudobulk counts layer and section replicate.
+- Wilcoxon statistics use normalized data when available, otherwise raw data are log-normalized.
+- Interaction markers use contact-conditioned Wilcoxon marker statistics.
 """
 
 UI_COLORS = {
@@ -295,6 +302,14 @@ class KaroSpaceExportGUI:
         self.feature_sparse_zero_threshold = tk.StringVar(value="0.8")
         self.neighbor_permutations = tk.StringVar(value="auto")
         self.neighbor_stats_seed = tk.StringVar(value="0")
+        self.statistics_modalities = tk.StringVar(value="")
+        self.wilcoxon_min_cells_per_group = tk.StringVar(value="20")
+        self.wilcoxon_min_pct_expressed = tk.StringVar(value="0")
+        self.wilcoxon_p_adjust_method = tk.StringVar(value="fdr_bh")
+        self.wilcoxon_padj_cutoff = tk.StringVar(value="0.05")
+        self.wilcoxon_log2fc_cutoff = tk.StringVar(value="1")
+        self.wilcoxon_embed_top_n_per_comparison = tk.StringVar(value="2")
+        self.wilcoxon_top_n_per_category = tk.StringVar(value="300")
         self.interaction_markers_top_targets = tk.StringVar(value="5")
         self.interaction_markers_top_features = tk.StringVar(value="20")
         self.interaction_markers_min_cells = tk.StringVar(value="30")
@@ -704,6 +719,42 @@ class KaroSpaceExportGUI:
         )
         self.neighbor_stats_annotations_editor.grid(row=2, column=0, columnspan=4, sticky="ew")
 
+        statistics_group = ttk.LabelFrame(self.advanced_content, text="Statistics", padding=10, style="Card.TLabelframe")
+        statistics_group.pack(fill="x", pady=(0, 10))
+        statistics_group.columnconfigure(1, weight=1)
+        statistics_group.columnconfigure(3, weight=1)
+        ttk.Label(statistics_group, text="Statistics modalities").grid(row=0, column=0, sticky="w", pady=4)
+        ttk.Entry(statistics_group, textvariable=self.statistics_modalities).grid(
+            row=0, column=1, columnspan=3, sticky="ew", padx=(8, 0), pady=4
+        )
+        ttk.Label(statistics_group, text="Min cells/group").grid(row=1, column=0, sticky="w", pady=4)
+        ttk.Entry(statistics_group, textvariable=self.wilcoxon_min_cells_per_group).grid(
+            row=1, column=1, sticky="ew", padx=(8, 16), pady=4
+        )
+        ttk.Label(statistics_group, text="Min pct expressed").grid(row=1, column=2, sticky="w", pady=4)
+        ttk.Entry(statistics_group, textvariable=self.wilcoxon_min_pct_expressed).grid(row=1, column=3, sticky="ew", pady=4)
+        ttk.Label(statistics_group, text="P adjust").grid(row=2, column=0, sticky="w", pady=4)
+        ttk.Combobox(
+            statistics_group,
+            textvariable=self.wilcoxon_p_adjust_method,
+            values=["fdr_bh", "bonferroni", "holm", "none"],
+            state="readonly",
+        ).grid(row=2, column=1, sticky="ew", padx=(8, 16), pady=4)
+        ttk.Label(statistics_group, text="Padj cutoff").grid(row=2, column=2, sticky="w", pady=4)
+        ttk.Entry(statistics_group, textvariable=self.wilcoxon_padj_cutoff).grid(row=2, column=3, sticky="ew", pady=4)
+        ttk.Label(statistics_group, text="|log2FC| cutoff").grid(row=3, column=0, sticky="w", pady=4)
+        ttk.Entry(statistics_group, textvariable=self.wilcoxon_log2fc_cutoff).grid(
+            row=3, column=1, sticky="ew", padx=(8, 16), pady=4
+        )
+        ttk.Label(statistics_group, text="Embed top/comparison").grid(row=3, column=2, sticky="w", pady=4)
+        ttk.Entry(statistics_group, textvariable=self.wilcoxon_embed_top_n_per_comparison).grid(
+            row=3, column=3, sticky="ew", pady=4
+        )
+        ttk.Label(statistics_group, text="Rows/category").grid(row=4, column=0, sticky="w", pady=4)
+        ttk.Entry(statistics_group, textvariable=self.wilcoxon_top_n_per_category).grid(
+            row=4, column=1, sticky="ew", padx=(8, 16), pady=4
+        )
+
         interaction_group = ttk.LabelFrame(self.advanced_content, text="Interaction Markers", padding=10, style="Card.TLabelframe")
         interaction_group.pack(fill="x")
         interaction_group.columnconfigure(1, weight=1)
@@ -860,6 +911,14 @@ class KaroSpaceExportGUI:
             "feature_storage": "embedded",
             "feature_manifest_path": "",
             "feature_sparse_zero_threshold": "0.8",
+            "statistics_modalities": "",
+            "wilcoxon_min_cells_per_group": "20",
+            "wilcoxon_min_pct_expressed": "0",
+            "wilcoxon_p_adjust_method": "fdr_bh",
+            "wilcoxon_padj_cutoff": "0.05",
+            "wilcoxon_log2fc_cutoff": "1",
+            "wilcoxon_embed_top_n_per_comparison": "2",
+            "wilcoxon_top_n_per_category": "300",
         }
         for key, value in common.items():
             attr = getattr(self, key)
@@ -1258,6 +1317,18 @@ class KaroSpaceExportGUI:
         cell_annotations = _unique(self.cell_annotations_editor.get_items())
         features = _unique(self.features_editor.get_items())
         outline_by = self.outline_by.get().strip() or None
+        statistics_modalities = _parse_tokens(self.statistics_modalities.get() or "")
+        wilcoxon_min_pct_expressed = _parse_non_negative_float(
+            "Wilcoxon min pct expressed",
+            self.wilcoxon_min_pct_expressed.get(),
+        )
+        wilcoxon_padj_cutoff = float(self.wilcoxon_padj_cutoff.get().strip())
+        if wilcoxon_padj_cutoff < 0 or wilcoxon_padj_cutoff > 1:
+            raise ValueError("Wilcoxon padj cutoff must be between 0 and 1.")
+        wilcoxon_log2fc_cutoff = _parse_non_negative_float(
+            "Wilcoxon log2FC cutoff",
+            self.wilcoxon_log2fc_cutoff.get(),
+        )
 
         load_kwargs = {
             "section_key": section_key,
@@ -1284,6 +1355,25 @@ class KaroSpaceExportGUI:
             "feature_storage": feature_storage,
             "feature_manifest_path": feature_manifest_path,
             "feature_sparse_zero_threshold": feature_sparse_zero_threshold,
+            "statistics_additional_annotations": cell_annotations,
+            "statistics_modalities": statistics_modalities,
+            "wilcoxon_min_cells_per_group": _parse_positive_int(
+                "Wilcoxon min cells/group",
+                self.wilcoxon_min_cells_per_group.get(),
+            ),
+            "wilcoxon_min_pct_expressed": wilcoxon_min_pct_expressed,
+            "wilcoxon_p_adjust_method": self.wilcoxon_p_adjust_method.get().strip() or "fdr_bh",
+            "wilcoxon_padj_cutoff": wilcoxon_padj_cutoff,
+            "wilcoxon_log2fc_cutoff": wilcoxon_log2fc_cutoff,
+            "wilcoxon_embed_top_n_per_comparison": _parse_non_negative_int(
+                "Wilcoxon embed top/comparison",
+                self.wilcoxon_embed_top_n_per_comparison.get(),
+            ),
+            "wilcoxon_top_n_per_category": _parse_positive_int(
+                "Wilcoxon rows/category",
+                self.wilcoxon_top_n_per_category.get(),
+            ),
+            "pseudobulk": None,
             "neighbor_stats_permutations": _parse_neighbor_permutations(self.neighbor_permutations.get()),
             "neighbor_stats_seed": int(self.neighbor_stats_seed.get().strip() or "0"),
             "interaction_markers_top_targets": _parse_positive_int("Interaction top targets", self.interaction_markers_top_targets.get()),

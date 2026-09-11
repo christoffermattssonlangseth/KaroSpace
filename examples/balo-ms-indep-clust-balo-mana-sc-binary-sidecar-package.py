@@ -71,7 +71,7 @@ common_kwargs = dict(
 "leiden_0.5","leiden_1","leiden_1.5","leiden_2","gmm_mana_10"    ],
     neighbor_stats_permutations=0,
     neighbor_stats_seed=42,
-    pseudobulk_additional_annotations=[
+    statistics_additional_annotations=[
         "niche",
 "leiden_0.5","leiden_1","leiden_1.5","leiden_2","gmm_mana_10"    ],
     pseudobulk_embed_top_n_per_comparison=20,

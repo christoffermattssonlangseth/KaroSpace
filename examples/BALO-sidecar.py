@@ -76,7 +76,7 @@ export_to_html(
     feature_storage="sidecar",
     feature_manifest_path="BALO.features.json",
     neighbor_stats_permutations=25 if ENABLE_ANALYTICS else 0,
-    pseudobulk_additional_annotations=["leiden_2"],
+    statistics_additional_annotations=["leiden_2"],
     pseudobulk_embed_top_n_per_comparison=20,
     pseudobulk_counts_layer="normalized",
     pseudobulk_min_cells_per_pseudobulk=20,

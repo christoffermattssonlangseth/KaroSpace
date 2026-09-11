@@ -47,16 +47,16 @@ def _clean_pseudobulk_category_list(value: Any, option_name: str) -> Optional[Li
     raise ValueError(f"{option_name} values must be category strings or lists of category strings")
 
 
-def normalize_pseudobulk_simple_constrast_categories(
+def normalize_statistics_simple_contrast_categories(
     value: Any,
     annotation_columns: Sequence[str],
     *,
-    option_name: str = "pseudobulk_simple_constrast_categories",
+    option_name: str = "statistics_simple_contrast_categories",
 ) -> Optional[Dict[str, Optional[List[str]]]]:
     """Normalize optional Simple design category filters by annotation column.
 
     A flat category list is only meaningful when a single annotation is analyzed.
-    With multiple pseudobulk annotation columns, callers must provide either a
+    With multiple statistics annotation columns, callers must provide either a
     mapping keyed by annotation name or a nested list whose order matches
     ``annotation_columns``.
     """
@@ -75,7 +75,7 @@ def normalize_pseudobulk_simple_constrast_categories(
         else:
             if len(columns) > 1:
                 raise ValueError(
-                    f"{option_name} is ambiguous with multiple pseudobulk annotations. "
+                    f"{option_name} is ambiguous with multiple statistics annotations. "
                     "Use a JSON object keyed by annotation name or a nested JSON list in "
                     "the order: " + ", ".join(columns) + "."
                 )
@@ -1005,11 +1005,12 @@ def _category_feature_means_from_pseudobulk_de(
                 "means": means,
                 "background": background,
                 "n_cells": cmeans.get("n_cells") or {},
-                "source": "pseudobulk_de",
+                "source": str(cmeans.get("source") or "pseudobulk_de"),
             }
     if not columns or not feature_order:
         return None
-    return {"features": feature_order, "columns": columns, "source": "pseudobulk_de"}
+    sources = sorted({str(column.get("source") or "pseudobulk_de") for column in columns.values()})
+    return {"features": feature_order, "columns": columns, "source": sources[0] if len(sources) == 1 else "mixed"}
 
 
 @dataclass
@@ -1666,11 +1667,21 @@ class SpatialDataset:
         feature_sparse_zero_threshold: float = 0.8,
         feature_sparse_pack: bool = True,
         feature_sparse_pack_min_nnz: int = 256,
+        statistics_additional_annotations: Optional[List[str]] = None,
+        statistics_modalities: Optional[Sequence[str]] = None,
+        wilcoxon_de_annotations: Optional[List[str]] = None,
+        wilcoxon_layer: Optional[str] = None,
+        wilcoxon_min_cells_per_group: int = 20,
+        wilcoxon_min_pct_expressed: float = 0.0,
+        wilcoxon_p_adjust_method: str = "fdr_bh",
+        wilcoxon_padj_cutoff: float = 0.05,
+        wilcoxon_log2fc_cutoff: float = 1,
+        wilcoxon_embed_top_n_per_comparison: int = 2,
+        wilcoxon_top_n_per_category: int = 300,
+        statistics_simple_contrast_categories: Any = None,
         pseudobulk_de_annotations: Optional[List[str]] = None,
         pseudobulk_replicate_annotation: Optional[str] = None,
-        pseudobulk_simple_constrast_categories: Any = None,
         pseudobulk_counts_layer: Optional[str] = "counts",
-        pseudobulk_modalities: Optional[Sequence[str]] = None,
         pseudobulk_min_cell_counts: int = 0,
         pseudobulk_min_feature_counts: int = 0,
         pseudobulk_min_cells_per_pseudobulk: int = 20,
@@ -1730,20 +1741,15 @@ class SpatialDataset:
         pseudobulk_replicate_annotation : str, optional
             Obs annotation used as the biological replicate for pseudobulk analyses.
             Defaults to the dataset section_key annotation.
-        pseudobulk_simple_constrast_categories : list or dict, optional
+        statistics_simple_contrast_categories : list or dict, optional
             Categories to include in Simple design category-versus-category
             contrasts. Use a flat list only when one annotation is analyzed.
-            With multiple pseudobulk annotation columns, pass a dict keyed by
+            With multiple statistics annotation columns, pass a dict keyed by
             annotation name or a nested list matching the annotation order. All
-            retained categories remain in the shared fit and receive a
-            balanced-rest contrast.
+            retained categories receive a balanced-rest contrast.
         pseudobulk_counts_layer : str, optional
             AnnData layer containing raw counts for pseudobulk aggregation.
             Defaults to "counts" when present, otherwise adata.X.
-        pseudobulk_modalities : list, optional
-            Modality names to run pseudobulk DE on. Defaults to the dataset
-            default modality, usually "rna". Use ["all"] for all detected
-            modalities.
         pseudobulk_min_cell_counts : int
             Exclude cells below this total raw-count threshold before pseudobulk
             aggregation. Zero disables filtering.
@@ -1779,7 +1785,7 @@ class SpatialDataset:
             vectors are written to the sidecar.
         interaction_marker_annotations : list, optional
             Internal list of obs columns to compute contact-conditioned
-            pseudobulk interaction markers for. Empty/None disables them.
+            Wilcoxon interaction markers for. Empty/None disables them.
         neighbor_stats_annotations : list, optional
             Obs columns to compute neighbor composition stats for (categorical only)
         neighbor_stats_permutations : int
@@ -1791,8 +1797,7 @@ class SpatialDataset:
         interaction_markers_top_features : int
             Number of top features to keep per source-target interaction.
         interaction_markers_min_cells : int
-            Minimum cells required per replicate in both contact+ and contact-
-            pseudobulk samples.
+            Minimum source cells required in both contact+ and contact- groups.
         interaction_markers_min_neighbors : int
             Minimum number of target neighbors for a source cell to be labeled contact+.
         Returns
@@ -2357,7 +2362,7 @@ class SpatialDataset:
                     )
             return dispersion
 
-        def _normalize_pseudobulk_modalities(
+        def _normalize_statistics_modalities(
             value: Optional[Sequence[str]],
         ) -> List[str]:
             available = list(self.modalities.keys())
@@ -2382,18 +2387,18 @@ class SpatialDataset:
             unknown = [name for name in requested if name not in self.modalities]
             if unknown:
                 raise ValueError(
-                    f"Unknown pseudobulk modalities: {unknown}. Available: {available}"
+                    f"Unknown statistics modalities: {unknown}. Available: {available}"
                 )
             return requested
 
-        def _adata_for_pseudobulk_modality(modality_name: str) -> Any:
+        def _adata_for_statistics_modality(modality_name: str) -> Any:
             if not self.modalities:
                 return self.adata
             if modality_name == self.default_modality:
                 return self.adata
             mod = self.modalities.get(modality_name)
             if mod is None:
-                raise ValueError(f"Unknown pseudobulk modality: {modality_name}")
+                raise ValueError(f"Unknown statistics modality: {modality_name}")
             var = mod.var.copy()
             if var.shape[0] != int(mod.matrix.shape[1]):
                 var = pd.DataFrame(index=[str(i) for i in range(int(mod.matrix.shape[1]))])
@@ -2410,8 +2415,8 @@ class SpatialDataset:
                     mod_adata.obsp[str(obsp_key)] = obsp_value.copy() if hasattr(obsp_value, "copy") else obsp_value
             return mod_adata
 
-        pseudobulk_modality_names = _normalize_pseudobulk_modalities(pseudobulk_modalities)
-        primary_pseudobulk_modality = pseudobulk_modality_names[0] if pseudobulk_modality_names else None
+        statistics_modality_names = _normalize_statistics_modalities(statistics_modalities)
+        primary_statistics_modality = statistics_modality_names[0] if statistics_modality_names else None
         modality_names = list(self.modalities.keys()) or [str(self.default_modality or "rna")]
         default_modality_name = (
             str(self.default_modality)
@@ -2514,6 +2519,7 @@ class SpatialDataset:
 
         def _html_embedded_feature_candidates_for_modality(
             modality_name: str,
+            wilcoxon_payload: Optional[Mapping[str, Any]] = None,
             pseudobulk_payload: Optional[Mapping[str, Any]] = None,
             interaction_payload: Optional[Mapping[str, Any]] = None,
         ) -> List[str]:
@@ -2522,15 +2528,23 @@ class SpatialDataset:
             auto_features: List[str] = []
             auto_features.extend(
                 _significant_de_features(
-                    pseudobulk_payload or {},
-                    float(pseudobulk_padj_cutoff),
-                    float(pseudobulk_log2fc_cutoff),
-                    limit_per_comparison=int(pseudobulk_embed_top_n_per_comparison),
+                    wilcoxon_payload or {},
+                    float(wilcoxon_padj_cutoff),
+                    float(wilcoxon_log2fc_cutoff),
+                    limit_per_comparison=int(wilcoxon_embed_top_n_per_comparison),
                 )
             )
             auto_features.extend(
                 _significant_de_features(
                     interaction_payload or {},
+                    float(wilcoxon_padj_cutoff),
+                    float(wilcoxon_log2fc_cutoff),
+                    limit_per_comparison=int(wilcoxon_embed_top_n_per_comparison),
+                )
+            )
+            auto_features.extend(
+                _significant_de_features(
+                    pseudobulk_payload or {},
                     float(pseudobulk_padj_cutoff),
                     float(pseudobulk_log2fc_cutoff),
                     limit_per_comparison=int(pseudobulk_embed_top_n_per_comparison),
@@ -2542,6 +2556,84 @@ class SpatialDataset:
                 if feature in available
             ]
 
+        def _de_payload_log_counts(payload: Mapping[str, Any]) -> Tuple[int, int, int, int]:
+            category_count = 0
+            comparison_count = 0
+            available_comparison_count = 0
+            reported_features: set[str] = set()
+            for source_key, by_reference in payload.items():
+                if str(source_key).startswith("_") or not isinstance(by_reference, Mapping):
+                    continue
+                category_count += 1
+                for result in by_reference.values():
+                    if not isinstance(result, Mapping):
+                        continue
+                    comparison_count += 1
+                    if bool(result.get("available", True)):
+                        available_comparison_count += 1
+                    for feature_name in result.get("features") or []:
+                        reported_features.add(str(feature_name))
+            return category_count, comparison_count, available_comparison_count, len(reported_features)
+
+        def _de_payload_threshold_count_lines(
+            payload: Mapping[str, Any],
+            padj_threshold: float,
+            log2fc_threshold: float,
+        ) -> List[str]:
+            lines: List[str] = []
+            for source_key, by_reference in payload.items():
+                if str(source_key).startswith("_") or not isinstance(by_reference, Mapping):
+                    continue
+                for reference_key, result in by_reference.items():
+                    if not isinstance(result, Mapping):
+                        continue
+                    label = (
+                        f"{source_key} vs rest"
+                        if str(reference_key) == "__rest__"
+                        else f"{source_key} vs {reference_key}"
+                    )
+                    if not bool(result.get("available", True)):
+                        reason = str(result.get("reason") or "unavailable")
+                        lines.append(f"{label}: unavailable ({reason})")
+                        continue
+                    features_list = result.get("features") or []
+                    padj_list = result.get("pvals_adj") or []
+                    log2fc_list = result.get("log2foldchanges") or []
+                    try:
+                        denominator = int(result.get("min_pct_feature_count", len(features_list)))
+                    except (TypeError, ValueError):
+                        denominator = len(features_list)
+                    is_rest = str(reference_key) == "__rest__"
+                    if is_rest:
+                        lines.append(
+                            f"{label}: {len(features_list)}/{denominator} source-enriched features retained "
+                            "after log2FC cutoff and top-N cap"
+                        )
+                        continue
+                    passing = 0
+                    for padj, log2fc in zip(padj_list, log2fc_list):
+                        try:
+                            padj_value = float(padj)
+                            log2fc_value = float(log2fc)
+                        except (TypeError, ValueError):
+                            continue
+                        passes_common = (
+                            np.isfinite(padj_value)
+                            and np.isfinite(log2fc_value)
+                            and padj_value < padj_threshold
+                        )
+                        passes_log2fc = (
+                            log2fc_value >= log2fc_threshold
+                            if is_rest
+                            else abs(log2fc_value) >= log2fc_threshold
+                        )
+                        if passes_common and passes_log2fc:
+                            passing += 1
+                    lines.append(
+                        f"{label}: {passing}/{denominator} two-sided features pass threshold"
+                    )
+            return lines
+
         replicate_override = str(pseudobulk_replicate_annotation or "").strip()
         pseudobulk_replicate_name = replicate_override or str(self.section_key)
         if pseudobulk_replicate_name not in self.adata.obs.columns:
@@ -2550,13 +2642,147 @@ class SpatialDataset:
                 f"'{pseudobulk_replicate_name}' is not an obs column"
             )
         marker_features = {}
+        if wilcoxon_de_annotations is None:
+            requested_wilcoxon_de_annotations = []
+            for col in [annotation, *(statistics_additional_annotations or [])]:
+                if col and col not in requested_wilcoxon_de_annotations:
+                    requested_wilcoxon_de_annotations.append(col)
+        else:
+            requested_wilcoxon_de_annotations = list(wilcoxon_de_annotations or [])
         requested_pseudobulk_de_annotations = list(pseudobulk_de_annotations or [])
-        pseudobulk_simple_categories_by_annotation = normalize_pseudobulk_simple_constrast_categories(
-            pseudobulk_simple_constrast_categories,
-            requested_pseudobulk_de_annotations,
+        simple_contrast_annotation_columns = list(
+            dict.fromkeys([*requested_wilcoxon_de_annotations, *requested_pseudobulk_de_annotations])
         )
+        statistics_simple_categories_by_annotation = normalize_statistics_simple_contrast_categories(
+            statistics_simple_contrast_categories,
+            simple_contrast_annotation_columns,
+        )
+        wilcoxon_expression_by_modality: Dict[str, Tuple[Any, str]] = {}
+
+        def _prepare_wilcoxon_expression_for_modality(modality_name: str, analysis_adata: Any) -> Tuple[Any, str]:
+            cached = wilcoxon_expression_by_modality.get(modality_name)
+            if cached is not None:
+                return cached
+            from .wilcoxon import resolve_wilcoxon_expression_matrix
+
+            log_step(f"Preparing Wilcoxon expression matrix for modality {modality_name}.")
+            prepared = resolve_wilcoxon_expression_matrix(analysis_adata, wilcoxon_layer)
+            log_detail(f"prepared_expression_source={prepared[1]}", level=1)
+            wilcoxon_expression_by_modality[modality_name] = prepared
+            return prepared
+
+        wilcoxon_de_by_modality: Dict[str, Dict[str, Any]] = {
+            modality_name: {} for modality_name in statistics_modality_names
+        }
+        if requested_wilcoxon_de_annotations:
+            from .wilcoxon import compute_wilcoxon_group_de
+
+            wilcoxon_min_cells_n = int(wilcoxon_min_cells_per_group)
+            wilcoxon_min_pct_n = float(wilcoxon_min_pct_expressed)
+            wilcoxon_padj_cutoff_n = float(wilcoxon_padj_cutoff)
+            wilcoxon_log2fc_cutoff_n = float(wilcoxon_log2fc_cutoff)
+            wilcoxon_top_n = int(wilcoxon_top_n_per_category)
+
+            for modality_name in statistics_modality_names:
+                analysis_adata = _adata_for_statistics_modality(modality_name)
+                modality_wilcoxon_de: Dict[str, Any] = {}
+                wilcoxon_expression_matrix, wilcoxon_expression_layer_used = (
+                    _prepare_wilcoxon_expression_for_modality(modality_name, analysis_adata)
+                )
+                log_step(
+                    f"Computing Wilcoxon marker statistics for modality {modality_name}: "
+                    f"{len(requested_wilcoxon_de_annotations)} annotation column"
+                    f"{'s' if len(requested_wilcoxon_de_annotations) != 1 else ''}; "
+                    "output feeds Statistics > Features and Statistics > Compare."
+                )
+                for annotation_key in requested_wilcoxon_de_annotations:
+                    log_step(
+                        f"Wilcoxon statistics: modality={modality_name}; annotation column {annotation_key}",
+                        level=1,
+                    )
+                    annotation_pairwise_categories = (
+                        statistics_simple_categories_by_annotation.get(annotation_key)
+                        if statistics_simple_categories_by_annotation
+                        else None
+                    )
+                    pairwise_categories_label = (
+                        ", ".join(str(value) for value in annotation_pairwise_categories)
+                        if annotation_pairwise_categories
+                        else "all retained categories"
+                    )
+                    log_detail("Parameters:", level=2)
+                    log_detail("method=cell_wilcoxon", level=3)
+                    log_detail("rest=one_vs_rest", level=3)
+                    log_detail("pairwise=category_vs_category", level=3)
+                    log_detail(f"expression_source={wilcoxon_expression_layer_used}", level=3)
+                    log_detail(f"min_cells_per_group={wilcoxon_min_cells_n}", level=3)
+                    log_detail(f"min_pct_expressed={wilcoxon_min_pct_n:g}", level=3)
+                    log_detail(f"p_adjust={wilcoxon_p_adjust_method}", level=3)
+                    log_detail(f"padj_cutoff={wilcoxon_padj_cutoff_n:g}", level=3)
+                    log_detail(f"log2fc_cutoff={wilcoxon_log2fc_cutoff_n:g}", level=3)
+                    log_detail(f"top_n_per_comparison={wilcoxon_top_n}", level=3)
+                    log_detail(f"embed_top_n_per_comparison={int(wilcoxon_embed_top_n_per_comparison)}", level=3)
+                    log_detail(f"reported_pairwise_categories={pairwise_categories_label}", level=3)
+                    annotation_results = compute_wilcoxon_group_de(
+                        analysis_adata,
+                        annotation_key,
+                        pairwise_categories=annotation_pairwise_categories,
+                        expression_layer=wilcoxon_layer,
+                        expression_matrix=wilcoxon_expression_matrix,
+                        expression_layer_used=wilcoxon_expression_layer_used,
+                        min_cells=wilcoxon_min_cells_n,
+                        min_pct_expressed=wilcoxon_min_pct_n,
+                        p_adjust_method=wilcoxon_p_adjust_method,
+                        padj_cutoff=wilcoxon_padj_cutoff_n,
+                        log2fc_cutoff=wilcoxon_log2fc_cutoff_n,
+                        top_n_per_comparison=wilcoxon_top_n,
+                    )
+                    if annotation_results:
+                        category_count, comparison_count, available_comparison_count, reported_feature_count = (
+                            _de_payload_log_counts(annotation_results)
+                        )
+                        log_detail(
+                            "Stored Wilcoxon result payload: "
+                            f"{category_count} categories, "
+                            f"{available_comparison_count}/{comparison_count} comparisons available, "
+                            f"{reported_feature_count} unique reported features.",
+                            level=2,
+                        )
+                        log_detail(
+                            "Feature counts per comparison "
+                            f"(denominator: features after min_pct; rest numerator: source-enriched "
+                            f"log2FC >= {wilcoxon_log2fc_cutoff_n:g} after top-N; "
+                            f"pairwise numerator: padj < {wilcoxon_padj_cutoff_n:g} "
+                            f"and |log2FC| >= {wilcoxon_log2fc_cutoff_n:g}):",
+                            level=2,
+                        )
+                        for threshold_line in _de_payload_threshold_count_lines(
+                            annotation_results,
+                            wilcoxon_padj_cutoff_n,
+                            wilcoxon_log2fc_cutoff_n,
+                        ):
+                            log_detail(threshold_line, level=3)
+                        embedded_feature_count = len(
+                            _html_embedded_feature_candidates_for_modality(
+                                modality_name,
+                                wilcoxon_payload={annotation_key: annotation_results},
+                            )
+                        )
+                        log_detail(
+                            f"Features selected for HTML embedding for modality "
+                            f"{modality_name}: {embedded_feature_count:,}.",
+                            level=2,
+                        )
+                        modality_wilcoxon_de[annotation_key] = annotation_results
+                    else:
+                        log_detail(
+                            "No Wilcoxon result payload stored "
+                            "(fewer than two categories with enough cells or unsupported annotation).",
+                            level=2,
+                        )
+                wilcoxon_de_by_modality[modality_name] = modality_wilcoxon_de
         pseudobulk_de_by_modality: Dict[str, Dict[str, Any]] = {
-            modality_name: {} for modality_name in pseudobulk_modality_names
+            modality_name: {} for modality_name in statistics_modality_names
         }
         companion_pseudobulk_de = companion_analytics.get("pseudobulk_de")
         if requested_pseudobulk_de_annotations:
@@ -2596,8 +2822,8 @@ class SpatialDataset:
                     return False
                 return True
 
-            for modality_name in pseudobulk_modality_names:
-                analysis_adata = _adata_for_pseudobulk_modality(modality_name)
+            for modality_name in statistics_modality_names:
+                analysis_adata = _adata_for_statistics_modality(modality_name)
                 modality_pseudobulk_de: Dict[str, Any] = {}
                 pending_pseudobulk_de_annotations = list(requested_pseudobulk_de_annotations)
                 allow_companion_reuse = (
@@ -2635,8 +2861,8 @@ class SpatialDataset:
 
                 for annotation_key in pending_pseudobulk_de_annotations:
                     annotation_pairwise_categories = (
-                        (pseudobulk_simple_categories_by_annotation or {}).get(annotation_key)
-                        if pseudobulk_simple_categories_by_annotation
+                        (statistics_simple_categories_by_annotation or {}).get(annotation_key)
+                        if statistics_simple_categories_by_annotation
                         else None
                     )
                     sample_metadata_model = _use_sample_metadata_pseudobulk(analysis_adata, annotation_key)
@@ -2699,7 +2925,8 @@ class SpatialDataset:
                         embedded_feature_count = len(
                             _html_embedded_feature_candidates_for_modality(
                                 modality_name,
-                                {annotation_key: annotation_results},
+                                wilcoxon_payload=wilcoxon_de_by_modality.get(modality_name),
+                                pseudobulk_payload={annotation_key: annotation_results},
                             )
                         )
                         log_detail(
@@ -2708,37 +2935,17 @@ class SpatialDataset:
                             level=2,
                         )
                         modality_pseudobulk_de[annotation_key] = annotation_results
-                    elif not sample_metadata_model:
-                        # Pseudobulk DESeq2 needs >= 2 biological replicates. When it
-                        # can't run (e.g. a single-sample dataset), fall back to
-                        # cell-level Welch markers (category vs rest) so the per-
-                        # category marker panel is still populated. Same payload
-                        # schema, so no viewer changes are needed.
-                        from .pseudobulk import compute_cell_level_group_markers
-
-                        fallback_results = compute_cell_level_group_markers(
-                            analysis_adata,
-                            annotation_key,
-                            expression_layer="normalized",
-                            padj_cutoff=pseudobulk_padj_cutoff_n,
-                            log2fc_cutoff=pseudobulk_log2fc_cutoff_n,
-                            p_adjust_method=pseudobulk_p_adjust_method,
-                            min_cells=pseudobulk_min_cells_n,
-                        )
-                        if fallback_results:
-                            modality_pseudobulk_de[annotation_key] = fallback_results
-                            log_detail(
-                                f"pseudobulk DE unavailable for '{annotation_key}' "
-                                f"on modality {modality_name}; used cell-level Welch markers "
-                                "(category vs rest) as a replicate-free fallback.",
-                                level=2,
-                            )
 
                 pseudobulk_de_by_modality[modality_name] = modality_pseudobulk_de
 
+        wilcoxon_de = (
+            dict(wilcoxon_de_by_modality.get(primary_statistics_modality, {}))
+            if primary_statistics_modality is not None
+            else {}
+        )
         pseudobulk_de = (
-            dict(pseudobulk_de_by_modality.get(primary_pseudobulk_modality, {}))
-            if primary_pseudobulk_modality is not None
+            dict(pseudobulk_de_by_modality.get(primary_statistics_modality, {}))
+            if primary_statistics_modality is not None
             else {}
         )
 
@@ -2794,7 +3001,7 @@ class SpatialDataset:
         # for source S and target T, compare source cells contacting T vs source cells not contacting T.
         requested_interaction_marker_annotations = list(interaction_marker_annotations or [])
         interaction_markers_by_modality: Dict[str, Dict[str, Any]] = {
-            modality_name: {} for modality_name in pseudobulk_modality_names
+            modality_name: {} for modality_name in statistics_modality_names
         }
         companion_interaction_markers = companion_analytics.get("interaction_markers")
         if neighbor_graph is not None and requested_interaction_marker_annotations:
@@ -2803,11 +3010,13 @@ class SpatialDataset:
             min_cells = int(interaction_markers_min_cells)
             min_neighbors = int(interaction_markers_min_neighbors)
             interaction_replicate_name = pseudobulk_replicate_name
-            interaction_min_rep_n = int(pseudobulk_min_replicates)
-            from .pseudobulk import compute_pseudobulk_interaction_markers
+            from .wilcoxon import compute_wilcoxon_interaction_markers
 
-            for modality_name in pseudobulk_modality_names:
-                analysis_adata = _adata_for_pseudobulk_modality(modality_name)
+            for modality_name in statistics_modality_names:
+                analysis_adata = _adata_for_statistics_modality(modality_name)
+                wilcoxon_expression_matrix, wilcoxon_expression_layer_used = (
+                    _prepare_wilcoxon_expression_for_modality(modality_name, analysis_adata)
+                )
                 modality_interaction_markers: Dict[str, Any] = {}
                 pending_interaction_marker_annotations = list(requested_interaction_marker_annotations)
                 allow_companion_reuse = (
@@ -2837,7 +3046,7 @@ class SpatialDataset:
 
                 if pending_interaction_marker_annotations:
                     log_step(
-                        f"Computing contact-conditioned pseudobulk interaction markers for modality {modality_name}: "
+                        f"Computing contact-conditioned Wilcoxon interaction markers for modality {modality_name}: "
                         f"{len(pending_interaction_marker_annotations)} annotation column"
                         f"{'s' if len(pending_interaction_marker_annotations) != 1 else ''}; "
                         "output feeds Statistics > Neighbors > Interactions."
@@ -2849,6 +3058,17 @@ class SpatialDataset:
                         f"replicate={interaction_replicate_name}",
                         level=1,
                     )
+                    log_detail("Parameters:", level=2)
+                    log_detail("method=cell_wilcoxon_contact", level=3)
+                    log_detail(f"expression_source={wilcoxon_expression_layer_used}", level=3)
+                    log_detail(f"top_targets={top_targets}", level=3)
+                    log_detail(f"top_features={top_features}", level=3)
+                    log_detail(f"min_cells={min_cells}", level=3)
+                    log_detail(f"min_neighbors={min_neighbors}", level=3)
+                    log_detail(f"min_pct_expressed={float(wilcoxon_min_pct_expressed):g}", level=3)
+                    log_detail(f"p_adjust={wilcoxon_p_adjust_method}", level=3)
+                    log_detail(f"padj_cutoff={float(wilcoxon_padj_cutoff):g}", level=3)
+                    log_detail(f"log2fc_cutoff={float(wilcoxon_log2fc_cutoff):g}", level=3)
                     if annotation_key not in neighbor_stats_context:
                         companion_neighbor_entry = None
                         if isinstance(companion_neighbor_stats, dict):
@@ -2883,10 +3103,9 @@ class SpatialDataset:
                     zscore = ctx.get("zscore")
                     n_cells = np.asarray(ctx["n_cells"], dtype=int)
 
-                    group_interactions = compute_pseudobulk_interaction_markers(
+                    group_interactions = compute_wilcoxon_interaction_markers(
                         analysis_adata,
                         annotation_key,
-                        replicate=interaction_replicate_name,
                         graph=graph,
                         obs_idx=obs_idx,
                         labels=labels,
@@ -2894,20 +3113,17 @@ class SpatialDataset:
                         neighbor_counts=counts,
                         neighbor_zscore=zscore,
                         neighbor_n_cells=n_cells,
-                        counts_layer=pseudobulk_counts_layer,
-                        min_cell_counts=int(pseudobulk_min_cell_counts),
-                        min_feature_counts=int(pseudobulk_min_feature_counts),
+                        expression_layer=wilcoxon_layer,
+                        expression_matrix=wilcoxon_expression_matrix,
+                        expression_layer_used=wilcoxon_expression_layer_used,
                         top_targets=top_targets,
                         top_features=top_features,
                         min_cells=min_cells,
                         min_neighbors=min_neighbors,
-                        min_replicates=interaction_min_rep_n,
-                        min_pct_expressed=pseudobulk_min_pct_expressed,
-                        p_adjust_method=pseudobulk_p_adjust_method,
-                        padj_cutoff=pseudobulk_padj_cutoff,
-                        log2fc_cutoff=pseudobulk_log2fc_cutoff,
-                        fit_type=pseudobulk_deseq2_fit_type,
-                        n_cpus=max(1, int(pseudobulk_n_cpus)),
+                        min_pct_expressed=wilcoxon_min_pct_expressed,
+                        p_adjust_method=wilcoxon_p_adjust_method,
+                        padj_cutoff=wilcoxon_padj_cutoff,
+                        log2fc_cutoff=wilcoxon_log2fc_cutoff,
                     )
                     if group_interactions:
                         modality_interaction_markers[annotation_key] = group_interactions
@@ -2915,8 +3131,8 @@ class SpatialDataset:
                 interaction_markers_by_modality[modality_name] = modality_interaction_markers
 
         interaction_markers = (
-            dict(interaction_markers_by_modality.get(primary_pseudobulk_modality, {}))
-            if primary_pseudobulk_modality is not None
+            dict(interaction_markers_by_modality.get(primary_statistics_modality, {}))
+            if primary_statistics_modality is not None
             else {}
         )
 
@@ -2989,40 +3205,48 @@ class SpatialDataset:
                     markers[str(color_name)] = color_markers
             return markers
 
-        de_embed_limit = int(pseudobulk_embed_top_n_per_comparison)
+        wilcoxon_embed_limit = int(wilcoxon_embed_top_n_per_comparison)
+        pseudobulk_embed_limit = int(pseudobulk_embed_top_n_per_comparison)
         de_feature_candidates = list(dict.fromkeys([
+            *_significant_de_features(
+                wilcoxon_de,
+                float(wilcoxon_padj_cutoff),
+                float(wilcoxon_log2fc_cutoff),
+                limit_per_comparison=wilcoxon_embed_limit,
+            ),
+            *_significant_de_features(
+                interaction_markers,
+                float(wilcoxon_padj_cutoff),
+                float(wilcoxon_log2fc_cutoff),
+                limit_per_comparison=wilcoxon_embed_limit,
+            ),
             *_significant_de_features(
                 pseudobulk_de,
                 float(pseudobulk_padj_cutoff),
                 float(pseudobulk_log2fc_cutoff),
-                limit_per_comparison=de_embed_limit,
-            ),
-            *_significant_de_features(
-                interaction_markers,
-                float(pseudobulk_padj_cutoff),
-                float(pseudobulk_log2fc_cutoff),
-                limit_per_comparison=de_embed_limit,
+                limit_per_comparison=pseudobulk_embed_limit,
             ),
         ]))
         export_features = _html_embedded_feature_candidates_for_modality(
             default_modality_name,
-            pseudobulk_de,
-            interaction_markers,
+            wilcoxon_payload=wilcoxon_de,
+            pseudobulk_payload=pseudobulk_de,
+            interaction_payload=interaction_markers,
         )
         if de_feature_candidates:
             log_step("Preparing viewer feature payload")
             log_detail(
                 f"Embedding {len(export_features)} requested/significant DE feature"
                 f"{'s' if len(export_features) != 1 else ''} in the HTML feature viewer "
-                f"(padj < {float(pseudobulk_padj_cutoff):g}, "
-                f"|log2FC| >= {float(pseudobulk_log2fc_cutoff):g}; "
-                f"automatic cap={de_embed_limit} per comparison).",
+                f"(Wilcoxon padj < {float(wilcoxon_padj_cutoff):g}, "
+                f"|log2FC| >= {float(wilcoxon_log2fc_cutoff):g}; "
+                f"automatic cap={wilcoxon_embed_limit} per comparison).",
                 level=1,
             )
         marker_features = _pseudobulk_de_marker_features(
-            pseudobulk_de,
-            float(pseudobulk_padj_cutoff),
-            float(pseudobulk_log2fc_cutoff),
+            wilcoxon_de,
+            float(wilcoxon_padj_cutoff),
+            float(wilcoxon_log2fc_cutoff),
         )
         feature_data = self._collect_feature_data(export_features)
         feature_encodings = self._resolve_feature_encodings(feature_data, feature_encoding, feature_sparse_zero_threshold)
@@ -3217,8 +3441,9 @@ class SpatialDataset:
                 continue
             modality_requested_features = _html_embedded_feature_candidates_for_modality(
                 modality_name,
-                pseudobulk_de_by_modality.get(modality_name),
-                interaction_markers_by_modality.get(modality_name),
+                wilcoxon_payload=wilcoxon_de_by_modality.get(modality_name),
+                pseudobulk_payload=pseudobulk_de_by_modality.get(modality_name),
+                interaction_payload=interaction_markers_by_modality.get(modality_name),
             )
             if not modality_requested_features:
                 continue
@@ -3270,17 +3495,27 @@ class SpatialDataset:
                 "feature_value_encodings": modality_feature_value_encodings,
                 "sections": modality_section_features,
             }
-        marker_features_by_modality = {
-            modality_name: _pseudobulk_de_marker_features(
-                modality_payload,
+        marker_features_by_method_by_modality: Dict[str, Dict[str, Dict[str, Dict[str, List[str]]]]] = {}
+        for modality_name in modality_names:
+            wilcoxon_markers = _pseudobulk_de_marker_features(
+                wilcoxon_de_by_modality.get(modality_name),
+                float(wilcoxon_padj_cutoff),
+                float(wilcoxon_log2fc_cutoff),
+            )
+            pseudobulk_markers = _pseudobulk_de_marker_features(
+                pseudobulk_de_by_modality.get(modality_name),
                 float(pseudobulk_padj_cutoff),
                 float(pseudobulk_log2fc_cutoff),
             )
-            for modality_name, modality_payload in pseudobulk_de_by_modality.items()
-        }
+            method_payload: Dict[str, Dict[str, Dict[str, List[str]]]] = {}
+            if wilcoxon_markers:
+                method_payload["wilcoxon"] = wilcoxon_markers
+            if pseudobulk_markers:
+                method_payload["pseudobulk"] = pseudobulk_markers
+            marker_features_by_method_by_modality[modality_name] = method_payload
 
-        category_feature_means_by_modality: Dict[str, Optional[dict]] = {
-            modality_name: None for modality_name in modality_names
+        category_feature_means_by_method_by_modality: Dict[str, Dict[str, Optional[dict]]] = {
+            modality_name: {} for modality_name in modality_names
         }
         feature_correlations_by_modality: Dict[str, dict] = {
             modality_name: {} for modality_name in modality_names
@@ -3305,10 +3540,20 @@ class SpatialDataset:
 
         for modality_name in analytics_modality_names:
             features_for_means = _category_mean_features_for_modality(modality_name)
-            category_feature_means_by_modality[modality_name] = _category_feature_means_from_pseudobulk_de(
+            wilcoxon_means = _category_feature_means_from_pseudobulk_de(
+                wilcoxon_de_by_modality.get(modality_name),
+                features_for_means,
+            )
+            pseudobulk_means = _category_feature_means_from_pseudobulk_de(
                 pseudobulk_de_by_modality.get(modality_name),
                 features_for_means,
             )
+            method_means: Dict[str, Optional[dict]] = {}
+            if wilcoxon_means:
+                method_means["wilcoxon"] = wilcoxon_means
+            if pseudobulk_means:
+                method_means["pseudobulk"] = pseudobulk_means
+            category_feature_means_by_method_by_modality[modality_name] = method_means
 
         if int(feature_correlation_top_n) > 0:
             for modality_name in analytics_modality_names:
@@ -3317,7 +3562,8 @@ class SpatialDataset:
                     for feature in (embedded_features_by_modality.get(modality_name) or [])
                     if str(feature)
                 ]
-                mean_payload = category_feature_means_by_modality.get(modality_name)
+                method_means = category_feature_means_by_method_by_modality.get(modality_name) or {}
+                mean_payload = method_means.get("wilcoxon") or method_means.get("pseudobulk")
                 feature_correlations_by_modality[modality_name] = _compute_feature_correlations_from_category_means(
                     mean_payload,
                     features_for_correlations,
@@ -3326,7 +3572,7 @@ class SpatialDataset:
 
         if int(spatial_variable_features_n) > 0:
             for modality_name in analytics_modality_names:
-                modality_adata = _adata_for_pseudobulk_modality(modality_name)
+                modality_adata = _adata_for_statistics_modality(modality_name)
                 spatial_variable_features_by_modality[modality_name] = _compute_morans_i_for_features(
                     modality_adata,
                     list(features_by_modality.get(modality_name) or []),
@@ -3339,8 +3585,8 @@ class SpatialDataset:
             "section_key": self.section_key,
             "pseudobulk_replicate_annotation": pseudobulk_replicate_name,
             "pseudobulk_settings": {
-                "modalities": list(pseudobulk_modality_names),
-                "primary_modality": primary_pseudobulk_modality,
+                "modalities": list(statistics_modality_names),
+                "primary_modality": primary_statistics_modality,
                 "min_replicates": max(2, int(pseudobulk_min_replicates)),
                 "min_cell_counts": int(pseudobulk_min_cell_counts),
                 "min_feature_counts": int(pseudobulk_min_feature_counts),
@@ -3352,6 +3598,18 @@ class SpatialDataset:
                 "padj_cutoff": float(pseudobulk_padj_cutoff),
                 "log2fc_cutoff": float(pseudobulk_log2fc_cutoff),
                 "embed_top_n_per_comparison": int(pseudobulk_embed_top_n_per_comparison),
+            },
+            "wilcoxon_settings": {
+                "modalities": list(statistics_modality_names),
+                "primary_modality": primary_statistics_modality,
+                "expression_layer": wilcoxon_layer or "auto(normalized,raw_log1p)",
+                "min_cells_per_group": int(wilcoxon_min_cells_per_group),
+                "p_adjust_method": str(wilcoxon_p_adjust_method or "fdr_bh"),
+                "min_pct_expressed": float(wilcoxon_min_pct_expressed),
+                "padj_cutoff": float(wilcoxon_padj_cutoff),
+                "log2fc_cutoff": float(wilcoxon_log2fc_cutoff),
+                "embed_top_n_per_comparison": int(wilcoxon_embed_top_n_per_comparison),
+                "top_n_per_category": int(wilcoxon_top_n_per_category),
             },
             "annotations_meta": annotations_meta,
             "modalities": [
@@ -3389,7 +3647,8 @@ class SpatialDataset:
             "sections": sections_data,
             "available_annotations": list(annotation_data.keys()) + list(decon_data.keys()),
             "available_deconvolutions": list(decon_data.keys()),
-            "marker_features_by_modality": marker_features_by_modality,
+            "marker_features_by_method_by_modality": marker_features_by_method_by_modality,
+            "wilcoxon_de_by_modality": wilcoxon_de_by_modality,
             "pseudobulk_de_by_modality": pseudobulk_de_by_modality,
             "has_umap": umap_coords is not None,
             "umap_bounds": umap_bounds,
@@ -3397,7 +3656,14 @@ class SpatialDataset:
             "neighbors_key": neighbor_graph_key,
             "neighbor_stats": neighbor_stats,
             "interaction_markers_by_modality": interaction_markers_by_modality,
-            "category_feature_means_by_modality": category_feature_means_by_modality,
+            "interaction_marker_settings": {
+                "method": "cell-wilcoxon-contact",
+                "min_cells": int(interaction_markers_min_cells),
+                "min_neighbors": int(interaction_markers_min_neighbors),
+                "top_targets": int(interaction_markers_top_targets),
+                "top_features": int(interaction_markers_top_features),
+            },
+            "category_feature_means_by_method_by_modality": category_feature_means_by_method_by_modality,
             "feature_correlations_by_modality": feature_correlations_by_modality,
             "spatial_variable_features_by_modality": spatial_variable_features_by_modality,
             "pathway_settings_by_modality": {

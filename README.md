@@ -23,9 +23,9 @@ Visit [KaroSpace Website](https://karospace.se/).
 - [x] **Split screen** — Compare two variables side-by-side in the modal (`Annotation`, a selected feature modality, or `Module`)
 - [x] **Feature modules** — Build custom feature sets, compute averaged module scores, display them like feature layers, and import/export module definitions
 - [x] **Legend controls** — Toggle/hide categories and spotlight one class across grid and UMAP
-- [x] **Feature exploration** — Search within a selected modality, inspect value distributions, review marker features, spatial features, category means, and related-feature suggestions
+- [x] **Feature exploration** — Search within a selected modality, inspect value distributions, review Wilcoxon marker features, spatial features, category means, and related-feature suggestions
 - [x] **Per cell comparison** — Live comparison of cell selections or regions with table and graph visualization (Welch test scores, log2FC, mean, percent detected)
-- [x] **Per sample comparison** — Precomputed pseudobulk differential feature analysis using DESeq2 (PCA, distance matrices, volcano plots) with pathway enrichment for feature-supported modalities.
+- [x] **Statistics comparisons** — Default cell-level Wilcoxon marker and category comparisons, with optional secondary pseudobulk DESeq2 analysis for replicate-aware comparisons and pathway enrichment.
 - [x] **Neighbor graph tools** — Graph overlay, hover rings (1–3 hops), enrichment, interactions, and dispersion summaries when `adata.obsp` contains a spatial graph
 - [x] **Quality-of-life controls** — Hideable toolbar, screenshots, light/dark theme toggle, buttons explanation, keyboard shortcuts, and adjustable spot size
 - [x] **Standalone export** — One self-contained HTML file, no backend required
@@ -148,18 +148,14 @@ export_to_html(
     modalities=["rna", "protein"],  # Feature namespaces to export into the viewer
     neighbor_stats_annotations=["cell_type"],
     neighbor_stats_permutations=20,
-    pseudobulk="auto",           # Use None to disable category pseudobulk DE in Python
-    pseudobulk_additional_annotations=["niche"],
-    pseudobulk_counts_layer="counts",
-    pseudobulk_modalities=["rna"],  # Use ["all"] or e.g. ["rna", "protein"] to run DE on multiple modalities
-    pseudobulk_min_cells_per_pseudobulk=20,
-    pseudobulk_min_pct_expressed=0.2,
-    pseudobulk_p_adjust_method="fdr_bh",
-    pseudobulk_padj_cutoff=0.05,
-    pseudobulk_log2fc_cutoff=1,
-    pseudobulk_deseq2_fit_type="parametric",
-    pseudobulk_n_cpus=1,
-    pseudobulk_embed_top_n_per_comparison=2,
+    statistics_additional_annotations=["niche"],
+    statistics_modalities=["rna"],  # Use ["all"] or e.g. ["rna", "protein"] for statistics on multiple modalities
+    wilcoxon_min_cells_per_group=20,
+    wilcoxon_min_pct_expressed=0.0,
+    wilcoxon_p_adjust_method="fdr_bh",
+    wilcoxon_padj_cutoff=0.05,
+    wilcoxon_log2fc_cutoff=1,
+    pseudobulk=None,             # Use "auto" to also compute secondary DESeq2 pseudobulk
     pathway="auto",             # Use None to disable pathway enrichment in Python
     pathway_gmt=None,            # default cached Reactome; or pass "reactome.gmt"
     pathway_organism="Mouse",
@@ -239,18 +235,12 @@ karospace your_data.h5ad \
   --modalities rna,protein \
   --neighbor-stats-annotations cell_type \
   --neighbor-permutations 20 \
-  --pseudobulk auto \
-  --pseudobulk-additional-annotations niche \
-  --pseudobulk-counts-layer counts \
-  --pseudobulk-modalities rna \
-  --pseudobulk-min-cells-per-pseudobulk 20 \
-  --pseudobulk-min-pct-expressed 0.2 \
-  --pseudobulk-p-adjust-method fdr_bh \
-  --pseudobulk-padj-cutoff 0.05 \
-  --pseudobulk-log2fc-cutoff 1 \
-  --pseudobulk-deseq2-fit-type parametric \
-  --pseudobulk-n-cpus 1 \
-  --pseudobulk-embed-top-n-per-comparison 2 \
+  --statistics-additional-annotations niche \
+  --statistics-modalities rna \
+  --wilcoxon-min-cells-per-group 20 \
+  --wilcoxon-padj-cutoff 0.05 \
+  --wilcoxon-log2fc-cutoff 1 \
+  --pseudobulk off \
   --pathway auto \
   --pathway-organism Mouse \
   --pathway-top-n 10 \
@@ -258,6 +248,19 @@ karospace your_data.h5ad \
   --pathway-gsea-permutations 100 \
   --interaction-markers auto \
   --section-rotations sample_a:37.5,sample_b:-90
+```
+
+Secondary pseudobulk DESeq2 analysis is opt-in:
+
+```bash
+karospace your_data.h5ad \
+  -o viewer.html \
+  --main-cell-annotation cell_type \
+  --statistics-additional-annotations niche \
+  --statistics-modalities rna \
+  --pseudobulk auto \
+  --pseudobulk-replicate-annotation sample \
+  --pseudobulk-min-replicates 2
 ```
 
 #### CLI Options
@@ -326,7 +329,7 @@ CLI value conventions:
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--features` | Comma-separated features to preload. Requested names are matched against every exported `--modalities` namespace, so the same feature name is included in each selected modality where it exists. Significant pseudobulk DE features are embedded automatically up to the per-comparison cap | empty string |
+| `--features` | Comma-separated features to preload. Requested names are matched against every exported `--modalities` namespace, so the same feature name is included in each selected modality where it exists. Significant Wilcoxon marker features are embedded automatically up to the per-comparison cap | empty string |
 | `--features-list` | Text file with one feature per line; combined with `--features`, deduplicated, and resolved across selected modalities | not set |
 | `--feature-storage` | Feature storage mode: `embedded` stores requested/top DE feature vectors in the HTML; `sidecar` stores all feature vectors outside the HTML | `embedded` |
 | `--feature-encoding` | Feature vector encoding (`auto`, `dense`, `sparse`) | `auto` |
@@ -347,10 +350,10 @@ CLI value conventions:
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--interaction-markers` | Contact-conditioned pseudobulk marker mode (`auto`, `off`) | `auto` |
+| `--interaction-markers` | Contact-conditioned Wilcoxon marker mode (`auto`, `off`) | `auto` |
 | `--interaction-markers-top-targets` | Target categories evaluated per source for contact-conditioned markers | `5` |
 | `--interaction-markers-top-features` | Top DE features kept per source-target interaction | `20` |
-| `--interaction-markers-min-cells` | Minimum cells per replicate contact+ and contact- pseudobulk sample | `30` |
+| `--interaction-markers-min-cells` | Minimum source cells required in both contact+ and contact- groups | `30` |
 | `--interaction-markers-min-neighbors` | Minimum target neighbors to classify contact+ source cells | `1` |
 
 ##### Connections
@@ -360,16 +363,23 @@ CLI value conventions:
 | `--feature-correlation-top-n` | Correlated features shown per embedded feature in discovery panel | `5` |
 | `--spatial-variable-features-n` | Top variable features scored with Moran's I; use `0` to disable | `20` |
 
-##### Pseudobulk DE
+##### Statistics And Differential Features
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--pseudobulk` | Category pseudobulk DE mode (`auto`, `off`) | `auto` |
-| `--pseudobulk-additional-annotations` | Additional annotation columns to analyze when pseudobulk or interaction markers are enabled. `--main-cell-annotation` is included automatically | empty string |
+| `--statistics-additional-annotations` | Additional annotation columns to analyze with default Wilcoxon statistics and optional secondary pseudobulk/interaction statistics. `--main-cell-annotation` is included automatically | empty string |
+| `--statistics-modalities` | Comma-separated modalities to run Wilcoxon, optional pseudobulk, and interaction statistics on. Use `all` for all detected modalities | dataset default modality |
+| `--wilcoxon-min-cells-per-group` | Minimum cells required in each category for Wilcoxon marker statistics | `20` |
+| `--wilcoxon-min-pct-expressed` | Minimum fraction of cells with nonzero feature values required in at least one compared group before Wilcoxon results are reported | `0` |
+| `--wilcoxon-p-adjust-method` | Multiple-testing correction method for Wilcoxon p-values (`fdr_bh`, `bonferroni`, `holm`, `none`) | `fdr_bh` |
+| `--wilcoxon-padj-cutoff` | Adjusted p-value threshold for Wilcoxon marker display and feature embedding | `0.05` |
+| `--wilcoxon-log2fc-cutoff` | Absolute log2FC cutoff for Wilcoxon marker display and feature embedding | `1` |
+| `--wilcoxon-embed-top-n-per-comparison` | Significant Wilcoxon features to auto-embed per category/contact comparison in embedded mode | `2` |
+| `--wilcoxon-top-n-per-category` | Maximum Wilcoxon result rows retained per category/rest or pairwise comparison | `300` |
+| `--pseudobulk` | Secondary category pseudobulk DE mode (`auto`, `off`) | `off` |
 | `--pseudobulk-replicate-annotation` | Obs annotation to use as the biological replicate for pseudobulk analyses; defaults to `--section-key` | `--section-key` |
 | `--pseudobulk-counts-layer` | Raw-count AnnData layer for pseudobulk aggregation; use `none` for `adata.X` | `counts` |
-| `--pseudobulk-modalities` | Comma-separated modalities to run category pseudobulk DE and contact-conditioned interaction markers on. Use `all` for all detected modalities. This is independent of `--modalities`, which controls feature export for the viewer | dataset default modality |
-| `--pseudobulk-simple-constrast-categories` | Categories to report in category-versus-category contrasts. With `--pseudobulk-additional-annotations`, use annotation-specific JSON wrapped in single quotes, such as `'{"cell_type":["Astrocyte","B cell"],"region":["Cortex"]}'`, or a nested list matching `[main-cell-annotation, additional...]` | empty string |
+| `--statistics-simple-contrast-categories` | Categories to report in category-versus-category contrasts. With `--statistics-additional-annotations`, use annotation-specific JSON wrapped in single quotes, such as `'{"cell_type":["Astrocyte","B cell"],"region":["Cortex"]}'`, or a nested list matching `[main-cell-annotation, additional...]` | empty string |
 | `--pseudobulk-min-cell-counts` | Exclude cells with fewer than this many total raw counts before pseudobulk aggregation; use `0` to disable | `0` |
 | `--pseudobulk-min-feature-counts` | Exclude features with fewer than this many total raw pseudobulk counts in the shared DESeq2 fit; use `0` to disable | `0` |
 | `--pseudobulk-min-cells-per-pseudobulk` | Minimum cells required in each replicate × annotation pseudobulk sample before it can enter the shared DESeq2 fit | `20` |
@@ -482,18 +492,25 @@ Split view keeps an independent source and feature namespace for layer A and lay
 
 Pathway enrichment is feature-supported only. It is computed for RNA-like modalities and reported as unavailable for unsupported modalities unless a future export provides an explicit feature-to-pathway mapping.
 
+### Default Wilcoxon marker statistics
+
+Cell-level Wilcoxon marker statistics are computed by default for `main_cell_annotation` plus `statistics_additional_annotations` / `--statistics-additional-annotations`, and are shown in `Insights → Statistics → Features` and `Insights → Statistics → Compare → Simple design`. KaroSpace uses `layers["normalized"]` when present; otherwise it copies raw expression values from `layers["counts"]` when present, falling back to `adata.X`, and applies `scanpy.pp.normalize_total(target_sum=10000)` plus `scanpy.pp.log1p` before `rank_genes_groups`. Wilcoxon marker features are now the default source for automatic feature embedding and marker suggestions.
+
+Use `statistics_modalities=["rna", "protein"]` in Python or `--statistics-modalities rna,protein` on the CLI to run Wilcoxon statistics, optional pseudobulk, and interaction markers on selected modalities, or use `all` for every detected modality.
+
 ### Optional pseudobulk category selection
 
-Pseudobulk category DE is precomputed automatically for the initial `main cells annotation` column unless `pseudobulk=None` in Python or `--pseudobulk off` on the CLI is used, and shown in `Insights → Statistics → Compare → Simple design`. KaroSpace aggregates raw counts by replicate and annotation, keeps replicate × annotation pseudobulk samples with at least `pseudobulk_min_cells_per_pseudobulk` / `--pseudobulk-min-cells-per-pseudobulk` cells, fits one shared `~ replicate + annotation` DESeq2 model per annotation column, then extracts category-versus-category contrasts. It also extracts a balanced-rest contrast for every category: the category minus the equally weighted mean of all other retained annotation categories. Features that do not reach `pseudobulk_min_pct_expressed` / `--pseudobulk-min-pct-expressed` in at least one compared group are removed from reported DE results, so they do not enter the contrast-level multiple-testing correction applied by KaroSpace. Pairwise PCA/distance diagnostics are generated automatically for selected category pairs.
+Pseudobulk category DE is now a secondary analysis. It runs only with `pseudobulk="auto"` in Python or `--pseudobulk auto` on the CLI, and is shown alongside Wilcoxon results in `Insights → Statistics → Compare → Simple design` when available. KaroSpace aggregates raw counts by replicate and annotation, keeps replicate × annotation pseudobulk samples with at least `pseudobulk_min_cells_per_pseudobulk` / `--pseudobulk-min-cells-per-pseudobulk` cells, fits one shared `~ replicate + annotation` DESeq2 model per annotation column, then extracts category-versus-category contrasts. It also extracts a balanced-rest contrast for every category: the category minus the equally weighted mean of all other retained annotation categories.
 
-By default, pseudobulk DE and contact-conditioned interaction markers run on the dataset default modality, usually `rna`. Use `pseudobulk_modalities=["rna", "protein"]` in Python or `--pseudobulk-modalities rna,protein` on the CLI to run those analyses on selected modalities, or use `all` for every detected modality. Results are stored only in modality-keyed payloads such as `pseudobulk_de_by_modality`, `interaction_markers_by_modality`, `category_feature_means_by_modality`, `feature_correlations_by_modality`, `spatial_variable_features_by_modality`, and `pathway_settings_by_modality`.
+When both Wilcoxon and pseudobulk are exported, `Insights → Statistics → Features → Markers`, `Features → Distribution`, and `Compare → Simple design` include a method selector. Pathway enrichment is computed only from pseudobulk DE results; when pseudobulk is off, pathway enrichment is skipped with a warning and Wilcoxon-ranked features are not used for pathways.
 
 When selecting specific pairwise categories from the command line, wrap listed values in single quotes:
 
 ```bash
 --main-cell-annotation cell_type \
---pseudobulk-additional-annotations region \
---pseudobulk-simple-constrast-categories '{"cell_type":["Astrocyte","B cell"],"region":["Cortex"]}'
+--statistics-additional-annotations region \
+--pseudobulk auto \
+--statistics-simple-contrast-categories '{"cell_type":["Astrocyte","B cell"],"region":["Cortex"]}'
 ```
 
 ## Deployment and Sharing

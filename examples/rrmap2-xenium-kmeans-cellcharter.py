@@ -91,7 +91,7 @@ def main() -> None:
         neighbor_stats_annotations=ALL_CLUSTERINGS,
         neighbor_stats_permutations=0,
         neighbor_stats_seed=42,
-        pseudobulk_additional_annotations=ALL_CLUSTERINGS,
+        statistics_additional_annotations=ALL_CLUSTERINGS,
         pseudobulk_embed_top_n_per_comparison=20,
         pseudobulk_counts_layer=None,
         pseudobulk_min_cells_per_pseudobulk=20,

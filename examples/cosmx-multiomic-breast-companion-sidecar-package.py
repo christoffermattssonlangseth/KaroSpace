@@ -83,7 +83,7 @@ common_kwargs = dict(
         "leiden_rna",
         "leiden_protein",
     ],
-    pseudobulk_additional_annotations=[
+    statistics_additional_annotations=[
         "leiden_rna",
         "leiden_protein",
     ],

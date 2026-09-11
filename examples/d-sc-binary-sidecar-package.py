@@ -99,7 +99,7 @@ common_kwargs = dict(
     "CellCharter_15",    ],
     neighbor_stats_permutations=0,
     neighbor_stats_seed=42,
-    pseudobulk_additional_annotations=[
+    statistics_additional_annotations=[
  "leiden_0_2",
     "leiden_0_4",
     "leiden_0_6",

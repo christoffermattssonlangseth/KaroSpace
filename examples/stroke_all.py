@@ -132,7 +132,7 @@ def main() -> None:
         feature_sidecar_shard_size=128,
         neighbor_stats_annotations=CLUSTER_COLUMNS,
         neighbor_stats_permutations=0,
-        pseudobulk_additional_annotations=CLUSTER_COLUMNS,
+        statistics_additional_annotations=CLUSTER_COLUMNS,
         section_images=section_images,
         section_images_max_px=4096,
     )
