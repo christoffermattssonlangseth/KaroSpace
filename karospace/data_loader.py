@@ -2339,7 +2339,7 @@ class SpatialDataset:
                 return dispersion
             message = (
                 f"Computing full-cell spatial dispersion for {len(candidates)} annotation"
-                f"{'s' if len(candidates) != 1 else ''}; output feeds Neighbors > Dispersion."
+                f"{'s' if len(candidates) != 1 else ''}; output feeds Statistics > Neighbors > Dispersion."
             )
             log_step(message)
             for annotation_col, (cats, labels) in candidates.items():
@@ -2630,7 +2630,7 @@ class SpatialDataset:
                         f"Computing pseudobulk differential expression for modality {modality_name}: "
                         f"{len(pending_pseudobulk_de_annotations)} annotation column"
                         f"{'s' if len(pending_pseudobulk_de_annotations) != 1 else ''}; "
-                        "output feeds Insights > Compare > Per sample."
+                        "output feeds Insights > Statistics > Compare."
                     )
 
                 for annotation_key in pending_pseudobulk_de_annotations:
@@ -2758,7 +2758,7 @@ class SpatialDataset:
                 log_step(
                     f"Reusing KaroSpaceCompanion neighbor stats for {len(reused_neighbor_annotations)} "
                     f"annotation column{'s' if len(reused_neighbor_annotations) != 1 else ''}; "
-                    "output feeds Neighbors > Enrichment/Interactions."
+                    "output feeds Statistics > Neighbors > Enrichment/Interactions."
                 )
                 for annotation_key in reused_neighbor_annotations:
                     neighbor_stats[annotation_key] = companion_neighbor_stats[annotation_key]
@@ -2772,7 +2772,7 @@ class SpatialDataset:
             log_step(
                 f"Computing neighbor composition stats for {len(pending_neighbor_stats_annotations)} "
                 f"annotation column{'s' if len(pending_neighbor_stats_annotations) != 1 else ''}; "
-                "output feeds Neighbors > Enrichment and Neighbors > Interactions."
+                "output feeds Statistics > Neighbors > Enrichment and Statistics > Neighbors > Interactions."
             )
             for annotation_key in pending_neighbor_stats_annotations:
                 log_step(f"Neighbor stats: annotation column {annotation_key}", level=1)
@@ -2840,7 +2840,7 @@ class SpatialDataset:
                         f"Computing contact-conditioned pseudobulk interaction markers for modality {modality_name}: "
                         f"{len(pending_interaction_marker_annotations)} annotation column"
                         f"{'s' if len(pending_interaction_marker_annotations) != 1 else ''}; "
-                        "output feeds Neighbors > Interactions."
+                        "output feeds Statistics > Neighbors > Interactions."
                     )
 
                 for annotation_key in pending_interaction_marker_annotations:
