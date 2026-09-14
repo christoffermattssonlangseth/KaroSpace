@@ -63,6 +63,13 @@ def _to_dense_counts(matrix) -> np.ndarray:
     return np.rint(dense).astype(np.int64, copy=False)
 
 
+def _to_dense_float_matrix(matrix) -> np.ndarray:
+    dense = matrix.toarray() if sp.issparse(matrix) else np.asarray(matrix)
+    dense = np.asarray(dense, dtype=np.float64)
+    dense[~np.isfinite(dense)] = 0
+    return dense
+
+
 def _cell_count_mask(matrix, min_cell_counts: int) -> np.ndarray:
     """Return cells meeting a raw total-count threshold without densifying cells x features."""
     threshold = max(0, int(min_cell_counts))
@@ -362,6 +369,8 @@ def _compute_category_feature_means_from_aggregate(
     pb_meta: pd.DataFrame,
     categories: Sequence[str],
     feature_names: Sequence[str],
+    *,
+    source: str = "pseudobulk_aggregate",
 ) -> Dict[str, Any]:
     """Summarize category-level means from replicate-level pseudobulk counts."""
     features = [str(g) for g in feature_names]
@@ -415,8 +424,22 @@ def _compute_category_feature_means_from_aggregate(
         "means": category_means,
         "background": background,
         "n_cells": category_cells,
-        "source": "pseudobulk_aggregate",
+        "source": source,
     }
+
+
+def _aggregate_display_expression_matrix(
+    incidence,
+    display_expression_matrix,
+    *,
+    expected_shape: Tuple[int, int],
+) -> Optional[np.ndarray]:
+    """Aggregate a display-scale matrix without rounding it to raw counts."""
+    if display_expression_matrix is None:
+        return None
+    if getattr(display_expression_matrix, "shape", None) != expected_shape:
+        return None
+    return _to_dense_float_matrix(incidence @ display_expression_matrix)
 
 
 def _fit_deseq2_pair(
@@ -1591,6 +1614,7 @@ def compute_pseudobulk_sample_metadata_de(
     replicate: str,
     pairwise_categories: Optional[Sequence[str]] = None,
     counts_layer: Optional[str] = "counts",
+    display_expression_matrix: Optional[Any] = None,
     min_cell_counts: int = 0,
     min_feature_counts: int = 0,
     min_cells: int = 20,
@@ -1701,8 +1725,21 @@ def compute_pseudobulk_sample_metadata_de(
         index=[f"pb_{index}" for index in range(len(sample_keys))],
     )
     pb_meta.attrs["feature_names"] = [str(feature) for feature in adata.var_names]
+    display_aggregate = _aggregate_display_expression_matrix(
+        incidence,
+        display_expression_matrix,
+        expected_shape=expression_matrix.shape,
+    )
     aggregate_summary = _compute_category_feature_means_from_aggregate(
-        aggregate, pb_meta, categories, adata.var_names,
+        display_aggregate if display_aggregate is not None else aggregate,
+        pb_meta,
+        categories,
+        adata.var_names,
+        source=(
+            "pseudobulk_display_aggregate"
+            if display_aggregate is not None
+            else "pseudobulk_aggregate"
+        ),
     )
     log_detail(
         f"Aggregated {len(pb_meta)} replicate pseudobulk samples from "
@@ -2132,6 +2169,7 @@ def _compute_pseudobulk_group_de_shared(
     replicate: str,
     pairwise_categories: Optional[Sequence[str]] = None,
     counts_layer: Optional[str] = "counts",
+    display_expression_matrix: Optional[Any] = None,
     min_cell_counts: int = 0,
     min_feature_counts: int = 0,
     min_cells: int = 20,
@@ -2233,8 +2271,21 @@ def _compute_pseudobulk_group_de_shared(
         index=[f"pb_{index}" for index in range(len(sample_keys))],
     )
     pb_meta.attrs["feature_names"] = [str(feature) for feature in adata.var_names]
+    display_aggregate = _aggregate_display_expression_matrix(
+        incidence,
+        display_expression_matrix,
+        expected_shape=expression_matrix.shape,
+    )
     aggregate_summary = _compute_category_feature_means_from_aggregate(
-        aggregate, pb_meta, categories, adata.var_names,
+        display_aggregate if display_aggregate is not None else aggregate,
+        pb_meta,
+        categories,
+        adata.var_names,
+        source=(
+            "pseudobulk_display_aggregate"
+            if display_aggregate is not None
+            else "pseudobulk_aggregate"
+        ),
     )
     log_detail(
         f"Aggregated {len(pb_meta)} replicate x annotation pseudobulk samples from "
@@ -2802,6 +2853,7 @@ def compute_pseudobulk_group_de(
     replicate: str,
     pairwise_categories: Optional[Sequence[str]] = None,
     counts_layer: Optional[str] = "counts",
+    display_expression_matrix: Optional[Any] = None,
     min_cell_counts: int = 0,
     min_feature_counts: int = 0,
     min_cells: int = 20,
@@ -2824,6 +2876,7 @@ def compute_pseudobulk_group_de(
         replicate=replicate,
         pairwise_categories=pairwise_categories,
         counts_layer=counts_layer,
+        display_expression_matrix=display_expression_matrix,
         min_cell_counts=min_cell_counts,
         min_feature_counts=min_feature_counts,
         min_cells=min_cells,

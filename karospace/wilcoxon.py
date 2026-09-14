@@ -24,11 +24,112 @@ _SCANPY_WILCOXON_FALLBACK_WARNED = False
 _SCANPY_NORMALIZATION_FALLBACK_WARNED = False
 _MISSING_WILCOXON_LAYER_WARNED: Set[str] = set()
 _RAW_WILCOXON_NORMALIZATION_WARNED: Set[str] = set()
+_MISSING_DISTRIBUTION_COUNTS_LAYER_WARNED: Set[str] = set()
+_MISSING_DISTRIBUTION_NORMALIZED_LAYER_WARNED: Set[str] = set()
 _WILCOXON_NORMALIZE_TARGET_SUM = 10000.0
 
 
 def _copy_expression_matrix(matrix):
     return matrix.copy() if sp.issparse(matrix) else np.array(matrix, dtype=float, copy=True)
+
+
+def library_size_normalize_expression_matrix(matrix, target_sum: float = _WILCOXON_NORMALIZE_TARGET_SUM):
+    """Library-size normalize an expression matrix without log transformation."""
+    target = float(target_sum)
+    if sp.issparse(matrix):
+        normalized = matrix.astype(np.float64, copy=True).tocsr()
+        normalized.data[~np.isfinite(normalized.data)] = 0.0
+        row_sums = np.asarray(normalized.sum(axis=1)).ravel()
+        scale = np.zeros_like(row_sums, dtype=np.float64)
+        valid = np.isfinite(row_sums) & (row_sums > 0)
+        scale[valid] = target / row_sums[valid]
+        normalized = sp.diags(scale).dot(normalized).tocsr()
+        normalized.data[~np.isfinite(normalized.data)] = 0.0
+        normalized.eliminate_zeros()
+        return normalized
+
+    normalized = np.array(matrix, dtype=np.float64, copy=True)
+    normalized[~np.isfinite(normalized)] = 0.0
+    row_sums = normalized.sum(axis=1)
+    scale = np.zeros_like(row_sums, dtype=np.float64)
+    valid = np.isfinite(row_sums) & (row_sums > 0)
+    scale[valid] = target / row_sums[valid]
+    normalized *= scale[:, None]
+    normalized[~np.isfinite(normalized)] = 0.0
+    return normalized
+
+
+def log_normalize_expression_matrix(matrix, target_sum: float = _WILCOXON_NORMALIZE_TARGET_SUM):
+    """Library-size normalize an expression matrix and apply log1p."""
+    normalized = library_size_normalize_expression_matrix(matrix, target_sum=target_sum)
+    if sp.issparse(normalized):
+        normalized = normalized.tocsr(copy=True)
+        with np.errstate(invalid="ignore"):
+            normalized.data = np.log1p(normalized.data)
+        normalized.data[~np.isfinite(normalized.data)] = 0.0
+        normalized.eliminate_zeros()
+        return normalized
+    with np.errstate(invalid="ignore"):
+        normalized = np.log1p(normalized)
+    normalized[~np.isfinite(normalized)] = 0.0
+    return normalized
+
+
+def normalize_distribution_normalization(method: Optional[str]) -> str:
+    text = str(method or "RC").strip().lower()
+    if text in {"rc", "relative_counts", "relative-counts", "relativecounts"}:
+        return "RC"
+    if text in {"lognormalize", "log_normalize", "log-normalize", "lognorm"}:
+        return "LogNormalize"
+    raise ValueError("statistics_normalization must be one of: 'RC', 'LogNormalize'")
+
+
+def resolve_distribution_expression_matrix(
+    adata,
+    counts_layer: Optional[str] = "counts",
+    normalization: str = "RC",
+    scale_factor: float = _WILCOXON_NORMALIZE_TARGET_SUM,
+    normalized_layer: Optional[str] = None,
+    target_sum: float = _WILCOXON_NORMALIZE_TARGET_SUM,
+) -> Tuple[Any, str]:
+    """Resolve display-scale expression values for Distribution panels."""
+    layers = getattr(adata, "layers", None) or {}
+    normalized_layer_name = str(normalized_layer or "").strip()
+    if normalized_layer_name:
+        if normalized_layer_name in layers:
+            return layers[normalized_layer_name], f"{normalized_layer_name}_layer"
+        if normalized_layer_name not in _MISSING_DISTRIBUTION_NORMALIZED_LAYER_WARNED:
+            log_warning(
+                f"statistics normalized layer '{normalized_layer_name}' was not found; "
+                "falling back to the configured statistics count matrix and normalization.",
+                level=2,
+            )
+            _MISSING_DISTRIBUTION_NORMALIZED_LAYER_WARNED.add(normalized_layer_name)
+
+    method = normalize_distribution_normalization(normalization)
+    source_matrix = adata.X
+    source_name = "X"
+    if counts_layer and counts_layer in layers:
+        source_matrix = layers[counts_layer]
+        source_name = str(counts_layer)
+    elif counts_layer:
+        missing_key = str(counts_layer)
+        if missing_key not in _MISSING_DISTRIBUTION_COUNTS_LAYER_WARNED:
+            log_warning(
+                f"statistics counts layer '{counts_layer}' was not found; using adata.X for Distribution values.",
+                level=2,
+            )
+            _MISSING_DISTRIBUTION_COUNTS_LAYER_WARNED.add(missing_key)
+
+    if method == "RC":
+        return (
+            library_size_normalize_expression_matrix(source_matrix, target_sum=float(scale_factor)),
+            f"{source_name}_library_normalized",
+        )
+    return (
+        log_normalize_expression_matrix(source_matrix, target_sum=float(target_sum)),
+        f"{source_name}_log_normalized",
+    )
 
 
 def _warn_raw_wilcoxon_normalized(source_label: str) -> None:
@@ -484,6 +585,8 @@ def compute_wilcoxon_group_de(
     expression_layer: Optional[str] = None,
     expression_matrix: Optional[Any] = None,
     expression_layer_used: Optional[str] = None,
+    summary_expression_matrix: Optional[Any] = None,
+    summary_expression_source: Optional[str] = None,
     min_cells: int = 20,
     min_pct_expressed: float = 0.0,
     p_adjust_method: str = "fdr_bh",
@@ -514,14 +617,14 @@ def compute_wilcoxon_group_de(
         expression_layer_used = str(expression_layer_used or expression_layer or "provided")
     if expression_matrix is None or int(expression_matrix.shape[0]) != int(labels.shape[0]):
         return None
+    if summary_expression_matrix is not None and int(summary_expression_matrix.shape[0]) != int(labels.shape[0]):
+        summary_expression_matrix = None
     feature_names = [str(feature) for feature in adata.var_names]
     retained_mask = np.isin(labels, retained_categories)
     retained_matrix = _materialize_rows(expression_matrix, retained_mask)
     retained_labels = labels[retained_mask]
 
     payload: Dict[str, Any] = {}
-    feature_to_idx = {feature: idx for idx, feature in enumerate(feature_names)}
-    summary_feature_indices: List[int] = []
     for category in retained_categories:
         source_mask = labels == category
         reference_mask = np.isin(labels, [c for c in retained_categories if c != category])
@@ -554,7 +657,6 @@ def compute_wilcoxon_group_de(
             log2fc_direction="positive",
         )
         payload.setdefault(category, {})["__rest__"] = result
-        summary_feature_indices.extend(_threshold_passing_feature_indices(result, feature_to_idx))
 
     if pairwise_categories is None:
         pairwise = retained_categories
@@ -618,30 +720,17 @@ def compute_wilcoxon_group_de(
             reverse_result = _invert_wilcoxon_pairwise_result(result)
             payload.setdefault(source, {})[reference] = result
             payload.setdefault(reference, {})[source] = reverse_result
-            summary_feature_indices.extend(_threshold_passing_feature_indices(result, feature_to_idx))
-            summary_feature_indices.extend(_threshold_passing_feature_indices(reverse_result, feature_to_idx))
 
     if not any(not str(key).startswith("_") for key in payload):
         return None
-    if not summary_feature_indices:
-        for by_reference in payload.values():
-            if not isinstance(by_reference, dict):
-                continue
-            for result in by_reference.values():
-                if isinstance(result, dict):
-                    summary_feature_indices.extend(
-                        feature_to_idx[str(feature)]
-                        for feature in (result.get("features") or [])[: min(10, len(result.get("features") or []))]
-                        if str(feature) in feature_to_idx
-                    )
     payload["_summary"] = {
         "category_feature_means": _category_feature_mean_summary(
-            expression_matrix,
+            summary_expression_matrix if summary_expression_matrix is not None else expression_matrix,
             labels,
             retained_categories,
             feature_names,
-            summary_feature_indices,
-            source="cell_wilcoxon",
+            range(len(feature_names)),
+            source=str(summary_expression_source or "cell_wilcoxon"),
         ),
         "source": "cell_wilcoxon",
     }

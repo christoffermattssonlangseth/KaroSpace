@@ -7958,13 +7958,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             : getLoadedFeaturesForModality(modality);
         return uniqueSortedFeatures(embedded);
     }}
+    function getExplorationDistributionFeatureNames(modality = getExplorationModality()) {{
+        return getFeatureDatalistValuesForModality(modality);
+    }}
+    function getStatisticsDistributionFeatureNames(annotationCol = explorationColorCol || currentAnnotation || '', modality = getExplorationModality()) {{
+        return getPseudobulkMeanFeatureNames(annotationCol, modality);
+    }}
     function getInsightsFeatureSearchValues(modality = getExplorationModality(), subtab = insightsFeaturesTab) {{
         const embedded = getEmbeddedFeatureDatalistValuesForModality(modality);
-        if (subtab === 'distribution') return embedded;
+        if (subtab === 'distribution') return getExplorationDistributionFeatureNames(modality);
+        if (subtab === 'means') return getStatisticsDistributionFeatureNames(explorationColorCol || currentAnnotation || '', modality);
         const embeddedSet = new Set(embedded);
-        const extraFeatures = subtab === 'means'
-            ? getPseudobulkMeanFeatureNames(explorationColorCol || currentAnnotation || '', modality)
-            : getCategoryVsRestFeatures(explorationColorCol || currentAnnotation || '', modality);
+        const extraFeatures = getCategoryVsRestFeatures(explorationColorCol || currentAnnotation || '', modality);
         return uniqueSortedFeatures([
             ...embedded,
             ...extraFeatures.filter(feature => !embeddedSet.has(feature)),
@@ -8459,47 +8464,47 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }},
         de_features: {{
             title: 'Marker features',
-            body: 'Differential analysis uses one shared fit model across replicate and annotation, while statistical tests are calculated category-versus-category. Features not detected in a minimal percentage of cells in at least one category are removed from reported DE results. Model and statistical tests are calculated using DESeq2 and multiple testing correction is applied to the retained result features using your method of choice. The table values report log2 fold-change, p-values, adjusted p-values, DESeq2 score and rank, base_mean, and percent detected. Marker features are ordered by adjusted pvalue then log2FC.',
-            formula: 'fit model: ~ replicate + annotation; reported feature filter: max(% detected in A, % detected in B) >= min_pct; statistical test: DESeq2 category A vs category B; padj: retained p-values adjusted with the selected correction method; marker order: padj ascending, then log2FC'
+            body: 'Statistics panels use the active method selector. Wilcoxon is the default cell-level analysis on normalized/log-transformed feature values. Pseudobulk DESeq2 is an optional secondary analysis that aggregates raw counts by biological replicate and annotation category before fitting a replicate-aware model.',
+            formula: 'Wilcoxon: rank-sum on per-cell values; pseudobulk: summed raw counts per replicate-category, then DESeq2 model ~ replicate + annotation'
         }},
         wilcoxon_marker_features: {{
             title: 'Wilcoxon marker features',
-            body: 'Marker features are computed with cell-level Wilcoxon rank-sum tests for the selected annotation and focused modality. Category marker lists use category-versus-rest rankings; Simple design uses category-versus-category rankings for Annotation A and Annotation B. Features must pass the minimum detected-cell fraction and are reported after multiple-testing correction.',
-            formula: 'test: Wilcoxon rank-sum on normalized/log-transformed per-cell values; filter: max(% detected in A, % detected in B) >= min_pct; displayed features: padj < padj_cutoff and |log2FC| >= log2fc_cutoff'
+            body: 'Marker features are computed with cell-level Wilcoxon rank-sum tests for the selected annotation and focused modality. KaroSpace uses the normalized layer when available; otherwise it normalizes raw counts and applies log1p before testing. Category marker lists use category-versus-rest rankings, while Simple design uses category-versus-category rankings for Annotation A and Annotation B. Features must pass the minimum detected-cell fraction and are reported after multiple-testing correction.',
+            formula: 'input: normalized/log1p per-cell values; test: Wilcoxon rank-sum; filter: max(% detected in A, % detected in B) >= min_pct; displayed features: padj < padj_cutoff and |log2FC| >= log2fc_cutoff'
         }},
         pseudobulk_marker_features: {{
-            title: 'Pseudobulk marker features',
-            body: 'Marker features are computed from replicate-level pseudobulk DESeq2 contrasts. Cells are summed by biological replicate and annotation category, one shared model is fit per annotation, and category-vs-rest or category-vs-category contrasts are extracted. Features shown as markers pass the minimum detected-cell fraction, adjusted p-value, and absolute log2FC thresholds.',
-            formula: 'model = ~ replicate + annotation; filter: max(% detected in A, % detected in B) >= min_pct; displayed features: padj < padj_cutoff and |log2FC| >= log2fc_cutoff'
+            title: 'Pseudobulk DESeq2 marker features',
+            body: 'Pseudobulk marker features come from the optional secondary DESeq2 analysis. Raw counts are summed into replicate x annotation samples, samples below the minimum cell count are excluded, one shared model is fit per annotation, and marker lists use category-versus-balanced-rest contrasts. Features shown as markers pass the minimum detected-cell fraction, adjusted p-value, and absolute log2FC thresholds.',
+            formula: 'pseudobulk sample = sum raw counts for replicate x category; model = ~ replicate + annotation; rest = equal-weight mean of other retained categories; displayed features: padj < padj_cutoff and |log2FC| >= log2fc_cutoff'
         }},
         wilcoxon_simple_de_section: {{
             title: 'Wilcoxon differential analysis',
-            body: 'This Simple design section is based on the selected cell-level Wilcoxon category-vs-category contrast. KaroSpace compares per-cell normalized/log-transformed feature values between Annotation A and Annotation B, applies the minimum detected-cell filter, then adjusts p-values across retained result features.',
+            body: 'This Simple design section is based on the selected cell-level Wilcoxon category-versus-category contrast. KaroSpace compares per-cell normalized/log-transformed feature values between Annotation A and Annotation B, applies the minimum detected-cell filter, then adjusts p-values across retained result features.',
             formula: 'test: Wilcoxon rank-sum for Annotation A vs Annotation B; retained features: max(% detected cells in A, B) >= min_pct; DE features: padj < padj_cutoff and |log2FC| >= log2fc_cutoff'
         }},
         pseudobulk_simple_de_section: {{
-            title: 'Pseudobulk differential analysis',
-            body: 'This section is based on the selected Simple design category-vs-category pseudobulk DESeq2 contrast. Cells are grouped by biological replicate and annotation, raw counts are summed into pseudobulk samples, and a shared DESeq2 model is fit for the annotation. The selected Annotation A and Annotation B are then extracted as a pairwise contrast. Features shown as DE pass the minimum percent-detected result filter, then pass the adjusted p-value and absolute log2FC thresholds.',
-            formula: 'model = ~ replicate + annotation; retained features: max(% detected cells in A, B) >= min_pct after DESeq2 statistics; DE features: padj < padj_cutoff and |log2FC| >= log2fc_cutoff'
+            title: 'Pseudobulk DESeq2 differential analysis',
+            body: 'This Simple design section is based on the selected category-versus-category pseudobulk DESeq2 contrast. Raw counts are grouped by biological replicate and annotation category, replicate-category samples below the minimum cell count are excluded, and one shared DESeq2 model is fit for the annotation. The selected Annotation A and Annotation B are extracted as a pairwise contrast when both categories have enough replicate pseudobulks. Features shown as DE pass the minimum percent-detected result filter, adjusted p-value threshold, and absolute log2FC threshold.',
+            formula: 'pseudobulk sample = sum raw counts for replicate x category; model = ~ replicate + annotation; contrast = Annotation A vs Annotation B; retained features: max(% detected cells in A, B) >= min_pct; DE features: padj < padj_cutoff and |log2FC| >= log2fc_cutoff'
         }},
         wilcoxon_simple_de_table: {{
             title: 'Wilcoxon feature table',
-            body: 'The table lists features from the selected Annotation A versus Annotation B Wilcoxon contrast that pass the current thresholds. Rows are sorted by adjusted p-value, then p-value and log2FC. Feature buttons are disabled only when that feature vector is not available in the HTML or sidecar.',
+            body: 'The table lists features from the selected Annotation A versus Annotation B Wilcoxon contrast that pass the current Wilcoxon thresholds. Rows are sorted by adjusted p-value, then p-value and log2FC. Feature buttons are disabled only when that feature vector is not available in the HTML or sidecar.',
             formula: 'displayed rows: padj < padj_cutoff and |log2FC| >= log2fc_cutoff; row direction/color follows sign(log2FC)'
         }},
         pseudobulk_simple_de_table: {{
-            title: 'Differential feature table',
-            body: 'The table lists features from the selected Annotation A versus Annotation B contrast that pass the current DE thresholds. Rows are sorted by adjusted p-value, then p-value and log2FC. Feature buttons are disabled only when that feature vector is not available in the HTML or sidecar.',
-            formula: 'displayed rows: padj < padj_cutoff and |log2FC| >= log2fc_cutoff; row direction/color follows sign(log2FC)'
+            title: 'Pseudobulk DESeq2 feature table',
+            body: 'The table lists features from the selected Annotation A versus Annotation B pseudobulk DESeq2 contrast that pass the current pseudobulk thresholds. Rows are sorted by adjusted p-value, then p-value and log2FC. Table values report log2 fold-change, p-value, adjusted p-value, DESeq2 statistic, baseMean, and percent detected in each category.',
+            formula: 'displayed rows: padj < padj_cutoff and |log2FC| >= log2fc_cutoff; row direction/color follows sign(log2FC); baseMean is the DESeq2 mean normalized count'
         }},
         wilcoxon_ma_plot: {{
             title: 'Wilcoxon MA plot',
-            body: 'The MA plot uses every feature returned for the selected Wilcoxon pairwise contrast. The x-axis is the mean feature value reported with the contrast and the y-axis is log2FC for Annotation A versus Annotation B. Red points have adjusted p-value below 0.1; grey points do not.',
+            body: 'The MA plot uses every feature returned for the selected Wilcoxon pairwise contrast. The x-axis is the mean normalized/log-transformed feature value reported with the contrast and the y-axis is log2FC for Annotation A versus Annotation B. Red points have adjusted p-value below 0.1; grey points do not.',
             formula: 'x = reported mean feature value; y = log2FC(A/B); red if padj < 0.1, grey if padj >= 0.1'
         }},
         pseudobulk_ma_plot: {{
-            title: 'MA plot',
-            body: 'The MA plot uses every feature returned for the fitted pairwise contrast. The x-axis is DESeq2 baseMean and the y-axis is log2FC for Annotation A versus Annotation B. Red points have adjusted p-value below 0.1; grey points do not.',
+            title: 'Pseudobulk DESeq2 MA plot',
+            body: 'The MA plot uses every feature returned for the selected pseudobulk DESeq2 pairwise contrast. The x-axis is DESeq2 baseMean and the y-axis is log2FC for Annotation A versus Annotation B. Red points have adjusted p-value below 0.1; grey points do not.',
             formula: 'x = baseMean; y = log2FC(A/B); red if padj < 0.1, grey if padj >= 0.1'
         }},
         wilcoxon_volcano_plot: {{
@@ -8508,8 +8513,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             formula: 'x = log2FC(A/B); y = -log10(padj); colored if padj < padj_cutoff and |log2FC| >= log2fc_cutoff'
         }},
         pseudobulk_volcano_plot: {{
-            title: 'Volcano plot',
-            body: 'The volcano plot uses every feature returned for the fitted pairwise contrast. The x-axis is log2FC and the y-axis is -log10 adjusted p-value. Grey points fail either the adjusted p-value or log2FC threshold. Colored points pass both thresholds; positive log2FC is colored as Annotation A and negative log2FC is colored as Annotation B.',
+            title: 'Pseudobulk DESeq2 volcano plot',
+            body: 'The volcano plot uses every feature returned for the selected pseudobulk DESeq2 pairwise contrast. The x-axis is log2FC and the y-axis is -log10 adjusted p-value. Grey points fail either the adjusted p-value or log2FC threshold. Colored points pass both thresholds; positive log2FC is colored as Annotation A and negative log2FC is colored as Annotation B.',
             formula: 'x = log2FC(A/B); y = -log10(padj); colored if padj < padj_cutoff and |log2FC| >= log2fc_cutoff'
         }},
         pseudobulk_pca_plot: {{
@@ -8539,8 +8544,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }},
         de_heatmap: {{
             title: 'DE heatmap',
-            body: 'Tiles use aggregation of feature counts per category/replicate and calculate the mean of each category across replicates, then z-score against the full DE heatmap table before applying the visible feature filter. Features are selected if found DE versus the balanced rest. A star marks features found DE versus the balanced rest.',
-            formula: 'category mean = mean over replicates of (category feature counts / category cells); z = (category mean - full table mean) / full table SD'
+            body: 'Tiles use category means from the active Statistics method. By default, Distribution means use RC values: raw counts library-size normalized without log transformation. Export options can instead use LogNormalize or a selected pre-normalized layer. Wilcoxon mode uses per-cell category means and Wilcoxon category-versus-rest marker selection. Pseudobulk mode averages display-scale values inside each replicate-category sample, then averages those replicate means. A star marks features passing the active method thresholds for that category.',
+            formula: 'RC value = raw count * scale_factor / cell library size; LogNormalize value = log1p(raw count * 10000 / cell library size); Wilcoxon mean = mean per-cell display value in category; pseudobulk display mean = mean over replicates of mean display value in replicate-category; z = (category mean - full table mean) / full table SD'
         }},
         spatial_moran: {{
             title: 'Spatial Moran index',
@@ -8549,13 +8554,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }},
         distribution: {{
             title: 'Feature distribution',
-            body: 'List of values and figures are computed from per-cell feature values in each Exploration annotation category. Selection can be restricted to subcategories',
-            formula: 'mean = sum(values) / n; Q1/Q3 = 25th/75th percentile; % Expr = 100 * cells with value > 0 / n'
+            body: 'List values and figures are computed from the exported Distribution display matrix in each Exploration annotation category. By default this is RC: raw counts library-size normalized without log transformation. Export options can instead use LogNormalize or a selected pre-normalized layer. Selection can be restricted to subcategories.',
+            formula: 'RC value = raw count * scale_factor / cell library size; LogNormalize value = log1p(raw count * 10000 / cell library size); mean = sum(values) / n; Q1/Q3 = 25th/75th percentile; % Expr = 100 * cells with value > 0 / n'
         }},
         means: {{
-            title: 'Pseudobulk category means',
-            body: 'Means are computed from replicate-level pseudobulk aggregates for each selected Exploration annotation category. For each category, counts are divided by the number of category cells inside each replicate, then averaged across replicates. The background mean is calculated per replicate across all cells, then averaged across replicates. The graph shows each category relative to that background mean.',
-            formula: 'category mean = mean over samples of (sample category counts / sample category cells); background = mean over samples of (sample total counts / sample total cells); delta = category mean - background'
+            title: 'Wilcoxon/Pseudobulk category means',
+            body: 'Category means follow the active Statistics method and the exported Distribution display matrix. By default, both Wilcoxon and pseudobulk Distribution means use RC values: raw counts library-size normalized without log transformation. Export options can instead use LogNormalize or a selected pre-normalized layer. Pseudobulk mode averages display-scale values inside each replicate-category sample, then averages those replicate means. The DESeq2 model still uses raw counts from the Statistics counts layer.',
+            formula: 'RC value = raw count * scale_factor / cell library size; LogNormalize value = log1p(raw count * 10000 / cell library size); Wilcoxon mean = mean per-cell display value in category; pseudobulk display mean = mean over replicates of mean display value in replicate-category; delta = category mean - background'
         }},
         group_de: {{
             title: 'Annotation feature values',
@@ -26209,6 +26214,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 advanceTutorialIfReady();
                 return;
             }}
+            if (insightsTopLevelTab === 'features' && insightsFeaturesTab === 'distribution') {{
+                const ok = await ensureFeatureAvailable(feature, {{
+                    showErrors: true,
+                    modality: getExplorationModality(),
+                }});
+                if (!ok) return;
+            }}
             // Marker search filters Insights panels only. It must not mutate the
             // visual feature namespace or feature input controls.
             renderActiveInsightsPanel();
@@ -34979,10 +34991,13 @@ def export_to_html(
     wilcoxon_log2fc_cutoff: float = 1,
     wilcoxon_embed_top_n_per_comparison: int = 2,
     wilcoxon_top_n_per_category: int = 300,
-    statistics_simple_contrast_categories: Any = None,
+    statistics_contrast_categories: Any = None,
     pseudobulk: Optional[str] = None,
     pseudobulk_replicate_annotation: Optional[str] = None,
-    pseudobulk_counts_layer: Optional[str] = "counts",
+    statistics_counts_layer: Optional[str] = "counts",
+    statistics_normalization: str = "RC",
+    statistics_scale_factor: float = 10000.0,
+    statistics_normalized_layer: Optional[str] = None,
     pseudobulk_min_cell_counts: int = 0,
     pseudobulk_min_feature_counts: int = 0,
     pseudobulk_min_cells_per_pseudobulk: int = 20,
@@ -35117,16 +35132,28 @@ def export_to_html(
     pseudobulk_replicate_annotation : str, optional
         Obs annotation used as the biological replicate for pseudobulk analyses.
         Defaults to the dataset section_key annotation.
-    statistics_simple_contrast_categories : list or dict, optional
+    statistics_contrast_categories : list or dict, optional
         Categories to include in Simple design category-versus-category contrasts.
         Use a flat list only when one annotation is analyzed. With
         statistics_additional_annotations, pass a dict keyed by annotation name
         or a nested list matching [main_cell_annotation, *additional]. All
         retained categories remain available, and each retained
         category receives a balanced-rest contrast.
-    pseudobulk_counts_layer : str, optional
-        Raw-count AnnData layer for pseudobulk aggregation. Defaults to "counts";
-        falls back to adata.X with a warning if absent.
+    statistics_counts_layer : str, optional
+        Raw-count AnnData layer used for Distribution normalization and
+        pseudobulk aggregation. Defaults to "counts"; use None for adata.X.
+    statistics_normalization : str
+        Distribution display normalization. "RC" library-size normalizes to
+        statistics_scale_factor without log transformation. "LogNormalize"
+        library-size normalizes to 10000 and applies log1p.
+    statistics_scale_factor : float
+        Library-size target for "RC" Distribution normalization. Ignored by
+        "LogNormalize" and by statistics_normalized_layer.
+    statistics_normalized_layer : str, optional
+        Pre-normalized AnnData layer to use directly for Distribution display
+        values. When set, it overrides statistics_counts_layer,
+        statistics_normalization, and statistics_scale_factor for Distribution
+        values only; pseudobulk DE still uses statistics_counts_layer.
     pseudobulk_min_cell_counts : int
         Exclude cells below this total raw-count threshold before pseudobulk
         aggregation. Zero disables filtering.
@@ -35409,6 +35436,20 @@ def export_to_html(
         option_name="statistics_modalities",
         default_to_all=False,
     )
+    def _optional_layer_name(value: Optional[str]) -> Optional[str]:
+        text = str(value or "").strip()
+        if not text or text.lower() in {"none", "null", "off"}:
+            return None
+        return text
+
+    statistics_counts_layer = _optional_layer_name(statistics_counts_layer)
+    statistics_normalized_layer = _optional_layer_name(statistics_normalized_layer)
+    statistics_scale_factor = float(statistics_scale_factor)
+    if statistics_scale_factor <= 0:
+        raise ValueError("statistics_scale_factor must be > 0")
+    from .wilcoxon import normalize_distribution_normalization
+
+    statistics_normalization = normalize_distribution_normalization(statistics_normalization)
     resolved_pseudobulk_replicate_annotation = (
         str(pseudobulk_replicate_annotation).strip()
         if pseudobulk_replicate_annotation is not None
@@ -35573,8 +35614,11 @@ def export_to_html(
         wilcoxon_top_n_per_category=wilcoxon_top_n_per_category,
         pseudobulk_de_annotations=pseudobulk_de_annotations,
         pseudobulk_replicate_annotation=resolved_pseudobulk_replicate_annotation,
-        statistics_simple_contrast_categories=statistics_simple_contrast_categories,
-        pseudobulk_counts_layer=pseudobulk_counts_layer,
+        statistics_contrast_categories=statistics_contrast_categories,
+        statistics_counts_layer=statistics_counts_layer,
+        statistics_normalization=statistics_normalization,
+        statistics_scale_factor=statistics_scale_factor,
+        statistics_normalized_layer=statistics_normalized_layer,
         pseudobulk_min_cell_counts=pseudobulk_min_cell_counts,
         pseudobulk_min_feature_counts=pseudobulk_min_feature_counts,
         pseudobulk_min_cells_per_pseudobulk=pseudobulk_min_cells_per_pseudobulk,
@@ -35997,8 +36041,11 @@ def export_to_html(
                 "wilcoxon_top_n_per_category": int(wilcoxon_top_n_per_category),
                 "pseudobulk": pseudobulk,
                 "pseudobulk_replicate_annotation": pseudobulk_replicate_annotation,
-                "statistics_simple_contrast_categories": statistics_simple_contrast_categories,
-                "pseudobulk_counts_layer": pseudobulk_counts_layer,
+                "statistics_contrast_categories": statistics_contrast_categories,
+                "statistics_counts_layer": statistics_counts_layer,
+                "statistics_normalization": statistics_normalization,
+                "statistics_scale_factor": float(statistics_scale_factor),
+                "statistics_normalized_layer": statistics_normalized_layer,
                 "pseudobulk_min_cell_counts": int(pseudobulk_min_cell_counts),
                 "pseudobulk_min_feature_counts": int(pseudobulk_min_feature_counts),
                 "pseudobulk_min_cells_per_pseudobulk": int(pseudobulk_min_cells_per_pseudobulk),
@@ -36211,6 +36258,10 @@ def export_to_html(
                 feature_encoding=feature_encoding,
                 feature_value_encoding=feature_value_encoding,
                 feature_sparse_zero_threshold=feature_sparse_zero_threshold,
+                distribution_counts_layer=statistics_counts_layer,
+                distribution_normalization=statistics_normalization,
+                distribution_scale_factor=statistics_scale_factor,
+                distribution_normalized_layer=statistics_normalized_layer,
             )
             default_entry["shards"][shard_rel] = shard_features
             for feature in shard_features:
@@ -36284,6 +36335,10 @@ def export_to_html(
                     feature_value_encoding=feature_value_encoding,
                     feature_sparse_zero_threshold=feature_sparse_zero_threshold,
                     modality=mod_name,
+                    distribution_counts_layer=statistics_counts_layer,
+                    distribution_normalization=statistics_normalization,
+                    distribution_scale_factor=statistics_scale_factor,
+                    distribution_normalized_layer=statistics_normalized_layer,
                 )
                 mod_entry["shards"][shard_rel] = shard_features
                 for feat in shard_features:

@@ -47,11 +47,11 @@ def _clean_pseudobulk_category_list(value: Any, option_name: str) -> Optional[Li
     raise ValueError(f"{option_name} values must be category strings or lists of category strings")
 
 
-def normalize_statistics_simple_contrast_categories(
+def normalize_statistics_contrast_categories(
     value: Any,
     annotation_columns: Sequence[str],
     *,
-    option_name: str = "statistics_simple_contrast_categories",
+    option_name: str = "statistics_contrast_categories",
 ) -> Optional[Dict[str, Optional[List[str]]]]:
     """Normalize optional Simple design category filters by annotation column.
 
@@ -84,7 +84,7 @@ def normalize_statistics_simple_contrast_categories(
         unknown = sorted(str(key) for key in value.keys() if str(key) not in set(columns))
         if unknown:
             raise ValueError(
-                f"{option_name} contains annotation column(s) not requested for pseudobulk DE: "
+                f"{option_name} contains annotation column(s) not requested for statistics contrasts: "
                 + ", ".join(unknown)
             )
         return {
@@ -102,7 +102,7 @@ def normalize_statistics_simple_contrast_categories(
         if not nested:
             if len(columns) > 1:
                 raise ValueError(
-                    f"{option_name} is ambiguous with multiple pseudobulk annotations. "
+                    f"{option_name} is ambiguous with multiple statistics annotations. "
                     "Use a JSON object keyed by annotation name or a nested JSON list in "
                     "the order: " + ", ".join(columns) + "."
                 )
@@ -128,7 +128,7 @@ def normalize_statistics_simple_contrast_categories(
         return normalized
     raise ValueError(
         f"{option_name} must be a category list, a JSON object keyed by annotation, "
-        "or a nested list matching the pseudobulk annotation order."
+        "or a nested list matching the statistics annotation order."
     )
 
 
@@ -1226,10 +1226,77 @@ class SpatialDataset:
             export_indices[section.section_id] = np.asarray(idx)
         return export_indices
 
+    def _distribution_expression_for_modality(
+        self,
+        modality: Optional[str],
+        *,
+        counts_layer: Optional[str] = "counts",
+        normalization: str = "RC",
+        scale_factor: float = 10000.0,
+        normalized_layer: Optional[str] = None,
+    ) -> Tuple[Any, List[str], str]:
+        """Return the display matrix used for Distribution values."""
+        from .wilcoxon import resolve_distribution_expression_matrix
+
+        mod = self._resolve_modality(modality)
+        if mod is not None:
+            feature_names = [str(feature) for feature in mod.feature_names]
+            matrix_view = type(
+                "_DistributionMatrixView",
+                (),
+                {"X": mod.matrix, "layers": mod.layers or {}},
+            )()
+            matrix, source = resolve_distribution_expression_matrix(
+                matrix_view,
+                counts_layer=counts_layer,
+                normalization=normalization,
+                scale_factor=scale_factor,
+                normalized_layer=normalized_layer,
+            )
+            return matrix, feature_names, f"{mod.name}.{source}"
+        matrix, source = resolve_distribution_expression_matrix(
+            self.adata,
+            counts_layer=counts_layer,
+            normalization=normalization,
+            scale_factor=scale_factor,
+            normalized_layer=normalized_layer,
+        )
+        return matrix, [str(feature) for feature in self.adata.var_names], f"adata.{source}"
+
+    def _get_distribution_feature_vector(
+        self,
+        feature: str,
+        modality: Optional[str] = None,
+        *,
+        counts_layer: Optional[str] = "counts",
+        normalization: str = "RC",
+        scale_factor: float = 10000.0,
+        normalized_layer: Optional[str] = None,
+    ) -> np.ndarray:
+        source_matrix, feature_names, _ = self._distribution_expression_for_modality(
+            modality,
+            counts_layer=counts_layer,
+            normalization=normalization,
+            scale_factor=scale_factor,
+            normalized_layer=normalized_layer,
+        )
+        feature_pos = {str(name): idx for idx, name in enumerate(feature_names)}
+        idx = feature_pos[str(feature)]
+        col = source_matrix[:, idx]
+        vals = np.asarray(col.toarray()).ravel() if issparse(col) else np.asarray(col).ravel()
+        vals = np.asarray(vals, dtype=float)
+        vals[~np.isfinite(vals)] = 0.0
+        return vals
+
     def _collect_feature_data(
         self,
         features: Optional[List[str]] = None,
         modality: Optional[str] = None,
+        *,
+        distribution_counts_layer: Optional[str] = "counts",
+        distribution_normalization: str = "RC",
+        distribution_scale_factor: float = 10000.0,
+        distribution_normalized_layer: Optional[str] = None,
     ) -> Dict[str, Dict[str, Union[np.ndarray, float]]]:
         """Collect feature vectors and ranges for export within a modality."""
         feature_data: Dict[str, Dict[str, Union[np.ndarray, float]]] = {}
@@ -1239,7 +1306,14 @@ class SpatialDataset:
             if feature not in feature_set:
                 continue
             try:
-                vals, _, _ = self.get_annotation_data(feature, modality=modality)
+                vals = self._get_distribution_feature_vector(
+                    feature,
+                    modality=modality,
+                    counts_layer=distribution_counts_layer,
+                    normalization=distribution_normalization,
+                    scale_factor=distribution_scale_factor,
+                    normalized_layer=distribution_normalized_layer,
+                )
                 finite = np.isfinite(vals)
                 feature_vmin = float(np.nanmin(vals[finite])) if finite.any() else 0.0
                 feature_vmax = float(np.nanmax(vals[finite])) if finite.any() else 1.0
@@ -1410,6 +1484,10 @@ class SpatialDataset:
         feature_sparse_pack: bool = True,
         feature_sparse_pack_min_nnz: int = 256,
         modality: Optional[str] = None,
+        distribution_counts_layer: Optional[str] = "counts",
+        distribution_normalization: str = "RC",
+        distribution_scale_factor: float = 10000.0,
+        distribution_normalized_layer: Optional[str] = None,
     ) -> Dict:
         """Export a feature-major sidecar payload for downstream viewer loading."""
         self._validate_feature_export_options(feature_encoding, feature_sparse_zero_threshold, feature_sparse_pack_min_nnz)
@@ -1417,12 +1495,14 @@ class SpatialDataset:
         export_indices = export_indices or self._get_export_section_indices(downsample=downsample)
 
         mod = self._resolve_modality(modality)
-        if mod is not None:
-            feature_pos = {n: i for i, n in enumerate(mod.feature_names)}
-            source_matrix = mod.layers.get("normalized", mod.matrix)
-        else:
-            feature_pos = {n: i for i, n in enumerate(self.adata.var_names)}
-            source_matrix = self.adata.layers["normalized"] if "normalized" in self.adata.layers else self.adata.X
+        source_matrix, source_feature_names, _ = self._distribution_expression_for_modality(
+            modality,
+            counts_layer=distribution_counts_layer,
+            normalization=distribution_normalization,
+            scale_factor=distribution_scale_factor,
+            normalized_layer=distribution_normalized_layer,
+        )
+        feature_pos = {n: i for i, n in enumerate(source_feature_names)}
 
         unique_features = []
         seen = set()
@@ -1444,8 +1524,7 @@ class SpatialDataset:
         feature_value_encodings: Dict[str, str] = {}
         if unique_features:
             feature_indices = [feature_pos[feature] for feature in unique_features]
-            expr_layer = source_matrix
-            batch = expr_layer[:, feature_indices]
+            batch = source_matrix[:, feature_indices]
             resolved_feature_encoding = str(feature_encoding or "auto").lower()
 
             if issparse(batch):
@@ -1678,10 +1757,13 @@ class SpatialDataset:
         wilcoxon_log2fc_cutoff: float = 1,
         wilcoxon_embed_top_n_per_comparison: int = 2,
         wilcoxon_top_n_per_category: int = 300,
-        statistics_simple_contrast_categories: Any = None,
+        statistics_contrast_categories: Any = None,
         pseudobulk_de_annotations: Optional[List[str]] = None,
         pseudobulk_replicate_annotation: Optional[str] = None,
-        pseudobulk_counts_layer: Optional[str] = "counts",
+        statistics_counts_layer: Optional[str] = "counts",
+        statistics_normalization: str = "RC",
+        statistics_scale_factor: float = 10000.0,
+        statistics_normalized_layer: Optional[str] = None,
         pseudobulk_min_cell_counts: int = 0,
         pseudobulk_min_feature_counts: int = 0,
         pseudobulk_min_cells_per_pseudobulk: int = 20,
@@ -1741,15 +1823,28 @@ class SpatialDataset:
         pseudobulk_replicate_annotation : str, optional
             Obs annotation used as the biological replicate for pseudobulk analyses.
             Defaults to the dataset section_key annotation.
-        statistics_simple_contrast_categories : list or dict, optional
+        statistics_contrast_categories : list or dict, optional
             Categories to include in Simple design category-versus-category
             contrasts. Use a flat list only when one annotation is analyzed.
             With multiple statistics annotation columns, pass a dict keyed by
             annotation name or a nested list matching the annotation order. All
             retained categories receive a balanced-rest contrast.
-        pseudobulk_counts_layer : str, optional
-            AnnData layer containing raw counts for pseudobulk aggregation.
-            Defaults to "counts" when present, otherwise adata.X.
+        statistics_counts_layer : str, optional
+            AnnData layer containing raw counts used as the source for Distribution
+            normalization and pseudobulk aggregation. Defaults to "counts";
+            use None for adata.X.
+        statistics_normalization : str
+            Distribution display normalization. "RC" library-size normalizes to
+            statistics_scale_factor without log transformation. "LogNormalize"
+            library-size normalizes to 10000 and applies log1p.
+        statistics_scale_factor : float
+            Library-size target for "RC" Distribution normalization. Ignored by
+            "LogNormalize" and by statistics_normalized_layer.
+        statistics_normalized_layer : str, optional
+            Pre-normalized AnnData layer to use directly for Distribution display
+            values. When set, it overrides statistics_counts_layer,
+            statistics_normalization, and statistics_scale_factor for Distribution
+            values only; pseudobulk DE still uses statistics_counts_layer.
         pseudobulk_min_cell_counts : int
             Exclude cells below this total raw-count threshold before pseudobulk
             aggregation. Zero disables filtering.
@@ -1805,6 +1900,28 @@ class SpatialDataset:
         dict
             JSON-serializable data structure
         """
+        def _optional_layer_name(value: Optional[str]) -> Optional[str]:
+            text = str(value or "").strip()
+            if not text or text.lower() in {"none", "null", "off"}:
+                return None
+            return text
+
+        statistics_counts_layer = _optional_layer_name(statistics_counts_layer)
+        statistics_normalized_layer = _optional_layer_name(statistics_normalized_layer)
+        statistics_scale_factor = float(statistics_scale_factor)
+        if statistics_scale_factor <= 0:
+            raise ValueError("statistics_scale_factor must be > 0")
+        from .wilcoxon import normalize_distribution_normalization
+
+        statistics_normalization = normalize_distribution_normalization(statistics_normalization)
+        if statistics_normalized_layer is not None:
+            log_warning(
+                "statistics_normalized_layer is set; Distribution values will use that layer directly. "
+                "statistics_counts_layer, statistics_normalization, and statistics_scale_factor are ignored "
+                "for Distribution display values. Pseudobulk DE still uses statistics_counts_layer.",
+                level=1,
+            )
+
         coords = np.asarray(self.adata.obsm[self.spatial_key])[:, :2]
         export_section_indices = self._get_export_section_indices(downsample=downsample)
 
@@ -2653,11 +2770,12 @@ class SpatialDataset:
         simple_contrast_annotation_columns = list(
             dict.fromkeys([*requested_wilcoxon_de_annotations, *requested_pseudobulk_de_annotations])
         )
-        statistics_simple_categories_by_annotation = normalize_statistics_simple_contrast_categories(
-            statistics_simple_contrast_categories,
+        statistics_contrast_categories_by_annotation = normalize_statistics_contrast_categories(
+            statistics_contrast_categories,
             simple_contrast_annotation_columns,
         )
         wilcoxon_expression_by_modality: Dict[str, Tuple[Any, str]] = {}
+        distribution_expression_by_modality: Dict[str, Tuple[Any, str]] = {}
 
         def _prepare_wilcoxon_expression_for_modality(modality_name: str, analysis_adata: Any) -> Tuple[Any, str]:
             cached = wilcoxon_expression_by_modality.get(modality_name)
@@ -2669,6 +2787,24 @@ class SpatialDataset:
             prepared = resolve_wilcoxon_expression_matrix(analysis_adata, wilcoxon_layer)
             log_detail(f"prepared_expression_source={prepared[1]}", level=1)
             wilcoxon_expression_by_modality[modality_name] = prepared
+            return prepared
+
+        def _prepare_distribution_expression_for_modality(modality_name: str, analysis_adata: Any) -> Tuple[Any, str]:
+            cached = distribution_expression_by_modality.get(modality_name)
+            if cached is not None:
+                return cached
+            from .wilcoxon import resolve_distribution_expression_matrix
+
+            log_step(f"Preparing Distribution expression matrix for modality {modality_name}.")
+            prepared = resolve_distribution_expression_matrix(
+                analysis_adata,
+                counts_layer=statistics_counts_layer,
+                normalization=statistics_normalization,
+                scale_factor=statistics_scale_factor,
+                normalized_layer=statistics_normalized_layer,
+            )
+            log_detail(f"prepared_distribution_expression_source={prepared[1]}", level=1)
+            distribution_expression_by_modality[modality_name] = prepared
             return prepared
 
         wilcoxon_de_by_modality: Dict[str, Dict[str, Any]] = {
@@ -2689,6 +2825,9 @@ class SpatialDataset:
                 wilcoxon_expression_matrix, wilcoxon_expression_layer_used = (
                     _prepare_wilcoxon_expression_for_modality(modality_name, analysis_adata)
                 )
+                distribution_expression_matrix, distribution_expression_source = (
+                    _prepare_distribution_expression_for_modality(modality_name, analysis_adata)
+                )
                 log_step(
                     f"Computing Wilcoxon marker statistics for modality {modality_name}: "
                     f"{len(requested_wilcoxon_de_annotations)} annotation column"
@@ -2701,8 +2840,8 @@ class SpatialDataset:
                         level=1,
                     )
                     annotation_pairwise_categories = (
-                        statistics_simple_categories_by_annotation.get(annotation_key)
-                        if statistics_simple_categories_by_annotation
+                        statistics_contrast_categories_by_annotation.get(annotation_key)
+                        if statistics_contrast_categories_by_annotation
                         else None
                     )
                     pairwise_categories_label = (
@@ -2730,6 +2869,8 @@ class SpatialDataset:
                         expression_layer=wilcoxon_layer,
                         expression_matrix=wilcoxon_expression_matrix,
                         expression_layer_used=wilcoxon_expression_layer_used,
+                        summary_expression_matrix=distribution_expression_matrix,
+                        summary_expression_source=distribution_expression_source,
                         min_cells=wilcoxon_min_cells_n,
                         min_pct_expressed=wilcoxon_min_pct_n,
                         p_adjust_method=wilcoxon_p_adjust_method,
@@ -2824,6 +2965,9 @@ class SpatialDataset:
 
             for modality_name in statistics_modality_names:
                 analysis_adata = _adata_for_statistics_modality(modality_name)
+                pseudobulk_display_expression_matrix, pseudobulk_display_expression_source = (
+                    _prepare_distribution_expression_for_modality(modality_name, analysis_adata)
+                )
                 modality_pseudobulk_de: Dict[str, Any] = {}
                 pending_pseudobulk_de_annotations = list(requested_pseudobulk_de_annotations)
                 allow_companion_reuse = (
@@ -2861,8 +3005,8 @@ class SpatialDataset:
 
                 for annotation_key in pending_pseudobulk_de_annotations:
                     annotation_pairwise_categories = (
-                        (statistics_simple_categories_by_annotation or {}).get(annotation_key)
-                        if statistics_simple_categories_by_annotation
+                        (statistics_contrast_categories_by_annotation or {}).get(annotation_key)
+                        if statistics_contrast_categories_by_annotation
                         else None
                     )
                     sample_metadata_model = _use_sample_metadata_pseudobulk(analysis_adata, annotation_key)
@@ -2886,7 +3030,7 @@ class SpatialDataset:
                         level=3,
                     )
                     log_detail("rest=balanced_equal_category_weight", level=3)
-                    log_detail(f"counts_layer={pseudobulk_counts_layer or 'X'}", level=3)
+                    log_detail(f"counts_layer={statistics_counts_layer or 'X'}", level=3)
                     log_detail(f"min_cell_counts={pseudobulk_min_cell_counts_n}", level=3)
                     log_detail(f"min_feature_counts={pseudobulk_min_feature_counts_n}", level=3)
                     log_detail(f"min_cells_per_pseudobulk={pseudobulk_min_cells_n}", level=3)
@@ -2899,6 +3043,10 @@ class SpatialDataset:
                     log_detail(f"n_cpus={pseudobulk_n_cpus_n}", level=3)
                     log_detail("diagnostics=pairwise", level=3)
                     log_detail(f"reported_pairwise_categories={pairwise_categories_label}", level=3)
+                    log_detail(
+                        f"display_mean_expression_source={pseudobulk_display_expression_source}",
+                        level=3,
+                    )
                     compute_de = (
                         compute_pseudobulk_sample_metadata_de
                         if sample_metadata_model
@@ -2909,7 +3057,8 @@ class SpatialDataset:
                         annotation_key,
                         replicate=pseudobulk_replicate_name,
                         pairwise_categories=annotation_pairwise_categories,
-                        counts_layer=pseudobulk_counts_layer,
+                        counts_layer=statistics_counts_layer,
+                        display_expression_matrix=pseudobulk_display_expression_matrix,
                         min_cell_counts=pseudobulk_min_cell_counts_n,
                         min_feature_counts=pseudobulk_min_feature_counts_n,
                         min_cells=pseudobulk_min_cells_n,
@@ -3248,7 +3397,13 @@ class SpatialDataset:
             float(wilcoxon_padj_cutoff),
             float(wilcoxon_log2fc_cutoff),
         )
-        feature_data = self._collect_feature_data(export_features)
+        feature_data = self._collect_feature_data(
+            export_features,
+            distribution_counts_layer=statistics_counts_layer,
+            distribution_normalization=statistics_normalization,
+            distribution_scale_factor=statistics_scale_factor,
+            distribution_normalized_layer=statistics_normalized_layer,
+        )
         feature_encodings = self._resolve_feature_encodings(feature_data, feature_encoding, feature_sparse_zero_threshold)
         embedded_features_by_modality: Dict[str, List[str]] = {
             modality_name: [] for modality_name in modality_names
@@ -3450,6 +3605,10 @@ class SpatialDataset:
             modality_feature_data = self._collect_feature_data(
                 modality_requested_features,
                 modality=modality_name,
+                distribution_counts_layer=statistics_counts_layer,
+                distribution_normalization=statistics_normalization,
+                distribution_scale_factor=statistics_scale_factor,
+                distribution_normalized_layer=statistics_normalized_layer,
             )
             modality_feature_encodings = self._resolve_feature_encodings(
                 modality_feature_data,
@@ -3525,6 +3684,13 @@ class SpatialDataset:
         }
 
         def _category_mean_features_for_modality(modality_name: str) -> List[str]:
+            catalog = [
+                str(feature)
+                for feature in (features_by_modality.get(modality_name) or [])
+                if str(feature)
+            ]
+            if catalog:
+                return catalog
             embedded = [
                 str(feature)
                 for feature in (embedded_features_by_modality.get(modality_name) or [])
@@ -3587,6 +3753,7 @@ class SpatialDataset:
             "pseudobulk_settings": {
                 "modalities": list(statistics_modality_names),
                 "primary_modality": primary_statistics_modality,
+                "counts_layer": statistics_counts_layer or "X",
                 "min_replicates": max(2, int(pseudobulk_min_replicates)),
                 "min_cell_counts": int(pseudobulk_min_cell_counts),
                 "min_feature_counts": int(pseudobulk_min_feature_counts),
@@ -3598,6 +3765,14 @@ class SpatialDataset:
                 "padj_cutoff": float(pseudobulk_padj_cutoff),
                 "log2fc_cutoff": float(pseudobulk_log2fc_cutoff),
                 "embed_top_n_per_comparison": int(pseudobulk_embed_top_n_per_comparison),
+            },
+            "distribution_settings": {
+                "modalities": list(statistics_modality_names),
+                "primary_modality": primary_statistics_modality,
+                "counts_layer": statistics_counts_layer or "X",
+                "normalization": str(statistics_normalization or "RC"),
+                "scale_factor": float(statistics_scale_factor),
+                "normalized_layer": statistics_normalized_layer,
             },
             "wilcoxon_settings": {
                 "modalities": list(statistics_modality_names),

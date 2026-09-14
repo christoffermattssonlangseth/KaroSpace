@@ -338,6 +338,58 @@ def _run_export_cli(argv=None):
         ),
     )
     statistics_args.add_argument(
+        "--statistics-contrast-categories",
+        type=str,
+        default="",
+        help=(
+            "Categories to include in Simple design category-versus-category contrasts. "
+            "Use comma-separated categories only with one statistics annotation. With "
+            "--statistics-additional-annotations, use a JSON object keyed by annotation "
+            "or a nested JSON list in order [main-cell-annotation, additional...], e.g. "
+            "'{\"Anno_L1\":[\"Astrocyte\",\"B cell\"],\"region\":[\"Cortex\"]}'. "
+            "In zsh/bash, wrap the whole JSON value in single quotes so inner double "
+            "quotes are preserved. "
+            "All retained categories remain available and balanced-rest "
+            "contrasts still run for every category. An empty string includes all categories."
+        ),
+    )
+    statistics_args.add_argument(
+        "--statistics-counts-layer",
+        type=str,
+        default="counts",
+        help=(
+            "AnnData layer containing raw counts for Statistics Distribution normalization "
+            "and pseudobulk DE. Use 'none' for adata.X. (default: counts)"
+        ),
+    )
+    statistics_args.add_argument(
+        "--statistics-normalization",
+        type=str,
+        default="RC",
+        help=(
+            "Distribution display normalization: RC for library-size normalized relative counts "
+            "without log transformation, or LogNormalize for library-size normalization plus log1p. "
+            "(default: RC)"
+        ),
+    )
+    statistics_args.add_argument(
+        "--statistics-scale-factor",
+        type=float,
+        default=10000.0,
+        help="Scale factor for RC Distribution normalization. Ignored unless --statistics-normalization RC. (default: 10000)",
+    )
+    statistics_args.add_argument(
+        "--statistics-normalized-layer",
+        type=str,
+        default="off",
+        help=(
+            "Pre-normalized AnnData layer to use directly for Distribution display values. "
+            "Use 'off' to disable. When set, Distribution ignores --statistics-counts-layer, "
+            "--statistics-normalization, and --statistics-scale-factor. Pseudobulk DE still "
+            "uses --statistics-counts-layer. (default: off)"
+        ),
+    )
+    statistics_args.add_argument(
         "--wilcoxon-min-cells-per-group",
         type=int,
         default=20,
@@ -398,28 +450,6 @@ def _run_export_cli(argv=None):
             "Obs annotation to use as the biological replicate in pseudobulk analyses. "
             "Defaults to --section-key."
         )
-    )
-    statistics_args.add_argument(
-        "--statistics-simple-contrast-categories",
-        type=str,
-        default="",
-        help=(
-            "Categories to include in Simple design category-versus-category contrasts. "
-            "Use comma-separated categories only with one statistics annotation. With "
-            "--statistics-additional-annotations, use a JSON object keyed by annotation "
-            "or a nested JSON list in order [main-cell-annotation, additional...], e.g. "
-            "'{\"Anno_L1\":[\"Astrocyte\",\"B cell\"],\"region\":[\"Cortex\"]}'. "
-            "In zsh/bash, wrap the whole JSON value in single quotes so inner double "
-            "quotes are preserved. "
-            "All retained categories remain available and balanced-rest "
-            "contrasts still run for every category. An empty string includes all categories."
-        ),
-    )
-    statistics_args.add_argument(
-        "--pseudobulk-counts-layer",
-        type=str,
-        default="counts",
-        help="AnnData layer containing raw counts for pseudobulk DE. Use 'none' for adata.X. (default: counts)"
     )
     statistics_args.add_argument(
         "--pseudobulk-min-cell-counts",
@@ -680,7 +710,7 @@ def _run_export_cli(argv=None):
     from .data_loader import (
         inspect_input_file,
         load_spatial_data,
-        normalize_statistics_simple_contrast_categories,
+        normalize_statistics_contrast_categories,
     )
     from .exporter import export_to_html
 
@@ -758,7 +788,7 @@ def _run_export_cli(argv=None):
 
     def _parse_optional_layer(value: str):
         text = str(value or "").strip()
-        if not text or text.lower() in {"none", "null"}:
+        if not text or text.lower() in {"none", "null", "off"}:
             return None
         return text
 
@@ -781,10 +811,10 @@ def _run_export_cli(argv=None):
         *(statistics_additional_annotations or []),
     ]
     try:
-        statistics_simple_contrast_categories = normalize_statistics_simple_contrast_categories(
-            args.statistics_simple_contrast_categories,
+        statistics_contrast_categories = normalize_statistics_contrast_categories(
+            args.statistics_contrast_categories,
             statistics_annotation_columns,
-            option_name="--statistics-simple-contrast-categories",
+            option_name="--statistics-contrast-categories",
         )
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
@@ -919,8 +949,11 @@ def _run_export_cli(argv=None):
         interaction_markers_min_neighbors=args.interaction_markers_min_neighbors,
         pseudobulk=pseudobulk_mode,
         pseudobulk_replicate_annotation=args.pseudobulk_replicate_annotation,
-        statistics_simple_contrast_categories=statistics_simple_contrast_categories,
-        pseudobulk_counts_layer=_parse_optional_layer(args.pseudobulk_counts_layer),
+        statistics_contrast_categories=statistics_contrast_categories,
+        statistics_counts_layer=_parse_optional_layer(args.statistics_counts_layer),
+        statistics_normalization=args.statistics_normalization,
+        statistics_scale_factor=args.statistics_scale_factor,
+        statistics_normalized_layer=_parse_optional_layer(args.statistics_normalized_layer),
         pseudobulk_min_cell_counts=args.pseudobulk_min_cell_counts,
         pseudobulk_min_feature_counts=args.pseudobulk_min_feature_counts,
         pseudobulk_min_cells_per_pseudobulk=args.pseudobulk_min_cells_per_pseudobulk,
