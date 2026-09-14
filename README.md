@@ -268,7 +268,7 @@ karospace your_data.h5ad \
 CLI value conventions:
 - Use `auto` when KaroSpace should choose behavior automatically.
 - Use `off` to disable analysis modes such as `--pseudobulk`, `--pathway`, and `--interaction-markers`.
-- Use `none` where an option documents a nullable string value, such as `--outlineby` and `--pseudobulk-counts-layer`.
+- Use `none` where an option documents a nullable string value, such as `--outlineby` and `--statistics-counts-layer`.
 - Omit comma-separated/JSON options, or pass `""`, for an empty list or object.
 - Use `0` for numeric disable switches.
 
@@ -369,6 +369,11 @@ CLI value conventions:
 |--------|-------------|---------|
 | `--statistics-additional-annotations` | Additional annotation columns to analyze with default Wilcoxon statistics and optional secondary pseudobulk/interaction statistics. `--main-cell-annotation` is included automatically | empty string |
 | `--statistics-modalities` | Comma-separated modalities to run Wilcoxon, optional pseudobulk, and interaction statistics on. Use `all` for all detected modalities | dataset default modality |
+| `--statistics-contrast-categories` | Categories to report in category-versus-category contrasts. With `--statistics-additional-annotations`, use annotation-specific JSON wrapped in single quotes, such as `'{"cell_type":["Astrocyte","B cell"],"region":["Cortex"]}'`, or a nested list matching `[main-cell-annotation, additional...]` | empty string |
+| `--statistics-counts-layer` | Raw-count AnnData layer used for Statistics/Distribution normalization and pseudobulk aggregation; use `none` for `adata.X` | `counts` |
+| `--statistics-normalization` | Distribution display normalization. Use `RC` for library-size normalized relative counts without log transformation, or `LogNormalize` for library-size normalization plus `log1p` | `RC` |
+| `--statistics-scale-factor` | Scale factor for `RC` Distribution normalization. Ignored unless `--statistics-normalization RC` | `10000` |
+| `--statistics-normalized-layer` | Pre-normalized AnnData layer to use directly for Distribution display values. Use `off` to disable. When set, Distribution ignores `--statistics-counts-layer`, `--statistics-normalization`, and `--statistics-scale-factor`; pseudobulk DE still uses `--statistics-counts-layer` | `off` |
 | `--wilcoxon-min-cells-per-group` | Minimum cells required in each category for Wilcoxon marker statistics | `20` |
 | `--wilcoxon-min-pct-expressed` | Minimum fraction of cells with nonzero feature values required in at least one compared group before Wilcoxon results are reported | `0` |
 | `--wilcoxon-p-adjust-method` | Multiple-testing correction method for Wilcoxon p-values (`fdr_bh`, `bonferroni`, `holm`, `none`) | `fdr_bh` |
@@ -378,8 +383,6 @@ CLI value conventions:
 | `--wilcoxon-top-n-per-category` | Maximum Wilcoxon result rows retained per category/rest or pairwise comparison | `300` |
 | `--pseudobulk` | Secondary category pseudobulk DE mode (`auto`, `off`) | `off` |
 | `--pseudobulk-replicate-annotation` | Obs annotation to use as the biological replicate for pseudobulk analyses; defaults to `--section-key` | `--section-key` |
-| `--pseudobulk-counts-layer` | Raw-count AnnData layer for pseudobulk aggregation; use `none` for `adata.X` | `counts` |
-| `--statistics-simple-contrast-categories` | Categories to report in category-versus-category contrasts. With `--statistics-additional-annotations`, use annotation-specific JSON wrapped in single quotes, such as `'{"cell_type":["Astrocyte","B cell"],"region":["Cortex"]}'`, or a nested list matching `[main-cell-annotation, additional...]` | empty string |
 | `--pseudobulk-min-cell-counts` | Exclude cells with fewer than this many total raw counts before pseudobulk aggregation; use `0` to disable | `0` |
 | `--pseudobulk-min-feature-counts` | Exclude features with fewer than this many total raw pseudobulk counts in the shared DESeq2 fit; use `0` to disable | `0` |
 | `--pseudobulk-min-cells-per-pseudobulk` | Minimum cells required in each replicate × annotation pseudobulk sample before it can enter the shared DESeq2 fit | `20` |
@@ -498,6 +501,8 @@ Cell-level Wilcoxon marker statistics are computed by default for `main_cell_ann
 
 Use `statistics_modalities=["rna", "protein"]` in Python or `--statistics-modalities rna,protein` on the CLI to run Wilcoxon statistics, optional pseudobulk, and interaction markers on selected modalities, or use `all` for every detected modality.
 
+Distribution display values use `--statistics-counts-layer counts` with `--statistics-normalization RC` by default, meaning raw counts are divided by cell library size and multiplied by `--statistics-scale-factor` (`10000`). Use `--statistics-normalization LogNormalize` for `log1p` after library normalization, or `--statistics-normalized-layer data` to use a pre-normalized layer directly. Pseudobulk DE always uses `--statistics-counts-layer` for raw-count aggregation, even when a normalized Distribution layer is selected.
+
 ### Optional pseudobulk category selection
 
 Pseudobulk category DE is now a secondary analysis. It runs only with `pseudobulk="auto"` in Python or `--pseudobulk auto` on the CLI, and is shown alongside Wilcoxon results in `Insights → Statistics → Compare → Simple design` when available. KaroSpace aggregates raw counts by replicate and annotation, keeps replicate × annotation pseudobulk samples with at least `pseudobulk_min_cells_per_pseudobulk` / `--pseudobulk-min-cells-per-pseudobulk` cells, fits one shared `~ replicate + annotation` DESeq2 model per annotation column, then extracts category-versus-category contrasts. It also extracts a balanced-rest contrast for every category: the category minus the equally weighted mean of all other retained annotation categories.
@@ -510,7 +515,7 @@ When selecting specific pairwise categories from the command line, wrap listed v
 --main-cell-annotation cell_type \
 --statistics-additional-annotations region \
 --pseudobulk auto \
---statistics-simple-contrast-categories '{"cell_type":["Astrocyte","B cell"],"region":["Cortex"]}'
+--statistics-contrast-categories '{"cell_type":["Astrocyte","B cell"],"region":["Cortex"]}'
 ```
 
 ## Deployment and Sharing

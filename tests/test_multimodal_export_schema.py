@@ -131,6 +131,41 @@ def test_multimodal_export_uses_only_by_modality_payloads():
         assert removed_key not in data
 
 
+def test_exploration_feature_values_are_library_normalized_without_log():
+    data = _make_multimodal_dataset().to_json_data(
+        annotation="cell_type",
+        features=["rna_a"],
+        feature_encoding="dense",
+        pseudobulk_de_annotations=[],
+        interaction_marker_annotations=[],
+        statistics_modalities=["rna"],
+    )
+
+    values = data["feature_state_by_modality"]["rna"]["sections"]["s1"]["features"]["rna_a"]
+
+    assert np.allclose(values, [10000.0, 6666.666667, 0.0, 2000.0])
+
+
+def test_distribution_feature_values_can_use_selected_normalized_layer():
+    data = _make_multimodal_dataset().to_json_data(
+        annotation="cell_type",
+        features=["rna_a"],
+        feature_encoding="dense",
+        statistics_normalized_layer="normalized",
+        statistics_counts_layer=None,
+        statistics_normalization="LogNormalize",
+        statistics_scale_factor=100,
+        pseudobulk_de_annotations=[],
+        interaction_marker_annotations=[],
+        statistics_modalities=["rna"],
+    )
+
+    values = data["feature_state_by_modality"]["rna"]["sections"]["s1"]["features"]["rna_a"]
+
+    assert np.allclose(values, [1.0, 2.0, 0.0, 1.0])
+    assert data["distribution_settings"]["normalized_layer"] == "normalized"
+
+
 def test_default_statistics_use_wilcoxon_without_pseudobulk():
     multimodal_dataset = _make_multimodal_dataset()
     data = multimodal_dataset.to_json_data(
@@ -149,9 +184,13 @@ def test_default_statistics_use_wilcoxon_without_pseudobulk():
     assert data["pseudobulk_de_by_modality"]["rna"] == {}
     assert data["marker_features_by_method_by_modality"]["rna"]["wilcoxon"]["cell_type"]
     assert "wilcoxon" in data["category_feature_means_by_method_by_modality"]["rna"]
+    assert data["category_feature_means_by_method_by_modality"]["rna"]["wilcoxon"]["features"] == [
+        "rna_a",
+        "rna_b",
+    ]
 
 
-def test_wilcoxon_simple_contrast_categories_apply_without_pseudobulk():
+def test_wilcoxon_contrast_categories_apply_without_pseudobulk():
     obs = pd.DataFrame(
         {
             "section": pd.Categorical(["s1"] * 6),
@@ -203,7 +242,7 @@ def test_wilcoxon_simple_contrast_categories_apply_without_pseudobulk():
         wilcoxon_padj_cutoff=1,
         wilcoxon_log2fc_cutoff=0,
         pseudobulk_de_annotations=[],
-        statistics_simple_contrast_categories=["A", "B"],
+        statistics_contrast_categories=["A", "B"],
         interaction_marker_annotations=[],
     )
 
@@ -358,12 +397,12 @@ def test_cli_help_prefers_feature_named_options():
     assert "Statistics and differential features:" in output
     assert "--statistics-additional-annotations" in output
     assert "--statistics-modalities" in output
-    assert "--statistics-simple-contrast-categories" in output
+    assert "--statistics-contrast-categories" in output
     assert "--wilcoxon-min-cells-per-group" in output
     assert "--pseudobulk-min-feature-counts" in output
     assert "--pseudobulk-" + "additional-annotations" not in output
     assert "--pseudobulk-" + "modalities" not in output
-    assert "--pseudobulk-" + "simple-constrast-categories" not in output
+    assert "--pseudobulk-" + "contrast-categories" not in output
     assert "--interaction-markers-top-features" in output
     assert "--feature-correlation-top-n" in output
     assert "--spatial-variable-features-n" in output
@@ -481,7 +520,7 @@ def test_secondary_analytics_are_modality_scoped():
     for modality, feature_name in [("rna", "rna_a"), ("protein", "protein_a")]:
         means = data["category_feature_means_by_method_by_modality"][modality]["wilcoxon"]
         assert means is not None
-        assert means["features"] == data["embedded_features_by_modality"][modality]
+        assert means["features"] == data["features_by_modality"][modality]
         assert feature_name in means["features"]
 
         correlations = data["feature_correlations_by_modality"][modality]
@@ -693,6 +732,108 @@ def test_sidecar_category_means_use_sidecar_loadable_features(tmp_path=None):
     assert data["embedded_features_by_modality"]["protein"] == []
     assert data["category_feature_means_by_method_by_modality"]["rna"]["wilcoxon"]["features"] == ["rna_a", "rna_b"]
     assert data["category_feature_means_by_method_by_modality"]["protein"]["wilcoxon"]["features"] == ["protein_a", "protein_b"]
+
+
+def test_pseudobulk_category_means_receive_display_scale_matrix(monkeypatch):
+    obs = pd.DataFrame(
+        {
+            "section": pd.Categorical(["s1"] * 4),
+            "replicate": pd.Categorical(["r1", "r2", "r1", "r2"]),
+            "cell_type": pd.Categorical(["A", "A", "B", "B"]),
+        },
+        index=[f"cell{i}" for i in range(4)],
+    )
+    var = pd.DataFrame(index=["rna_a"])
+    rna = np.asarray([[1], [1], [1], [1]], dtype=np.float32)
+    adata = AnnData(X=rna, obs=obs, var=var)
+    adata.layers["normalized"] = rna
+    adata.obsm["spatial"] = np.asarray([[0, 0], [1, 0], [0, 1], [1, 1]], dtype=np.float32)
+    protein_raw = np.asarray(
+        [
+            [100, 100],
+            [130, 70],
+            [20, 180],
+            [40, 160],
+        ],
+        dtype=np.float32,
+    )
+    protein_normalized = protein_raw / 100.0
+    dataset = SpatialDataset(
+        adata=adata,
+        sections=[SectionData("s1", adata.obsm["spatial"])],
+        section_key="section",
+        obs_columns=["section", "replicate", "cell_type"],
+        var_names=list(var.index),
+        modalities={
+            "rna": Modality(
+                name="rna",
+                matrix=rna,
+                var=var,
+                layers={"normalized": rna},
+                value_kind="counts",
+                label="RNA",
+            ),
+            "protein": Modality(
+                name="protein",
+                matrix=protein_raw,
+                var=pd.DataFrame(index=["CD3", "CD19"]),
+                layers={"normalized": protein_normalized},
+                value_kind="intensity",
+                label="Protein",
+            ),
+        },
+        default_modality="rna",
+    )
+    captured = {}
+
+    def fake_compute_pseudobulk_group_de(adata, annotation_key, **kwargs):
+        display_matrix = np.asarray(kwargs["display_expression_matrix"], dtype=float)
+        captured["display_expression_matrix"] = display_matrix
+        captured["counts_layer"] = kwargs.get("counts_layer")
+        labels = adata.obs[annotation_key].astype(str).to_numpy()
+        categories = ["A", "B"]
+        means = {
+            category: display_matrix[labels == category, :].mean(axis=0).astype(float).tolist()
+            for category in categories
+        }
+        return {
+            "A": {},
+            "B": {},
+            "_summary": {
+                "category_feature_means": {
+                    "features": ["CD3", "CD19"],
+                    "categories": categories,
+                    "means": means,
+                    "background": [float(display_matrix[:, 0].mean()), float(display_matrix[:, 1].mean())],
+                    "n_cells": {category: int(np.count_nonzero(labels == category)) for category in categories},
+                    "source": "pseudobulk_display_aggregate",
+                }
+            },
+        }
+
+    monkeypatch.setattr("karospace.pseudobulk.compute_pseudobulk_group_de", fake_compute_pseudobulk_group_de)
+
+    data = dataset.to_json_data(
+        annotation="cell_type",
+        features=[],
+        analytics_features=["CD3", "CD19"],
+        analytics_modalities=["protein"],
+        statistics_modalities=["protein"],
+        statistics_counts_layer="counts",
+        statistics_normalized_layer="normalized",
+        wilcoxon_de_annotations=[],
+        pseudobulk_de_annotations=["cell_type"],
+        pseudobulk_replicate_annotation="replicate",
+        interaction_marker_annotations=[],
+        spatial_variable_features_n=0,
+        feature_correlation_top_n=0,
+    )
+
+    assert captured["counts_layer"] == "counts"
+    assert np.allclose(captured["display_expression_matrix"], protein_normalized)
+    means = data["category_feature_means_by_method_by_modality"]["protein"]["pseudobulk"]
+    assert np.allclose(means["columns"]["cell_type"]["means"]["A"], [1.15, 0.85])
+    assert means["columns"]["cell_type"]["source"] == "pseudobulk_display_aggregate"
 
 
 def test_sidecar_export_passes_loadable_features_for_category_means():

@@ -96,6 +96,11 @@ def test_exploration_feature_controls_accept_manual_input(tmp_path=None):
     assert "moduleFeaturePicker?.addEventListener('keydown'" in html
     assert "markerSearch?.addEventListener('keydown'" in html
     assert "resolveCanonicalFeatureName(moduleFeaturePicker.value, moduleFocusedModality)" in html
+    assert "function getExplorationDistributionFeatureNames(modality = getExplorationModality())" in html
+    assert "return getFeatureDatalistValuesForModality(modality);" in html
+    assert "function getStatisticsDistributionFeatureNames(annotationCol = explorationColorCol || currentAnnotation || '', modality = getExplorationModality())" in html
+    assert "if (subtab === 'means') return getStatisticsDistributionFeatureNames" in html
+    assert "await ensureFeatureAvailable(feature, {" in html
 
 
 def test_feature_modules_are_scoped_to_focused_modality(tmp_path=None):
@@ -138,9 +143,9 @@ def test_marker_search_datalist_uses_embedded_features_only(tmp_path=None):
     html = _render_multimodal_html(tmp_path)
 
     assert "function getEmbeddedFeatureDatalistValuesForModality" in html
-    assert "if (subtab === 'distribution') return embedded;" in html
-    assert "subtab === 'means'" in html
-    assert "getPseudobulkMeanFeatureNames(explorationColorCol || currentAnnotation || '', modality)" in html
+    assert "if (subtab === 'distribution') return getExplorationDistributionFeatureNames(modality);" in html
+    assert "if (subtab === 'means') return getStatisticsDistributionFeatureNames" in html
+    assert "return getPseudobulkMeanFeatureNames(annotationCol, modality);" in html
 
 
 def test_marker_search_does_not_mutate_visual_feature_controls(tmp_path=None):
@@ -201,10 +206,27 @@ def test_simple_design_calc_info_matches_active_analysis_method(tmp_path=None):
     assert "wilcoxon_marker_features" in html
     assert "wilcoxon_simple_de_section" in html
     assert "wilcoxon_simple_de_table" in html
+    assert "KaroSpace uses the normalized layer when available" in html
+    assert "Pseudobulk DESeq2 marker features" in html
+    assert "pseudobulk sample = sum raw counts for replicate x category" in html
+    assert "Pseudobulk DESeq2 feature table" in html
     assert "function getAnalysisCalcInfoKey(method, subject)" in html
     assert "getAnalysisCalcInfoKey(activeMethod, 'simple_section')" in html
     assert "getAnalysisCalcInfoKey(activeMethod, 'simple_table')" in html
     assert "getAnalysisCalcInfoKey(activeMethod, 'volcano_plot')" in html
+
+
+def test_statistics_feature_calc_info_describes_wilcoxon_and_pseudobulk_means(tmp_path=None):
+    html = _render_multimodal_html(tmp_path)
+
+    assert "List values and figures are computed from the exported Distribution display matrix" in html
+    assert "Tiles use category means from the active Statistics method" in html
+    assert "By default, Distribution means use RC values" in html
+    assert "Export options can instead use LogNormalize or a selected pre-normalized layer" in html
+    assert "RC value = raw count * scale_factor / cell library size" in html
+    assert "Wilcoxon/Pseudobulk category means" in html
+    assert "Category means follow the active Statistics method" in html
+    assert "The DESeq2 model still uses raw counts from the Statistics counts layer" in html
 
 
 def test_insights_has_separate_statistics_menu(tmp_path=None):

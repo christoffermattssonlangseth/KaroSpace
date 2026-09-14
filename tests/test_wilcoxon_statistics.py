@@ -5,6 +5,7 @@ from anndata import AnnData
 from karospace import wilcoxon as wilcoxon_module
 from karospace.wilcoxon import (
     compute_wilcoxon_group_de,
+    resolve_distribution_expression_matrix,
     resolve_wilcoxon_expression_matrix,
 )
 
@@ -27,6 +28,51 @@ def test_wilcoxon_expression_layer_prefers_normalized_then_log_normalized_raw_da
     matrix, layer_name = resolve_wilcoxon_expression_matrix(adata, None)
     assert layer_name == "X_log1p_normalized"
     assert np.isclose(np.asarray(matrix)[0, 0], np.log1p(1 / 3 * 10000))
+
+
+def test_distribution_expression_matrix_library_normalizes_without_log_transform():
+    adata = AnnData(np.array([[1, 2], [3, 0]], dtype=float))
+    adata.layers["counts"] = np.array([[10, 30], [5, 5]], dtype=float)
+    adata.layers["normalized"] = np.array([[0.1, 0.2], [0.3, 0.4]], dtype=float)
+
+    matrix, layer_name = resolve_distribution_expression_matrix(adata)
+
+    assert layer_name == "counts_library_normalized"
+    assert np.allclose(np.asarray(matrix), [[2500, 7500], [5000, 5000]])
+
+
+def test_distribution_expression_matrix_supports_scale_log_and_direct_layer():
+    adata = AnnData(np.array([[1, 2], [3, 0]], dtype=float))
+    adata.layers["counts"] = np.array([[10, 30], [5, 5]], dtype=float)
+    adata.layers["data"] = np.array([[0.1, 0.2], [0.3, 0.4]], dtype=float)
+
+    matrix, layer_name = resolve_distribution_expression_matrix(
+        adata,
+        counts_layer="counts",
+        normalization="RC",
+        scale_factor=100,
+    )
+    assert layer_name == "counts_library_normalized"
+    assert np.allclose(np.asarray(matrix), [[25, 75], [50, 50]])
+
+    matrix, layer_name = resolve_distribution_expression_matrix(
+        adata,
+        counts_layer="counts",
+        normalization="LogNormalize",
+        scale_factor=100,
+    )
+    assert layer_name == "counts_log_normalized"
+    assert np.allclose(np.asarray(matrix), np.log1p([[2500, 7500], [5000, 5000]]))
+
+    matrix, layer_name = resolve_distribution_expression_matrix(
+        adata,
+        counts_layer="counts",
+        normalization="RC",
+        scale_factor=100,
+        normalized_layer="data",
+    )
+    assert layer_name == "data_layer"
+    assert np.allclose(np.asarray(matrix), adata.layers["data"])
 
 
 def test_wilcoxon_missing_explicit_layer_falls_back_to_auto_selection():
