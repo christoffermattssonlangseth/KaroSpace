@@ -374,6 +374,8 @@ CLI value conventions:
 | `--statistics-normalization` | Distribution display normalization. Use `RC` for library-size normalized relative counts without log transformation, or `LogNormalize` for library-size normalization plus `log1p` | `RC` |
 | `--statistics-scale-factor` | Scale factor for `RC` Distribution normalization. Ignored unless `--statistics-normalization RC` | `10000` |
 | `--statistics-normalized-layer` | Pre-normalized AnnData layer to use directly for Distribution display values. Use `off` to disable. When set, Distribution ignores `--statistics-counts-layer`, `--statistics-normalization`, and `--statistics-scale-factor`; pseudobulk DE still uses `--statistics-counts-layer` | `off` |
+| `--statistics-min-cell-counts` | Exclude cells with fewer than this many total raw counts before Wilcoxon and pseudobulk statistics; use `0` to disable | `0` |
+| `--statistics-min-feature-counts` | Exclude features with fewer than this many total raw counts before Wilcoxon and pseudobulk statistics; use `0` to disable | `0` |
 | `--wilcoxon-min-cells-per-group` | Minimum cells required in each category for Wilcoxon marker statistics | `20` |
 | `--wilcoxon-min-pct-expressed` | Minimum fraction of cells with nonzero feature values required in at least one compared group before Wilcoxon results are reported | `0` |
 | `--wilcoxon-p-adjust-method` | Multiple-testing correction method for Wilcoxon p-values (`fdr_bh`, `bonferroni`, `holm`, `none`) | `fdr_bh` |
@@ -383,9 +385,7 @@ CLI value conventions:
 | `--wilcoxon-top-n-per-category` | Maximum Wilcoxon result rows retained per category/rest or pairwise comparison | `300` |
 | `--pseudobulk` | Secondary category pseudobulk DE mode (`auto`, `off`) | `off` |
 | `--pseudobulk-replicate-annotation` | Obs annotation to use as the biological replicate for pseudobulk analyses; defaults to `--section-key` | `--section-key` |
-| `--pseudobulk-min-cell-counts` | Exclude cells with fewer than this many total raw counts before pseudobulk aggregation; use `0` to disable | `0` |
-| `--pseudobulk-min-feature-counts` | Exclude features with fewer than this many total raw pseudobulk counts in the shared DESeq2 fit; use `0` to disable | `0` |
-| `--pseudobulk-min-cells-per-pseudobulk` | Minimum cells required in each replicate × annotation pseudobulk sample before it can enter the shared DESeq2 fit | `20` |
+| `--pseudobulk-min-cells-per-pseudobulk` | Minimum cells required in each replicate × annotation pseudobulk sample before pseudobulk Distribution means and DESeq2 fitting | `20` |
 | `--pseudobulk-min-replicates` | Minimum paired replicates required for each reported contrast | `2` |
 | `--pseudobulk-min-pct-expressed` | Minimum fraction of cells with nonzero feature values required in at least one compared group before DE results are reported; values >1 are interpreted as percentages | `0` |
 | `--pseudobulk-p-adjust-method` | Multiple-testing correction method (`fdr_bh`, `bonferroni`, `holm`, `none`) | `fdr_bh` |
@@ -501,11 +501,11 @@ Cell-level Wilcoxon marker statistics are computed by default for `main_cell_ann
 
 Use `statistics_modalities=["rna", "protein"]` in Python or `--statistics-modalities rna,protein` on the CLI to run Wilcoxon statistics, optional pseudobulk, and interaction markers on selected modalities, or use `all` for every detected modality.
 
-Distribution display values use `--statistics-counts-layer counts` with `--statistics-normalization RC` by default, meaning raw counts are divided by cell library size and multiplied by `--statistics-scale-factor` (`10000`). Use `--statistics-normalization LogNormalize` for `log1p` after library normalization, or `--statistics-normalized-layer data` to use a pre-normalized layer directly. Pseudobulk DE always uses `--statistics-counts-layer` for raw-count aggregation, even when a normalized Distribution layer is selected.
+Distribution display values use `--statistics-counts-layer counts` with `--statistics-normalization RC` by default, meaning raw counts are divided by cell library size and multiplied by `--statistics-scale-factor` (`10000`). Use `--statistics-normalization LogNormalize` for `log1p` after library normalization, or `--statistics-normalized-layer data` to use a pre-normalized layer directly. `--statistics-min-cell-counts` and `--statistics-min-feature-counts` apply to Wilcoxon and pseudobulk statistics. Pseudobulk DE always uses `--statistics-counts-layer` for raw-count aggregation, even when a normalized Distribution layer is selected.
 
 ### Optional pseudobulk category selection
 
-Pseudobulk category DE is now a secondary analysis. It runs only with `pseudobulk="auto"` in Python or `--pseudobulk auto` on the CLI, and is shown alongside Wilcoxon results in `Insights → Statistics → Compare → Simple design` when available. KaroSpace aggregates raw counts by replicate and annotation, keeps replicate × annotation pseudobulk samples with at least `pseudobulk_min_cells_per_pseudobulk` / `--pseudobulk-min-cells-per-pseudobulk` cells, fits one shared `~ replicate + annotation` DESeq2 model per annotation column, then extracts category-versus-category contrasts. It also extracts a balanced-rest contrast for every category: the category minus the equally weighted mean of all other retained annotation categories.
+Pseudobulk category DE is now a secondary analysis. It runs only with `pseudobulk="auto"` in Python or `--pseudobulk auto` on the CLI, and is shown alongside Wilcoxon results in `Insights → Statistics → Compare → Simple design` when available. KaroSpace first removes cells below `statistics_min_cell_counts` / `--statistics-min-cell-counts`, removes features below `statistics_min_feature_counts` / `--statistics-min-feature-counts`, then removes replicate × annotation pseudobulk samples with fewer than `pseudobulk_min_cells_per_pseudobulk` / `--pseudobulk-min-cells-per-pseudobulk` cells before calculating pseudobulk Distribution means. DESeq2 then applies `pseudobulk_min_replicates` / `--pseudobulk-min-replicates`, fits one shared `~ replicate + annotation` model per annotation column, and extracts category-versus-category contrasts. It also extracts a balanced-rest contrast for every category: the category minus the equally weighted mean of all other retained annotation categories.
 
 When both Wilcoxon and pseudobulk are exported, `Insights → Statistics → Features → Markers`, `Features → Distribution`, and `Compare → Simple design` include a method selector. Pathway enrichment is computed only from pseudobulk DE results; when pseudobulk is off, pathway enrichment is skipped with a warning and Wilcoxon-ranked features are not used for pathways.
 

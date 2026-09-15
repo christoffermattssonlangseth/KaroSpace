@@ -26,6 +26,7 @@ _MISSING_WILCOXON_LAYER_WARNED: Set[str] = set()
 _RAW_WILCOXON_NORMALIZATION_WARNED: Set[str] = set()
 _MISSING_DISTRIBUTION_COUNTS_LAYER_WARNED: Set[str] = set()
 _MISSING_DISTRIBUTION_NORMALIZED_LAYER_WARNED: Set[str] = set()
+_MISSING_STATISTICS_FILTER_COUNTS_LAYER_WARNED: Set[str] = set()
 _WILCOXON_NORMALIZE_TARGET_SUM = 10000.0
 
 
@@ -130,6 +131,25 @@ def resolve_distribution_expression_matrix(
         log_normalize_expression_matrix(source_matrix, target_sum=float(target_sum)),
         f"{source_name}_log_normalized",
     )
+
+
+def resolve_statistics_filter_counts_matrix(
+    adata,
+    counts_layer: Optional[str] = "counts",
+) -> Tuple[Any, str]:
+    """Resolve the raw-count matrix used for Statistics count filters."""
+    layers = getattr(adata, "layers", None) or {}
+    if counts_layer and counts_layer in layers:
+        return layers[counts_layer], str(counts_layer)
+    if counts_layer:
+        missing_key = str(counts_layer)
+        if missing_key not in _MISSING_STATISTICS_FILTER_COUNTS_LAYER_WARNED:
+            log_warning(
+                f"statistics counts layer '{counts_layer}' was not found; using adata.X for Statistics count filters.",
+                level=2,
+            )
+            _MISSING_STATISTICS_FILTER_COUNTS_LAYER_WARNED.add(missing_key)
+    return adata.X, "X"
 
 
 def _warn_raw_wilcoxon_normalized(source_label: str) -> None:
@@ -254,6 +274,19 @@ def resolve_wilcoxon_expression_matrix(adata, expression_layer: Optional[str] = 
 def _materialize_rows(matrix, row_mask: np.ndarray):
     subset = matrix[row_mask]
     return subset.copy() if sp.issparse(subset) else np.asarray(subset, dtype=float)
+
+
+def _subset_expression_matrix(matrix, row_mask: np.ndarray, feature_mask: np.ndarray):
+    subset = matrix[row_mask]
+    subset = subset[:, feature_mask]
+    return subset.copy() if sp.issparse(subset) else np.asarray(subset, dtype=float)
+
+
+def _matrix_axis_sum(matrix, axis: int) -> np.ndarray:
+    values = np.asarray(matrix.sum(axis=axis)).ravel() if sp.issparse(matrix) else np.asarray(matrix, dtype=float).sum(axis=axis)
+    values = np.asarray(values, dtype=float).ravel()
+    values[~np.isfinite(values)] = 0.0
+    return values
 
 
 def _column_means(matrix, mask: np.ndarray) -> np.ndarray:
@@ -587,6 +620,10 @@ def compute_wilcoxon_group_de(
     expression_layer_used: Optional[str] = None,
     summary_expression_matrix: Optional[Any] = None,
     summary_expression_source: Optional[str] = None,
+    filter_expression_matrix: Optional[Any] = None,
+    filter_expression_source: Optional[str] = None,
+    min_cell_counts: int = 0,
+    min_feature_counts: int = 0,
     min_cells: int = 20,
     min_pct_expressed: float = 0.0,
     p_adjust_method: str = "fdr_bh",
@@ -605,11 +642,6 @@ def compute_wilcoxon_group_de(
     labels = col.astype(str).to_numpy()
     categories = [str(category) for category in col.cat.categories]
     min_cells_eff = max(1, int(min_cells))
-    retained_categories = [
-        category for category in categories if int(np.count_nonzero(labels == category)) >= min_cells_eff
-    ]
-    if len(retained_categories) < 2:
-        return None
 
     if expression_matrix is None:
         expression_matrix, expression_layer_used = resolve_wilcoxon_expression_matrix(adata, expression_layer)
@@ -617,9 +649,60 @@ def compute_wilcoxon_group_de(
         expression_layer_used = str(expression_layer_used or expression_layer or "provided")
     if expression_matrix is None or int(expression_matrix.shape[0]) != int(labels.shape[0]):
         return None
-    if summary_expression_matrix is not None and int(summary_expression_matrix.shape[0]) != int(labels.shape[0]):
+    if (
+        summary_expression_matrix is not None
+        and (
+            int(summary_expression_matrix.shape[0]) != int(labels.shape[0])
+            or int(summary_expression_matrix.shape[1]) != int(expression_matrix.shape[1])
+        )
+    ):
         summary_expression_matrix = None
     feature_names = [str(feature) for feature in adata.var_names]
+    if int(expression_matrix.shape[1]) != len(feature_names):
+        return None
+
+    min_cell_counts_eff = max(0, int(min_cell_counts))
+    min_feature_counts_eff = max(0, int(min_feature_counts))
+    count_filter_source = str(filter_expression_source or "provided")
+    if (
+        filter_expression_matrix is None
+        or int(filter_expression_matrix.shape[0]) != int(expression_matrix.shape[0])
+        or int(filter_expression_matrix.shape[1]) != int(expression_matrix.shape[1])
+    ):
+        filter_expression_matrix = expression_matrix
+        count_filter_source = str(expression_layer_used or "expression_matrix")
+
+    count_cell_mask = np.ones(int(labels.shape[0]), dtype=bool)
+    if min_cell_counts_eff > 0:
+        count_cell_totals = _matrix_axis_sum(filter_expression_matrix, axis=1)
+        count_cell_mask = np.isfinite(count_cell_totals) & (count_cell_totals >= min_cell_counts_eff)
+    if not bool(count_cell_mask.any()):
+        return None
+
+    feature_mask = np.ones(len(feature_names), dtype=bool)
+    if min_feature_counts_eff > 0:
+        count_filter_after_cells = filter_expression_matrix[count_cell_mask]
+        feature_totals = _matrix_axis_sum(count_filter_after_cells, axis=0)
+        feature_mask = np.isfinite(feature_totals) & (feature_totals >= min_feature_counts_eff)
+    if not bool(feature_mask.any()):
+        return None
+
+    if not bool(count_cell_mask.all()) or not bool(feature_mask.all()):
+        labels = labels[count_cell_mask]
+        expression_matrix = _subset_expression_matrix(expression_matrix, count_cell_mask, feature_mask)
+        if summary_expression_matrix is not None:
+            summary_expression_matrix = _subset_expression_matrix(
+                summary_expression_matrix,
+                count_cell_mask,
+                feature_mask,
+            )
+        feature_names = [feature for feature, keep in zip(feature_names, feature_mask) if bool(keep)]
+
+    retained_categories = [
+        category for category in categories if int(np.count_nonzero(labels == category)) >= min_cells_eff
+    ]
+    if len(retained_categories) < 2:
+        return None
     retained_mask = np.isin(labels, retained_categories)
     retained_matrix = _materialize_rows(expression_matrix, retained_mask)
     retained_labels = labels[retained_mask]
@@ -733,6 +816,11 @@ def compute_wilcoxon_group_de(
             source=str(summary_expression_source or "cell_wilcoxon"),
         ),
         "source": "cell_wilcoxon",
+        "filter_expression_source": count_filter_source,
+        "min_cell_counts": int(min_cell_counts_eff),
+        "min_feature_counts": int(min_feature_counts_eff),
+        "n_cells_after_count_filter": int(labels.shape[0]),
+        "n_features_after_count_filter": int(len(feature_names)),
     }
     log_detail(
         f"Stored Wilcoxon marker payload: {len([k for k in payload if not str(k).startswith('_')])} "

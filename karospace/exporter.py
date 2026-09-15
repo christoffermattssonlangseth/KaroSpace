@@ -1265,6 +1265,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             color: var(--accent-text);
         }}
         .overview-downsample-warning {{
+            display: flex;
+            align-items: flex-start;
+            gap: 7px;
             margin: 8px 0;
             padding: 7px 8px;
             border: 1px solid color-mix(in srgb, var(--warning-text) 48%, var(--border-color));
@@ -1275,6 +1278,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             line-height: 1.35;
         }}
         .overview-downsample-warning strong {{ color: var(--warning-text); }}
+        .warning-content {{ min-width: 0; }}
         .control-group {{ display: flex; align-items: center; gap: 4px; }}
         #expression-scale-section {{
             flex-direction: column;
@@ -3393,6 +3397,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             flex-shrink: 0;
         }}
         .neighbor-warning {{
+            display: flex;
+            align-items: flex-start;
+            gap: 7px;
             padding: 9px 10px;
             border: 1px solid color-mix(in srgb, var(--warning-border) 62%, var(--border-color));
             border-radius: 6px;
@@ -4149,6 +4156,14 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             grid-template-columns: repeat(2, minmax(0, 1fr));
             gap: 8px;
         }}
+        .statistics-method-row {{
+            grid-template-columns: minmax(0, 220px);
+        }}
+        .statistics-method-row > div {{
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }}
         .comparison-pair-select-row {{
             align-items: start;
         }}
@@ -4180,6 +4195,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             font-size: 9px;
         }}
         .comparison-info-warning {{
+            display: flex;
+            align-items: flex-start;
+            gap: 7px;
             margin-top: 5px;
             padding: 5px 6px;
             border: 1px solid color-mix(in srgb, var(--warning-border) 62%, var(--border-color));
@@ -4194,6 +4212,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
         }}
         .pseudobulk-comparison-warning {{
+            display: flex;
+            align-items: flex-start;
+            gap: 7px;
             margin: 8px 0;
             padding: 7px 8px;
             border: 1px solid color-mix(in srgb, var(--warning-border) 70%, var(--border-color));
@@ -4598,6 +4619,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         .marker-heatmap-controls input {{ width: 64px; }}
         .features-warning {{
+            display: flex;
+            align-items: flex-start;
+            gap: 7px;
             margin: 6px 0 8px;
             padding: 7px 8px;
             border: 1px solid color-mix(in srgb, var(--warning-border) 60%, var(--border-color));
@@ -4690,6 +4714,30 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .samples-legend-item {{ display: flex; align-items: center; gap: 3px; font-size: 10px; color: var(--text-color); }}
         .samples-legend-swatch {{ width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }}
         .feature-distribution-summary {{ font-size: 11px; color: var(--muted-color); margin: 8px 0 6px; }}
+        .feature-distribution-info {{
+            margin: 8px 0 8px;
+            padding: 8px 10px;
+            border: 1px solid color-mix(in srgb, var(--info-border) 62%, var(--border-color));
+            border-radius: 6px;
+            background: var(--info-bg);
+            color: var(--info-text);
+            font-size: 11px;
+            line-height: 1.45;
+        }}
+        .feature-distribution-info strong {{ font-weight: 700; }}
+        .feature-distribution-warning {{
+            display: flex;
+            align-items: flex-start;
+            gap: 7px;
+            margin: 8px 0 8px;
+            padding: 7px 8px;
+            border: 1px solid color-mix(in srgb, var(--warning-border) 62%, var(--border-color));
+            border-radius: 6px;
+            background: var(--warning-bg);
+            color: var(--warning-text);
+            font-size: 11px;
+            line-height: 1.35;
+        }}
         .feature-distribution-table {{ width: 100%; border-collapse: collapse; font-size: 11px; }}
         .feature-distribution-table th, .feature-distribution-table td {{ padding: 4px 6px; text-align: right; border-bottom: 1px solid var(--border-color); }}
         .feature-distribution-table th:first-child, .feature-distribution-table td:first-child {{ text-align: left; }}
@@ -5499,6 +5547,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             min-width: 0;
             overflow: hidden;
         }}
+        .selection-summary-expr-bars.has-outside-label {{
+            overflow: visible;
+        }}
         .selection-summary-expr-stat {{
             min-width: 0;
             font-size: 10px;
@@ -5553,6 +5604,18 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .selection-summary-expr-bar.sel {{ background: var(--accent-fill); }}
         .selection-summary-expr-bar.rest {{ background: var(--muted-color); opacity: 0.5; }}
         .selection-summary-expr-bar.region-b {{ background: var(--compare-fill); color: var(--compare-on-fill); opacity: 0.92; }}
+        .selection-summary-expr-bar.outside-label {{
+            overflow: visible;
+        }}
+        .selection-summary-expr-bar-label-outside {{
+            position: absolute;
+            left: calc(100% + 4px);
+            top: 50%;
+            transform: translateY(-50%);
+            color: #111;
+            text-shadow: none;
+            pointer-events: none;
+        }}
         .selection-summary-expr-factor {{
             flex-shrink: 0;
             text-align: right;
@@ -7824,7 +7887,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const options = getStatisticsMethodOptions(modality, payloadKind);
         if (options.length < 2) return '';
         const active = getActiveStatisticsMethod(panelKey, modality, payloadKind);
-        const labelFor = (method) => method === 'pseudobulk' ? 'Pseudobulk DESeq2' : 'Wilcoxon';
+        const labelFor = (method) => method === 'pseudobulk' ? 'Pseudobulk' : 'Wilcoxon';
         return `<div class="pseudobulk-de-select-row statistics-method-row"><div><label>Method</label><select class="statistics-method-select" data-statistics-method-panel="${{escapeHtml(panelKey)}}">${{options.map((method) => `<option value="${{escapeHtml(method)}}"${{method === active ? ' selected' : ''}}>${{escapeHtml(labelFor(method))}}</option>`).join('')}}</select></div></div>`;
     }}
     function bindStatisticsMethodSelects(container, rerender) {{
@@ -8443,9 +8506,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             formula: 'Welch T = (mean A - mean B) / sqrt(variance A / n A + variance B / n B); factor = mean A / mean B; log2FC = log2(mean A / mean B)'
         }},
         selection_compare: {{
-            title: 'Region comparison',
-            body: 'Region A and B category percentages are computed independently from each region cell count.',
-            formula: 'percent = 100 * category cells / region cells'
+            title: 'Selection comparison',
+            body: 'Selection A and B category percentages are computed independently from each selection cell count.',
+            formula: 'percent = 100 * category cells / selection cells'
         }},
         annotation_aggregation: {{
             title: 'Per-annotation summary',
@@ -8554,13 +8617,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }},
         distribution: {{
             title: 'Feature distribution',
-            body: 'List values and figures are computed from the exported Distribution display matrix in each Exploration annotation category. By default this is RC: raw counts library-size normalized without log transformation. Export options can instead use LogNormalize or a selected pre-normalized layer. Selection can be restricted to subcategories.',
-            formula: 'RC value = raw count * scale_factor / cell library size; LogNormalize value = log1p(raw count * 10000 / cell library size); mean = sum(values) / n; Q1/Q3 = 25th/75th percentile; % Expr = 100 * cells with value > 0 / n'
+            body: 'Values are grouped by the selected Annotation dropdown. By default, display values are normalized Relative Counts (RC): raw counts divided by each cell’s library size and scaled, without log transformation. The export can instead use LogNormalize or a pre-normalized layer. Optional restriction filters limit which cells enter the summary.',
+            formula: 'RC value = raw count * scale_factor / cell library size; LogNormalize value = log1p(raw count * scale_factor / cell library size); mean = sum(values) / cells in group; Q1/Q3 = 25th/75th percentile; % Expr = 100 * cells with value > 0 / cells in group'
         }},
         means: {{
             title: 'Wilcoxon/Pseudobulk category means',
-            body: 'Category means follow the active Statistics method and the exported Distribution display matrix. By default, both Wilcoxon and pseudobulk Distribution means use RC values: raw counts library-size normalized without log transformation. Export options can instead use LogNormalize or a selected pre-normalized layer. Pseudobulk mode averages display-scale values inside each replicate-category sample, then averages those replicate means. The DESeq2 model still uses raw counts from the Statistics counts layer.',
-            formula: 'RC value = raw count * scale_factor / cell library size; LogNormalize value = log1p(raw count * 10000 / cell library size); Wilcoxon mean = mean per-cell display value in category; pseudobulk display mean = mean over replicates of mean display value in replicate-category; delta = category mean - background'
+            body: 'Low-count cells and features are first filtered out. By default, Wilcoxon and Pseudobulk use normalized Relative Counts (RC) values: raw counts divided by each cell’s library size and scaled, without log transformation. The export can instead use LogNormalize or a pre-normalized layer. For Pseudobulk, replicate-category samples with too few cells are removed prior average calculation. DESeq2 applies the minimum replicate filter afterward, using only the retained pseudobulk samples.',
+            formula: 'RC value = raw count * scale_factor / cell library size; LogNormalize value = log1p(raw count * scale_factor / cell library size); Wilcoxon mean = mean per-cell value in category; pseudobulk mean = mean over retained replicate-category samples of mean value; delta = category mean - background'
         }},
         group_de: {{
             title: 'Annotation feature values',
@@ -14641,7 +14704,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function renderFeatureGoogleSearchButton(feature, options = {{}}) {{
         const label = String(feature || '').trim();
         if (!label) return '';
-        const query = options.query || `${{label}} feature`;
+        const modality = options.modality || getExplorationModality?.() || getVisualModality?.() || '';
+        const modalityLabel = String(getModalityDisplayLabel?.(modality) || modality || '').trim();
+        const query = options.query || [label, modalityLabel].filter(Boolean).join(' ');
         return `
             <button
                 type="button"
@@ -15185,7 +15250,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const original = Number(downsample.original_total_cells);
         const exported = Number(downsample.exported_total_cells);
         if (!(original > 0) || !(exported >= 0)) return '';
-        return `<div class="overview-downsample-warning"><strong>Downsampled warning.</strong> Showing ${{exported.toLocaleString()}} of ${{original.toLocaleString()}} cells.</div>`;
+        return renderWarningDiv('overview-downsample-warning', `Showing ${{exported.toLocaleString()}} of ${{original.toLocaleString()}} cells from a downsampled export.`);
+    }}
+
+    function renderWarningDiv(className, contentHtml) {{
+        return `<div class="${{className}}"><span class="exploration-embedded-warning-icon" aria-hidden="true">&#9888;</span><span class="warning-content">${{contentHtml}}</span></div>`;
     }}
 
     function setSelectOptions(selectEl, values, selectedValue) {{
@@ -16364,6 +16433,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                             </span>
                         </button>
                         ${{renderFeatureGoogleSearchButton(entry.feature, {{
+                            modality: getExplorationModality(),
                             title: 'Search Google for this selection feature',
                         }})}}
                     </div>
@@ -17718,8 +17788,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     function renderSelectionComparisonCompactPlot(summaryA, summaryB) {{
         let html = `<div class="selection-summary-compare-header">
-            <span class="selection-summary-compare-label region-a">Region A (${{summaryA.total.toLocaleString()}} cells)</span>
-            <span class="selection-summary-compare-label region-b">Region B (${{summaryB.total.toLocaleString()}} cells)</span>
+            <span class="selection-summary-compare-label region-a">Selection A (${{summaryA.total.toLocaleString()}} cells)</span>
+            <span class="selection-summary-compare-label region-b">Selection B (${{summaryB.total.toLocaleString()}} cells)</span>
         </div>`;
         if (!summaryA.typeColumn || (!summaryA.types.length && !summaryB.types.length)) return html;
         const allTypes = new Set([...summaryA.types.map(([type]) => type), ...summaryB.types.map(([type]) => type)]);
@@ -17733,9 +17803,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const isActive = linkedSpotlightEnabled && spotlightPinnedCategory === label;
             const chipColor = getCategoryColorForValue(summaryA.typeColumn, label);
             html += `<div class="selection-summary-compare-row${{isActive ? ' is-active' : ''}}" data-spotlight-cat="${{escapeHtml(label)}}" title="Click to spotlight ${{escapeHtml(label)}} in the viewer">
-                <div class="selection-summary-compare-bar selection-summary-compare-a" title="Region A: ${{countA.toLocaleString()}} cells (${{pctA}}%)"><div class="selection-summary-compare-fill" style="width:${{pctA}}%;"></div><span>${{countA.toLocaleString()}} (${{pctA}}%)</span></div>
+                <div class="selection-summary-compare-bar selection-summary-compare-a" title="Selection A: ${{countA.toLocaleString()}} cells (${{pctA}}%)"><div class="selection-summary-compare-fill" style="width:${{pctA}}%;"></div><span>${{countA.toLocaleString()}} (${{pctA}}%)</span></div>
                 <span class="selection-summary-compare-type" style="background:${{chipColor}};" title="${{escapeHtml(label)}}" aria-label="${{escapeHtml(label)}}"></span>
-                <div class="selection-summary-compare-bar selection-summary-compare-b" title="Region B: ${{countB.toLocaleString()}} cells (${{pctB}}%)"><div class="selection-summary-compare-fill" style="width:${{pctB}}%;"></div><span>${{countB.toLocaleString()}} (${{pctB}}%)</span></div>
+                <div class="selection-summary-compare-bar selection-summary-compare-b" title="Selection B: ${{countB.toLocaleString()}} cells (${{pctB}}%)"><div class="selection-summary-compare-fill" style="width:${{pctB}}%;"></div><span>${{countB.toLocaleString()}} (${{pctB}}%)</span></div>
             </div>`;
         }});
         html += '<div class="selection-summary-compare-legend">';
@@ -17760,8 +17830,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (!options.comparisonView && !compareAllCells) {{
             return renderSelectionComparisonCompactPlot(summaryA, summaryB);
         }}
-        const labelA = compareAllCells ? 'Selected cells' : 'Region A';
-        const labelB = compareAllCells ? 'All cells' : 'Region B';
+        const labelA = compareAllCells ? 'Selected cells' : 'Selection A';
+        const labelB = compareAllCells ? 'All cells' : 'Selection B';
         const colorA = 'var(--accent-strong)';
         const colorB = compareAllCells ? 'var(--muted-color)' : '#4cc9f0';
         const selectionResultKey = getSelectionWelchCacheKey(compareAllCells ? null : selectedCellsB);
@@ -17781,7 +17851,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 {{ label: labelA, total: summaryA.total, types: mapA, color: colorA }},
                 {{ label: labelB, total: summaryB.total, types: mapB, color: colorB }},
             ];
-            html += `<div class="selection-comparison-composition"><div class="selection-summary-title">Cell Composition — ${{labelA.toLowerCase()}} vs ${{labelB.toLowerCase()}}</div>`;
+            const compositionTitle = compareAllCells
+                ? `Cell Composition — ${{labelA.toLowerCase()}} vs ${{labelB.toLowerCase()}}`
+                : 'Cell Composition — SELECTION A vs SELECTION B';
+            html += `<div class="selection-comparison-composition"><div class="selection-summary-title">${{compositionTitle}}</div>`;
             regionRows.forEach((region) => {{
                 html += `<div class="composition-comparison-row"><div class="composition-comparison-header"><span class="composition-comparison-dot" style="background:${{region.color}}"></span><span>${{region.label}}</span><span class="composition-comparison-count">${{region.total.toLocaleString()}} cells</span></div>`;
                 if (region.total > 0) {{
@@ -17817,7 +17890,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (selectedCells.size > 0 && (compareAllCells || selectedCellsB.size > 0)) {{
             const top = getWelchTopResults(expr);
             html += '<div class="selection-summary-expr">';
-            html += `<div class="selection-summary-title-row"><div class="selection-summary-title">Feature values - ${{labelA.toLowerCase()}} vs ${{labelB.toLowerCase()}}${{renderCalcInfoButton('selection_expression')}}</div>${{renderFindMarkersButton()}}</div>${{selectionWelchRunRequested && !selectionWelchRunning ? renderWelchTopNControl() : ''}}`;
+            const expressionTitle = compareAllCells
+                ? `Feature values - ${{labelA.toLowerCase()}} vs ${{labelB.toLowerCase()}}`
+                : 'Feature values - selection a vs selection b';
+            html += `<div class="selection-summary-title-row"><div class="selection-summary-title">${{expressionTitle}}${{renderCalcInfoButton('selection_expression')}}</div>${{renderFindMarkersButton()}}</div>${{selectionWelchRunRequested && !selectionWelchRunning ? renderWelchTopNControl() : ''}}`;
             if (selectionFullRun?.running) {{
                 const maximum = Math.max(1, Number(selectionFullRun.totalFeatures || selectionFullRun.totalShards || 1));
                 const value = Math.min(maximum, Number(selectionFullRun.completedFeatures || selectionFullRun.completedShards || 0));
@@ -17832,12 +17908,21 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
             top.forEach(({{feature, meanA, meanB, pctA, pctB}}) => {{
                 const vmax = Math.max(1e-12, meanA || 0, meanB || 0);
-                const factor = meanB > 0 ? (meanA / meanB).toFixed(1) + 'x' : '—';
+                const ratio = meanB > 0 ? meanA / meanB : (meanA > 0 ? Infinity : NaN);
+                const factor = Number.isFinite(ratio) ? ratio.toFixed(1) + 'x' : '—';
+                const outsideA = Number.isFinite(ratio) && ratio < 0.2;
+                const outsideB = ratio > 5;
+                const barsClass = `selection-summary-expr-bars${{outsideA || outsideB ? ' has-outside-label' : ''}}`;
+                const barLabelA = `${{formatCompactNumber(meanA)}} (${{pctA.toFixed(0)}}%)`;
+                const barLabelB = `${{formatCompactNumber(meanB)}} (${{pctB.toFixed(0)}}%)`;
+                const barLabel = (label, outside) => outside
+                    ? `<span class="selection-summary-expr-bar-label-outside">${{escapeHtml(label)}}</span>`
+                    : escapeHtml(label);
                 html += `<div class="selection-summary-expr-row">
                     <span class="selection-summary-expr-feature" data-feature-activate="${{escapeHtml(feature)}}" data-feature-modality="${{escapeHtml(resultModality)}}" title="Load ${{escapeHtml(feature)}} into the viewer">${{escapeHtml(feature)}}</span>
-                    <div class="selection-summary-expr-bars">
-                        <div class="selection-summary-expr-bar sel" style="width:${{clampPercent(100 * meanA / vmax)}}%;" title="${{labelA}} mean: ${{formatCompactNumber(meanA)}}">${{formatCompactNumber(meanA)}} (${{pctA.toFixed(0)}}%)</div>
-                        <div class="selection-summary-expr-bar ${{compareAllCells ? 'rest' : 'region-b'}}" style="width:${{clampPercent(100 * meanB / vmax)}}%;" title="${{labelB}} mean: ${{formatCompactNumber(meanB)}}">${{formatCompactNumber(meanB)}} (${{pctB.toFixed(0)}}%)</div>
+                    <div class="${{barsClass}}">
+                        <div class="selection-summary-expr-bar sel${{outsideA ? ' outside-label' : ''}}" style="width:${{clampPercent(100 * meanA / vmax)}}%;color:#fff;" title="${{labelA}} mean: ${{formatCompactNumber(meanA)}}">${{barLabel(barLabelA, outsideA)}}</div>
+                        <div class="selection-summary-expr-bar ${{compareAllCells ? 'rest' : 'region-b'}}${{outsideB ? ' outside-label' : ''}}" style="width:${{clampPercent(100 * meanB / vmax)}}%;color:#fff;" title="${{labelB}} mean: ${{formatCompactNumber(meanB)}}">${{barLabel(barLabelB, outsideB)}}</div>
                     </div>
                     <span class="selection-summary-expr-factor" title="Mean A / mean B">${{factor}}</span>
                 </div>`;
@@ -17860,6 +17945,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                                     title: 'Load selection comparison feature into the viewer',
                                 }})}}
                                 ${{renderFeatureGoogleSearchButton(entry.feature, {{
+                                    modality: resultModality,
                                     title: 'Search Google for this feature',
                                 }})}}
                             </div>
@@ -17987,12 +18073,21 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
             top.forEach(({{feature, meanA, meanB, pctA, pctB}}) => {{
                 const vmax = Math.max(1e-12, meanA || 0, meanB || 0);
-                const factor = meanB > 0 ? (meanA / meanB).toFixed(1) + 'x' : '—';
+                const ratio = meanB > 0 ? meanA / meanB : (meanA > 0 ? Infinity : NaN);
+                const factor = Number.isFinite(ratio) ? ratio.toFixed(1) + 'x' : '—';
+                const outsideA = Number.isFinite(ratio) && ratio < 0.2;
+                const outsideB = ratio > 5;
+                const barsClass = `selection-summary-expr-bars${{outsideA || outsideB ? ' has-outside-label' : ''}}`;
+                const barLabelA = `${{formatCompactNumber(meanA)}} (${{pctA.toFixed(0)}}%)`;
+                const barLabelB = `${{formatCompactNumber(meanB)}} (${{pctB.toFixed(0)}}%)`;
+                const barLabel = (label, outside) => outside
+                    ? `<span class="selection-summary-expr-bar-label-outside">${{escapeHtml(label)}}</span>`
+                    : escapeHtml(label);
                 html += `<div class="selection-summary-expr-row">
                     <span class="selection-summary-expr-feature" data-feature-activate="${{escapeHtml(feature)}}" data-feature-modality="${{escapeHtml(resultModality)}}" title="Load ${{escapeHtml(feature)}} into the viewer">${{escapeHtml(feature)}}</span>
-                    <div class="selection-summary-expr-bars">
-                        <div class="selection-summary-expr-bar sel" style="width:${{clampPercent(100 * meanA / vmax)}}%;" title="Selected mean: ${{formatCompactNumber(meanA)}}">${{formatCompactNumber(meanA)}} (${{pctA.toFixed(0)}}%)</div>
-                        <div class="selection-summary-expr-bar rest" style="width:${{clampPercent(100 * meanB / vmax)}}%;" title="All cells mean: ${{formatCompactNumber(meanB)}}">${{formatCompactNumber(meanB)}} (${{pctB.toFixed(0)}}%)</div>
+                    <div class="${{barsClass}}">
+                        <div class="selection-summary-expr-bar sel${{outsideA ? ' outside-label' : ''}}" style="width:${{clampPercent(100 * meanA / vmax)}}%;color:#fff;" title="Selected mean: ${{formatCompactNumber(meanA)}}">${{barLabel(barLabelA, outsideA)}}</div>
+                        <div class="selection-summary-expr-bar rest${{outsideB ? ' outside-label' : ''}}" style="width:${{clampPercent(100 * meanB / vmax)}}%;color:#fff;" title="All cells mean: ${{formatCompactNumber(meanB)}}">${{barLabel(barLabelB, outsideB)}}</div>
                     </div>
                     <span class="selection-summary-expr-factor" title="Mean selected / mean all">${{factor}}</span>
                 </div>`;
@@ -19707,7 +19802,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const chips = availableColors.length
             ? availableColors.map((color) => renderAggChip(formatMetadataLabel(color), 'color-mix(in srgb, #e2a400 18%, #ffffff)')).join('')
             : renderAggChip('none', 'color-mix(in srgb, #e2a400 18%, #ffffff)');
-        return `<div class="features-warning">No marker statistics are available for this annotation in ${{escapeHtml(getModalityDisplayLabel(modality))}}.<br>Available statistics for: ${{chips}}</div>`;
+        return renderWarningDiv('features-warning', `No marker statistics are available for this annotation in ${{escapeHtml(getModalityDisplayLabel(modality))}}.<br>Available statistics for: ${{chips}}`);
     }}
 
     function renderFeaturesDetailsWarnings() {{
@@ -19725,7 +19820,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             if (downsampleWarning) warnings.push(downsampleWarning);
         }}
         if (insightsFeaturesTab === 'de-features') {{
-            warnings.push('<div class="features-warning"><strong>Double dipping warning.</strong> When unsupervised cell clustering is used as category, the features contributing to that clustering are inherently likely to be identified as differentially enriched. False positive differential features are expected, which could lead to false biological interpretation.</div>');
+            warnings.push(renderWarningDiv('features-warning', 'When unsupervised cell clustering is used as category, the features contributing to that clustering are inherently likely to be identified as differentially enriched. False positive differential features are expected, which could lead to false biological interpretation.'));
         }}
         container.innerHTML = warnings.join('');
     }}
@@ -25133,6 +25228,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                                     title: 'Load region DE feature into the viewer',
                                 }})}}
                                 ${{renderFeatureGoogleSearchButton(entry.feature, {{
+                                    modality: resultModality,
                                     title: 'Search Google for this feature',
                                 }})}}
                             </div>
@@ -25380,12 +25476,21 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     const pctA = 100 * Number(entry.pctA || 0);
                     const pctB = 100 * Number(entry.pctB || 0);
                     const vmax = Math.max(1e-12, meanA, meanB);
-                    const factor = meanB > 0 ? (meanA / meanB).toFixed(1) + 'x' : '—';
+                    const ratio = meanB > 0 ? meanA / meanB : (meanA > 0 ? Infinity : NaN);
+                    const factor = Number.isFinite(ratio) ? ratio.toFixed(1) + 'x' : '—';
+                    const outsideA = Number.isFinite(ratio) && ratio < 0.2;
+                    const outsideB = ratio > 5;
+                    const barsClass = `selection-summary-expr-bars${{outsideA || outsideB ? ' has-outside-label' : ''}}`;
+                    const labelA = `${{formatCompactNumber(meanA)}} (${{pctA.toFixed(0)}}%)`;
+                    const labelB = `${{formatCompactNumber(meanB)}} (${{pctB.toFixed(0)}}%)`;
+                    const barLabel = (label, outside) => outside
+                        ? `<span class="selection-summary-expr-bar-label-outside">${{escapeHtml(label)}}</span>`
+                        : escapeHtml(label);
                     summaryHtml += `<div class="selection-summary-expr-row">
                         <span class="selection-summary-expr-feature" data-feature-activate="${{escapeHtml(entry.feature)}}" data-feature-modality="${{escapeHtml(comparisonModality)}}" title="Load ${{escapeHtml(entry.feature)}} into the viewer">${{escapeHtml(entry.feature)}}</span>
-                        <div class="selection-summary-expr-bars">
-                            <div class="selection-summary-expr-bar" style="width:${{clampPercent(100 * meanA / vmax)}}%;background:${{colorA}}" title="Region A mean: ${{formatCompactNumber(meanA)}}">${{formatCompactNumber(meanA)}} (${{pctA.toFixed(0)}}%)</div>
-                            <div class="selection-summary-expr-bar" style="width:${{clampPercent(100 * meanB / vmax)}}%;background:${{colorB}}" title="Region B mean: ${{formatCompactNumber(meanB)}}">${{formatCompactNumber(meanB)}} (${{pctB.toFixed(0)}}%)</div>
+                        <div class="${{barsClass}}">
+                            <div class="selection-summary-expr-bar${{outsideA ? ' outside-label' : ''}}" style="width:${{clampPercent(100 * meanA / vmax)}}%;background:${{colorA}}" title="Region A mean: ${{formatCompactNumber(meanA)}}">${{barLabel(labelA, outsideA)}}</div>
+                            <div class="selection-summary-expr-bar${{outsideB ? ' outside-label' : ''}}" style="width:${{clampPercent(100 * meanB / vmax)}}%;background:${{colorB}}" title="Region B mean: ${{formatCompactNumber(meanB)}}">${{barLabel(labelB, outsideB)}}</div>
                         </div>
                         <span class="selection-summary-expr-factor" title="Mean A / mean B">${{factor}}</span>
                     </div>`;
@@ -27925,6 +28030,54 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         if (content) content.style.display = visible ? '' : 'none';
     }}
 
+    function renderFeatureDistributionSettingsInfo(modality, method = null) {{
+        const settings = DATA.distribution_settings || {{}};
+        const normalizedLayer = settings.normalized_layer;
+        const normalization = String(settings.normalization || 'RC');
+        const countsLayer = settings.counts_layer || 'X';
+        const scaleFactor = Number(settings.scale_factor);
+        const methodText = method ? `<strong>Method:</strong> ${{escapeHtml(method)}}. ` : '';
+        let sourceText = '';
+        let normalizationText = '';
+        let scaleText = '';
+        let logText = '';
+        if (normalizedLayer) {{
+            sourceText = `<strong>Matrix:</strong> normalized layer ${{escapeHtml(String(normalizedLayer))}}. `;
+            normalizationText = '<strong>Normalization:</strong> pre-normalized values used directly. ';
+            scaleText = '<strong>Scale factor:</strong> not applied. ';
+            logText = '<strong>Log transform:</strong> no additional transform in the viewer.';
+        }} else if (normalization.toLowerCase() === 'lognormalize') {{
+            sourceText = `<strong>Matrix:</strong> counts layer ${{escapeHtml(String(countsLayer))}}. `;
+            normalizationText = '<strong>Normalization:</strong> library-size normalization plus log1p. ';
+            scaleText = '<strong>Scale factor:</strong> 10,000 target sum before log1p. ';
+            logText = '<strong>Log transform:</strong> yes.';
+        }} else {{
+            sourceText = `<strong>Matrix:</strong> counts layer ${{escapeHtml(String(countsLayer))}}. `;
+            normalizationText = '<strong>Normalization:</strong> RC library-size normalization without log1p. ';
+            scaleText = `<strong>Scale factor:</strong> ${{Number.isFinite(scaleFactor) ? scaleFactor.toLocaleString() : 'n/a'}}. `;
+            logText = '<strong>Log transform:</strong> no.';
+        }}
+        return `<div class="feature-distribution-info">${{methodText}}${{sourceText}}${{normalizationText}}${{scaleText}}${{logText}}</div>`;
+    }}
+
+    function renderFeatureDistributionCountFilterWarning(method = null) {{
+        const methodKey = String(method || '').toLowerCase().startsWith('pseudo')
+            ? 'pseudobulk'
+            : (String(method || '').toLowerCase().startsWith('wilcoxon') ? 'wilcoxon' : '');
+        if (!methodKey) return '';
+        const methodSettings = methodKey === 'pseudobulk'
+            ? (DATA.pseudobulk_settings || {{}})
+            : (DATA.wilcoxon_settings || {{}});
+        const minCellCounts = Number(methodSettings.min_cell_counts);
+        const minFeatureCounts = Number(methodSettings.min_feature_counts);
+        let content = `<strong>Count filters:</strong> cells >= ${{Number.isFinite(minCellCounts) ? minCellCounts.toLocaleString() : '0'}} raw counts; features >= ${{Number.isFinite(minFeatureCounts) ? minFeatureCounts.toLocaleString() : '0'}} raw counts.`;
+        const minCellsPerPseudobulk = Number(methodSettings.min_cells_per_pseudobulk);
+        if (methodKey === 'pseudobulk') {{
+            content += ` <strong>Pseudobulk samples:</strong> replicate x category samples require >= ${{Number.isFinite(minCellsPerPseudobulk) ? minCellsPerPseudobulk.toLocaleString() : 'n/a'}} cells.`;
+        }}
+        return renderWarningDiv('feature-distribution-warning', content);
+    }}
+
     function renderFeatureDistributionInsights() {{
         const container = document.getElementById('feature-distribution-panel');
         if (!container) return;
@@ -28054,26 +28207,28 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const rows = sorted.map((s, idx) => `
             <tr data-feature-dist-cat="${{escapeHtml(String(s.cat))}}" ${{isCellKind ? 'style="cursor:pointer"' : 'style="cursor:default"'}} title="${{isCellKind ? `Click to spotlight \\"${{escapeHtml(String(s.cat))}}\\" in the viewer` : 'Sample-metadata group (not linked to spatial view)'}}">
                 <td>${{isCellKind ? renderAggCategoryChip(spec.key, String(s.cat), idx) : renderAggChip(String(s.cat), getMetadataValueTagBg(spec.key, s.cat))}}</td>
-                <td>${{fmtN(s.n)}}</td>
                 <td>${{fmtF(s.mean)}}</td>
                 <td>${{fmtF(s.median)}}</td>
                 <td>${{fmtP(s.pctExpr)}}</td>
+                <td>${{fmtN(s.n)}}</td>
             </tr>
         `).join('');
 
         const restrictLabel = activeRestrict
             ? ` \u2014 restricted to ${{escapeHtml(formatMetadataLabel(restrictSpec.key))}} = <strong>${{escapeHtml(String(featureDistributionRestrictValue))}}</strong>`
             : '';
+        const settingsInfoHtml = renderFeatureDistributionSettingsInfo(modality);
         const tableHtml = `
+            ${{settingsInfoHtml}}
             <div class="feature-distribution-summary">Feature value of <strong>${{escapeHtml(selectedFeature)}}</strong> in ${{escapeHtml(getModalityDisplayLabel(modality))}} across ${{escapeHtml(formatMetadataLabel(spec.key))}}${{restrictLabel}}</div>
             <table class="feature-distribution-table">
                 <thead>
                     <tr>
                         <th data-feature-dist-sort="cat">Group${{arrow('cat')}}</th>
-                        <th data-feature-dist-sort="n">n${{arrow('n')}}</th>
                         <th data-feature-dist-sort="mean">Mean${{arrow('mean')}}</th>
                         <th data-feature-dist-sort="median">Median${{arrow('median')}}</th>
                         <th data-feature-dist-sort="pctExpr">% Expr${{arrow('pctExpr')}}</th>
+                        <th data-feature-dist-sort="n">Cells${{arrow('n')}}</th>
                     </tr>
                 </thead>
                 <tbody>${{rows}}</tbody>
@@ -28081,6 +28236,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         `;
 
         const graphHtml = `
+            ${{settingsInfoHtml}}
             <div class="feature-distribution-summary">Feature value of <strong>${{escapeHtml(selectedFeature)}}</strong> in ${{escapeHtml(getModalityDisplayLabel(modality))}} across ${{escapeHtml(formatMetadataLabel(spec.key))}}${{restrictLabel}}</div>
             ${{buildFeatureDistributionBoxplot(sorted, spec)}}
         `;
@@ -28192,7 +28348,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}).join('');
 
         const methodLabel = getActiveStatisticsMethod('means', modality, 'means') === 'pseudobulk' ? 'Pseudobulk-derived' : 'Wilcoxon marker';
+        const countFilterWarningHtml = renderFeatureDistributionCountFilterWarning(methodLabel);
+        const settingsInfoHtml = renderFeatureDistributionSettingsInfo(modality, methodLabel);
         const listHtml = `
+            ${{countFilterWarningHtml}}
+            ${{settingsInfoHtml}}
             <div class="feature-distribution-summary">${{methodLabel}} category means for <strong>${{escapeHtml(selectedFeature)}}</strong> in ${{escapeHtml(getModalityDisplayLabel(modality))}}. Background mean: ${{Number.isFinite(background) ? background.toFixed(4) : 'n/a'}}.</div>
             <table class="feature-distribution-table">
                 <thead>
@@ -28202,6 +28362,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             </table>
         `;
         const graphHtml = `
+            ${{countFilterWarningHtml}}
+            ${{settingsInfoHtml}}
             <div class="feature-distribution-summary">${{methodLabel}} category means for <strong>${{escapeHtml(selectedFeature)}}</strong> in ${{escapeHtml(getModalityDisplayLabel(modality))}}. Background mean: ${{Number.isFinite(background) ? background.toFixed(4) : 'n/a'}}.</div>
             ${{buildPseudobulkMeanDeviationPlot(meanRows, background, selectedCol)}}
         `;
@@ -30031,7 +30193,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     'color-mix(in srgb, #eab308 18%, var(--input-bg))'
                 )).join('')
                 : renderAggChip('none', 'color-mix(in srgb, #eab308 18%, var(--input-bg))');
-            container.innerHTML = `${{methodSelectHtml}}<div class="pseudobulk-comparison-warning"><strong>Statistics warning.</strong> No ${{escapeHtml(activeMethodLabel)}} result is available for this comparison in ${{escapeHtml(getModalityDisplayLabel(modality))}}.<br>Available comparison: ${{comparisonChips}}</div>`;
+            container.innerHTML = `${{methodSelectHtml}}${{renderWarningDiv('pseudobulk-comparison-warning', `No ${{escapeHtml(activeMethodLabel)}} result is available for this comparison in ${{escapeHtml(getModalityDisplayLabel(modality))}}.<br>Available comparison: ${{comparisonChips}}`)}}`;
             bindStatisticsMethodSelects(container, renderPseudobulkDE);
             return;
         }}
@@ -30123,7 +30285,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             0.5
         );
         const contrastInfo = activeMethod === 'pseudobulk' ? `
-            <div class="comparison-info-warning"><strong>Warning.</strong> If annotations were defined from the same feature patterns being tested here, DE results can be inflated by double dipping. Interpret these marker features as exploratory unless the annotations were defined independently or validated on independent data.</div>
+            ${{renderWarningDiv('comparison-info-warning', 'If annotations were defined from the same feature patterns being tested here, DE results can be inflated by double dipping. Interpret these marker features as exploratory unless the annotations were defined independently or validated on independent data.')}}
             <div class="comparison-info">
                 <strong>DESeq2 contrast.</strong> Model: ${{escapeHtml(modelFormula)}}.
                 <div class="comparison-info-settings">
@@ -30134,9 +30296,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     <span><code>--pseudobulk-log2fc-cutoff</code> |log₂FC| ≥ ${{formatScaleNumber(log2fcCutoff)}}</span>
                 </div>
             </div>
-            ${{minPct > 0 ? `<div class="comparison-info-warning"><strong>Warning.</strong> Features detected in less than ${{formatScaleNumber(100 * minPct)}}% of cells in both selected annotations are removed before DESeq2 statistical testing.${{minPctRemovalCountText}}</div>` : ''}}
+            ${{minPct > 0 ? renderWarningDiv('comparison-info-warning', `Features detected in less than ${{formatScaleNumber(100 * minPct)}}% of cells in both selected annotations are removed before DESeq2 statistical testing.${{minPctRemovalCountText}}`) : ''}}
         ` : `
-            <div class="comparison-info-warning"><strong>Warning.</strong> If annotations were defined from the same feature patterns being tested here, marker statistics can be inflated by double dipping. Interpret these Wilcoxon marker features as exploratory unless the annotations were defined independently or validated on independent data.</div>
+            ${{renderWarningDiv('comparison-info-warning', 'If annotations were defined from the same feature patterns being tested here, marker statistics can be inflated by double dipping. Interpret these Wilcoxon marker features as exploratory unless the annotations were defined independently or validated on independent data.')}}
             <div class="comparison-info">
                 <strong>Wilcoxon contrast.</strong> Cell-level rank-sum comparison for ${{escapeHtml(conditionMetadata)}}.
                 <div class="comparison-info-settings">
@@ -30769,7 +30931,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const renderCards = () => displayed.map((entry) => {{
             const sideColor = Number(entry.score || 0) >= 0 ? colorA : colorB;
             const resultModality = result?.modality || getExplorationModality();
-            return `<div class="comparison-card"><div class="comparison-card-title comparison-de-card-title"><div class="comparison-de-card-title-main">${{renderFeatureTokenButton(entry.feature, {{ allowUnknown: true, isActive: entry.feature === currentFeature, modality: resultModality, showMeta: false, title: 'Load annotation DE feature into the viewer' }})}}${{renderFeatureGoogleSearchButton(entry.feature, {{ title: 'Search Google for this feature' }})}}</div><div class="comparison-de-title-stats" style="border-color:${{sideColor}}"><span>log2FC ${{formatScaleNumber(entry.log2fc)}}</span><span>Score ${{formatScaleNumber(entry.score)}}</span></div></div><div class="comparison-metric-grid"><span class="comparison-de-metric-chip" style="background:${{getComparisonMetricChipBackground(colorA, sideColor)}};color:${{getTextColorForBackground(colorA)}}"><span>% detected A</span><strong>${{formatPseudobulkDEPct(entry.pctA)}}</strong><span>Mean A</span><strong>${{formatScaleNumber(entry.meanA)}}</strong></span><span class="comparison-de-metric-chip" style="background:${{getComparisonMetricChipBackground(colorB, sideColor)}};color:${{getTextColorForBackground(colorB)}}"><span>% detected B</span><strong>${{formatPseudobulkDEPct(entry.pctB)}}</strong><span>Mean B</span><strong>${{formatScaleNumber(entry.meanB)}}</strong></span></div></div>`;
+            return `<div class="comparison-card"><div class="comparison-card-title comparison-de-card-title"><div class="comparison-de-card-title-main">${{renderFeatureTokenButton(entry.feature, {{ allowUnknown: true, isActive: entry.feature === currentFeature, modality: resultModality, showMeta: false, title: 'Load annotation DE feature into the viewer' }})}}${{renderFeatureGoogleSearchButton(entry.feature, {{ modality: resultModality, title: 'Search Google for this feature' }})}}</div><div class="comparison-de-title-stats" style="border-color:${{sideColor}}"><span>log2FC ${{formatScaleNumber(entry.log2fc)}}</span><span>Score ${{formatScaleNumber(entry.score)}}</span></div></div><div class="comparison-metric-grid"><span class="comparison-de-metric-chip" style="background:${{getComparisonMetricChipBackground(colorA, sideColor)}};color:${{getTextColorForBackground(colorA)}}"><span>% detected A</span><strong>${{formatPseudobulkDEPct(entry.pctA)}}</strong><span>Mean A</span><strong>${{formatScaleNumber(entry.meanA)}}</strong></span><span class="comparison-de-metric-chip" style="background:${{getComparisonMetricChipBackground(colorB, sideColor)}};color:${{getTextColorForBackground(colorB)}}"><span>% detected B</span><strong>${{formatPseudobulkDEPct(entry.pctB)}}</strong><span>Mean B</span><strong>${{formatScaleNumber(entry.meanB)}}</strong></span></div></div>`;
         }}).join('');
         if (groupDeQuickRunning) {{
             html += '<div id="group-de-results"></div>';
@@ -30793,7 +30955,25 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     }});
                 }}
             }}
-            html += `<div class="selection-summary-expr"><div class="selection-summary-title">Feature Values by Annotation</div>${{displayed.map((entry) => {{ const resultModality = result?.modality || getExplorationModality(); const vmax = Math.max(1e-12, Number(entry.meanA || 0), Number(entry.meanB || 0)); const factor = entry.meanB > 0 ? `${{(entry.meanA / entry.meanB).toFixed(1)}}x` : '—'; return `<div class="selection-summary-expr-row"><span class="selection-summary-expr-feature" data-feature-activate="${{escapeHtml(entry.feature)}}" data-feature-modality="${{escapeHtml(resultModality)}}">${{escapeHtml(entry.feature)}}</span><div class="selection-summary-expr-bars"><div class="selection-summary-expr-bar" style="width:${{clampPercent(100 * entry.meanA / vmax)}}%;background:${{colorA}}">${{formatCompactNumber(entry.meanA)}} (${{(100 * entry.pctA).toFixed(0)}}%)</div><div class="selection-summary-expr-bar" style="width:${{clampPercent(100 * entry.meanB / vmax)}}%;background:${{colorB}}">${{formatCompactNumber(entry.meanB)}} (${{(100 * entry.pctB).toFixed(0)}}%)</div></div><span class="selection-summary-expr-factor">${{factor}}</span></div>`; }}).join('')}}</div>`;
+            html += `<div class="selection-summary-expr"><div class="selection-summary-title">Feature Values by Annotation</div>${{displayed.map((entry) => {{
+                const resultModality = result?.modality || getExplorationModality();
+                const meanA = Number(entry.meanA || 0);
+                const meanB = Number(entry.meanB || 0);
+                const pctA = Number(entry.pctA || 0);
+                const pctB = Number(entry.pctB || 0);
+                const vmax = Math.max(1e-12, meanA, meanB);
+                const ratio = meanB > 0 ? meanA / meanB : (meanA > 0 ? Infinity : NaN);
+                const factor = Number.isFinite(ratio) ? `${{ratio.toFixed(1)}}x` : '—';
+                const outsideA = Number.isFinite(ratio) && ratio < 0.2;
+                const outsideB = ratio > 5;
+                const barsClass = `selection-summary-expr-bars${{outsideA || outsideB ? ' has-outside-label' : ''}}`;
+                const labelA = `${{formatCompactNumber(meanA)}} (${{(100 * pctA).toFixed(0)}}%)`;
+                const labelB = `${{formatCompactNumber(meanB)}} (${{(100 * pctB).toFixed(0)}}%)`;
+                const barLabel = (label, outside) => outside
+                    ? `<span class="selection-summary-expr-bar-label-outside">${{escapeHtml(label)}}</span>`
+                    : escapeHtml(label);
+                return `<div class="selection-summary-expr-row"><span class="selection-summary-expr-feature" data-feature-activate="${{escapeHtml(entry.feature)}}" data-feature-modality="${{escapeHtml(resultModality)}}">${{escapeHtml(entry.feature)}}</span><div class="${{barsClass}}"><div class="selection-summary-expr-bar${{outsideA ? ' outside-label' : ''}}" style="width:${{clampPercent(100 * meanA / vmax)}}%;background:${{colorA}}">${{barLabel(labelA, outsideA)}}</div><div class="selection-summary-expr-bar${{outsideB ? ' outside-label' : ''}}" style="width:${{clampPercent(100 * meanB / vmax)}}%;background:${{colorB}}">${{barLabel(labelB, outsideB)}}</div></div><span class="selection-summary-expr-factor">${{factor}}</span></div>`;
+            }}).join('')}}</div>`;
             const volcanoToolbar = '<button class="icon-btn" type="button" data-group-de-export-volcano title="Download volcano plot as SVG" aria-label="Download volcano plot as SVG"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path></svg></button>';
             html += `<div id="group-de-results">${{buildGroupVolcanoPlot(displayed, volcanoToolbar, {{ positive: colorA, negative: colorB }})}}<div class="comparison-stack">${{renderCards()}}</div><div style="display:flex;justify-content:flex-end;gap:6px;margin-top:6px;"><button class="icon-btn" type="button" data-group-de-export-csv title="Download all annotation comparison features as CSV" aria-label="Download all annotation comparison features as CSV"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3"></path><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path></svg></button></div>${{DATA.feature_manifest_url && result === quickResult && Number(result.loadedFeatureCount || 0) < Number(result.totalFeatureCount || 0) ? '<div style="display:flex;justify-content:flex-end"><button class="legend-btn" id="group-de-run-full" type="button">Run Full DE</button></div>' : ''}}</div>`;
         }} else if (quickResult && !quickResult.available) {{
@@ -31178,10 +31358,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ? available.map((col) => renderAggChip(formatMetadataLabel(col))).join(' ')
             : renderAggChip('none');
         return `
-            <div class="neighbor-warning">
-                <strong>Warning.</strong> The selected annotation ${{selectedChip}} does not have neighbor stats.
+            ${{renderWarningDiv('neighbor-warning', `The selected annotation ${{selectedChip}} does not have neighbor stats.
                 Neighbor enrichment and interactions are available for: ${{availableChips}}
-            </div>
+            `)}}
         `;
     }}
 
@@ -32597,7 +32776,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         const rows = getPrecomputedDispersionRows(annotationCol);
         if (!rows || !rows.length) {{
-            container.innerHTML = '<div class="neighbor-warning"><strong>Warning.</strong> No full-cell spatial dispersion data available for the selected annotation.</div>';
+            container.innerHTML = renderWarningDiv('neighbor-warning', 'No full-cell spatial dispersion data available for the selected annotation.');
             return;
         }}
 
@@ -32704,7 +32883,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         setNeighborStatsPanelAvailability('neighbors-tab-enrichment-content', true, viewState.annotationCol || getNeighborStatsColorColumn());
         if (viewState.error) {{
             container.innerHTML = viewState.warning
-                ? `<div class="neighbor-warning"><strong>Warning.</strong> ${{escapeHtml(viewState.error)}}</div>`
+                ? renderWarningDiv('neighbor-warning', escapeHtml(viewState.error))
                 : `<div class="neighbor-view-note">${{escapeHtml(viewState.error)}}</div>`;
             return;
         }}
@@ -34998,8 +35177,8 @@ def export_to_html(
     statistics_normalization: str = "RC",
     statistics_scale_factor: float = 10000.0,
     statistics_normalized_layer: Optional[str] = None,
-    pseudobulk_min_cell_counts: int = 0,
-    pseudobulk_min_feature_counts: int = 0,
+    statistics_min_cell_counts: int = 0,
+    statistics_min_feature_counts: int = 0,
     pseudobulk_min_cells_per_pseudobulk: int = 20,
     pseudobulk_min_replicates: int = 2,
     pseudobulk_min_pct_expressed: float = 0.0,
@@ -35154,15 +35333,15 @@ def export_to_html(
         values. When set, it overrides statistics_counts_layer,
         statistics_normalization, and statistics_scale_factor for Distribution
         values only; pseudobulk DE still uses statistics_counts_layer.
-    pseudobulk_min_cell_counts : int
-        Exclude cells below this total raw-count threshold before pseudobulk
-        aggregation. Zero disables filtering.
-    pseudobulk_min_feature_counts : int
-        Exclude features below this total raw pseudobulk-count threshold in the
-        shared DESeq2 fit. Zero disables filtering.
+    statistics_min_cell_counts : int
+        Exclude cells below this total raw-count threshold before Wilcoxon and
+        pseudobulk statistics. Zero disables filtering.
+    statistics_min_feature_counts : int
+        Exclude features below this total raw-count threshold before Wilcoxon
+        and pseudobulk statistics. Zero disables filtering.
     pseudobulk_min_cells_per_pseudobulk : int
         Minimum cells required in each replicate x annotation pseudobulk sample
-        before it can enter the shared DESeq2 fit. Default: 20.
+        before pseudobulk Distribution means and DESeq2 fitting. Default: 20.
     pseudobulk_min_replicates : int
         Minimum paired replicates required for each reported group-vs-group
         contrast.
@@ -35467,10 +35646,10 @@ def export_to_html(
         )
     if int(pseudobulk_min_replicates) < 1:
         raise ValueError("pseudobulk_min_replicates must be >= 1")
-    if int(pseudobulk_min_cell_counts) < 0:
-        raise ValueError("pseudobulk_min_cell_counts must be >= 0")
-    if int(pseudobulk_min_feature_counts) < 0:
-        raise ValueError("pseudobulk_min_feature_counts must be >= 0")
+    if int(statistics_min_cell_counts) < 0:
+        raise ValueError("statistics_min_cell_counts must be >= 0")
+    if int(statistics_min_feature_counts) < 0:
+        raise ValueError("statistics_min_feature_counts must be >= 0")
     if int(pseudobulk_min_cells_per_pseudobulk) < 1:
         raise ValueError("pseudobulk_min_cells_per_pseudobulk must be >= 1")
     if int(pseudobulk_n_cpus) < 1:
@@ -35619,8 +35798,8 @@ def export_to_html(
         statistics_normalization=statistics_normalization,
         statistics_scale_factor=statistics_scale_factor,
         statistics_normalized_layer=statistics_normalized_layer,
-        pseudobulk_min_cell_counts=pseudobulk_min_cell_counts,
-        pseudobulk_min_feature_counts=pseudobulk_min_feature_counts,
+        statistics_min_cell_counts=statistics_min_cell_counts,
+        statistics_min_feature_counts=statistics_min_feature_counts,
         pseudobulk_min_cells_per_pseudobulk=pseudobulk_min_cells_per_pseudobulk,
         pseudobulk_min_replicates=pseudobulk_min_replicates,
         pseudobulk_min_pct_expressed=pseudobulk_min_pct_expressed,
@@ -35989,7 +36168,8 @@ def export_to_html(
         downsample_warning_html = (
             '<div class="downsample-warning" title="'
             + _escape_html_attr(warning_title)
-            + f'">{_escape_html_attr(percent_label)}% downsampled</div>'
+            + f'"><span class="exploration-embedded-warning-icon" aria-hidden="true">&#9888;</span>'
+            + f'<span class="warning-content">{_escape_html_attr(percent_label)}% downsampled</span></div>'
         )
 
     final_output_path = package_output_path_obj if package_output_path_obj is not None else requested_output_path
@@ -36046,8 +36226,8 @@ def export_to_html(
                 "statistics_normalization": statistics_normalization,
                 "statistics_scale_factor": float(statistics_scale_factor),
                 "statistics_normalized_layer": statistics_normalized_layer,
-                "pseudobulk_min_cell_counts": int(pseudobulk_min_cell_counts),
-                "pseudobulk_min_feature_counts": int(pseudobulk_min_feature_counts),
+                "statistics_min_cell_counts": int(statistics_min_cell_counts),
+                "statistics_min_feature_counts": int(statistics_min_feature_counts),
                 "pseudobulk_min_cells_per_pseudobulk": int(pseudobulk_min_cells_per_pseudobulk),
                 "pseudobulk_min_replicates": int(pseudobulk_min_replicates),
                 "pseudobulk_min_pct_expressed": float(pseudobulk_min_pct_expressed),

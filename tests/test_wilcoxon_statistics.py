@@ -124,6 +124,79 @@ def test_wilcoxon_group_de_emits_rest_and_pairwise_results():
     assert "marker_b" not in result["A"]["__rest__"]["features"]
 
 
+def test_wilcoxon_group_de_applies_statistics_count_filters():
+    adata = AnnData(
+        np.array(
+            [
+                [50.0, 0.0, 2.0],
+                [10.0, 0.0, 1.0],
+                [9.0, 0.0, 1.0],
+                [0.0, 50.0, 2.0],
+                [0.0, 10.0, 1.0],
+                [0.0, 9.0, 1.0],
+            ]
+        ),
+        obs=pd.DataFrame(
+            {"cell_type": ["A", "A", "A", "B", "B", "B"]},
+            index=[f"cell_{idx}" for idx in range(6)],
+        ),
+        var=pd.DataFrame(index=["marker_a", "marker_b", "low_count"]),
+    )
+    adata.layers["normalized"] = adata.X.copy()
+    filter_counts = np.array(
+        [
+            [1, 0, 0],
+            [15, 0, 1],
+            [15, 0, 1],
+            [0, 1, 0],
+            [0, 15, 1],
+            [0, 15, 1],
+        ],
+        dtype=float,
+    )
+    calls = []
+    original = wilcoxon_module._scanpy_wilcoxon_table
+
+    def fake_wilcoxon_table(matrix, labels, *, source, reference, feature_names):
+        calls.append((tuple(feature_names), int(matrix.shape[0]), int(matrix.shape[1])))
+        return pd.DataFrame(
+            {
+                "feature": list(feature_names),
+                "score": [2.0 for _ in feature_names],
+                "pvalue": [0.01 for _ in feature_names],
+            }
+        )
+
+    wilcoxon_module._scanpy_wilcoxon_table = fake_wilcoxon_table
+    try:
+        result = compute_wilcoxon_group_de(
+            adata,
+            "cell_type",
+            pairwise_categories=["A", "B"],
+            filter_expression_matrix=filter_counts,
+            filter_expression_source="counts",
+            min_cell_counts=10,
+            min_feature_counts=10,
+            min_cells=2,
+            min_pct_expressed=0,
+            p_adjust_method="none",
+            padj_cutoff=1,
+            log2fc_cutoff=0,
+            top_n_per_comparison=10,
+        )
+    finally:
+        wilcoxon_module._scanpy_wilcoxon_table = original
+
+    summary = result["_summary"]
+    assert summary["filter_expression_source"] == "counts"
+    assert summary["n_cells_after_count_filter"] == 4
+    assert summary["n_features_after_count_filter"] == 2
+    assert summary["category_feature_means"]["features"] == ["marker_a", "marker_b"]
+    assert summary["category_feature_means"]["n_cells"] == {"A": 2, "B": 2}
+    assert all(call == (("marker_a", "marker_b"), 4, 2) for call in calls)
+    assert "low_count" not in result["A"]["__rest__"]["features"]
+
+
 def test_wilcoxon_pairwise_computes_each_category_pair_once():
     adata = AnnData(
         np.array(
