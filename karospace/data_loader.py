@@ -1764,8 +1764,8 @@ class SpatialDataset:
         statistics_normalization: str = "RC",
         statistics_scale_factor: float = 10000.0,
         statistics_normalized_layer: Optional[str] = None,
-        pseudobulk_min_cell_counts: int = 0,
-        pseudobulk_min_feature_counts: int = 0,
+        statistics_min_cell_counts: int = 0,
+        statistics_min_feature_counts: int = 0,
         pseudobulk_min_cells_per_pseudobulk: int = 20,
         pseudobulk_min_replicates: int = 2,
         pseudobulk_min_pct_expressed: float = 0.0,
@@ -1845,15 +1845,16 @@ class SpatialDataset:
             values. When set, it overrides statistics_counts_layer,
             statistics_normalization, and statistics_scale_factor for Distribution
             values only; pseudobulk DE still uses statistics_counts_layer.
-        pseudobulk_min_cell_counts : int
-            Exclude cells below this total raw-count threshold before pseudobulk
-            aggregation. Zero disables filtering.
-        pseudobulk_min_feature_counts : int
-            Exclude features below this total raw pseudobulk-count threshold in the
-            shared DESeq2 fit. Zero disables filtering.
+        statistics_min_cell_counts : int
+            Exclude cells below this total raw-count threshold before Wilcoxon
+            and pseudobulk statistics. Zero disables filtering.
+        statistics_min_feature_counts : int
+            Exclude features below this total raw-count threshold before
+            Wilcoxon and pseudobulk statistics. Zero disables filtering.
         pseudobulk_min_cells_per_pseudobulk : int
             Minimum cells required in each replicate x annotation pseudobulk
-            sample before it can enter the shared DESeq2 fit. Default: 20.
+            sample before pseudobulk Distribution means and DESeq2 fitting.
+            Default: 20.
         pseudobulk_min_replicates : int
             Minimum paired replicates required for a reported group-vs-group
             contrast.
@@ -2066,6 +2067,10 @@ class SpatialDataset:
 
         feature_encoding = str(feature_encoding or "auto").lower()
         self._validate_feature_export_options(feature_encoding, feature_sparse_zero_threshold, feature_sparse_pack_min_nnz)
+        if int(statistics_min_cell_counts) < 0:
+            raise ValueError("statistics_min_cell_counts must be >= 0")
+        if int(statistics_min_feature_counts) < 0:
+            raise ValueError("statistics_min_feature_counts must be >= 0")
         if int(pseudobulk_min_cells_per_pseudobulk) < 1:
             raise ValueError("pseudobulk_min_cells_per_pseudobulk must be >= 1")
         if int(pseudobulk_embed_top_n_per_comparison) < 0:
@@ -2807,6 +2812,26 @@ class SpatialDataset:
             distribution_expression_by_modality[modality_name] = prepared
             return prepared
 
+        statistics_filter_counts_by_modality: Dict[str, Tuple[Any, str]] = {}
+
+        def _prepare_statistics_filter_counts_for_modality(modality_name: str, analysis_adata: Any) -> Tuple[Any, str]:
+            cached = statistics_filter_counts_by_modality.get(modality_name)
+            if cached is not None:
+                return cached
+            from .wilcoxon import resolve_statistics_filter_counts_matrix
+
+            log_step(f"Preparing Statistics count-filter matrix for modality {modality_name}.")
+            prepared = resolve_statistics_filter_counts_matrix(
+                analysis_adata,
+                counts_layer=statistics_counts_layer,
+            )
+            log_detail(f"prepared_count_filter_source={prepared[1]}", level=1)
+            statistics_filter_counts_by_modality[modality_name] = prepared
+            return prepared
+
+        statistics_min_cell_counts_n = int(statistics_min_cell_counts)
+        statistics_min_feature_counts_n = int(statistics_min_feature_counts)
+
         wilcoxon_de_by_modality: Dict[str, Dict[str, Any]] = {
             modality_name: {} for modality_name in statistics_modality_names
         }
@@ -2827,6 +2852,9 @@ class SpatialDataset:
                 )
                 distribution_expression_matrix, distribution_expression_source = (
                     _prepare_distribution_expression_for_modality(modality_name, analysis_adata)
+                )
+                statistics_filter_counts_matrix, statistics_filter_counts_source = (
+                    _prepare_statistics_filter_counts_for_modality(modality_name, analysis_adata)
                 )
                 log_step(
                     f"Computing Wilcoxon marker statistics for modality {modality_name}: "
@@ -2854,6 +2882,9 @@ class SpatialDataset:
                     log_detail("rest=one_vs_rest", level=3)
                     log_detail("pairwise=category_vs_category", level=3)
                     log_detail(f"expression_source={wilcoxon_expression_layer_used}", level=3)
+                    log_detail(f"count_filter_source={statistics_filter_counts_source}", level=3)
+                    log_detail(f"min_cell_counts={statistics_min_cell_counts_n}", level=3)
+                    log_detail(f"min_feature_counts={statistics_min_feature_counts_n}", level=3)
                     log_detail(f"min_cells_per_group={wilcoxon_min_cells_n}", level=3)
                     log_detail(f"min_pct_expressed={wilcoxon_min_pct_n:g}", level=3)
                     log_detail(f"p_adjust={wilcoxon_p_adjust_method}", level=3)
@@ -2871,6 +2902,10 @@ class SpatialDataset:
                         expression_layer_used=wilcoxon_expression_layer_used,
                         summary_expression_matrix=distribution_expression_matrix,
                         summary_expression_source=distribution_expression_source,
+                        filter_expression_matrix=statistics_filter_counts_matrix,
+                        filter_expression_source=statistics_filter_counts_source,
+                        min_cell_counts=statistics_min_cell_counts_n,
+                        min_feature_counts=statistics_min_feature_counts_n,
                         min_cells=wilcoxon_min_cells_n,
                         min_pct_expressed=wilcoxon_min_pct_n,
                         p_adjust_method=wilcoxon_p_adjust_method,
@@ -2928,8 +2963,6 @@ class SpatialDataset:
         companion_pseudobulk_de = companion_analytics.get("pseudobulk_de")
         if requested_pseudobulk_de_annotations:
             pseudobulk_min_cells_n = int(pseudobulk_min_cells_per_pseudobulk)
-            pseudobulk_min_cell_counts_n = int(pseudobulk_min_cell_counts)
-            pseudobulk_min_feature_counts_n = int(pseudobulk_min_feature_counts)
             pseudobulk_min_rep_n = int(pseudobulk_min_replicates)
             pseudobulk_min_pct_n = float(pseudobulk_min_pct_expressed)
             pseudobulk_padj_cutoff_n = float(pseudobulk_padj_cutoff)
@@ -3031,8 +3064,8 @@ class SpatialDataset:
                     )
                     log_detail("rest=balanced_equal_category_weight", level=3)
                     log_detail(f"counts_layer={statistics_counts_layer or 'X'}", level=3)
-                    log_detail(f"min_cell_counts={pseudobulk_min_cell_counts_n}", level=3)
-                    log_detail(f"min_feature_counts={pseudobulk_min_feature_counts_n}", level=3)
+                    log_detail(f"min_cell_counts={statistics_min_cell_counts_n}", level=3)
+                    log_detail(f"min_feature_counts={statistics_min_feature_counts_n}", level=3)
                     log_detail(f"min_cells_per_pseudobulk={pseudobulk_min_cells_n}", level=3)
                     log_detail(f"min_replicates={max(2, pseudobulk_min_rep_n)}", level=3)
                     log_detail(f"min_pct_expressed={pseudobulk_min_pct_n:g}", level=3)
@@ -3059,8 +3092,8 @@ class SpatialDataset:
                         pairwise_categories=annotation_pairwise_categories,
                         counts_layer=statistics_counts_layer,
                         display_expression_matrix=pseudobulk_display_expression_matrix,
-                        min_cell_counts=pseudobulk_min_cell_counts_n,
-                        min_feature_counts=pseudobulk_min_feature_counts_n,
+                        min_cell_counts=statistics_min_cell_counts_n,
+                        min_feature_counts=statistics_min_feature_counts_n,
                         min_cells=pseudobulk_min_cells_n,
                         min_replicates=pseudobulk_min_rep_n,
                         min_pct_expressed=pseudobulk_min_pct_n,
@@ -3755,8 +3788,8 @@ class SpatialDataset:
                 "primary_modality": primary_statistics_modality,
                 "counts_layer": statistics_counts_layer or "X",
                 "min_replicates": max(2, int(pseudobulk_min_replicates)),
-                "min_cell_counts": int(pseudobulk_min_cell_counts),
-                "min_feature_counts": int(pseudobulk_min_feature_counts),
+                "min_cell_counts": int(statistics_min_cell_counts),
+                "min_feature_counts": int(statistics_min_feature_counts),
                 "min_cells_per_pseudobulk": int(pseudobulk_min_cells_per_pseudobulk),
                 "n_cpus": max(1, int(pseudobulk_n_cpus)),
                 "diagnostics": "pairwise",
@@ -3778,6 +3811,9 @@ class SpatialDataset:
                 "modalities": list(statistics_modality_names),
                 "primary_modality": primary_statistics_modality,
                 "expression_layer": wilcoxon_layer or "auto(normalized,raw_log1p)",
+                "count_filter_layer": statistics_counts_layer or "X",
+                "min_cell_counts": int(statistics_min_cell_counts),
+                "min_feature_counts": int(statistics_min_feature_counts),
                 "min_cells_per_group": int(wilcoxon_min_cells_per_group),
                 "p_adjust_method": str(wilcoxon_p_adjust_method or "fdr_bh"),
                 "min_pct_expressed": float(wilcoxon_min_pct_expressed),

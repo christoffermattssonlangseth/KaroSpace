@@ -398,8 +398,11 @@ def test_cli_help_prefers_feature_named_options():
     assert "--statistics-additional-annotations" in output
     assert "--statistics-modalities" in output
     assert "--statistics-contrast-categories" in output
+    assert "--statistics-min-cell-counts" in output
     assert "--wilcoxon-min-cells-per-group" in output
-    assert "--pseudobulk-min-feature-counts" in output
+    assert "--statistics-min-feature-counts" in output
+    assert "--pseudobulk-" + "min-cell-counts" not in output
+    assert "--pseudobulk-" + "min-feature-counts" not in output
     assert "--pseudobulk-" + "additional-annotations" not in output
     assert "--pseudobulk-" + "modalities" not in output
     assert "--pseudobulk-" + "contrast-categories" not in output

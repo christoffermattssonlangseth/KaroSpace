@@ -139,6 +139,15 @@ def test_feature_dropdowns_use_full_catalog_only_with_sidecar(tmp_path=None):
     assert '"rna_b"' in html
 
 
+def test_feature_google_search_uses_modality_keyword(tmp_path=None):
+    html = _render_multimodal_html(tmp_path)
+
+    assert "const modality = options.modality || getExplorationModality?.() || getVisualModality?.() || '';" in html
+    assert "const modalityLabel = String(getModalityDisplayLabel?.(modality) || modality || '').trim();" in html
+    assert "const query = options.query || [label, modalityLabel].filter(Boolean).join(' ');" in html
+    assert "`${label} feature`" not in html
+
+
 def test_marker_search_datalist_uses_embedded_features_only(tmp_path=None):
     html = _render_multimodal_html(tmp_path)
 
@@ -187,6 +196,7 @@ def test_statistics_method_selector_runtime_is_available(tmp_path=None):
     assert "function getStatisticsMethodOptions" in html
     assert "function getActiveStatisticsMethod" in html
     assert "statistics-method-select" in html
+    assert "const labelFor = (method) => method === 'pseudobulk' ? 'Pseudobulk' : 'Wilcoxon';" in html
     assert "activeMethod === 'pseudobulk' ? 'Pseudobulk' : 'Wilcoxon'" in html
 
 
@@ -219,14 +229,61 @@ def test_simple_design_calc_info_matches_active_analysis_method(tmp_path=None):
 def test_statistics_feature_calc_info_describes_wilcoxon_and_pseudobulk_means(tmp_path=None):
     html = _render_multimodal_html(tmp_path)
 
-    assert "List values and figures are computed from the exported Distribution display matrix" in html
+    assert "Values are grouped by the selected Annotation dropdown" in html
+    assert "display values are normalized Relative Counts (RC)" in html
+    assert "The export can instead use LogNormalize or a pre-normalized layer" in html
+    assert "Optional restriction filters limit which cells enter the summary" in html
     assert "Tiles use category means from the active Statistics method" in html
-    assert "By default, Distribution means use RC values" in html
-    assert "Export options can instead use LogNormalize or a selected pre-normalized layer" in html
     assert "RC value = raw count * scale_factor / cell library size" in html
+    assert "LogNormalize value = log1p(raw count * scale_factor / cell library size)" in html
+    assert "mean = sum(values) / cells in group" in html
+    assert "% Expr = 100 * cells with value > 0 / cells in group" in html
     assert "Wilcoxon/Pseudobulk category means" in html
-    assert "Category means follow the active Statistics method" in html
-    assert "The DESeq2 model still uses raw counts from the Statistics counts layer" in html
+    assert "Low-count cells and features are first filtered out" in html
+    assert "Wilcoxon and Pseudobulk use normalized Relative Counts (RC) values" in html
+    assert "replicate-category samples with too few cells are removed prior average calculation" in html
+    assert "DESeq2 applies the minimum replicate filter afterward" in html
+    assert "LogNormalize value = log1p(raw count * scale_factor / cell library size); Wilcoxon mean = mean per-cell value in category; pseudobulk mean = mean over retained replicate-category samples of mean value; delta = category mean - background" in html
+    assert "LogNormalize value = log1p(raw count * 10000 / cell library size); Wilcoxon mean = mean per-cell display value in category; pseudobulk display mean = mean over retained replicate-category samples of mean display value; delta = category mean - background" not in html
+
+
+def test_feature_distribution_panels_show_distribution_settings(tmp_path=None):
+    html = _render_multimodal_html(tmp_path)
+
+    assert "function renderFeatureDistributionSettingsInfo(modality, method = null)" in html
+    assert "function renderFeatureDistributionCountFilterWarning(method = null)" in html
+    assert "feature-distribution-info" in html
+    assert "feature-distribution-warning" in html
+    assert "<strong>Assay:</strong>" not in html
+    assert "<strong>Count filters:</strong> cells >=" in html
+    assert "renderWarningDiv('feature-distribution-warning', content)" in html
+    assert "<strong>Matrix:</strong> counts layer" in html
+    assert "<strong>Normalization:</strong> RC library-size normalization without log1p" in html
+    assert "<strong>Scale factor:</strong>" in html
+    assert "<strong>Log transform:</strong> no" in html
+    assert "renderFeatureDistributionSettingsInfo(modality, methodLabel)" in html
+    assert "${countFilterWarningHtml}\n            ${settingsInfoHtml}" in html
+
+
+def test_exploration_distribution_cells_column_is_last(tmp_path=None):
+    html = _render_multimodal_html(tmp_path)
+
+    assert '<th data-feature-dist-sort="cat">Group${arrow(\'cat\')}</th>\n                        <th data-feature-dist-sort="mean">Mean${arrow(\'mean\')}</th>\n                        <th data-feature-dist-sort="median">Median${arrow(\'median\')}</th>\n                        <th data-feature-dist-sort="pctExpr">% Expr${arrow(\'pctExpr\')}</th>\n                        <th data-feature-dist-sort="n">Cells${arrow(\'n\')}</th>' in html
+    assert '<th data-feature-dist-sort="n">n${arrow(\'n\')}</th>' not in html
+    assert '<td>${fmtP(s.pctExpr)}</td>\n                <td>${fmtN(s.n)}</td>' in html
+
+
+def test_warning_blocks_use_icon_without_warning_prefix(tmp_path=None):
+    html = _render_multimodal_html(tmp_path)
+
+    assert "function renderWarningDiv(className, contentHtml)" in html
+    assert 'class="exploration-embedded-warning-icon"' in html
+    assert "renderWarningDiv('comparison-info-warning'" in html
+    assert "renderWarningDiv('pseudobulk-comparison-warning'" in html
+    assert "renderWarningDiv('neighbor-warning'" in html
+    assert "renderWarningDiv('features-warning'" in html
+    assert "Warning.</strong>" not in html
+    assert "warning.</strong>" not in html
 
 
 def test_insights_has_separate_statistics_menu(tmp_path=None):
@@ -287,6 +344,44 @@ def test_selection_comparison_uses_full_sidecar_features(tmp_path=None):
     assert "const cachedResult = getCachedSelectionWelchResult(selectedCells, compareAllCells ? null : selectedCellsB);" in html
     assert "Scanning all ${getModalityDisplayLabel(resultModality)} features from the sidecar." in html
     assert "Full sidecar comparison across ${Number(selectionWelchResult.totalFeatureCount || 0).toLocaleString()} ${getModalityDisplayLabel(resultModality)} features." in html
+
+
+def test_selection_comparison_uses_selection_labels_and_outside_bar_labels(tmp_path=None):
+    html = _render_multimodal_html(tmp_path)
+
+    assert "Cell Composition — SELECTION A vs SELECTION B" in html
+    assert "const compositionTitle = compareAllCells" in html
+    assert "Feature values - selection a vs selection b" in html
+    assert "const labelA = compareAllCells ? 'Selected cells' : 'Selection A';" in html
+    assert "const labelB = compareAllCells ? 'All cells' : 'Selection B';" in html
+    assert "Selection comparison" in html
+    assert "Selection A and B category percentages" in html
+    assert "const barLabelA = `${formatCompactNumber(meanA)} (${pctA.toFixed(0)}%)`;" in html
+    assert "const barLabelB = `${formatCompactNumber(meanB)} (${pctB.toFixed(0)}%)`;" in html
+    assert "style=\"width:${clampPercent(100 * meanA / vmax)}%;color:#fff;\"" in html
+    assert "style=\"width:${clampPercent(100 * meanB / vmax)}%;color:#fff;\"" in html
+    assert "barLabel(barLabelA, outsideA)" in html
+    assert "barLabel(barLabelB, outsideB)" in html
+
+
+def test_annotation_comparison_moves_tiny_bar_labels_outside(tmp_path=None):
+    html = _render_multimodal_html(tmp_path)
+
+    assert ".selection-summary-expr-bars.has-outside-label" in html
+    assert ".selection-summary-expr-bar-label-outside" in html
+    assert "const outsideA = Number.isFinite(ratio) && ratio < 0.2;" in html
+    assert "const outsideB = ratio > 5;" in html
+    assert "barLabel(labelA, outsideA)" in html
+    assert "barLabel(labelB, outsideB)" in html
+
+
+def test_region_comparison_moves_tiny_bar_labels_outside(tmp_path=None):
+    html = _render_multimodal_html(tmp_path)
+
+    assert "Feature Values by Region" in html
+    assert "const barsClass = `selection-summary-expr-bars${outsideA || outsideB ? ' has-outside-label' : ''}`;" in html
+    assert 'Region A mean: ${formatCompactNumber(meanA)}">${barLabel(labelA, outsideA)}</div>' in html
+    assert 'Region B mean: ${formatCompactNumber(meanB)}">${barLabel(labelB, outsideB)}</div>' in html
 
 
 def test_compare_pseudobulk_follows_exploration_controls(tmp_path=None):

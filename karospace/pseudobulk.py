@@ -86,11 +86,9 @@ def _filter_pseudobulk_features(
     min_feature_counts: int,
 ) -> Tuple[np.ndarray, pd.DataFrame]:
     """Drop features below a raw aggregate-count threshold for one DESeq2 fit."""
-    threshold = max(0, int(min_feature_counts))
-    if threshold == 0:
+    keep = _pseudobulk_feature_keep_mask(counts, min_feature_counts)
+    if keep.all():
         return counts, metadata
-    totals = np.asarray(counts, dtype=float).sum(axis=0)
-    keep = np.isfinite(totals) & (totals >= threshold)
     filtered_counts = np.asarray(counts)[:, keep]
     filtered_meta = metadata.copy()
     feature_names = [str(g) for g in metadata.attrs.get("feature_names", [])]
@@ -98,6 +96,15 @@ def _filter_pseudobulk_features(
         feature for feature, include in zip(feature_names, keep) if include
     ]
     return filtered_counts, filtered_meta
+
+
+def _pseudobulk_feature_keep_mask(counts: np.ndarray, min_feature_counts: int) -> np.ndarray:
+    """Return features meeting the raw aggregate-count threshold."""
+    threshold = max(0, int(min_feature_counts))
+    if threshold == 0:
+        return np.ones(int(counts.shape[1]), dtype=bool)
+    totals = np.asarray(counts, dtype=float).sum(axis=0)
+    return np.isfinite(totals) & (totals >= threshold)
 
 
 def _positive_fraction(matrix, mask: np.ndarray, feature_indices: Sequence[int]) -> List[Optional[float]]:
@@ -440,6 +447,82 @@ def _aggregate_display_expression_matrix(
     if getattr(display_expression_matrix, "shape", None) != expected_shape:
         return None
     return _to_dense_float_matrix(incidence @ display_expression_matrix)
+
+
+def _prepare_pseudobulk_distribution_aggregate(
+    aggregate: np.ndarray,
+    display_aggregate: Optional[np.ndarray],
+    pb_meta: pd.DataFrame,
+    categories: Sequence[str],
+    feature_names: Sequence[str],
+    *,
+    min_feature_counts: int,
+    min_cells: int,
+) -> Tuple[np.ndarray, Optional[np.ndarray], pd.DataFrame, Dict[str, Any]]:
+    """Apply pseudobulk filters in export order and build display means."""
+    feature_keep = _pseudobulk_feature_keep_mask(aggregate, min_feature_counts)
+    filtered_feature_names = [
+        str(feature)
+        for feature, include in zip(feature_names, feature_keep)
+        if bool(include)
+    ]
+    filtered_aggregate = np.asarray(aggregate)[:, feature_keep]
+    filtered_display = (
+        np.asarray(display_aggregate, dtype=float)[:, feature_keep]
+        if display_aggregate is not None
+        else None
+    )
+    filtered_meta = pb_meta.copy()
+    filtered_meta.attrs["feature_names"] = filtered_feature_names
+
+    sample_keep = filtered_meta["n_cells"].to_numpy(dtype=float) >= int(min_cells)
+    sample_positions = np.flatnonzero(sample_keep)
+    summary_meta = filtered_meta.iloc[sample_positions].copy()
+    summary_meta.attrs["feature_names"] = filtered_feature_names
+    summary_matrix = (
+        filtered_display[sample_positions]
+        if filtered_display is not None
+        else filtered_aggregate[sample_positions]
+    )
+    aggregate_summary = _compute_category_feature_means_from_aggregate(
+        summary_matrix,
+        summary_meta,
+        categories,
+        filtered_feature_names,
+        source=(
+            "pseudobulk_display_aggregate"
+            if filtered_display is not None
+            else "pseudobulk_aggregate"
+        ),
+    )
+    return filtered_aggregate, filtered_display, filtered_meta, aggregate_summary
+
+
+def _pseudobulk_summary_payload(
+    aggregate_summary: Dict[str, Any],
+    *,
+    replicate: str,
+    annotation_key: str,
+    counts_layer_used: Optional[str],
+    pairwise_categories: Sequence[str],
+    model_formula: str,
+    model_categories: Sequence[str],
+    pair_diagnostics: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    return {
+        "_summary": {
+            "category_feature_means": aggregate_summary,
+            "replicate": str(replicate),
+            "annotation_key": str(annotation_key),
+            "counts_layer": counts_layer_used,
+            "pairwise_categories": [str(category) for category in pairwise_categories],
+            "model_formula": model_formula,
+            "model_categories": [str(category) for category in model_categories],
+            "rest_definition": "balanced_equal_category_weight",
+            "diagnostics": "pairwise",
+            **({"pair_diagnostics": pair_diagnostics} if pair_diagnostics else {}),
+        }
+    }
 
 
 def _fit_deseq2_pair(
@@ -1665,7 +1748,6 @@ def compute_pseudobulk_sample_metadata_de(
     if not valid.any():
         return None
 
-    required_min_replicates = max(2, int(min_replicates))
     valid_indices = np.flatnonzero(valid)
     rep_valid = rep_values.iloc[valid_indices].to_numpy(dtype=str)
     group_valid = group_values.iloc[valid_indices].to_numpy(dtype=str)
@@ -1682,19 +1764,6 @@ def compute_pseudobulk_sample_metadata_de(
         log_warning(
             f"sample-metadata pseudobulk DE for '{annotation_key}' was skipped: annotation is not "
             f"fixed within replicate '{replicate}' ({preview}).",
-            level=2,
-        )
-        return None
-    if len(per_replicate_groups) < required_min_replicates:
-        available = len(per_replicate_groups)
-        reason = (
-            "only one biological replicate is available; pseudobulk DE requires at least two"
-            if available == 1
-            else f"{available} biological replicate(s) are available; need >= {required_min_replicates}"
-        )
-        log_warning(
-            f"sample-metadata pseudobulk DE for '{annotation_key}' was skipped: {reason} "
-            f"(replicate annotation: '{replicate}').",
             level=2,
         )
         return None
@@ -1730,23 +1799,29 @@ def compute_pseudobulk_sample_metadata_de(
         display_expression_matrix,
         expected_shape=expression_matrix.shape,
     )
-    aggregate_summary = _compute_category_feature_means_from_aggregate(
-        display_aggregate if display_aggregate is not None else aggregate,
+    aggregate, display_aggregate, pb_meta, aggregate_summary = _prepare_pseudobulk_distribution_aggregate(
+        aggregate,
+        display_aggregate,
         pb_meta,
         categories,
         adata.var_names,
-        source=(
-            "pseudobulk_display_aggregate"
-            if display_aggregate is not None
-            else "pseudobulk_aggregate"
-        ),
+        min_feature_counts=min_feature_counts,
+        min_cells=min_cells,
     )
+    if not pb_meta.attrs.get("feature_names"):
+        log_warning(
+            f"sample-metadata pseudobulk DE for '{annotation_key}' was skipped: no features meet "
+            f"min_feature_counts={max(0, int(min_feature_counts))}.",
+            level=2,
+        )
+        return None
     log_detail(
         f"Aggregated {len(pb_meta)} replicate pseudobulk samples from "
         f"{len(valid_indices)} retained cells; output is the count matrix used for sample-level DESeq2.",
         level=2,
     )
 
+    required_min_replicates = max(2, int(min_replicates))
     sufficient_pb = pb_meta[pb_meta["n_cells"] >= int(min_cells)]
     retained_categories = [
         category
@@ -1767,7 +1842,15 @@ def compute_pseudobulk_sample_metadata_de(
             f">= {required_min_replicates} replicate pseudobulks with >= {int(min_cells)} cells.",
             level=2,
         )
-        return None
+        return _pseudobulk_summary_payload(
+            aggregate_summary,
+            replicate=str(replicate),
+            annotation_key=str(annotation_key),
+            counts_layer_used=counts_layer_used,
+            pairwise_categories=selected_pairwise_categories,
+            model_formula=f"~ {annotation_key}",
+            model_categories=retained_categories,
+        )
 
     model_mask = (
         pb_meta["_pb_group"].isin(retained_categories)
@@ -1776,7 +1859,7 @@ def compute_pseudobulk_sample_metadata_de(
     model_positions = np.flatnonzero(model_mask.to_numpy())
     model_counts = aggregate[model_positions]
     model_meta = pb_meta.iloc[model_positions].copy()
-    model_meta.attrs["feature_names"] = [str(feature) for feature in adata.var_names]
+    model_meta.attrs["feature_names"] = [str(feature) for feature in pb_meta.attrs.get("feature_names", [])]
     design_rank, design_columns = _sample_metadata_design_rank(model_meta)
     residual_df = int(len(model_meta) - design_rank)
     if design_rank < design_columns or residual_df <= 0:
@@ -1786,7 +1869,15 @@ def compute_pseudobulk_sample_metadata_de(
             f"(rank {design_rank}/{design_columns}; residual df {residual_df}).",
             level=2,
         )
-        return None
+        return _pseudobulk_summary_payload(
+            aggregate_summary,
+            replicate=str(replicate),
+            annotation_key=str(annotation_key),
+            counts_layer_used=counts_layer_used,
+            pairwise_categories=selected_pairwise_categories,
+            model_formula=f"~ {annotation_key}",
+            model_categories=retained_categories,
+        )
     log_detail(
         f"Validated sample-level DESeq2 design ~ {annotation_key}: "
         f"rank {design_rank}/{design_columns}; residual df {residual_df}",
@@ -1795,19 +1886,13 @@ def compute_pseudobulk_sample_metadata_de(
 
     model_replicates = set(model_meta["_pb_replicate"].astype(str))
     model_cell_mask = valid & rep_values.astype(str).isin(model_replicates).to_numpy()
-    fit_counts, fit_meta = _filter_pseudobulk_features(
-        model_counts,
-        model_meta,
-        min_feature_counts,
-    )
-    if not fit_meta.attrs.get("feature_names"):
-        log_warning(
-            f"sample-metadata pseudobulk DE for '{annotation_key}' was skipped: no features meet "
-            f"min_feature_counts={max(0, int(min_feature_counts))}.",
-            level=2,
-        )
-        return None
+    fit_counts, fit_meta = model_counts, model_meta
 
+    log_detail(
+        f"Sample-level feature filter: min_feature_counts={max(0, int(min_feature_counts))}; "
+        f"retained {fit_counts.shape[1]} features before DESeq2 fitting",
+        level=2,
+    )
     log_detail(
         "Fitting sample-level DESeq2 model "
         f"(~ {annotation_key}; {fit_counts.shape[0]} pseudobulk samples, {fit_counts.shape[1]} features).",
@@ -1825,7 +1910,15 @@ def compute_pseudobulk_sample_metadata_de(
         )
     except Exception as exc:
         log_warning(f"sample-metadata pseudobulk DE fit for '{annotation_key}' failed ({exc}).", level=2)
-        return None
+        return _pseudobulk_summary_payload(
+            aggregate_summary,
+            replicate=str(replicate),
+            annotation_key=str(annotation_key),
+            counts_layer_used=counts_layer_used,
+            pairwise_categories=selected_pairwise_categories,
+            model_formula=f"~ {annotation_key}",
+            model_categories=retained_categories,
+        )
     log_detail(
         f"Sample-level DESeq2 model fit completed in {_format_duration(time.perf_counter() - fit_started)}.",
         level=2,
@@ -2131,7 +2224,16 @@ def compute_pseudobulk_sample_metadata_de(
         )
 
     if not results:
-        return None
+        return _pseudobulk_summary_payload(
+            aggregate_summary,
+            replicate=str(replicate),
+            annotation_key=str(annotation_key),
+            counts_layer_used=counts_layer_used,
+            pairwise_categories=selected_pairwise_categories,
+            model_formula=f"~ {annotation_key}",
+            model_categories=retained_categories,
+            pair_diagnostics=pair_diagnostics,
+        )
     stored_sources = [
         key for key, value in results.items()
         if not str(key).startswith("_") and isinstance(value, dict)
@@ -2147,18 +2249,16 @@ def compute_pseudobulk_sample_metadata_de(
         f"{stored_contrasts} contrasts, {'with' if pair_diagnostics else 'without'} pairwise diagnostics.",
         level=2,
     )
-    results["_summary"] = {
-        "category_feature_means": aggregate_summary,
-        "replicate": str(replicate),
-        "annotation_key": str(annotation_key),
-        "counts_layer": counts_layer_used,
-        "pairwise_categories": selected_pairwise_categories,
-        "model_formula": f"~ {annotation_key}",
-        "model_categories": retained_categories,
-        "rest_definition": "balanced_equal_category_weight",
-        "diagnostics": "pairwise",
-        **({"pair_diagnostics": pair_diagnostics} if pair_diagnostics else {}),
-    }
+    results.update(_pseudobulk_summary_payload(
+        aggregate_summary,
+        replicate=str(replicate),
+        annotation_key=str(annotation_key),
+        counts_layer_used=counts_layer_used,
+        pairwise_categories=selected_pairwise_categories,
+        model_formula=f"~ {annotation_key}",
+        model_categories=retained_categories,
+        pair_diagnostics=pair_diagnostics,
+    ))
     return results
 
 
@@ -2226,23 +2326,9 @@ def _compute_pseudobulk_group_de_shared(
     if not valid.any():
         return None
 
-    required_min_replicates = max(2, int(min_replicates))
     valid_indices = np.flatnonzero(valid)
     rep_valid = rep_values.iloc[valid_indices].to_numpy(dtype=str)
     group_valid = group_values.iloc[valid_indices].to_numpy(dtype=str)
-    if len(set(rep_valid)) < required_min_replicates:
-        available = len(set(rep_valid))
-        reason = (
-            "only one biological replicate is available; pseudobulk DE requires at least two"
-            if available == 1
-            else f"{available} biological replicate(s) are available; need >= {required_min_replicates}"
-        )
-        log_warning(
-            f"pseudobulk DE for '{annotation_key}' was skipped: {reason} "
-            f"(replicate annotation: '{replicate}').",
-            level=2,
-        )
-        return None
 
     sample_keys: List[Tuple[str, str]] = []
     sample_index: Dict[Tuple[str, str], int] = {}
@@ -2276,23 +2362,29 @@ def _compute_pseudobulk_group_de_shared(
         display_expression_matrix,
         expected_shape=expression_matrix.shape,
     )
-    aggregate_summary = _compute_category_feature_means_from_aggregate(
-        display_aggregate if display_aggregate is not None else aggregate,
+    aggregate, display_aggregate, pb_meta, aggregate_summary = _prepare_pseudobulk_distribution_aggregate(
+        aggregate,
+        display_aggregate,
         pb_meta,
         categories,
         adata.var_names,
-        source=(
-            "pseudobulk_display_aggregate"
-            if display_aggregate is not None
-            else "pseudobulk_aggregate"
-        ),
+        min_feature_counts=min_feature_counts,
+        min_cells=min_cells,
     )
+    if not pb_meta.attrs.get("feature_names"):
+        log_warning(
+            f"shared pseudobulk DE for '{annotation_key}' was skipped: no features meet "
+            f"min_feature_counts={max(0, int(min_feature_counts))}.",
+            level=2,
+        )
+        return None
     log_detail(
         f"Aggregated {len(pb_meta)} replicate x annotation pseudobulk samples from "
         f"{len(valid_indices)} retained cells; output is the count matrix used for DESeq2.",
         level=2,
     )
 
+    required_min_replicates = max(2, int(min_replicates))
     sufficient_pb = pb_meta[pb_meta["n_cells"] >= int(min_cells)]
     retained_categories = [
         category
@@ -2313,7 +2405,15 @@ def _compute_pseudobulk_group_de_shared(
             f">= {required_min_replicates} replicate pseudobulks with >= {int(min_cells)} cells.",
             level=2,
         )
-        return None
+        return _pseudobulk_summary_payload(
+            aggregate_summary,
+            replicate=str(replicate),
+            annotation_key=str(annotation_key),
+            counts_layer_used=counts_layer_used,
+            pairwise_categories=selected_pairwise_categories,
+            model_formula=f"~ {replicate} + {annotation_key}",
+            model_categories=retained_categories,
+        )
 
     log_detail(
         f"Shared-fit cohort: {len(retained_categories)} retained categories; "
@@ -2328,7 +2428,7 @@ def _compute_pseudobulk_group_de_shared(
     model_positions = np.flatnonzero(model_mask.to_numpy())
     model_counts = aggregate[model_positions]
     model_meta = pb_meta.iloc[model_positions].copy()
-    model_meta.attrs["feature_names"] = [str(feature) for feature in adata.var_names]
+    model_meta.attrs["feature_names"] = [str(feature) for feature in pb_meta.attrs.get("feature_names", [])]
     design_rank, design_columns = _shared_category_design_rank(model_meta)
     residual_df = int(len(model_meta) - design_rank)
     if design_rank < design_columns or residual_df <= 0:
@@ -2338,7 +2438,15 @@ def _compute_pseudobulk_group_de_shared(
             f"degrees of freedom (rank {design_rank}/{design_columns}; residual df {residual_df}).",
             level=2,
         )
-        return None
+        return _pseudobulk_summary_payload(
+            aggregate_summary,
+            replicate=str(replicate),
+            annotation_key=str(annotation_key),
+            counts_layer_used=counts_layer_used,
+            pairwise_categories=selected_pairwise_categories,
+            model_formula=f"~ {replicate} + {annotation_key}",
+            model_categories=retained_categories,
+        )
     log_detail(
         f"Validated shared DESeq2 design ~ {replicate} + {annotation_key}: "
         f"rank {design_rank}/{design_columns}; residual df {residual_df}",
@@ -2359,21 +2467,10 @@ def _compute_pseudobulk_group_de_shared(
         count=adata.n_obs,
     )
 
-    fit_counts, fit_meta = _filter_pseudobulk_features(
-        model_counts,
-        model_meta,
-        min_feature_counts,
-    )
-    if not fit_meta.attrs.get("feature_names"):
-        log_warning(
-            f"shared pseudobulk DE for '{annotation_key}' was skipped: no features meet "
-            f"min_feature_counts={max(0, int(min_feature_counts))}.",
-            level=2,
-        )
-        return None
+    fit_counts, fit_meta = model_counts, model_meta
     log_detail(
         f"Shared-fit feature filter: min_feature_counts={max(0, int(min_feature_counts))}; "
-        f"retained {fit_counts.shape[1]} of {model_counts.shape[1]} features before DESeq2 fitting",
+        f"retained {fit_counts.shape[1]} features before DESeq2 fitting",
         level=2,
     )
     estimate = _estimate_shared_deseq2_fit_seconds(
@@ -2399,7 +2496,15 @@ def _compute_pseudobulk_group_de_shared(
         )
     except Exception as exc:
         log_warning(f"shared pseudobulk DE fit for '{annotation_key}' failed ({exc}).", level=2)
-        return None
+        return _pseudobulk_summary_payload(
+            aggregate_summary,
+            replicate=str(replicate),
+            annotation_key=str(annotation_key),
+            counts_layer_used=counts_layer_used,
+            pairwise_categories=selected_pairwise_categories,
+            model_formula=f"~ {replicate} + {annotation_key}",
+            model_categories=retained_categories,
+        )
 
     fit_elapsed = time.perf_counter() - fit_started
     log_detail(
@@ -2815,7 +2920,16 @@ def _compute_pseudobulk_group_de_shared(
     run_pairwise_contrast_tasks(pairwise_contrast_tasks, next_pairwise_progress)
 
     if not results:
-        return None
+        return _pseudobulk_summary_payload(
+            aggregate_summary,
+            replicate=str(replicate),
+            annotation_key=str(annotation_key),
+            counts_layer_used=counts_layer_used,
+            pairwise_categories=selected_pairwise_categories,
+            model_formula=f"~ {replicate} + {annotation_key}",
+            model_categories=retained_categories,
+            pair_diagnostics=pair_diagnostics,
+        )
     stored_sources = [
         key for key, value in results.items()
         if not str(key).startswith("_") and isinstance(value, dict)
@@ -2831,18 +2945,16 @@ def _compute_pseudobulk_group_de_shared(
         f"{stored_contrasts} contrasts, {'with' if pair_diagnostics else 'without'} pairwise diagnostics.",
         level=2,
     )
-    results["_summary"] = {
-        "category_feature_means": aggregate_summary,
-        "replicate": str(replicate),
-        "annotation_key": str(annotation_key),
-        "counts_layer": counts_layer_used,
-        "pairwise_categories": selected_pairwise_categories,
-        "model_formula": f"~ {replicate} + {annotation_key}",
-        "model_categories": retained_categories,
-        "rest_definition": "balanced_equal_category_weight",
-        "diagnostics": "pairwise",
-        **({"pair_diagnostics": pair_diagnostics} if pair_diagnostics else {}),
-    }
+    results.update(_pseudobulk_summary_payload(
+        aggregate_summary,
+        replicate=str(replicate),
+        annotation_key=str(annotation_key),
+        counts_layer_used=counts_layer_used,
+        pairwise_categories=selected_pairwise_categories,
+        model_formula=f"~ {replicate} + {annotation_key}",
+        model_categories=retained_categories,
+        pair_diagnostics=pair_diagnostics,
+    ))
     return results
 
 

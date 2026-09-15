@@ -452,22 +452,21 @@ def _run_export_cli(argv=None):
         )
     )
     statistics_args.add_argument(
-        "--pseudobulk-min-cell-counts",
+        "--statistics-min-cell-counts",
         type=int,
         default=0,
         help=(
-            "Exclude cells with fewer than this many total raw counts before pseudobulk aggregation. "
+            "Exclude cells with fewer than this many total raw counts before Wilcoxon and pseudobulk statistics. "
             "Use 0 to disable. (default: 0)"
         ),
     )
     statistics_args.add_argument(
-        "--pseudobulk-min-feature-counts",
+        "--statistics-min-feature-counts",
         type=int,
         default=0,
-        dest="pseudobulk_min_feature_counts",
         metavar="N",
         help=(
-            "Exclude features with fewer than this many total raw pseudobulk counts in the shared DESeq2 fit. "
+            "Exclude features with fewer than this many total raw counts before Wilcoxon and pseudobulk statistics. "
             "Use 0 to disable. (default: 0)"
         ),
     )
@@ -477,8 +476,8 @@ def _run_export_cli(argv=None):
         type=int,
         default=20,
         help=(
-            "Minimum cells required in each replicate x annotation pseudobulk sample before it can enter "
-            "the shared DESeq2 fit. (default: 20)"
+            "Minimum cells required in each replicate x annotation pseudobulk sample before "
+            "pseudobulk Distribution means and DESeq2 fitting. (default: 20)"
         ),
     )
     statistics_args.add_argument(
@@ -668,10 +667,10 @@ def _run_export_cli(argv=None):
 
     args = parser.parse_args(argv)
 
-    if args.pseudobulk_min_cell_counts < 0:
-        parser.error("--pseudobulk-min-cell-counts must be >= 0")
-    if args.pseudobulk_min_feature_counts < 0:
-        parser.error("--pseudobulk-min-feature-counts must be >= 0")
+    if args.statistics_min_cell_counts < 0:
+        parser.error("--statistics-min-cell-counts must be >= 0")
+    if args.statistics_min_feature_counts < 0:
+        parser.error("--statistics-min-feature-counts must be >= 0")
     if args.pseudobulk_n_cpus < 1:
         parser.error("--pseudobulk-n-cpus must be >= 1")
     if args.pseudobulk_embed_top_n_per_comparison < 0:
@@ -954,8 +953,8 @@ def _run_export_cli(argv=None):
         statistics_normalization=args.statistics_normalization,
         statistics_scale_factor=args.statistics_scale_factor,
         statistics_normalized_layer=_parse_optional_layer(args.statistics_normalized_layer),
-        pseudobulk_min_cell_counts=args.pseudobulk_min_cell_counts,
-        pseudobulk_min_feature_counts=args.pseudobulk_min_feature_counts,
+        statistics_min_cell_counts=args.statistics_min_cell_counts,
+        statistics_min_feature_counts=args.statistics_min_feature_counts,
         pseudobulk_min_cells_per_pseudobulk=args.pseudobulk_min_cells_per_pseudobulk,
         pseudobulk_min_replicates=args.pseudobulk_min_replicates,
         pseudobulk_min_pct_expressed=args.pseudobulk_min_pct_expressed,
