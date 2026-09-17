@@ -1796,7 +1796,7 @@ class SpatialDataset:
         Parameters
         ----------
         annotation : str
-            Initial cell annotation column or feature
+            Initial cell annotation column from ``adata.obs``
         downsample : int, optional
             If set, randomly downsample to this many cells per section
         cell_annotations : list, optional
@@ -1972,6 +1972,11 @@ class SpatialDataset:
                 idx_dtype = np.int64 if maxval > np.iinfo(np.int32).max else np.int32
                 neighbor_graph.indptr = neighbor_graph.indptr.astype(idx_dtype, copy=False)
                 neighbor_graph.indices = neighbor_graph.indices.astype(idx_dtype, copy=False)
+
+        if annotation not in self.adata.obs.columns:
+            raise ValueError(
+                f"Initial annotation must be an obs column, got {annotation!r}"
+            )
 
         # Get initial annotation data
         values, is_continuous, categories = self.get_annotation_data(annotation)

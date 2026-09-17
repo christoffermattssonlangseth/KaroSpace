@@ -9602,7 +9602,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'The screenshot menu exports the current grid view.'
             ], {{ nextLabel: tryIt }}),
             step('Save the viewer session', ['#save-session-btn'], [
-	                'Session export saves an interactive state JSON file containing annotations, hidden categories, feature modules and current views.'
+	                'Session export saves an interactive state JSON file containing annotations, hidden categories, palettes, labels, feature modules, rotations, opacity, image alignment and current views.'
             ], {{ nextLabel: tryIt }}),
             step('Load a previous session', ['#load-session-btn'], [
                 'Session import restores a JSON session that was previously exported from the viewer.'
@@ -9688,7 +9688,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); }}, nextLabel: tryIt }}),
             step('Insights Statistics mode', ['#insights-mode-statistics', '#insights-exploration-panel'], [
                 'Statistics contains precomputed analyses generated from the raw dataset before the HTML file was created.',
-                'It contains marker features, spatial features, per-sample distributions, sample-level comparisons, and neighborhood statistics.'
+                'It contains marker features, spatial features, per-sample distributions, category comparisons, and neighborhood statistics.'
             ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('statistics'); }}, nextLabel: tryIt }}),
             step('Insights Selection', ['#insights-selection-panel.insights-panel-mode'], [
                 'Selection summarizes the active cells selection by section and main annotation.'
@@ -35224,7 +35224,7 @@ def export_to_html(
         Path for output HTML file, or a `.karospace` package when
         `feature_storage="sidecar"`.
     main_cell_annotation : str
-        Main cell annotation column or feature name shown first in the viewer
+        Main obs column shown first in the viewer
     title : str
         Page title
     min_panel_size : int
@@ -35420,11 +35420,16 @@ def export_to_html(
     Returns
     -------
     str
-        Path to created HTML file
+        Path to created HTML or `.karospace` package
     """
     annotation = str(main_cell_annotation or "").strip()
     if not annotation:
         raise ValueError("main_cell_annotation is required")
+    obs_columns = getattr(getattr(dataset, "adata", None), "obs", None)
+    if obs_columns is None or annotation not in obs_columns.columns:
+        raise ValueError(
+            f"main_cell_annotation must be an obs column, got {annotation!r}"
+        )
 
     requested_output_path = Path(output_path).expanduser()
     package_mode = requested_output_path.suffix.lower() == ".karospace"

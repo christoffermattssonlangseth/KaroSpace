@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 from anndata import AnnData
 
 from karospace.cli import _run_export_cli
@@ -90,6 +91,22 @@ def _make_multimodal_dataset():
         modalities=modalities,
         default_modality="rna",
     )
+
+
+def test_export_rejects_feature_as_main_cell_annotation(tmp_path):
+    output_path = tmp_path / "viewer.html"
+
+    with pytest.raises(ValueError, match="main_cell_annotation must be an obs column"):
+        export_to_html(
+            _make_multimodal_dataset(),
+            output_path=str(output_path),
+            main_cell_annotation="rna_a",
+            features=["rna_a"],
+            pseudobulk=None,
+            interaction_markers=None,
+            spatial_variable_features_n=0,
+            feature_correlation_top_n=0,
+        )
 
 
 def test_multimodal_export_uses_only_by_modality_payloads():

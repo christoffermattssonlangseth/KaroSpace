@@ -1,6 +1,6 @@
 # KaroSpace
 
-**KaroSpace** is an interactive HTML viewer for exploring spatial transcriptomics data. It generates standalone HTML files from AnnData/H5AD or SpatialData inputs that can be shared and viewed in any web browser — no server or Python installation required.
+**KaroSpace** is an interactive HTML viewer for exploring spatial transcriptomics data. It generates embedded HTML files from AnnData/H5AD or SpatialData inputs that can be shared and opened directly in any web browser — no server or Python installation required. For large feature payloads, KaroSpace can instead write sidecar assets that must be served over HTTP(S), or package those assets into a `.karospace` bundle opened through a loader.
 
 Originally developed at Karolinska Institutet for visualizing Xenium spatial transcriptomics data across multiple tissue sections.
 
@@ -28,13 +28,13 @@ Visit [KaroSpace Website](https://karospace.se/).
 - [x] **Statistics comparisons** — Default cell-level Wilcoxon marker and category comparisons, with optional secondary pseudobulk DESeq2 analysis for replicate-aware comparisons and pathway enrichment.
 - [x] **Neighbor graph tools** — Graph overlay, hover rings (1–3 hops), enrichment, interactions, and dispersion summaries when `adata.obsp` contains a spatial graph
 - [x] **Quality-of-life controls** — Hideable toolbar, screenshots, light/dark theme toggle, buttons explanation, keyboard shortcuts, and adjustable spot size
-- [x] **Standalone export** — One self-contained HTML file, no backend required
+- [x] **Embedded standalone export** — One self-contained HTML file, no backend required
 - [x] **Compact sidecar** — Keep large feature matrices outside the HTML with lazy-loaded sidecar manifests and binary shards for lighter initial viewer files
 - [x] **Shareable packages** — Export as `.karospace` bundles (ZIP + viewer HTML)
 
 ## Quick Start
 
-A GUI version of KaroSpace (`KaroSpaceBuilder`) has been developed to allow researchers with moderate computational skills to create HTML file.
+A GUI version of KaroSpace (`KaroSpaceBuilder`) is available for non-code HTML/sidecar exports. The GUI covers the common export workflow; the Python API and CLI expose the full SpatialData, package, statistics, pathway, image, and reproducibility options.
 
 Prebuilt executables are available from the
 [KaroSpaceBuilder Releases](https://github.com/christoffermattssonlangseth/KaroSpaceBuilder/releases) page:
@@ -44,7 +44,7 @@ Prebuilt executables are available from the
 
 Download, unzip, and run — no Python required.
 
-To install from source:
+To install the GUI builder from source:
 
 ```bash
 git clone https://github.com/christoffermattssonlangseth/KaroSpaceBuilder
@@ -54,7 +54,7 @@ python -m pip install -e .
 KaroSpaceBuilder
 ```
 
-If KaroSpaceBuilder is already installed, launch with:
+If KaroSpace or KaroSpaceBuilder is already installed, launch the GUI with:
 
 ```bash
 karospacebuilder   # or: karospace-gui
@@ -81,6 +81,8 @@ pip install -e .
 > - gseapy >= 1.1.0
 > - tqdm >= 4.66.0
 > ```
+
+Optional image utilities use `Pillow` for section image embedding and `tifffile` for pyramidal TIFF reading or `karospace ome-convert`.
 
 SpatialData input is optional. Install only when you want to load SpatialData `.zarr` :
 
@@ -126,7 +128,7 @@ dataset = load_spatial_data(
 export_to_html(
     dataset,
     output_path="viewer.html",
-    main_cell_annotation="cell_type",    # Main cell-annotation column shown first
+    main_cell_annotation="cell_type",    # Main obs annotation column shown first
     title="KaroSpace",
     min_panel_size=150,          # Min panel width (responsive autoscaling)
     spot_size="auto",            # Adaptive by section density (or set a fixed number)
@@ -155,8 +157,8 @@ export_to_html(
     wilcoxon_p_adjust_method="fdr_bh",
     wilcoxon_padj_cutoff=0.05,
     wilcoxon_log2fc_cutoff=1,
-    pseudobulk=None,             # Use "auto" to also compute secondary DESeq2 pseudobulk
-    pathway="auto",             # Use None to disable pathway enrichment in Python
+    pseudobulk="auto",          # Use None to skip secondary DESeq2 pseudobulk
+    pathway="auto",             # Requires pseudobulk="auto"; use None to disable
     pathway_gmt=None,            # default cached Reactome; or pass "reactome.gmt"
     pathway_organism="Mouse",
     pathway_top_n=10,
@@ -226,7 +228,7 @@ karospace your_data.h5ad \
   --min-panel-size 150 \
   --spot-size auto \
   --downsample 30000 \
-  --cell-annotations leiden, niche \
+  --cell-annotations leiden,niche \
   --features Cd4,Cd8a,Gfap \
   --features-list features.txt \
   --feature-encoding auto \
@@ -240,7 +242,7 @@ karospace your_data.h5ad \
   --wilcoxon-min-cells-per-group 20 \
   --wilcoxon-padj-cutoff 0.05 \
   --wilcoxon-log2fc-cutoff 1 \
-  --pseudobulk off \
+  --pseudobulk auto \
   --pathway auto \
   --pathway-organism Mouse \
   --pathway-top-n 10 \
@@ -281,9 +283,9 @@ CLI value conventions:
 | `--section-key` | Column to identify sections | `sample_id` |
 | `--section-order` | Comma-separated section IDs to control section order | empty string |
 | `--spatial-key` | Key in `adata.obsm` containing spatial coordinates, or target key created from `--spatial-x/--spatial-y` | `spatial` |
-| `--main-cell-annotation` | Main cell-annotation column shown first in the viewer | `leiden` |
+| `--main-cell-annotation` | Main obs column shown first in the viewer | `leiden` |
 | `--section-metadata` | Comma-separated obs columns to use as section metadata shown in the visual params bar/filter chips | empty string |
-| `--modalities` | Comma-separated modalities to export | all detected |
+| `--modalities` | Comma-separated modalities to export. Embedded mode defaults to the dataset default modality; sidecar/package mode defaults to all detected modalities | depends on feature storage |
 
 ##### Inspection
 
@@ -466,7 +468,7 @@ Control display order of metadata values and section ordering via `metadata_valu
 dataset = load_spatial_data(
     "your_data.h5ad",
     section_key="sample_id",
-    section_metadata="course,
+    section_metadata=["course"],
     metadata_value_order={
         "course": ["naive", "peak_I", "peak_II", "peak_III"],
     },
@@ -491,7 +493,7 @@ When multiple modalities are exported with `modalities=["rna", "protein"]` or `-
 
 Split view keeps an independent source and feature namespace for layer A and layer B. This allows comparisons such as RNA feature versus protein feature, annotation versus protein, or module score versus RNA without changing the main visual namespace.
 
-`Insights → Exploration` contains cell/HTML-derived feature distributions and cell-level comparisons. `Insights → Statistics` contains precomputed raw-dataset panels for marker features, spatial features, per-sample/category distributions, sample-level comparisons, and neighbor statistics. Both modes share the Insights feature-namespace selector; `Insights → Statistics → Neighbors → Interactions` has an interaction-marker modality selector. Exported CSV/SVG filenames include the selected modality where a result is modality-specific.
+`Insights → Exploration` contains cell/HTML-derived feature distributions and cell-level comparisons. `Insights → Statistics` contains precomputed raw-dataset panels for marker features, spatial features, per-sample/category distributions, category comparisons, and neighbor statistics. Both modes share the Insights feature-namespace selector; `Insights → Statistics → Neighbors → Interactions` has an interaction-marker modality selector. Exported CSV/SVG filenames include the selected modality where a result is modality-specific.
 
 Pathway enrichment is feature-supported only. It is computed for RNA-like modalities and reported as unavailable for unsupported modalities unless a future export provides an explicit feature-to-pathway mapping.
 
@@ -526,7 +528,7 @@ KaroSpace has three practical export modes:
 | --- | --- | --- | --- |
 | Embedded HTML | `viewer.html` | Small to medium feature payloads, easiest sharing | Double-click or open the file in a browser |
 | Sidecar viewer | `viewer.html` + `viewer.features.json` + `viewer.features/` | Large feature payloads with lazy loading | Serve the directory over HTTP(S), then open the HTML URL |
-| `.karospace` package | `viewer.karospace` + optional `viewer.loader.html` | One-file sharing of a sidecar viewer | Drop the package into the hosted loader or the generated local loader |
+| `.karospace` package | `viewer.karospace` + `viewer.loader.html` when the loader template is available | One-file sharing of a sidecar viewer | Drop the package into the hosted loader or the generated local loader |
 
 Sidecar mode keeps the initial HTML smaller by moving feature vectors into a manifest and binary shard files. The viewer fetches those shards only when a feature is needed. This is useful when many features or modalities would make a single HTML file too large.
 
@@ -647,6 +649,14 @@ karospace package-sidecar viewer.html \
   --feature-manifest-path viewer.features.json \
   --feature-shard-dir viewer.features \
   --loader-output viewer.loader.html
+```
+
+### Convert stitched TIFFs to OME-TIFF
+
+KaroSpace also ships an optional TIFF helper for preparing pyramidal tiled OME-TIFF files for Xenium Explorer. This is independent of HTML export and requires `tifffile`.
+
+```bash
+karospace ome-convert sample1.tif sample2.tif --output-dir ./ome_outputs
 ```
 
 ### Sidecar troubleshooting

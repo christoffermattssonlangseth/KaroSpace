@@ -6,7 +6,7 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 
 - Python API for inspecting input metadata, loading `.h5ad`, `AnnData`, or SpatialData input, and exporting an HTML viewer.
 - Command-line interface (`karospace`) for scriptable exports and inspect-only metadata checks.
-- Desktop GUI (`karospace.gui`) for non-code export configuration.
+- Desktop GUI (`karospace.gui`) for non-code HTML/sidecar export configuration. The CLI and Python API expose the full advanced workflow.
 - Standalone HTML output that can be opened in a browser without a Python server when all required feature data is embedded.
 - Optional sidecar and `.karospace` package outputs for large feature payloads.
 
@@ -19,7 +19,7 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 - Section grouping uses `section_key` to group metadata by section.
 - Section metadata is split into `section_metadata` for visual filter chips and `section_metadata_extra` for stored section metadata that is not displayed as filter chips.
 - Cell annotation dropdowns use `main_cell_annotation` plus `cell_annotations`.
-- Optional payloads include UMAP coordinates, neighborhood graphs, image overlays, deconvolution keys, modules, sidecar feature catalogs, pseudobulk DE by modality, pathways, spatial features, category means, and feature correlations.
+- Optional payloads include UMAP coordinates, neighborhood graphs, image overlays, deconvolution keys, sidecar feature catalogs, pseudobulk DE by modality, pathways, spatial features, category means, and feature correlations. Feature modules are created or imported inside the viewer and can be saved in session/module JSON.
 
 ## 3. Introduction
 
@@ -40,7 +40,7 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 
 - The theme button switches light and dark modes.
 - The screenshot menu exports the current grid view, with size and transparent-background options.
-- Session export downloads a JSON state file containing annotations, hidden categories, and current views.
+- Session export downloads a JSON state file containing annotations, hidden categories, palettes, category labels, feature modules, section rotations, opacity, H&E alignment, and current views.
 - Session import restores a previously exported session JSON.
 - The annotation export menu contains broad data, category, and annotation export actions.
 
@@ -70,7 +70,7 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 - Pan mode is the default movement mode for navigating section panels.
 - Lasso mode selects cells directly in spatial panels.
 - The compare-selection workflow creates Region A and Region B cell sets for side-by-side comparison.
-- Regions can be cleared with the cross-format compare button.
+- Selection/compare state can be cleared with the lasso/cross controls; saved regions are managed in Region mode.
 - Selected cells can be saved as a region annotation.
 - Selected cells can be cleared from the lasso/cross control or from the selection chip.
 - The cell search tool can select cells from annotation values, feature values, or section metadata.
@@ -145,7 +145,7 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 - Compare contains selection, region, annotation, and relationship comparisons.
 - The Statistics Visualization menu tree opens precomputed Features, Compare, and Neighbors panels from the raw dataset.
 - Statistics Features contains per-sample/category feature distributions, marker features, and spatial features in the selected feature namespace.
-- Statistics Compare contains Wilcoxon category comparisons by default and optional sample-level pseudobulk comparisons.
+- Statistics Compare contains Wilcoxon category comparisons by default and optional replicate-aware category pseudobulk comparisons.
 - Statistics Neighbors contains spatial adjacency enrichment, interaction markers, and dispersion analysis.
 
 ## 17. Exploration > Overview
@@ -179,6 +179,7 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 - Simple design metrics can be shown as Raw table, Features, and Samples views.
 - Statistics can be exported for selected modalities with `statistics_modalities` / `--statistics-modalities`; the default is the dataset default modality.
 - The Simple design method selector appears when both Wilcoxon and pseudobulk results are exported.
+- `Statistics > Compare > Complex design` is currently visible as an unavailable placeholder while the generic contrast interface is redesigned.
 - DE features are filtered with `padj < cutoff` and `abs(log2FC) >= cutoff`.
 - Features below the minimum percent-detected threshold in both compared groups are removed before `DeseqStats`, so they do not enter contrast-level multiple-testing correction.
 - Marker lists are ordered by adjusted p-value then log2FC and can expand from the first displayed rows.
@@ -216,7 +217,7 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 - ORA and GSEA are computed after Simple design pseudobulk DE and feed the Pathway Enrichment panel.
 - Spatially variable features are computed with Moran's I per selected modality for up to `spatial_variable_features_n` variable features on the full input cell set.
 - Category feature means are derived from the selected statistics method and feed per-sample/category distribution panels.
-- Feature correlations are computed from category means and feed related-feature suggestions.
+- Feature correlations are computed from category means for embedded features and feed related-feature suggestions.
 - Full-cell spatial dispersion is computed before HTML downsampling for the main cell annotation and requested `cell_annotations`.
 
 ## 22. Sharing and Storage
