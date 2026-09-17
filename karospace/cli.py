@@ -81,7 +81,7 @@ def _run_export_cli(argv=None):
         type=str,
         default="leiden",
         dest="main_cell_annotation",
-        help="Main cell annotation column or feature shown first in the viewer (default: leiden)"
+        help="Main obs column shown first in the viewer (default: leiden)"
     )
     viewer_args.add_argument(
         "--cell-annotations",
@@ -376,7 +376,7 @@ def _run_export_cli(argv=None):
         "--statistics-scale-factor",
         type=float,
         default=10000.0,
-        help="Scale factor for RC Distribution normalization. Ignored unless --statistics-normalization RC. (default: 10000)",
+        help="Scale factor for Distribution normalization before optional log1p. (default: 10000)",
     )
     statistics_args.add_argument(
         "--statistics-normalized-layer",
@@ -980,8 +980,13 @@ def _run_export_cli(argv=None):
         section_images_max_px=args.section_images_max_px,
     )
 
-    if args.feature_storage == "sidecar":
-        output_obj = Path(output_path).expanduser()
+    output_obj = Path(output_path).expanduser()
+    if output_obj.suffix.lower() == ".karospace":
+        print(
+            f"Done! Share {output_obj} and open it with the hosted loader or "
+            f"the sibling {output_obj.with_suffix('.loader.html').name} file when available."
+        )
+    elif args.feature_storage == "sidecar":
         print(
             "Done! Sidecar feature loading requires HTTP(S). "
             f"Serve the output directory with: python -m http.server --directory {output_obj.parent}"

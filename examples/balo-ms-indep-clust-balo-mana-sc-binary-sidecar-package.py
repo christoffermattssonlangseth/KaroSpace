@@ -75,7 +75,7 @@ common_kwargs = dict(
         "niche",
 "leiden_0.5","leiden_1","leiden_1.5","leiden_2","gmm_mana_10"    ],
     pseudobulk_embed_top_n_per_comparison=20,
-    pseudobulk_counts_layer=None,
+    statistics_counts_layer=None,
     pseudobulk_min_cells_per_pseudobulk=20,
 )
 

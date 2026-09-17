@@ -76,7 +76,7 @@ common_kwargs = dict(
         "leiden_0_6",
     ],
     pseudobulk_embed_top_n_per_comparison=20,
-    pseudobulk_counts_layer=None,
+    statistics_counts_layer=None,
     pseudobulk_min_cells_per_pseudobulk=20,
 )
 

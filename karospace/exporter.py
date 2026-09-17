@@ -8608,7 +8608,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         de_heatmap: {{
             title: 'DE heatmap',
             body: 'Tiles use category means from the active Statistics method. By default, Distribution means use RC values: raw counts library-size normalized without log transformation. Export options can instead use LogNormalize or a selected pre-normalized layer. Wilcoxon mode uses per-cell category means and Wilcoxon category-versus-rest marker selection. Pseudobulk mode averages display-scale values inside each replicate-category sample, then averages those replicate means. A star marks features passing the active method thresholds for that category.',
-            formula: 'RC value = raw count * scale_factor / cell library size; LogNormalize value = log1p(raw count * 10000 / cell library size); Wilcoxon mean = mean per-cell display value in category; pseudobulk display mean = mean over replicates of mean display value in replicate-category; z = (category mean - full table mean) / full table SD'
+            formula: 'RC value = raw count * scale_factor / cell library size; LogNormalize value = log1p(raw count * scale_factor / cell library size); Wilcoxon mean = mean per-cell display value in category; pseudobulk display mean = mean over replicates of mean display value in replicate-category; z = (category mean - full table mean) / full table SD'
         }},
         spatial_moran: {{
             title: 'Spatial Moran index',
@@ -9602,7 +9602,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'The screenshot menu exports the current grid view.'
             ], {{ nextLabel: tryIt }}),
             step('Save the viewer session', ['#save-session-btn'], [
-	                'Session export saves an interactive state JSON file containing annotations, hidden categories, feature modules and current views.'
+		                'Session export saves an interactive state JSON file containing annotations, hidden categories, palettes, labels, feature modules, rotations, opacity, image alignment and current views.'
             ], {{ nextLabel: tryIt }}),
             step('Load a previous session', ['#load-session-btn'], [
                 'Session import restores a JSON session that was previously exported from the viewer.'
@@ -9688,7 +9688,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); }}, nextLabel: tryIt }}),
             step('Insights Statistics mode', ['#insights-mode-statistics', '#insights-exploration-panel'], [
                 'Statistics contains precomputed analyses generated from the raw dataset before the HTML file was created.',
-                'It contains marker features, spatial features, per-sample distributions, sample-level comparisons, and neighborhood statistics.'
+                'It contains marker features, spatial features, per-sample distributions, category comparisons, and neighborhood statistics.'
             ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('statistics'); }}, nextLabel: tryIt }}),
             step('Insights Selection', ['#insights-selection-panel.insights-panel-mode'], [
                 'Selection summarizes the active cells selection by section and main annotation.'
@@ -28049,7 +28049,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }} else if (normalization.toLowerCase() === 'lognormalize') {{
             sourceText = `<strong>Matrix:</strong> counts layer ${{escapeHtml(String(countsLayer))}}. `;
             normalizationText = '<strong>Normalization:</strong> library-size normalization plus log1p. ';
-            scaleText = '<strong>Scale factor:</strong> 10,000 target sum before log1p. ';
+            scaleText = `<strong>Scale factor:</strong> ${{Number.isFinite(scaleFactor) ? scaleFactor.toLocaleString() : 'n/a'}} target sum before log1p. `;
             logText = '<strong>Log transform:</strong> yes.';
         }} else {{
             sourceText = `<strong>Matrix:</strong> counts layer ${{escapeHtml(String(countsLayer))}}. `;
@@ -35224,7 +35224,7 @@ def export_to_html(
         Path for output HTML file, or a `.karospace` package when
         `feature_storage="sidecar"`.
     main_cell_annotation : str
-        Main cell annotation column or feature name shown first in the viewer
+        Main obs column shown first in the viewer
     title : str
         Page title
     min_panel_size : int
@@ -35324,10 +35324,10 @@ def export_to_html(
     statistics_normalization : str
         Distribution display normalization. "RC" library-size normalizes to
         statistics_scale_factor without log transformation. "LogNormalize"
-        library-size normalizes to 10000 and applies log1p.
+        library-size normalizes to statistics_scale_factor and applies log1p.
     statistics_scale_factor : float
-        Library-size target for "RC" Distribution normalization. Ignored by
-        "LogNormalize" and by statistics_normalized_layer.
+        Library-size target for Distribution normalization. Ignored by
+        statistics_normalized_layer.
     statistics_normalized_layer : str, optional
         Pre-normalized AnnData layer to use directly for Distribution display
         values. When set, it overrides statistics_counts_layer,
@@ -35420,11 +35420,16 @@ def export_to_html(
     Returns
     -------
     str
-        Path to created HTML file
+        Path to created HTML or `.karospace` package
     """
     annotation = str(main_cell_annotation or "").strip()
     if not annotation:
         raise ValueError("main_cell_annotation is required")
+    obs_columns = getattr(getattr(dataset, "adata", None), "obs", None)
+    if obs_columns is None or annotation not in obs_columns.columns:
+        raise ValueError(
+            f"main_cell_annotation must be an obs column, got {annotation!r}"
+        )
 
     requested_output_path = Path(output_path).expanduser()
     package_mode = requested_output_path.suffix.lower() == ".karospace"

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 from anndata import AnnData
 
 from karospace.cli import _run_export_cli
@@ -92,6 +93,22 @@ def _make_multimodal_dataset():
     )
 
 
+def test_export_rejects_feature_as_main_cell_annotation(tmp_path):
+    output_path = tmp_path / "viewer.html"
+
+    with pytest.raises(ValueError, match="main_cell_annotation must be an obs column"):
+        export_to_html(
+            _make_multimodal_dataset(),
+            output_path=str(output_path),
+            main_cell_annotation="rna_a",
+            features=["rna_a"],
+            pseudobulk=None,
+            interaction_markers=None,
+            spatial_variable_features_n=0,
+            feature_correlation_top_n=0,
+        )
+
+
 def test_multimodal_export_uses_only_by_modality_payloads():
     multimodal_dataset = _make_multimodal_dataset()
     data = multimodal_dataset.to_json_data(
@@ -144,6 +161,24 @@ def test_exploration_feature_values_are_library_normalized_without_log():
     values = data["feature_state_by_modality"]["rna"]["sections"]["s1"]["features"]["rna_a"]
 
     assert np.allclose(values, [10000.0, 6666.666667, 0.0, 2000.0])
+
+
+def test_log_normalized_distribution_feature_values_use_statistics_scale_factor():
+    data = _make_multimodal_dataset().to_json_data(
+        annotation="cell_type",
+        features=["rna_a"],
+        feature_encoding="dense",
+        statistics_counts_layer=None,
+        statistics_normalization="LogNormalize",
+        statistics_scale_factor=100,
+        pseudobulk_de_annotations=[],
+        interaction_marker_annotations=[],
+        statistics_modalities=["rna"],
+    )
+
+    values = data["feature_state_by_modality"]["rna"]["sections"]["s1"]["features"]["rna_a"]
+
+    assert np.allclose(values, np.log1p([100.0, 200.0 / 3.0, 0.0, 20.0]))
 
 
 def test_distribution_feature_values_can_use_selected_normalized_layer():
