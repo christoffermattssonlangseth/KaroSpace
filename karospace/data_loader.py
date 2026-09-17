@@ -1836,10 +1836,10 @@ class SpatialDataset:
         statistics_normalization : str
             Distribution display normalization. "RC" library-size normalizes to
             statistics_scale_factor without log transformation. "LogNormalize"
-            library-size normalizes to 10000 and applies log1p.
+            library-size normalizes to statistics_scale_factor and applies log1p.
         statistics_scale_factor : float
-            Library-size target for "RC" Distribution normalization. Ignored by
-            "LogNormalize" and by statistics_normalized_layer.
+            Library-size target for Distribution normalization. Ignored by
+            statistics_normalized_layer.
         statistics_normalized_layer : str, optional
             Pre-normalized AnnData layer to use directly for Distribution display
             values. When set, it overrides statistics_counts_layer,

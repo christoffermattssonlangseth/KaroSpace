@@ -163,6 +163,24 @@ def test_exploration_feature_values_are_library_normalized_without_log():
     assert np.allclose(values, [10000.0, 6666.666667, 0.0, 2000.0])
 
 
+def test_log_normalized_distribution_feature_values_use_statistics_scale_factor():
+    data = _make_multimodal_dataset().to_json_data(
+        annotation="cell_type",
+        features=["rna_a"],
+        feature_encoding="dense",
+        statistics_counts_layer=None,
+        statistics_normalization="LogNormalize",
+        statistics_scale_factor=100,
+        pseudobulk_de_annotations=[],
+        interaction_marker_annotations=[],
+        statistics_modalities=["rna"],
+    )
+
+    values = data["feature_state_by_modality"]["rna"]["sections"]["s1"]["features"]["rna_a"]
+
+    assert np.allclose(values, np.log1p([100.0, 200.0 / 3.0, 0.0, 20.0]))
+
+
 def test_distribution_feature_values_can_use_selected_normalized_layer():
     data = _make_multimodal_dataset().to_json_data(
         annotation="cell_type",

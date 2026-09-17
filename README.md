@@ -374,7 +374,7 @@ CLI value conventions:
 | `--statistics-contrast-categories` | Categories to report in category-versus-category contrasts. With `--statistics-additional-annotations`, use annotation-specific JSON wrapped in single quotes, such as `'{"cell_type":["Astrocyte","B cell"],"region":["Cortex"]}'`, or a nested list matching `[main-cell-annotation, additional...]` | empty string |
 | `--statistics-counts-layer` | Raw-count AnnData layer used for Statistics/Distribution normalization and pseudobulk aggregation; use `none` for `adata.X` | `counts` |
 | `--statistics-normalization` | Distribution display normalization. Use `RC` for library-size normalized relative counts without log transformation, or `LogNormalize` for library-size normalization plus `log1p` | `RC` |
-| `--statistics-scale-factor` | Scale factor for `RC` Distribution normalization. Ignored unless `--statistics-normalization RC` | `10000` |
+| `--statistics-scale-factor` | Scale factor for Distribution normalization before optional `log1p` | `10000` |
 | `--statistics-normalized-layer` | Pre-normalized AnnData layer to use directly for Distribution display values. Use `off` to disable. When set, Distribution ignores `--statistics-counts-layer`, `--statistics-normalization`, and `--statistics-scale-factor`; pseudobulk DE still uses `--statistics-counts-layer` | `off` |
 | `--statistics-min-cell-counts` | Exclude cells with fewer than this many total raw counts before Wilcoxon and pseudobulk statistics; use `0` to disable | `0` |
 | `--statistics-min-feature-counts` | Exclude features with fewer than this many total raw counts before Wilcoxon and pseudobulk statistics; use `0` to disable | `0` |
@@ -503,7 +503,7 @@ Cell-level Wilcoxon marker statistics are computed by default for `main_cell_ann
 
 Use `statistics_modalities=["rna", "protein"]` in Python or `--statistics-modalities rna,protein` on the CLI to run Wilcoxon statistics, optional pseudobulk, and interaction markers on selected modalities, or use `all` for every detected modality.
 
-Distribution display values use `--statistics-counts-layer counts` with `--statistics-normalization RC` by default, meaning raw counts are divided by cell library size and multiplied by `--statistics-scale-factor` (`10000`). Use `--statistics-normalization LogNormalize` for `log1p` after library normalization, or `--statistics-normalized-layer data` to use a pre-normalized layer directly. `--statistics-min-cell-counts` and `--statistics-min-feature-counts` apply to Wilcoxon and pseudobulk statistics. Pseudobulk DE always uses `--statistics-counts-layer` for raw-count aggregation, even when a normalized Distribution layer is selected.
+Distribution display values use `--statistics-counts-layer counts` with `--statistics-normalization RC` by default, meaning raw counts are divided by cell library size and multiplied by `--statistics-scale-factor` (`10000`). Use `--statistics-normalization LogNormalize` for `log1p` after library normalization with the same scale factor, or `--statistics-normalized-layer data` to use a pre-normalized layer directly. `--statistics-min-cell-counts` and `--statistics-min-feature-counts` apply to Wilcoxon and pseudobulk statistics. Pseudobulk DE always uses `--statistics-counts-layer` for raw-count aggregation, even when a normalized Distribution layer is selected.
 
 ### Optional pseudobulk category selection
 

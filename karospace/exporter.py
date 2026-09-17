@@ -8608,7 +8608,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         de_heatmap: {{
             title: 'DE heatmap',
             body: 'Tiles use category means from the active Statistics method. By default, Distribution means use RC values: raw counts library-size normalized without log transformation. Export options can instead use LogNormalize or a selected pre-normalized layer. Wilcoxon mode uses per-cell category means and Wilcoxon category-versus-rest marker selection. Pseudobulk mode averages display-scale values inside each replicate-category sample, then averages those replicate means. A star marks features passing the active method thresholds for that category.',
-            formula: 'RC value = raw count * scale_factor / cell library size; LogNormalize value = log1p(raw count * 10000 / cell library size); Wilcoxon mean = mean per-cell display value in category; pseudobulk display mean = mean over replicates of mean display value in replicate-category; z = (category mean - full table mean) / full table SD'
+            formula: 'RC value = raw count * scale_factor / cell library size; LogNormalize value = log1p(raw count * scale_factor / cell library size); Wilcoxon mean = mean per-cell display value in category; pseudobulk display mean = mean over replicates of mean display value in replicate-category; z = (category mean - full table mean) / full table SD'
         }},
         spatial_moran: {{
             title: 'Spatial Moran index',
@@ -9602,7 +9602,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'The screenshot menu exports the current grid view.'
             ], {{ nextLabel: tryIt }}),
             step('Save the viewer session', ['#save-session-btn'], [
-	                'Session export saves an interactive state JSON file containing annotations, hidden categories, palettes, labels, feature modules, rotations, opacity, image alignment and current views.'
+		                'Session export saves an interactive state JSON file containing annotations, hidden categories, palettes, labels, feature modules, rotations, opacity, image alignment and current views.'
             ], {{ nextLabel: tryIt }}),
             step('Load a previous session', ['#load-session-btn'], [
                 'Session import restores a JSON session that was previously exported from the viewer.'
@@ -28049,7 +28049,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }} else if (normalization.toLowerCase() === 'lognormalize') {{
             sourceText = `<strong>Matrix:</strong> counts layer ${{escapeHtml(String(countsLayer))}}. `;
             normalizationText = '<strong>Normalization:</strong> library-size normalization plus log1p. ';
-            scaleText = '<strong>Scale factor:</strong> 10,000 target sum before log1p. ';
+            scaleText = `<strong>Scale factor:</strong> ${{Number.isFinite(scaleFactor) ? scaleFactor.toLocaleString() : 'n/a'}} target sum before log1p. `;
             logText = '<strong>Log transform:</strong> yes.';
         }} else {{
             sourceText = `<strong>Matrix:</strong> counts layer ${{escapeHtml(String(countsLayer))}}. `;
@@ -35324,10 +35324,10 @@ def export_to_html(
     statistics_normalization : str
         Distribution display normalization. "RC" library-size normalizes to
         statistics_scale_factor without log transformation. "LogNormalize"
-        library-size normalizes to 10000 and applies log1p.
+        library-size normalizes to statistics_scale_factor and applies log1p.
     statistics_scale_factor : float
-        Library-size target for "RC" Distribution normalization. Ignored by
-        "LogNormalize" and by statistics_normalized_layer.
+        Library-size target for Distribution normalization. Ignored by
+        statistics_normalized_layer.
     statistics_normalized_layer : str, optional
         Pre-normalized AnnData layer to use directly for Distribution display
         values. When set, it overrides statistics_counts_layer,

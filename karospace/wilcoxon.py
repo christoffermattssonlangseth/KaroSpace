@@ -91,7 +91,6 @@ def resolve_distribution_expression_matrix(
     normalization: str = "RC",
     scale_factor: float = _WILCOXON_NORMALIZE_TARGET_SUM,
     normalized_layer: Optional[str] = None,
-    target_sum: float = _WILCOXON_NORMALIZE_TARGET_SUM,
 ) -> Tuple[Any, str]:
     """Resolve display-scale expression values for Distribution panels."""
     layers = getattr(adata, "layers", None) or {}
@@ -128,7 +127,7 @@ def resolve_distribution_expression_matrix(
             f"{source_name}_library_normalized",
         )
     return (
-        log_normalize_expression_matrix(source_matrix, target_sum=float(target_sum)),
+        log_normalize_expression_matrix(source_matrix, target_sum=float(scale_factor)),
         f"{source_name}_log_normalized",
     )
 

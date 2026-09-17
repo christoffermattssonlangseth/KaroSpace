@@ -376,7 +376,7 @@ def _run_export_cli(argv=None):
         "--statistics-scale-factor",
         type=float,
         default=10000.0,
-        help="Scale factor for RC Distribution normalization. Ignored unless --statistics-normalization RC. (default: 10000)",
+        help="Scale factor for Distribution normalization before optional log1p. (default: 10000)",
     )
     statistics_args.add_argument(
         "--statistics-normalized-layer",

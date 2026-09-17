@@ -62,7 +62,7 @@ def test_distribution_expression_matrix_supports_scale_log_and_direct_layer():
         scale_factor=100,
     )
     assert layer_name == "counts_log_normalized"
-    assert np.allclose(np.asarray(matrix), np.log1p([[2500, 7500], [5000, 5000]]))
+    assert np.allclose(np.asarray(matrix), np.log1p([[25, 75], [50, 50]]))
 
     matrix, layer_name = resolve_distribution_expression_matrix(
         adata,
