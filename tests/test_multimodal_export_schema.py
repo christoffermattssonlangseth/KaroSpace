@@ -1,7 +1,7 @@
 import io
 import json
 import uuid
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 import numpy as np
@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 from anndata import AnnData
 
+from karospace import wilcoxon as wilcoxon_module
 from karospace.cli import _run_export_cli
 from karospace.data_loader import Modality, SectionData, SpatialDataset, inspect_input_file
 from karospace.exporter import _extract_embedded_viewer_data, export_to_html
@@ -225,6 +226,79 @@ def test_default_statistics_use_wilcoxon_without_pseudobulk():
     ]
 
 
+def test_wilcoxon_off_skips_marker_and_interaction_wilcoxon():
+    data = _make_multimodal_dataset().to_json_data(
+        annotation="cell_type",
+        features=[],
+        statistics_additional_annotations=[],
+        statistics_modalities=["rna"],
+        wilcoxon="off",
+        pseudobulk_de_annotations=[],
+        interaction_marker_annotations=["cell_type"],
+    )
+
+    assert data["wilcoxon_de_by_modality"]["rna"] == {}
+    assert data["interaction_markers_by_modality"]["rna"] == {}
+    assert data["wilcoxon_settings"]["mode"] == "off"
+    assert data["wilcoxon_settings"]["runtime_decision"]["should_run"] is False
+
+
+def test_wilcoxon_auto_skips_when_predicted_runtime_exceeds_limit():
+    original = wilcoxon_module.calibrate_wilcoxon_runtime
+
+    def fake_calibration(matrix, *, random_state=0, max_cells=2048, max_features=512):
+        return {
+            "sample_cells": 4,
+            "sample_features": 2,
+            "sample_nnz": 8,
+            "sample_density": 1.0,
+            "sample_zero_fraction": 0.0,
+            "elapsed_seconds": 8.0,
+            "calibration_total_elapsed_seconds": 8.0,
+            "work_units": 8.0,
+            "intercept_seconds": 0.0,
+            "seconds_per_work_unit": 1.0,
+            "safety_multiplier": 1.0,
+            "calibration_samples": [
+                {
+                    "sample_cells": 4,
+                    "sample_features": 2,
+                    "sample_nnz": 8,
+                    "sample_density": 1.0,
+                    "sample_zero_fraction": 0.0,
+                    "elapsed_seconds": 8.0,
+                    "work_units": 8.0,
+                    "calibration_includes_formatting": True,
+                }
+            ],
+            "calibration_includes_formatting": True,
+        }
+
+    wilcoxon_module.calibrate_wilcoxon_runtime = fake_calibration
+    try:
+        data = _make_multimodal_dataset().to_json_data(
+            annotation="cell_type",
+            features=[],
+            statistics_additional_annotations=[],
+            statistics_modalities=["rna"],
+            wilcoxon="auto",
+            wilcoxon_runtime_limit="00:00:01",
+            wilcoxon_min_cells_per_group=1,
+            pseudobulk_de_annotations=[],
+            interaction_marker_annotations=["cell_type"],
+            interaction_markers_min_cells=1,
+        )
+    finally:
+        wilcoxon_module.calibrate_wilcoxon_runtime = original
+
+    decision = data["wilcoxon_settings"]["runtime_decision"]
+    assert decision["should_run"] is False
+    assert decision["estimated_seconds"] > decision["runtime_limit_seconds"]
+    assert "contact_conditioned" in decision["estimated_by_kind"]
+    assert data["wilcoxon_de_by_modality"]["rna"] == {}
+    assert data["interaction_markers_by_modality"]["rna"] == {}
+
+
 def test_wilcoxon_contrast_categories_apply_without_pseudobulk():
     obs = pd.DataFrame(
         {
@@ -434,8 +508,12 @@ def test_cli_help_prefers_feature_named_options():
     assert "--statistics-modalities" in output
     assert "--statistics-contrast-categories" in output
     assert "--statistics-min-cell-counts" in output
+    assert "--statistics-n-cpus" in output
+    assert "--wilcoxon" in output
+    assert "--wilcoxon-runtime-limit" in output
     assert "--wilcoxon-min-cells-per-group" in output
     assert "--statistics-min-feature-counts" in output
+    assert "--pseudobulk-" + "n-cpus" not in output
     assert "--pseudobulk-" + "min-cell-counts" not in output
     assert "--pseudobulk-" + "min-feature-counts" not in output
     assert "--pseudobulk-" + "additional-annotations" not in output
@@ -457,6 +535,19 @@ def test_cli_help_prefers_feature_named_options():
     for option in removed_feature_options:
         assert option not in output
     assert "--category-means-n-features" not in output
+
+
+def test_cli_rejects_removed_pseudobulk_n_cpus_option():
+    stream = io.StringIO()
+    with redirect_stderr(stream):
+        try:
+            _run_export_cli(["--pseudobulk-n-cpus", "2"])
+        except SystemExit as exc:
+            assert exc.code == 2
+        else:
+            raise AssertionError("Expected CLI parser to reject --pseudobulk-n-cpus")
+
+    assert "unrecognized arguments: --pseudobulk-n-cpus" in stream.getvalue()
 
 
 def test_cli_pathway_none_passes_disabled_mode_to_exporter(tmp_path, monkeypatch):
@@ -647,6 +738,7 @@ def test_export_defaults_analyze_neighbors_for_cell_annotations():
                 interaction_markers="auto",
                 neighbor_stats_annotations=None,
                 neighbor_stats_permutations=0,
+                statistics_n_cpus=3,
                 spatial_variable_features_n=0,
                 feature_correlation_top_n=0,
                 pathway_gsea_permutations=0,
@@ -660,6 +752,7 @@ def test_export_defaults_analyze_neighbors_for_cell_annotations():
     assert captured["annotation"] == "cell_type"
     assert captured["kwargs"]["neighbor_stats_annotations"] == ["cell_type", "cell_state"]
     assert captured["kwargs"]["interaction_marker_annotations"] == ["cell_type", "cell_state"]
+    assert captured["kwargs"]["statistics_n_cpus"] == 3
 
 
 def test_export_neighbor_defaults_include_cell_annotations_without_interactions():

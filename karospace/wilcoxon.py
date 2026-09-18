@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import math
 import warnings
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+import time
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 import numpy as np
 import pandas as pd
@@ -28,10 +31,235 @@ _MISSING_DISTRIBUTION_COUNTS_LAYER_WARNED: Set[str] = set()
 _MISSING_DISTRIBUTION_NORMALIZED_LAYER_WARNED: Set[str] = set()
 _MISSING_STATISTICS_FILTER_COUNTS_LAYER_WARNED: Set[str] = set()
 _WILCOXON_NORMALIZE_TARGET_SUM = 10000.0
+_WILCOXON_MODES = {"auto", "off", "force"}
+_WILCOXON_RUNTIME_SAFETY_MULTIPLIER = 1.25
+
+
+def normalize_wilcoxon_mode(mode: Optional[str]) -> str:
+    value = str(mode or "auto").strip().lower()
+    if value in {"", "true", "yes", "on", "1"}:
+        return "auto"
+    if value in {"false", "no", "none", "0"}:
+        return "off"
+    if value not in _WILCOXON_MODES:
+        raise ValueError("wilcoxon must be one of: auto, off, force")
+    return value
+
+
+def parse_wilcoxon_runtime_limit(value: Any) -> float:
+    if value is None:
+        return 30.0 * 60.0
+    if isinstance(value, (int, float)):
+        seconds = float(value)
+        if seconds < 0:
+            raise ValueError("wilcoxon_runtime_limit must be >= 0")
+        return seconds
+    text = str(value).strip()
+    if not text:
+        return 30.0 * 60.0
+    parts = text.split(":")
+    try:
+        if len(parts) == 1:
+            seconds = float(parts[0])
+        elif len(parts) == 3:
+            hours, minutes, seconds_part = parts
+            seconds = int(hours) * 3600.0 + int(minutes) * 60.0 + float(seconds_part)
+        else:
+            raise ValueError
+    except ValueError as exc:
+        raise ValueError("wilcoxon_runtime_limit must be seconds or HH:MM:SS") from exc
+    if seconds < 0:
+        raise ValueError("wilcoxon_runtime_limit must be >= 0")
+    return float(seconds)
+
+
+def format_wilcoxon_runtime(seconds: float) -> str:
+    total = max(0, int(round(float(seconds))))
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
+def decide_wilcoxon_runtime(
+    mode: Optional[str],
+    runtime_limit_seconds: float,
+    estimate_items: Sequence[Dict[str, Any]],
+    *,
+    n_cpus: int = 1,
+) -> Dict[str, Any]:
+    mode_norm = normalize_wilcoxon_mode(mode)
+    limit = max(0.0, float(runtime_limit_seconds))
+    estimated = float(sum(float(item.get("estimated_seconds") or 0.0) for item in estimate_items))
+    by_kind: Dict[str, float] = {}
+    for item in estimate_items:
+        kind = str(item.get("kind") or "wilcoxon")
+        by_kind[kind] = by_kind.get(kind, 0.0) + float(item.get("estimated_seconds") or 0.0)
+    if mode_norm == "off":
+        should_run = False
+        reason = "Wilcoxon disabled by mode=off."
+    elif mode_norm == "force":
+        should_run = True
+        reason = "Wilcoxon mode=force; ignoring runtime limit."
+    elif estimated > limit:
+        should_run = False
+        reason = (
+            "Predicted Wilcoxon runtime exceeds runtime limit "
+            f"({format_wilcoxon_runtime(estimated)} > {format_wilcoxon_runtime(limit)})."
+        )
+    else:
+        should_run = True
+        reason = (
+            "Predicted Wilcoxon runtime is within runtime limit "
+            f"({format_wilcoxon_runtime(estimated)} <= {format_wilcoxon_runtime(limit)})."
+        )
+    return {
+        "mode": mode_norm,
+        "should_run": bool(should_run),
+        "reason": reason,
+        "estimated_seconds": estimated,
+        "runtime_limit_seconds": limit,
+        "estimated_by_kind": by_kind,
+        "n_cpus": max(1, int(n_cpus)),
+        "items": list(estimate_items),
+    }
+
+
+def wilcoxon_runtime_decision_log_lines(decision: Mapping[str, Any]) -> List[Tuple[str, int, str]]:
+    estimated = float(decision.get("estimated_seconds") or 0.0)
+    limit = float(decision.get("runtime_limit_seconds") or 0.0)
+    action = "run" if bool(decision.get("should_run")) else "skip"
+    lines: List[Tuple[str, int, str]] = [
+        (
+            "step",
+            0,
+            "runtime_decision="
+            f"{action}; estimated={format_wilcoxon_runtime(estimated)}; "
+            f"limit={format_wilcoxon_runtime(limit)}",
+        )
+    ]
+    reason = str(decision.get("reason") or "").strip()
+    if reason:
+        lines.append(("step", 0, reason))
+
+    items = list(decision.get("items") or [])
+    fixed_seconds = float(sum(float(item.get("estimated_fixed_seconds") or 0.0) for item in items))
+    variable_seconds = float(sum(float(item.get("estimated_variable_seconds") or 0.0) for item in items))
+    pre_safety_seconds = fixed_seconds + variable_seconds
+    safety_multiplier = estimated / pre_safety_seconds if pre_safety_seconds > 0.0 else 1.0
+    serial_fixed_seconds = float(
+        sum(
+            float(item.get("estimated_serial_fixed_seconds", item.get("estimated_fixed_seconds") or 0.0))
+            for item in items
+        )
+    )
+    serial_variable_seconds = float(
+        sum(
+            float(
+                item.get(
+                    "estimated_serial_variable_seconds",
+                    item.get("estimated_variable_seconds") or 0.0,
+                )
+            )
+            for item in items
+        )
+    )
+    serial_seconds = serial_fixed_seconds + serial_variable_seconds
+    comparison_count = int(sum(int(item.get("comparison_count") or 0) for item in items))
+    work_units = float(sum(float(item.get("work_units") or 0.0) for item in items))
+    if items and (fixed_seconds > 0.0 or variable_seconds > 0.0):
+        n_cpus = max(1, int(decision.get("n_cpus") or 1))
+        if n_cpus > 1:
+            calculation = (
+                "runtime_calculation="
+                f"serial=(fixed={format_wilcoxon_runtime(serial_fixed_seconds)} + "
+                f"variable={format_wilcoxon_runtime(serial_variable_seconds)}) = "
+                f"{format_wilcoxon_runtime(serial_seconds)}; "
+                f"parallel_adjusted=(fixed={format_wilcoxon_runtime(fixed_seconds)} + "
+                f"variable={format_wilcoxon_runtime(variable_seconds)}) with n_cpus={n_cpus}; "
+                f"* safety_multiplier={safety_multiplier:.3g} = {format_wilcoxon_runtime(estimated)}; "
+                f"comparisons={comparison_count:,}; work_units={work_units:,.0f}"
+            )
+        else:
+            calculation = (
+                "runtime_calculation="
+                f"(fixed={format_wilcoxon_runtime(fixed_seconds)} + "
+                f"variable={format_wilcoxon_runtime(variable_seconds)}) * "
+                f"safety_multiplier={safety_multiplier:.3g} = {format_wilcoxon_runtime(estimated)}; "
+                f"comparisons={comparison_count:,}; work_units={work_units:,.0f}"
+            )
+        lines.append(
+            (
+                "detail",
+                1,
+                calculation,
+            )
+        )
+
+    details_by_kind: Dict[str, Dict[str, float]] = {}
+    for item in items:
+        kind = str(item.get("kind") or "wilcoxon")
+        detail = details_by_kind.setdefault(
+            kind,
+            {
+                "fixed": 0.0,
+                "variable": 0.0,
+                "serial_fixed": 0.0,
+                "serial_variable": 0.0,
+                "comparisons": 0.0,
+                "work_units": 0.0,
+                "workers": 0.0,
+            },
+        )
+        detail["fixed"] += float(item.get("estimated_fixed_seconds") or 0.0)
+        detail["variable"] += float(item.get("estimated_variable_seconds") or 0.0)
+        detail["serial_fixed"] += float(
+            item.get("estimated_serial_fixed_seconds", item.get("estimated_fixed_seconds") or 0.0)
+        )
+        detail["serial_variable"] += float(
+            item.get("estimated_serial_variable_seconds", item.get("estimated_variable_seconds") or 0.0)
+        )
+        detail["comparisons"] += float(int(item.get("comparison_count") or 0))
+        detail["work_units"] += float(item.get("work_units") or 0.0)
+        detail["workers"] = max(detail["workers"], float(item.get("estimated_parallel_workers") or 1.0))
+    for kind, seconds in (decision.get("estimated_by_kind") or {}).items():
+        detail = details_by_kind.get(str(kind))
+        if detail is None:
+            lines.append(("detail", 1, f"estimated_by_kind={kind}; runtime={format_wilcoxon_runtime(seconds)}"))
+            continue
+        serial_kind_seconds = detail["serial_fixed"] + detail["serial_variable"]
+        worker_note = ""
+        if max(1, int(decision.get("n_cpus") or 1)) > 1:
+            worker_note = (
+                f"serial={format_wilcoxon_runtime(serial_kind_seconds)}; "
+                f"effective_workers={int(detail['workers'])}; "
+            )
+        lines.append(
+            (
+                "detail",
+                1,
+                f"estimated_by_kind={kind}; runtime={format_wilcoxon_runtime(seconds)}; "
+                f"{worker_note}"
+                f"fixed={format_wilcoxon_runtime(detail['fixed'])}; "
+                f"variable={format_wilcoxon_runtime(detail['variable'])}; "
+                f"comparisons={int(detail['comparisons']):,}; "
+                f"work_units={detail['work_units']:,.0f}",
+            )
+        )
+    return lines
 
 
 def _copy_expression_matrix(matrix):
     return matrix.copy() if sp.issparse(matrix) else np.array(matrix, dtype=float, copy=True)
+
+
+def _run_wilcoxon_tasks(tasks: Sequence[Any], worker, n_cpus: int) -> List[Any]:
+    if not tasks:
+        return []
+    workers = min(max(1, int(n_cpus)), len(tasks))
+    if workers <= 1:
+        return [worker(task) for task in tasks]
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        return list(executor.map(worker, tasks))
 
 
 def library_size_normalize_expression_matrix(matrix, target_sum: float = _WILCOXON_NORMALIZE_TARGET_SUM):
@@ -298,6 +526,421 @@ def _column_means(matrix, mask: np.ndarray) -> np.ndarray:
     return means
 
 
+def _filtered_labels_and_feature_count_for_wilcoxon(
+    labels: np.ndarray,
+    expression_matrix,
+    filter_expression_matrix=None,
+    *,
+    min_cell_counts: int = 0,
+    min_feature_counts: int = 0,
+) -> Tuple[np.ndarray, int]:
+    if expression_matrix is None or int(expression_matrix.shape[0]) != int(labels.shape[0]):
+        return labels[:0], 0
+    if (
+        filter_expression_matrix is None
+        or int(filter_expression_matrix.shape[0]) != int(expression_matrix.shape[0])
+        or int(filter_expression_matrix.shape[1]) != int(expression_matrix.shape[1])
+    ):
+        filter_expression_matrix = expression_matrix
+    min_cell_counts_eff = max(0, int(min_cell_counts))
+    min_feature_counts_eff = max(0, int(min_feature_counts))
+    count_cell_mask = np.ones(int(labels.shape[0]), dtype=bool)
+    if min_cell_counts_eff > 0:
+        totals = _matrix_axis_sum(filter_expression_matrix, axis=1)
+        count_cell_mask = np.isfinite(totals) & (totals >= min_cell_counts_eff)
+    if not bool(count_cell_mask.any()):
+        return labels[:0], 0
+    n_features = int(expression_matrix.shape[1])
+    if min_feature_counts_eff > 0:
+        feature_totals = _matrix_axis_sum(filter_expression_matrix[count_cell_mask], axis=0)
+        n_features = int(np.count_nonzero(np.isfinite(feature_totals) & (feature_totals >= min_feature_counts_eff)))
+    return labels[count_cell_mask], n_features
+
+
+def _wilcoxon_rank_work_units(cell_count: int, feature_count: int) -> float:
+    cells = max(0, int(cell_count))
+    features = max(0, int(feature_count))
+    if cells == 0 or features == 0:
+        return 0.0
+    return float(cells * np.log2(max(2, cells)) * features)
+
+
+def estimate_wilcoxon_group_workload(
+    adata,
+    annotation_key: str,
+    *,
+    expression_matrix,
+    filter_expression_matrix=None,
+    pairwise_categories: Optional[Sequence[str]] = None,
+    min_cell_counts: int = 0,
+    min_feature_counts: int = 0,
+    min_cells: int = 20,
+) -> List[Dict[str, Any]]:
+    if annotation_key not in adata.obs.columns:
+        return []
+    col = adata.obs[annotation_key]
+    if pd.api.types.is_numeric_dtype(col):
+        return []
+    if not isinstance(col.dtype, CategoricalDtype):
+        col = col.astype("category")
+    labels = col.astype(str).to_numpy()
+    categories = [str(category) for category in col.cat.categories]
+    labels, n_features = _filtered_labels_and_feature_count_for_wilcoxon(
+        labels,
+        expression_matrix,
+        filter_expression_matrix,
+        min_cell_counts=min_cell_counts,
+        min_feature_counts=min_feature_counts,
+    )
+    if labels.size == 0 or n_features <= 0:
+        return []
+    min_cells_eff = max(1, int(min_cells))
+    retained = [category for category in categories if int(np.count_nonzero(labels == category)) >= min_cells_eff]
+    if len(retained) < 2:
+        return []
+
+    retained_mask = np.isin(labels, retained)
+    retained_cells = int(retained_mask.sum())
+    items: List[Dict[str, Any]] = [
+        {
+            "kind": "category_vs_rest",
+            "annotation": str(annotation_key),
+            "comparison_count": int(len(retained)),
+            "cell_count": retained_cells,
+            "feature_count": int(n_features),
+            "work_units": _wilcoxon_rank_work_units(retained_cells, int(n_features)) * len(retained),
+        }
+    ]
+    if pairwise_categories is None:
+        pairwise = retained
+    else:
+        requested = {str(category) for category in pairwise_categories}
+        pairwise = [category for category in retained if category in requested]
+    pairwise_units = 0.0
+    pairwise_count = 0
+    for source_idx, source in enumerate(pairwise):
+        source_n = int(np.count_nonzero(labels == source))
+        for reference in pairwise[source_idx + 1 :]:
+            reference_n = int(np.count_nonzero(labels == reference))
+            if source_n >= min_cells_eff and reference_n >= min_cells_eff:
+                pairwise_count += 1
+                pairwise_units += _wilcoxon_rank_work_units(source_n + reference_n, int(n_features))
+    if pairwise_count > 0:
+        items.append(
+            {
+                "kind": "category_vs_category",
+                "annotation": str(annotation_key),
+                "comparison_count": int(pairwise_count),
+                "cell_count": int(retained_cells),
+                "feature_count": int(n_features),
+                "work_units": float(pairwise_units),
+            }
+        )
+    return items
+
+
+def estimate_wilcoxon_interaction_workload(
+    adata,
+    annotation_key: str,
+    *,
+    expression_matrix,
+    top_targets: int = 5,
+    min_cells: int = 30,
+) -> List[Dict[str, Any]]:
+    if annotation_key not in adata.obs.columns:
+        return []
+    col = adata.obs[annotation_key]
+    if pd.api.types.is_numeric_dtype(col):
+        return []
+    if not isinstance(col.dtype, CategoricalDtype):
+        col = col.astype("category")
+    labels = col.astype(str).to_numpy()
+    categories = [str(category) for category in col.cat.categories]
+    n_features = int(expression_matrix.shape[1]) if expression_matrix is not None else 0
+    if n_features <= 0:
+        return []
+    min_cells_eff = max(1, int(min_cells))
+    retained = [category for category in categories if int(np.count_nonzero(labels == category)) >= min_cells_eff * 2]
+    if len(retained) < 2:
+        return []
+    target_count = max(1, int(top_targets))
+    comparison_count = 0
+    work_units = 0.0
+    for source in retained:
+        source_n = int(np.count_nonzero(labels == source))
+        n_targets = min(target_count, max(0, len(retained) - 1))
+        comparison_count += n_targets
+        work_units += _wilcoxon_rank_work_units(source_n, n_features) * n_targets
+    return [
+        {
+            "kind": "contact_conditioned",
+            "annotation": str(annotation_key),
+            "comparison_count": int(comparison_count),
+            "cell_count": int(labels.size),
+            "feature_count": int(n_features),
+            "work_units": float(work_units),
+        }
+    ]
+
+
+def _matrix_subset_rows_cols(matrix, row_indices: np.ndarray, col_indices: np.ndarray):
+    subset = matrix[row_indices]
+    subset = subset[:, col_indices]
+    return subset.copy() if sp.issparse(subset) else np.asarray(subset, dtype=float)
+
+
+def _fit_wilcoxon_runtime_model(
+    samples: Sequence[Mapping[str, Any]],
+    *,
+    safety_multiplier: float = _WILCOXON_RUNTIME_SAFETY_MULTIPLIER,
+) -> Dict[str, Any]:
+    usable = [
+        (
+            float(sample.get("work_units") or 0.0),
+            float(sample.get("elapsed_seconds") or 0.0),
+        )
+        for sample in samples
+        if np.isfinite(float(sample.get("work_units") or 0.0))
+        and np.isfinite(float(sample.get("elapsed_seconds") or 0.0))
+        and float(sample.get("work_units") or 0.0) > 0.0
+        and float(sample.get("elapsed_seconds") or 0.0) >= 0.0
+    ]
+    if not usable:
+        return {
+            "intercept_seconds": 0.0,
+            "seconds_per_work_unit": 0.0,
+            "safety_multiplier": max(1.0, float(safety_multiplier)),
+        }
+    x = np.asarray([item[0] for item in usable], dtype=float)
+    y = np.asarray([item[1] for item in usable], dtype=float)
+    if x.size >= 2 and float(np.ptp(x)) > 0.0:
+        x_mean = float(np.mean(x))
+        y_mean = float(np.mean(y))
+        slope = float(np.sum((x - x_mean) * (y - y_mean)) / np.sum((x - x_mean) ** 2))
+        intercept = y_mean - slope * x_mean
+        if slope < 0.0:
+            slope = 0.0
+            intercept = y_mean
+        if intercept < 0.0:
+            intercept = 0.0
+            slope = float(np.sum(x * y) / max(float(np.sum(x * x)), 1e-12))
+    else:
+        intercept = 0.0
+        slope = float(y[0] / max(float(x[0]), 1.0))
+    return {
+        "intercept_seconds": float(max(0.0, intercept)),
+        "seconds_per_work_unit": float(max(0.0, slope)),
+        "safety_multiplier": max(1.0, float(safety_multiplier)),
+    }
+
+
+def _wilcoxon_runtime_sample_plan(
+    n_cells: int,
+    n_features: int,
+    *,
+    max_cells: int,
+    max_features: int,
+) -> List[Tuple[int, int]]:
+    max_sample_cells = min(max(2, int(max_cells)), int(n_cells))
+    if max_sample_cells % 2:
+        max_sample_cells -= 1
+    max_sample_cells = max(2, max_sample_cells)
+    max_sample_features = min(max(1, int(max_features)), int(n_features))
+    plan: List[Tuple[int, int]] = []
+    for fraction in (0.25, 0.5, 1.0):
+        sample_cells = min(max_sample_cells, max(2, int(round(max_sample_cells * fraction))))
+        if sample_cells % 2:
+            sample_cells -= 1
+        sample_cells = max(2, sample_cells)
+        sample_features = min(max_sample_features, max(1, int(round(max_sample_features * fraction))))
+        dims = (sample_cells, sample_features)
+        if dims not in plan:
+            plan.append(dims)
+    return plan
+
+
+def _measure_wilcoxon_runtime_sample(
+    matrix,
+    *,
+    rng: np.random.Generator,
+    sample_cells: int,
+    sample_features: int,
+) -> Dict[str, Any]:
+    n_cells = int(matrix.shape[0])
+    n_features = int(matrix.shape[1])
+    row_idx = np.sort(rng.choice(np.arange(n_cells), size=int(sample_cells), replace=False))
+    col_idx = np.sort(rng.choice(np.arange(n_features), size=int(sample_features), replace=False))
+    sample = _matrix_subset_rows_cols(matrix, row_idx, col_idx)
+    sample_nnz = int(sample.nnz) if sp.issparse(sample) else int(np.count_nonzero(sample))
+    sample_density = float(sample_nnz / max(int(sample_cells) * int(sample_features), 1))
+    half = int(sample_cells) // 2
+    labels = np.asarray(["calibration_a"] * half + ["calibration_b"] * (int(sample_cells) - half), dtype=object)
+    feature_names = [f"feature_{idx}" for idx in range(int(sample_features))]
+    fallback_before = bool(_SCANPY_WILCOXON_FALLBACK_WARNED)
+    started = time.perf_counter()
+    table = _scanpy_wilcoxon_table(
+        sample,
+        labels,
+        source="calibration_a",
+        reference="calibration_b",
+        feature_names=feature_names,
+    )
+    source_mask = labels == "calibration_a"
+    reference_mask = labels == "calibration_b"
+    _format_wilcoxon_result(
+        table,
+        method="cell-wilcoxon-calibration",
+        source_mask=source_mask,
+        reference_mask=reference_mask,
+        expression_matrix=sample,
+        feature_names=feature_names,
+        expression_layer_used="calibration_sample",
+        p_adjust_method="fdr_bh",
+        min_pct_expressed=0.0,
+        padj_cutoff=0.05,
+        log2fc_cutoff=0.0,
+        top_n=int(sample_features),
+    )
+    elapsed = max(time.perf_counter() - started, 1e-9)
+    if not fallback_before and bool(_SCANPY_WILCOXON_FALLBACK_WARNED):
+        started = time.perf_counter()
+        table = _scanpy_wilcoxon_table(
+            sample,
+            labels,
+            source="calibration_a",
+            reference="calibration_b",
+            feature_names=feature_names,
+        )
+        _format_wilcoxon_result(
+            table,
+            method="cell-wilcoxon-calibration",
+            source_mask=source_mask,
+            reference_mask=reference_mask,
+            expression_matrix=sample,
+            feature_names=feature_names,
+            expression_layer_used="calibration_sample",
+            p_adjust_method="fdr_bh",
+            min_pct_expressed=0.0,
+            padj_cutoff=0.05,
+            log2fc_cutoff=0.0,
+            top_n=int(sample_features),
+        )
+        elapsed = max(time.perf_counter() - started, 1e-9)
+    work_units = _wilcoxon_rank_work_units(int(sample_cells), int(sample_features))
+    return {
+        "sample_cells": int(sample_cells),
+        "sample_features": int(sample_features),
+        "sample_nnz": int(sample_nnz),
+        "sample_density": float(sample_density),
+        "sample_zero_fraction": float(1.0 - sample_density),
+        "elapsed_seconds": float(elapsed),
+        "work_units": work_units,
+        "calibration_includes_formatting": True,
+    }
+
+
+def calibrate_wilcoxon_runtime(
+    matrix,
+    *,
+    random_state: int = 0,
+    max_cells: int = 2048,
+    max_features: int = 512,
+) -> Dict[str, Any]:
+    n_cells = int(matrix.shape[0]) if matrix is not None else 0
+    n_features = int(matrix.shape[1]) if matrix is not None and len(matrix.shape) > 1 else 0
+    if n_cells < 2 or n_features < 1:
+        return {
+            "sample_cells": 0,
+            "sample_features": 0,
+            "sample_nnz": 0,
+            "sample_density": 0.0,
+            "sample_zero_fraction": 0.0,
+            "elapsed_seconds": 0.0,
+            "calibration_total_elapsed_seconds": 0.0,
+            "work_units": 0.0,
+            "intercept_seconds": 0.0,
+            "seconds_per_work_unit": 0.0,
+            "safety_multiplier": _WILCOXON_RUNTIME_SAFETY_MULTIPLIER,
+            "calibration_samples": [],
+            "calibration_includes_formatting": False,
+        }
+    rng = np.random.default_rng(int(random_state))
+    sample_plan = _wilcoxon_runtime_sample_plan(
+        n_cells,
+        n_features,
+        max_cells=max_cells,
+        max_features=max_features,
+    )
+    warmup_cells, warmup_features = sample_plan[0]
+    _measure_wilcoxon_runtime_sample(
+        matrix,
+        rng=rng,
+        sample_cells=warmup_cells,
+        sample_features=warmup_features,
+    )
+    calibration_samples = [
+        _measure_wilcoxon_runtime_sample(
+            matrix,
+            rng=rng,
+            sample_cells=sample_cells,
+            sample_features=sample_features,
+        )
+        for sample_cells, sample_features in sample_plan
+    ]
+    largest = max(calibration_samples, key=lambda sample: float(sample.get("work_units") or 0.0))
+    model = _fit_wilcoxon_runtime_model(calibration_samples)
+    return {
+        "sample_cells": int(largest.get("sample_cells") or 0),
+        "sample_features": int(largest.get("sample_features") or 0),
+        "sample_nnz": int(largest.get("sample_nnz") or 0),
+        "sample_density": float(largest.get("sample_density") or 0.0),
+        "sample_zero_fraction": float(largest.get("sample_zero_fraction") or 0.0),
+        "elapsed_seconds": float(largest.get("elapsed_seconds") or 0.0),
+        "calibration_total_elapsed_seconds": float(
+            sum(float(sample.get("elapsed_seconds") or 0.0) for sample in calibration_samples)
+        ),
+        "work_units": float(largest.get("work_units") or 0.0),
+        "calibration_samples": calibration_samples,
+        "calibration_includes_formatting": True,
+        **model,
+    }
+
+
+def apply_wilcoxon_runtime_calibration(
+    items: Sequence[Dict[str, Any]],
+    calibration: Mapping[str, Any],
+    *,
+    modality: str,
+    n_cpus: int = 1,
+) -> List[Dict[str, Any]]:
+    seconds_per_unit = float(calibration.get("seconds_per_work_unit") or 0.0)
+    intercept_seconds = float(calibration.get("intercept_seconds") or 0.0)
+    safety_multiplier = float(calibration.get("safety_multiplier") or 1.0)
+    estimated: List[Dict[str, Any]] = []
+    requested_workers = max(1, int(n_cpus))
+    for item in items:
+        entry = dict(item)
+        comparison_count = max(1, int(entry.get("comparison_count") or 1))
+        effective_workers = min(requested_workers, comparison_count)
+        serial_fixed_seconds = comparison_count * intercept_seconds
+        serial_variable_seconds = float(entry.get("work_units") or 0.0) * seconds_per_unit
+        fixed_seconds = math.ceil(comparison_count / effective_workers) * intercept_seconds
+        variable_seconds = serial_variable_seconds / effective_workers
+        entry["modality"] = str(modality)
+        entry["estimated_fixed_seconds"] = float(fixed_seconds)
+        entry["estimated_variable_seconds"] = float(variable_seconds)
+        entry["estimated_serial_fixed_seconds"] = float(serial_fixed_seconds)
+        entry["estimated_serial_variable_seconds"] = float(serial_variable_seconds)
+        entry["estimated_parallel_workers"] = int(effective_workers)
+        entry["estimated_requested_workers"] = int(requested_workers)
+        entry["runtime_intercept_seconds"] = float(intercept_seconds)
+        entry["runtime_seconds_per_work_unit"] = float(seconds_per_unit)
+        entry["runtime_safety_multiplier"] = float(max(1.0, safety_multiplier))
+        entry["estimated_seconds"] = float((fixed_seconds + variable_seconds) * max(1.0, safety_multiplier))
+        estimated.append(entry)
+    return estimated
+
+
 def _scanpy_wilcoxon_table(
     matrix,
     labels: np.ndarray,
@@ -306,6 +949,15 @@ def _scanpy_wilcoxon_table(
     reference: str,
     feature_names: Sequence[str],
 ) -> pd.DataFrame:
+    global _SCANPY_WILCOXON_FALLBACK_WARNED
+    if _SCANPY_WILCOXON_FALLBACK_WARNED:
+        return _scipy_ranksum_table(
+            matrix,
+            labels,
+            source=source,
+            reference=reference,
+            feature_names=feature_names,
+        )
     try:
         import scanpy as sc
 
@@ -334,7 +986,6 @@ def _scanpy_wilcoxon_table(
             }
         )
     except Exception as exc:
-        global _SCANPY_WILCOXON_FALLBACK_WARNED
         if not _SCANPY_WILCOXON_FALLBACK_WARNED:
             log_warning(f"Scanpy Wilcoxon failed ({exc}); using SciPy rank-sum fallback.", level=2)
             _SCANPY_WILCOXON_FALLBACK_WARNED = True
@@ -629,6 +1280,7 @@ def compute_wilcoxon_group_de(
     padj_cutoff: float = 0.05,
     log2fc_cutoff: float = 1,
     top_n_per_comparison: int = 300,
+    n_cpus: int = 1,
 ) -> Optional[Dict[str, Any]]:
     """Compute cell-level Wilcoxon category markers and pairwise comparisons."""
     if annotation_key not in adata.obs.columns:
@@ -705,13 +1357,15 @@ def compute_wilcoxon_group_de(
     retained_mask = np.isin(labels, retained_categories)
     retained_matrix = _materialize_rows(expression_matrix, retained_mask)
     retained_labels = labels[retained_mask]
+    n_cpus_eff = max(1, int(n_cpus))
 
     payload: Dict[str, Any] = {}
-    for category in retained_categories:
+
+    def _compute_rest(category: str) -> Tuple[str, Optional[Dict[str, Any]]]:
         source_mask = labels == category
         reference_mask = np.isin(labels, [c for c in retained_categories if c != category])
         if not source_mask.any() or int(reference_mask.sum()) < min_cells_eff:
-            continue
+            return category, None
         try:
             table = _scanpy_wilcoxon_table(
                 retained_matrix,
@@ -722,7 +1376,7 @@ def compute_wilcoxon_group_de(
             )
         except Exception as exc:
             log_warning(f"Wilcoxon markers for '{annotation_key}' category '{category}' failed ({exc}).", level=2)
-            continue
+            return category, None
         result = _format_wilcoxon_result(
             table,
             method="cell-wilcoxon-rest",
@@ -738,6 +1392,11 @@ def compute_wilcoxon_group_de(
             top_n=top_n_per_comparison,
             log2fc_direction="positive",
         )
+        return category, result
+
+    for category, result in _run_wilcoxon_tasks(retained_categories, _compute_rest, n_cpus_eff):
+        if result is None:
+            continue
         payload.setdefault(category, {})["__rest__"] = result
 
     if pairwise_categories is None:
@@ -745,63 +1404,67 @@ def compute_wilcoxon_group_de(
     else:
         requested_set = {str(category) for category in pairwise_categories}
         pairwise = [category for category in retained_categories if category in requested_set]
-    for source_idx, source in enumerate(pairwise):
-        for reference in pairwise[source_idx + 1 :]:
-            source_mask = labels == source
-            reference_mask = labels == reference
-            n_source = int(source_mask.sum())
-            n_reference = int(reference_mask.sum())
-            if n_source < min_cells_eff or n_reference < min_cells_eff:
-                result = _empty_result(
-                    "too_few_cells",
-                    method="cell-wilcoxon-pairwise",
-                    n_source=n_source,
-                    n_reference=n_reference,
-                    min_cells=min_cells_eff,
-                )
-                payload.setdefault(source, {})[reference] = result
-                payload.setdefault(reference, {})[source] = _invert_wilcoxon_pairwise_result(result)
-                continue
-            pair_mask = source_mask | reference_mask
-            pair_labels = labels[pair_mask]
-            pair_matrix = _materialize_rows(expression_matrix, pair_mask)
-            try:
-                table = _scanpy_wilcoxon_table(
-                    pair_matrix,
-                    pair_labels,
-                    source=source,
-                    reference=reference,
-                    feature_names=feature_names,
-                )
-            except Exception as exc:
-                result = _empty_result(
-                    "wilcoxon_failed",
-                    method="cell-wilcoxon-pairwise",
-                    n_source=n_source,
-                    n_reference=n_reference,
-                    min_cells=min_cells_eff,
-                    details=str(exc),
-                )
-                payload.setdefault(source, {})[reference] = result
-                payload.setdefault(reference, {})[source] = _invert_wilcoxon_pairwise_result(result)
-                continue
-            result = _format_wilcoxon_result(
-                table,
+    pairwise_tasks = [
+        (source, reference)
+        for source_idx, source in enumerate(pairwise)
+        for reference in pairwise[source_idx + 1 :]
+    ]
+
+    def _compute_pairwise(task: Tuple[str, str]) -> Tuple[str, str, Dict[str, Any], Dict[str, Any]]:
+        source, reference = task
+        source_mask = labels == source
+        reference_mask = labels == reference
+        n_source = int(source_mask.sum())
+        n_reference = int(reference_mask.sum())
+        if n_source < min_cells_eff or n_reference < min_cells_eff:
+            result = _empty_result(
+                "too_few_cells",
                 method="cell-wilcoxon-pairwise",
-                source_mask=source_mask,
-                reference_mask=reference_mask,
-                expression_matrix=expression_matrix,
-                feature_names=feature_names,
-                expression_layer_used=expression_layer_used,
-                p_adjust_method=p_adjust_method,
-                min_pct_expressed=min_pct_expressed,
-                padj_cutoff=padj_cutoff,
-                log2fc_cutoff=log2fc_cutoff,
-                top_n=top_n_per_comparison,
+                n_source=n_source,
+                n_reference=n_reference,
+                min_cells=min_cells_eff,
             )
-            reverse_result = _invert_wilcoxon_pairwise_result(result)
-            payload.setdefault(source, {})[reference] = result
-            payload.setdefault(reference, {})[source] = reverse_result
+            return source, reference, result, _invert_wilcoxon_pairwise_result(result)
+        pair_mask = source_mask | reference_mask
+        pair_labels = labels[pair_mask]
+        pair_matrix = _materialize_rows(expression_matrix, pair_mask)
+        try:
+            table = _scanpy_wilcoxon_table(
+                pair_matrix,
+                pair_labels,
+                source=source,
+                reference=reference,
+                feature_names=feature_names,
+            )
+        except Exception as exc:
+            result = _empty_result(
+                "wilcoxon_failed",
+                method="cell-wilcoxon-pairwise",
+                n_source=n_source,
+                n_reference=n_reference,
+                min_cells=min_cells_eff,
+                details=str(exc),
+            )
+            return source, reference, result, _invert_wilcoxon_pairwise_result(result)
+        result = _format_wilcoxon_result(
+            table,
+            method="cell-wilcoxon-pairwise",
+            source_mask=source_mask,
+            reference_mask=reference_mask,
+            expression_matrix=expression_matrix,
+            feature_names=feature_names,
+            expression_layer_used=expression_layer_used,
+            p_adjust_method=p_adjust_method,
+            min_pct_expressed=min_pct_expressed,
+            padj_cutoff=padj_cutoff,
+            log2fc_cutoff=log2fc_cutoff,
+            top_n=top_n_per_comparison,
+        )
+        return source, reference, result, _invert_wilcoxon_pairwise_result(result)
+
+    for source, reference, result, reverse_result in _run_wilcoxon_tasks(pairwise_tasks, _compute_pairwise, n_cpus_eff):
+        payload.setdefault(source, {})[reference] = result
+        payload.setdefault(reference, {})[source] = reverse_result
 
     if not any(not str(key).startswith("_") for key in payload):
         return None
@@ -924,6 +1587,7 @@ def compute_wilcoxon_interaction_markers(
     p_adjust_method: str = "fdr_bh",
     padj_cutoff: float = 0.05,
     log2fc_cutoff: float = 1,
+    n_cpus: int = 1,
 ) -> Optional[Dict[str, Any]]:
     """Compute contact-conditioned source-cell markers using cell-level Wilcoxon."""
     if annotation_key not in adata.obs.columns:
@@ -951,6 +1615,7 @@ def compute_wilcoxon_interaction_markers(
         return None
 
     payload: Dict[str, Any] = {}
+    tasks: List[Tuple[int, str, int, str, float]] = []
     for source_idx, source_name in enumerate(categories):
         source_local = np.flatnonzero(labels == source_idx)
         if source_local.size < min_cells_eff * 2:
@@ -965,79 +1630,89 @@ def compute_wilcoxon_interaction_markers(
             target_scores.append((float(primary), edge_count, target_idx, target_name))
         target_scores.sort(key=lambda item: (-item[0], -item[1], item[3]))
         for _score, edge_count, target_idx, target_name in target_scores[:top_targets]:
-            target_neighbor_counts = graph[obs_idx[source_local]][:, obs_idx[labels == target_idx]].sum(axis=1)
-            target_neighbor_counts = np.asarray(target_neighbor_counts, dtype=float).ravel()
-            pos_local = source_local[target_neighbor_counts >= min_neighbors_eff]
-            neg_local = source_local[target_neighbor_counts < min_neighbors_eff]
-            n_contact = int(pos_local.size)
-            n_non_contact = int(neg_local.size)
-            target_zscore = _target_zscore_value(neighbor_zscore, source_idx, target_idx)
-            meta = _interaction_meta(
-                target_neighbor_counts=target_neighbor_counts,
-                pos_mask=target_neighbor_counts >= min_neighbors_eff,
-                neg_mask=target_neighbor_counts < min_neighbors_eff,
+            tasks.append((source_idx, source_name, target_idx, target_name, edge_count))
+
+    def _compute_interaction(task: Tuple[int, str, int, str, float]) -> Tuple[str, str, Dict[str, Any]]:
+        source_idx, source_name, target_idx, target_name, edge_count = task
+        source_local = np.flatnonzero(labels == source_idx)
+        target_neighbor_counts = graph[obs_idx[source_local]][:, obs_idx[labels == target_idx]].sum(axis=1)
+        target_neighbor_counts = np.asarray(target_neighbor_counts, dtype=float).ravel()
+        pos_mask = target_neighbor_counts >= min_neighbors_eff
+        neg_mask = target_neighbor_counts < min_neighbors_eff
+        pos_local = source_local[pos_mask]
+        neg_local = source_local[neg_mask]
+        n_contact = int(pos_local.size)
+        n_non_contact = int(neg_local.size)
+        target_zscore = _target_zscore_value(neighbor_zscore, source_idx, target_idx)
+        meta = _interaction_meta(
+            target_neighbor_counts=target_neighbor_counts,
+            pos_mask=pos_mask,
+            neg_mask=neg_mask,
+            n_contact=n_contact,
+            n_non_contact=n_non_contact,
+            edge_count=edge_count,
+            target_zscore=target_zscore,
+        )
+        if n_contact < min_cells_eff or n_non_contact < min_cells_eff:
+            result = _empty_interaction_result(
+                "too_few_cells",
                 n_contact=n_contact,
                 n_non_contact=n_non_contact,
-                edge_count=edge_count,
-                target_zscore=target_zscore,
+                min_cells=min_cells_eff,
+                **meta,
             )
-            if n_contact < min_cells_eff or n_non_contact < min_cells_eff:
-                payload.setdefault(source_name, {})[target_name] = _empty_interaction_result(
-                    "too_few_cells",
-                    n_contact=n_contact,
-                    n_non_contact=n_non_contact,
-                    min_cells=min_cells_eff,
-                    **meta,
-                )
-                continue
-            source_obs_idx = obs_idx[pos_local]
-            reference_obs_idx = obs_idx[neg_local]
-            pair_obs_idx = np.concatenate([source_obs_idx, reference_obs_idx])
-            pair_labels = np.asarray(["contact"] * n_contact + ["non_contact"] * n_non_contact, dtype=object)
-            pair_matrix = expression_matrix[pair_obs_idx]
-            if sp.issparse(pair_matrix):
-                pair_matrix = pair_matrix.copy()
-            else:
-                pair_matrix = np.asarray(pair_matrix, dtype=float)
-            source_mask = np.zeros(int(adata.n_obs), dtype=bool)
-            reference_mask = np.zeros(int(adata.n_obs), dtype=bool)
-            source_mask[source_obs_idx] = True
-            reference_mask[reference_obs_idx] = True
-            try:
-                table = _scanpy_wilcoxon_table(
-                    pair_matrix,
-                    pair_labels,
-                    source="contact",
-                    reference="non_contact",
-                    feature_names=feature_names,
-                )
-                result = _format_wilcoxon_result(
-                    table,
-                    method="cell-wilcoxon-contact",
-                    source_mask=source_mask,
-                    reference_mask=reference_mask,
-                    expression_matrix=expression_matrix,
-                    feature_names=feature_names,
-                    expression_layer_used=expression_layer_used,
-                    p_adjust_method=p_adjust_method,
-                    min_pct_expressed=min_pct_expressed,
-                    padj_cutoff=padj_cutoff,
-                    log2fc_cutoff=log2fc_cutoff,
-                    top_n=top_features,
-                )
-            except Exception as exc:
-                result = _empty_interaction_result(
-                    "wilcoxon_failed",
-                    n_contact=n_contact,
-                    n_non_contact=n_non_contact,
-                    min_cells=min_cells_eff,
-                    details=str(exc),
-                    **meta,
-                )
-            result.update(meta)
-            result["n_contact"] = n_contact
-            result["n_non_contact"] = n_non_contact
-            payload.setdefault(source_name, {})[target_name] = result
+            return source_name, target_name, result
+        source_obs_idx = obs_idx[pos_local]
+        reference_obs_idx = obs_idx[neg_local]
+        pair_obs_idx = np.concatenate([source_obs_idx, reference_obs_idx])
+        pair_labels = np.asarray(["contact"] * n_contact + ["non_contact"] * n_non_contact, dtype=object)
+        pair_matrix = expression_matrix[pair_obs_idx]
+        if sp.issparse(pair_matrix):
+            pair_matrix = pair_matrix.copy()
+        else:
+            pair_matrix = np.asarray(pair_matrix, dtype=float)
+        source_mask = np.zeros(int(adata.n_obs), dtype=bool)
+        reference_mask = np.zeros(int(adata.n_obs), dtype=bool)
+        source_mask[source_obs_idx] = True
+        reference_mask[reference_obs_idx] = True
+        try:
+            table = _scanpy_wilcoxon_table(
+                pair_matrix,
+                pair_labels,
+                source="contact",
+                reference="non_contact",
+                feature_names=feature_names,
+            )
+            result = _format_wilcoxon_result(
+                table,
+                method="cell-wilcoxon-contact",
+                source_mask=source_mask,
+                reference_mask=reference_mask,
+                expression_matrix=expression_matrix,
+                feature_names=feature_names,
+                expression_layer_used=expression_layer_used,
+                p_adjust_method=p_adjust_method,
+                min_pct_expressed=min_pct_expressed,
+                padj_cutoff=padj_cutoff,
+                log2fc_cutoff=log2fc_cutoff,
+                top_n=top_features,
+            )
+        except Exception as exc:
+            result = _empty_interaction_result(
+                "wilcoxon_failed",
+                n_contact=n_contact,
+                n_non_contact=n_non_contact,
+                min_cells=min_cells_eff,
+                details=str(exc),
+                **meta,
+            )
+        result.update(meta)
+        result["n_contact"] = n_contact
+        result["n_non_contact"] = n_non_contact
+        return source_name, target_name, result
+
+    for source_name, target_name, result in _run_wilcoxon_tasks(tasks, _compute_interaction, n_cpus):
+        payload.setdefault(source_name, {})[target_name] = result
 
     if not payload:
         return None

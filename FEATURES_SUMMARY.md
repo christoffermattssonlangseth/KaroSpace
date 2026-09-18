@@ -174,12 +174,11 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 - `Exploration > Compare > Selections` analyzes active lasso/cell selections and is the detailed view behind Selection Find More.
 - `Exploration > Compare > Regions` compares saved region annotations and can run region comparisons similar to selection comparisons.
 - `Exploration > Compare > Annotations` compares categories within the selected annotation using per-cell summaries.
-- `Statistics > Compare > Simple design` displays category-versus-category Wilcoxon results by default and pseudobulk DE when exported.
-- Simple design includes raw tables, markers, MA plots, volcano plots, and, for pseudobulk results, PCA, distance matrix diagnostics, and pathway enrichment.
-- Simple design metrics can be shown as Raw table, Features, and Samples views.
+- `Statistics > Compare > Annotations` displays category-versus-category Wilcoxon results by default and pseudobulk DE when exported.
+- Annotations includes raw tables, markers, MA plots, volcano plots, and, for pseudobulk results, PCA, distance matrix diagnostics, and pathway enrichment.
+- Annotations metrics can be shown as Raw table, Features, and Samples views.
 - Statistics can be exported for selected modalities with `statistics_modalities` / `--statistics-modalities`; the default is the dataset default modality.
-- The Simple design method selector appears when both Wilcoxon and pseudobulk results are exported.
-- `Statistics > Compare > Complex design` is currently visible as an unavailable placeholder while the generic contrast interface is redesigned.
+- The Annotations method selector appears when both Wilcoxon and pseudobulk results are exported.
 - DE features are filtered with `padj < cutoff` and `abs(log2FC) >= cutoff`.
 - Features below the minimum percent-detected threshold in both compared groups are removed before `DeseqStats`, so they do not enter contrast-level multiple-testing correction.
 - Marker lists are ordered by adjusted p-value then log2FC and can expand from the first displayed rows.
@@ -214,7 +213,7 @@ This document summarizes what the generated KaroSpace HTML viewer currently disp
 - Pseudobulk category-versus-category contrasts are extracted from a shared fit per annotation column.
 - Balanced-rest contrasts compare one category against the equally weighted mean of retained other categories.
 - Pairwise PCA and distance diagnostics are generated for selected pseudobulk comparisons.
-- ORA and GSEA are computed after Simple design pseudobulk DE and feed the Pathway Enrichment panel.
+- ORA and GSEA are computed after Annotations pseudobulk DE and feed the Pathway Enrichment panel.
 - Spatially variable features are computed with Moran's I per selected modality for up to `spatial_variable_features_n` variable features on the full input cell set.
 - Category feature means are derived from the selected statistics method and feed per-sample/category distribution panels.
 - Feature correlations are computed from category means for embedded features and feed related-feature suggestions.
