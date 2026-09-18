@@ -197,6 +197,10 @@ def test_statistics_method_selector_runtime_is_available(tmp_path=None):
     assert "function getActiveStatisticsMethod" in html
     assert "statistics-method-select" in html
     assert "const labelFor = (method) => method === 'pseudobulk' ? 'Pseudobulk' : 'Wilcoxon';" in html
+    assert "function renderMarkerCalculationLabel(method)" in html
+    assert "Calculation: <strong>${escapeHtml(label)}</strong>" in html
+    assert "Wilcoxon rank-sum" in html
+    assert "Pseudobulk DESeq2" in html
     assert "activeMethod === 'pseudobulk' ? 'Pseudobulk' : 'Wilcoxon'" in html
 
 
@@ -298,7 +302,10 @@ def test_insights_has_separate_statistics_menu(tmp_path=None):
     assert "compare: ['groups', 'regions', 'selection', 'river']" in html
     assert "statistics: {" in html
     assert "features: ['means', 'de-features', 'spatial']" in html
-    assert "compare: ['cell-de', 'complex-contrast']" in html
+    assert "compare: ['cell-de']" in html
+    assert "'cell-de': 'Annotations'" in html
+    legacy_label = "Simple " + "design"
+    assert legacy_label not in html
     assert "neighbors: ['enrichment', 'interactions', 'dispersion']" in html
     assert "getInsightsModeForLeaf(topLevel, subtab)" in html
     assert ">Per cell<" not in html

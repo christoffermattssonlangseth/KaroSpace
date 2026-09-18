@@ -7,9 +7,7 @@ and metadata for visualization.
 
 import json
 import os
-import re
 from dataclasses import dataclass, field
-from itertools import combinations, product
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
@@ -53,7 +51,7 @@ def normalize_statistics_contrast_categories(
     *,
     option_name: str = "statistics_contrast_categories",
 ) -> Optional[Dict[str, Optional[List[str]]]]:
-    """Normalize optional Simple design category filters by annotation column.
+    """Normalize optional Annotations category filters by annotation column.
 
     A flat category list is only meaningful when a single annotation is analyzed.
     With multiple statistics annotation columns, callers must provide either a
@@ -142,145 +140,6 @@ _SPATIAL_KEY_FALLBACKS = (
     "Spatial",
     "spatialcoords",
 )
-
-# Dormant Complex design support. It is intentionally not exposed through the
-# API or CLI, and no export path invokes it while the feature is in development.
-_PSEUDOBULK_MODEL_FACTOR = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-
-
-def _build_pseudobulk_model_design_audit(
-    obs: pd.DataFrame,
-    formula: Optional[str],
-    pseudobulk_replicate_annotation: Optional[str] = None,
-) -> Optional[Dict[str, Any]]:
-    """Parse a safe categorical DESeq2 design subset and describe its pseudobulk grid."""
-    text = str(formula or "").strip()
-    if not text:
-        return None
-    audit: Dict[str, Any] = {
-        "formula": text,
-        "valid": False,
-        "terms": [],
-        "variables": [],
-        "errors": [],
-        "warnings": [],
-        "sample_count": 0,
-        "design_rank": None,
-        "design_columns": 0,
-        "levels": {},
-        "sample_preview": [],
-        "candidate_contrasts": [],
-        "sample_variables": [],
-        "pseudobulk_replicate_annotation": None,
-    }
-    if not text.startswith("~"):
-        audit["errors"].append("The model must start with '~'.")
-        return audit
-    expression = text[1:].strip()
-    if not expression:
-        audit["errors"].append("The model has no terms after '~'.")
-        return audit
-    if any(token in expression for token in ("(", ")", "|", "-", "/")):
-        audit["errors"].append(
-            "Only categorical main effects and ':' or '*' interactions are supported."
-        )
-        return audit
-
-    terms: List[Tuple[str, ...]] = []
-    for raw_term in (item.strip() for item in expression.split("+")):
-        if not raw_term:
-            audit["errors"].append("Empty model term.")
-            continue
-        separators = "*" if "*" in raw_term else ":"
-        factors = tuple(item.strip() for item in raw_term.split(separators))
-        if not factors or any(not _PSEUDOBULK_MODEL_FACTOR.match(item) for item in factors):
-            audit["errors"].append(f"Unsupported model term '{raw_term}'.")
-            continue
-        expanded = (
-            [combo for size in range(1, len(factors) + 1) for combo in combinations(factors, size)]
-            if separators == "*"
-            else [factors]
-        )
-        for term in expanded:
-            if term not in terms:
-                terms.append(term)
-    if audit["errors"]:
-        return audit
-
-    variables = list(dict.fromkeys(factor for term in terms for factor in term))
-    audit["terms"] = [":".join(term) for term in terms]
-    audit["variables"] = variables
-    missing = [factor for factor in variables if factor not in obs.columns]
-    if missing:
-        audit["errors"].append("Unknown obs annotation(s): " + ", ".join(missing) + ".")
-        return audit
-    numeric = [factor for factor in variables if pd.api.types.is_numeric_dtype(obs[factor])]
-    if numeric:
-        audit["errors"].append(
-            "Numeric covariates are not supported in Complex design yet: " + ", ".join(numeric) + "."
-        )
-        return audit
-
-    replicate = str(pseudobulk_replicate_annotation or "").strip()
-    if replicate and replicate not in obs.columns:
-        audit["errors"].append(
-            f"Pseudobulk replicate annotation '{replicate}' is not an obs annotation."
-        )
-        return audit
-    sample_variables = list(variables)
-    if replicate and replicate not in sample_variables:
-        sample_variables.insert(0, replicate)
-    audit["sample_variables"] = sample_variables
-    audit["pseudobulk_replicate_annotation"] = replicate or None
-
-    model_obs = obs[sample_variables].dropna().copy()
-    if model_obs.empty:
-        audit["errors"].append("No cells have complete values for every model annotation.")
-        return audit
-    for factor in variables:
-        model_obs[factor] = model_obs[factor].astype(str)
-    levels = {factor: sorted(model_obs[factor].unique().tolist()) for factor in variables}
-    audit["levels"] = levels
-    single_level = [factor for factor, values in levels.items() if len(values) < 2]
-    if single_level:
-        audit["errors"].append("Annotation(s) have fewer than two levels: " + ", ".join(single_level) + ".")
-        return audit
-
-    grouped = model_obs.groupby(sample_variables, observed=True, sort=True).size().reset_index(name="n_cells")
-    audit["sample_count"] = int(len(grouped))
-    audit["sample_preview"] = [
-        {"values": {factor: str(row[factor]) for factor in sample_variables}, "n_cells": int(row["n_cells"])}
-        for _, row in grouped.head(200).iterrows()
-    ]
-    if len(grouped) > 200:
-        audit["warnings"].append("Only the first 200 pseudobulk samples are shown in the balance preview.")
-
-    basis: Dict[str, np.ndarray] = {}
-    for factor in variables:
-        one_hot = pd.get_dummies(grouped[factor], drop_first=True, dtype=float).to_numpy(dtype=float)
-        basis[factor] = one_hot
-    columns = [np.ones(len(grouped), dtype=float)]
-    for term in terms:
-        arrays = [basis[factor] for factor in term]
-        if any(array.shape[1] == 0 for array in arrays):
-            continue
-        for chosen in product(*(range(array.shape[1]) for array in arrays)):
-            value = np.ones(len(grouped), dtype=float)
-            for array, index in zip(arrays, chosen):
-                value *= array[:, index]
-            columns.append(value)
-    matrix = np.column_stack(columns)
-    audit["design_columns"] = int(matrix.shape[1])
-    audit["design_rank"] = int(np.linalg.matrix_rank(matrix))
-    if audit["design_rank"] < audit["design_columns"]:
-        audit["errors"].append(
-            "The design is rank-deficient: one or more model effects are confounded."
-        )
-        return audit
-    audit["candidate_contrasts"] = [":".join(term) for term in terms if len(term) > 1]
-    audit["valid"] = True
-    return audit
-
 
 def _rgb_nums_to_hex(nums) -> Optional[str]:
     """Convert a 3/4-number RGB(A) sequence to a ``#RRGGBB`` hex string.
@@ -1749,6 +1608,8 @@ class SpatialDataset:
         statistics_additional_annotations: Optional[List[str]] = None,
         statistics_modalities: Optional[Sequence[str]] = None,
         wilcoxon_de_annotations: Optional[List[str]] = None,
+        wilcoxon: str = "auto",
+        wilcoxon_runtime_limit: Any = "00:30:00",
         wilcoxon_layer: Optional[str] = None,
         wilcoxon_min_cells_per_group: int = 20,
         wilcoxon_min_pct_expressed: float = 0.0,
@@ -1773,7 +1634,7 @@ class SpatialDataset:
         pseudobulk_padj_cutoff: float = 0.05,
         pseudobulk_log2fc_cutoff: float = 1,
         pseudobulk_deseq2_fit_type: str = "parametric",
-        pseudobulk_n_cpus: int = 1,
+        statistics_n_cpus: int = 1,
         pseudobulk_embed_top_n_per_comparison: int = 2,
         interaction_marker_annotations: Optional[List[str]] = None,
         neighbor_stats_annotations: Optional[List[str]] = None,
@@ -1824,7 +1685,7 @@ class SpatialDataset:
             Obs annotation used as the biological replicate for pseudobulk analyses.
             Defaults to the dataset section_key annotation.
         statistics_contrast_categories : list or dict, optional
-            Categories to include in Simple design category-versus-category
+            Categories to include in Annotations category-versus-category
             contrasts. Use a flat list only when one annotation is analyzed.
             With multiple statistics annotation columns, pass a dict keyed by
             annotation name or a nested list matching the annotation order. All
@@ -1871,9 +1732,9 @@ class SpatialDataset:
             Absolute log2 fold-change cutoff used by the viewer volcano/table.
         pseudobulk_deseq2_fit_type : str
             PyDESeq2 dispersion trend fit type, "parametric" or "mean".
-        pseudobulk_n_cpus : int
-            Number of CPU workers used for the shared PyDESeq2 fit and the
-            maximum number of parallel shared-fit contrasts. Must be at least
+        statistics_n_cpus : int
+            Number of CPU workers used for Wilcoxon comparisons, the shared
+            PyDESeq2 fit, and parallel shared-fit contrasts. Must be at least
             one.
         pseudobulk_embed_top_n_per_comparison : int
             Maximum significant DE features to auto-embed per category or contact
@@ -2078,6 +1939,9 @@ class SpatialDataset:
             raise ValueError("statistics_min_feature_counts must be >= 0")
         if int(pseudobulk_min_cells_per_pseudobulk) < 1:
             raise ValueError("pseudobulk_min_cells_per_pseudobulk must be >= 1")
+        effective_statistics_n_cpus = int(statistics_n_cpus)
+        if effective_statistics_n_cpus < 1:
+            raise ValueError("statistics_n_cpus must be >= 1")
         if int(pseudobulk_embed_top_n_per_comparison) < 0:
             raise ValueError("pseudobulk_embed_top_n_per_comparison must be >= 0")
         if int(interaction_markers_top_targets) < 1:
@@ -2784,6 +2648,7 @@ class SpatialDataset:
             statistics_contrast_categories,
             simple_contrast_annotation_columns,
         )
+        requested_interaction_marker_annotations = list(interaction_marker_annotations or [])
         wilcoxon_expression_by_modality: Dict[str, Tuple[Any, str]] = {}
         distribution_expression_by_modality: Dict[str, Tuple[Any, str]] = {}
 
@@ -2836,11 +2701,188 @@ class SpatialDataset:
 
         statistics_min_cell_counts_n = int(statistics_min_cell_counts)
         statistics_min_feature_counts_n = int(statistics_min_feature_counts)
+        statistics_n_cpus_n = max(1, effective_statistics_n_cpus)
+        from .wilcoxon import (
+            apply_wilcoxon_runtime_calibration,
+            calibrate_wilcoxon_runtime,
+            decide_wilcoxon_runtime,
+            estimate_wilcoxon_group_workload,
+            estimate_wilcoxon_interaction_workload,
+            format_wilcoxon_runtime,
+            normalize_wilcoxon_mode,
+            parse_wilcoxon_runtime_limit,
+            wilcoxon_runtime_decision_log_lines,
+        )
+
+        wilcoxon_mode_n = normalize_wilcoxon_mode(wilcoxon)
+        wilcoxon_runtime_limit_seconds = parse_wilcoxon_runtime_limit(wilcoxon_runtime_limit)
+        wilcoxon_runtime_decision: Dict[str, Any] = {
+            "mode": wilcoxon_mode_n,
+            "should_run": True,
+            "reason": "No Wilcoxon work planned.",
+            "estimated_seconds": 0.0,
+            "runtime_limit_seconds": float(wilcoxon_runtime_limit_seconds),
+            "estimated_by_kind": {},
+            "n_cpus": statistics_n_cpus_n,
+            "items": [],
+        }
+        wilcoxon_work_requested = bool(
+            requested_wilcoxon_de_annotations or requested_interaction_marker_annotations
+        )
+        if wilcoxon_work_requested:
+            if wilcoxon_mode_n == "off":
+                wilcoxon_runtime_decision = decide_wilcoxon_runtime(
+                    wilcoxon_mode_n,
+                    wilcoxon_runtime_limit_seconds,
+                    [],
+                    n_cpus=statistics_n_cpus_n,
+                )
+                log_step("Wilcoxon runtime preflight: disabled.")
+                log_detail("mode=off; skipping category and interaction Wilcoxon calculations.", level=1)
+            else:
+                log_step("Wilcoxon runtime preflight.")
+                log_detail(f"mode={wilcoxon_mode_n}", level=1)
+                log_detail(
+                    f"runtime_limit={format_wilcoxon_runtime(wilcoxon_runtime_limit_seconds)}",
+                    level=1,
+                )
+                log_detail("work_unit_model=cells * log2(cells) * features per Wilcoxon comparison", level=1)
+                estimated_items: List[Dict[str, Any]] = []
+                calibration_failed = False
+                for modality_name in statistics_modality_names:
+                    analysis_adata = _adata_for_statistics_modality(modality_name)
+                    wilcoxon_expression_matrix, wilcoxon_expression_layer_used = (
+                        _prepare_wilcoxon_expression_for_modality(modality_name, analysis_adata)
+                    )
+                    raw_items: List[Dict[str, Any]] = []
+                    if requested_wilcoxon_de_annotations:
+                        statistics_filter_counts_matrix, _statistics_filter_counts_source = (
+                            _prepare_statistics_filter_counts_for_modality(modality_name, analysis_adata)
+                        )
+                        for annotation_key in requested_wilcoxon_de_annotations:
+                            annotation_pairwise_categories = (
+                                statistics_contrast_categories_by_annotation.get(annotation_key)
+                                if statistics_contrast_categories_by_annotation
+                                else None
+                            )
+                            raw_items.extend(
+                                estimate_wilcoxon_group_workload(
+                                    analysis_adata,
+                                    annotation_key,
+                                    expression_matrix=wilcoxon_expression_matrix,
+                                    filter_expression_matrix=statistics_filter_counts_matrix,
+                                    pairwise_categories=annotation_pairwise_categories,
+                                    min_cell_counts=statistics_min_cell_counts_n,
+                                    min_feature_counts=statistics_min_feature_counts_n,
+                                    min_cells=wilcoxon_min_cells_per_group,
+                                )
+                            )
+                    if requested_interaction_marker_annotations:
+                        for annotation_key in requested_interaction_marker_annotations:
+                            raw_items.extend(
+                                estimate_wilcoxon_interaction_workload(
+                                    analysis_adata,
+                                    annotation_key,
+                                    expression_matrix=wilcoxon_expression_matrix,
+                                    top_targets=interaction_markers_top_targets,
+                                    min_cells=interaction_markers_min_cells,
+                                )
+                            )
+                    raw_work_units = sum(float(item.get("work_units") or 0.0) for item in raw_items)
+                    raw_comparisons = sum(int(item.get("comparison_count") or 0) for item in raw_items)
+                    log_detail(
+                        "preflight_modality="
+                        f"{modality_name}; expression_source={wilcoxon_expression_layer_used}; "
+                        f"planned_comparisons={raw_comparisons}; work_units={raw_work_units:.3g}",
+                        level=1,
+                    )
+                    for item in raw_items:
+                        log_detail(
+                            "planned_wilcoxon="
+                            f"{item.get('kind')}; annotation={item.get('annotation')}; "
+                            f"comparisons={item.get('comparison_count')}; "
+                            f"cells={item.get('cell_count')}; features={item.get('feature_count')}; "
+                            f"work_units={float(item.get('work_units') or 0.0):.3g}",
+                            level=2,
+                        )
+                    if not raw_items:
+                        continue
+                    if wilcoxon_mode_n == "auto":
+                        try:
+                            calibration = calibrate_wilcoxon_runtime(
+                                wilcoxon_expression_matrix,
+                                random_state=0,
+                            )
+                            log_detail(
+                                "runtime_calibration="
+                                f"{modality_name}; sample_cells={calibration.get('sample_cells')}; "
+                                f"sample_features={calibration.get('sample_features')}; "
+                                f"sample_nnz={calibration.get('sample_nnz')}; "
+                                f"sample_zero_fraction={float(calibration.get('sample_zero_fraction') or 0.0):.3f}; "
+                                f"samples={len(calibration.get('calibration_samples') or [])}; "
+                                f"total_elapsed={float(calibration.get('calibration_total_elapsed_seconds') or 0.0):.3f}s; "
+                                f"includes_formatting={bool(calibration.get('calibration_includes_formatting'))}; "
+                                f"intercept={float(calibration.get('intercept_seconds') or 0.0):.6g}s; "
+                                "seconds_per_work_unit="
+                                f"{float(calibration.get('seconds_per_work_unit') or 0.0):.6g}; "
+                                f"safety_multiplier={float(calibration.get('safety_multiplier') or 1.0):.3g}",
+                                level=1,
+                            )
+                            estimated_items.extend(
+                                apply_wilcoxon_runtime_calibration(
+                                    raw_items,
+                                    calibration,
+                                    modality=modality_name,
+                                    n_cpus=statistics_n_cpus_n,
+                                )
+                            )
+                        except Exception as exc:
+                            calibration_failed = True
+                            log_warning(
+                                f"Wilcoxon runtime calibration failed for modality {modality_name} ({exc}); "
+                                "running Wilcoxon because no reliable runtime estimate is available.",
+                                level=2,
+                            )
+                    else:
+                        estimated_items.extend(
+                            {
+                                **item,
+                                "modality": modality_name,
+                                "estimated_seconds": 0.0,
+                            }
+                            for item in raw_items
+                        )
+                if calibration_failed and wilcoxon_mode_n == "auto":
+                    wilcoxon_runtime_decision = {
+                        "mode": wilcoxon_mode_n,
+                        "should_run": True,
+                        "reason": "Wilcoxon auto runtime calibration failed; running because no reliable full estimate is available.",
+                        "estimated_seconds": float(
+                            sum(float(item.get("estimated_seconds") or 0.0) for item in estimated_items)
+                        ),
+                        "runtime_limit_seconds": float(wilcoxon_runtime_limit_seconds),
+                        "estimated_by_kind": {},
+                        "n_cpus": statistics_n_cpus_n,
+                        "items": list(estimated_items),
+                    }
+                else:
+                    wilcoxon_runtime_decision = decide_wilcoxon_runtime(
+                        wilcoxon_mode_n,
+                        wilcoxon_runtime_limit_seconds,
+                        estimated_items,
+                        n_cpus=statistics_n_cpus_n,
+                    )
+                for line_kind, line_level, line in wilcoxon_runtime_decision_log_lines(wilcoxon_runtime_decision):
+                    if line_kind == "step":
+                        log_step(line, level=line_level)
+                    else:
+                        log_detail(line, level=line_level)
+        wilcoxon_runtime_should_run = bool(wilcoxon_runtime_decision.get("should_run", True))
 
         wilcoxon_de_by_modality: Dict[str, Dict[str, Any]] = {
             modality_name: {} for modality_name in statistics_modality_names
         }
-        if requested_wilcoxon_de_annotations:
+        if requested_wilcoxon_de_annotations and wilcoxon_runtime_should_run:
             from .wilcoxon import compute_wilcoxon_group_de
 
             wilcoxon_min_cells_n = int(wilcoxon_min_cells_per_group)
@@ -2897,6 +2939,7 @@ class SpatialDataset:
                     log_detail(f"log2fc_cutoff={wilcoxon_log2fc_cutoff_n:g}", level=3)
                     log_detail(f"top_n_per_comparison={wilcoxon_top_n}", level=3)
                     log_detail(f"embed_top_n_per_comparison={int(wilcoxon_embed_top_n_per_comparison)}", level=3)
+                    log_detail(f"n_cpus={statistics_n_cpus_n}", level=3)
                     log_detail(f"reported_pairwise_categories={pairwise_categories_label}", level=3)
                     annotation_results = compute_wilcoxon_group_de(
                         analysis_adata,
@@ -2917,6 +2960,7 @@ class SpatialDataset:
                         padj_cutoff=wilcoxon_padj_cutoff_n,
                         log2fc_cutoff=wilcoxon_log2fc_cutoff_n,
                         top_n_per_comparison=wilcoxon_top_n,
+                        n_cpus=statistics_n_cpus_n,
                     )
                     if annotation_results:
                         category_count, comparison_count, available_comparison_count, reported_feature_count = (
@@ -2962,6 +3006,9 @@ class SpatialDataset:
                             level=2,
                         )
                 wilcoxon_de_by_modality[modality_name] = modality_wilcoxon_de
+        elif requested_wilcoxon_de_annotations:
+            log_step("Skipping Wilcoxon marker statistics.")
+            log_detail(str(wilcoxon_runtime_decision.get("reason") or ""), level=1)
         pseudobulk_de_by_modality: Dict[str, Dict[str, Any]] = {
             modality_name: {} for modality_name in statistics_modality_names
         }
@@ -2972,8 +3019,6 @@ class SpatialDataset:
             pseudobulk_min_pct_n = float(pseudobulk_min_pct_expressed)
             pseudobulk_padj_cutoff_n = float(pseudobulk_padj_cutoff)
             pseudobulk_log2fc_cutoff_n = float(pseudobulk_log2fc_cutoff)
-            pseudobulk_n_cpus_n = max(1, int(pseudobulk_n_cpus))
-
             from .pseudobulk import compute_pseudobulk_group_de, compute_pseudobulk_sample_metadata_de
 
             section_metadata_columns = set(self.section_metadata or [])
@@ -3078,7 +3123,7 @@ class SpatialDataset:
                     log_detail(f"padj_cutoff={pseudobulk_padj_cutoff_n:g}", level=3)
                     log_detail(f"log2fc_cutoff={pseudobulk_log2fc_cutoff_n:g}", level=3)
                     log_detail(f"fit_type={pseudobulk_deseq2_fit_type}", level=3)
-                    log_detail(f"n_cpus={pseudobulk_n_cpus_n}", level=3)
+                    log_detail(f"n_cpus={statistics_n_cpus_n}", level=3)
                     log_detail("diagnostics=pairwise", level=3)
                     log_detail(f"reported_pairwise_categories={pairwise_categories_label}", level=3)
                     log_detail(
@@ -3106,7 +3151,7 @@ class SpatialDataset:
                         padj_cutoff=pseudobulk_padj_cutoff_n,
                         log2fc_cutoff=pseudobulk_log2fc_cutoff_n,
                         fit_type=pseudobulk_deseq2_fit_type,
-                        n_cpus=max(1, int(pseudobulk_n_cpus)),
+                        n_cpus=statistics_n_cpus_n,
                     )
                     if annotation_results:
                         embedded_feature_count = len(
@@ -3186,12 +3231,11 @@ class SpatialDataset:
 
         # Compute contact-conditioned interaction markers:
         # for source S and target T, compare source cells contacting T vs source cells not contacting T.
-        requested_interaction_marker_annotations = list(interaction_marker_annotations or [])
         interaction_markers_by_modality: Dict[str, Dict[str, Any]] = {
             modality_name: {} for modality_name in statistics_modality_names
         }
         companion_interaction_markers = companion_analytics.get("interaction_markers")
-        if neighbor_graph is not None and requested_interaction_marker_annotations:
+        if neighbor_graph is not None and requested_interaction_marker_annotations and wilcoxon_runtime_should_run:
             top_targets = int(interaction_markers_top_targets)
             top_features = int(interaction_markers_top_features)
             min_cells = int(interaction_markers_min_cells)
@@ -3256,6 +3300,7 @@ class SpatialDataset:
                     log_detail(f"p_adjust={wilcoxon_p_adjust_method}", level=3)
                     log_detail(f"padj_cutoff={float(wilcoxon_padj_cutoff):g}", level=3)
                     log_detail(f"log2fc_cutoff={float(wilcoxon_log2fc_cutoff):g}", level=3)
+                    log_detail(f"n_cpus={statistics_n_cpus_n}", level=3)
                     if annotation_key not in neighbor_stats_context:
                         companion_neighbor_entry = None
                         if isinstance(companion_neighbor_stats, dict):
@@ -3311,11 +3356,15 @@ class SpatialDataset:
                         p_adjust_method=wilcoxon_p_adjust_method,
                         padj_cutoff=wilcoxon_padj_cutoff,
                         log2fc_cutoff=wilcoxon_log2fc_cutoff,
+                        n_cpus=statistics_n_cpus_n,
                     )
                     if group_interactions:
                         modality_interaction_markers[annotation_key] = group_interactions
 
                 interaction_markers_by_modality[modality_name] = modality_interaction_markers
+        elif neighbor_graph is not None and requested_interaction_marker_annotations:
+            log_step("Skipping contact-conditioned Wilcoxon interaction markers.")
+            log_detail(str(wilcoxon_runtime_decision.get("reason") or ""), level=1)
 
         interaction_markers = (
             dict(interaction_markers_by_modality.get(primary_statistics_modality, {}))
@@ -3796,7 +3845,7 @@ class SpatialDataset:
                 "min_cell_counts": int(statistics_min_cell_counts),
                 "min_feature_counts": int(statistics_min_feature_counts),
                 "min_cells_per_pseudobulk": int(pseudobulk_min_cells_per_pseudobulk),
-                "n_cpus": max(1, int(pseudobulk_n_cpus)),
+                "n_cpus": statistics_n_cpus_n,
                 "diagnostics": "pairwise",
                 "p_adjust_method": str(pseudobulk_p_adjust_method or "fdr_bh"),
                 "min_pct_expressed": float(pseudobulk_min_pct_expressed),
@@ -3815,8 +3864,12 @@ class SpatialDataset:
             "wilcoxon_settings": {
                 "modalities": list(statistics_modality_names),
                 "primary_modality": primary_statistics_modality,
+                "mode": wilcoxon_mode_n,
+                "runtime_limit_seconds": float(wilcoxon_runtime_limit_seconds),
+                "runtime_decision": wilcoxon_runtime_decision,
                 "expression_layer": wilcoxon_layer or "auto(normalized,raw_log1p)",
                 "count_filter_layer": statistics_counts_layer or "X",
+                "n_cpus": statistics_n_cpus_n,
                 "min_cell_counts": int(statistics_min_cell_counts),
                 "min_feature_counts": int(statistics_min_feature_counts),
                 "min_cells_per_group": int(wilcoxon_min_cells_per_group),

@@ -36,8 +36,7 @@ branch once the blockers below are resolved.
    confirm cluster-DE and dispersion are deliberately dropped.
 
 **Nits:**
-6. `compute_pseudobulk_complex_design_de` is dead code ("no supported caller").
-7. `pydeseq2` has no upper pin but relies on private internals (see inline).
+6. `pydeseq2` has no upper pin but relies on private internals (see inline).
 
 Happy to pair on the integration-branch plan and on porting the tests.
 
@@ -60,10 +59,6 @@ Happy to pair on the integration-branch plan and on porting the tests.
 > attributes. That's reverse-engineered PyDESeq2 internals and will likely break
 > on a PyDESeq2 upgrade. Since `pydeseq2>=0.5.0` allows arbitrary newer versions,
 > please add an upper bound (e.g. `>=0.5.0,<0.6`) or use a supported public API.
-
-### karospace/pseudobulk.py : 857  (compute_pseudobulk_complex_design_de)
-> Flagged "no supported caller" at line 780 and unused. ~220 lines of dead code —
-> remove it, or gate behind an explicit experimental flag rather than shipping it.
 
 ### karospace/pathways.py : 89  (_load_reactome_from_gseapy → gp.get_library)
 > `gp.get_library(...)` hits Enrichr over the network at export time. This makes
