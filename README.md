@@ -378,6 +378,9 @@ CLI value conventions:
 | `--statistics-normalized-layer` | Pre-normalized AnnData layer to use directly for Distribution display values. Use `off` to disable. When set, Distribution ignores `--statistics-counts-layer`, `--statistics-normalization`, and `--statistics-scale-factor`; pseudobulk DE still uses `--statistics-counts-layer` | `off` |
 | `--statistics-min-cell-counts` | Exclude cells with fewer than this many total raw counts before Wilcoxon and pseudobulk statistics; use `0` to disable | `0` |
 | `--statistics-min-feature-counts` | Exclude features with fewer than this many total raw counts before Wilcoxon and pseudobulk statistics; use `0` to disable | `0` |
+| `--statistics-n-cpus` | CPU workers for Wilcoxon comparisons, the shared DESeq2 fit, and parallel shared-fit contrasts | `1` |
+| `--wilcoxon` | Cell-level Wilcoxon mode: `auto` estimates total runtime and skips all Wilcoxon calculations when above `--wilcoxon-runtime-limit`; `off` disables Wilcoxon; `force` runs regardless of the estimate | `auto` |
+| `--wilcoxon-runtime-limit` | Runtime budget for `--wilcoxon auto`, formatted as `HH:MM:SS` or seconds. Compared against the summed predicted runtime for category-vs-rest, category-vs-category, and interaction Wilcoxon tests | `00:30:00` |
 | `--wilcoxon-min-cells-per-group` | Minimum cells required in each category for Wilcoxon marker statistics | `20` |
 | `--wilcoxon-min-pct-expressed` | Minimum fraction of cells with nonzero feature values required in at least one compared group before Wilcoxon results are reported | `0` |
 | `--wilcoxon-p-adjust-method` | Multiple-testing correction method for Wilcoxon p-values (`fdr_bh`, `bonferroni`, `holm`, `none`) | `fdr_bh` |
@@ -394,7 +397,6 @@ CLI value conventions:
 | `--pseudobulk-padj-cutoff` | Adjusted p-value threshold for DE calls and plot coloring; DE features must pass `padj < cutoff` | `0.05` |
 | `--pseudobulk-log2fc-cutoff` | Absolute log2FC cutoff for volcano highlighting and DE table inclusion | `1` |
 | `--pseudobulk-deseq2-fit-type` | PyDESeq2 dispersion trend fit type; use `mean` to avoid parametric trend fallback warnings | `parametric` |
-| `--pseudobulk-n-cpus` | CPU workers for the shared DESeq2 fit and maximum parallel shared-fit contrasts | `1` |
 | `--pseudobulk-embed-top-n-per-comparison` | Significant DE features to auto-embed per category/contact comparison in embedded mode; ignored by sidecar mode because feature vectors are sidecar-loaded | `2` |
 
 ##### Pathway enrichment
@@ -402,7 +404,7 @@ CLI value conventions:
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--pathway` | Pathway enrichment mode (`auto`, `off`) | `auto` |
-| `--pathway-gmt` | GMT pathway file(s) for ORA/GSEA after Simple design DE; omitted uses cached/default Reactome when available, then falls back to GSEApy/Enrichr | Reactome |
+| `--pathway-gmt` | GMT pathway file(s) for ORA/GSEA after Annotations DE; omitted uses cached/default Reactome when available, then falls back to GSEApy/Enrichr | Reactome |
 | `--pathway-organism` | Organism used for default Reactome loading, e.g. `Human` or `Mouse` | `Mouse` |
 | `--pathway-top-n` | Maximum ORA/GSEA pathways stored per direction and comparison | `10` |
 | `--pathway-min-overlap` | Minimum pathway/query feature overlap for ORA/GSEA reporting | `3` |
@@ -499,7 +501,7 @@ Pathway enrichment is feature-supported only. It is computed for RNA-like modali
 
 ### Default Wilcoxon marker statistics
 
-Cell-level Wilcoxon marker statistics are computed by default for `main_cell_annotation` plus `statistics_additional_annotations` / `--statistics-additional-annotations`, and are shown in `Insights → Statistics → Features` and `Insights → Statistics → Compare → Simple design`. KaroSpace uses `layers["normalized"]` when present; otherwise it copies raw expression values from `layers["counts"]` when present, falling back to `adata.X`, and applies `scanpy.pp.normalize_total(target_sum=10000)` plus `scanpy.pp.log1p` before `rank_genes_groups`. Wilcoxon marker features are now the default source for automatic feature embedding and marker suggestions.
+Cell-level Wilcoxon marker statistics are computed by default for `main_cell_annotation` plus `statistics_additional_annotations` / `--statistics-additional-annotations`, and are shown in `Insights → Statistics → Features` and `Insights → Statistics → Compare → Annotations`. KaroSpace uses `layers["normalized"]` when present; otherwise it copies raw expression values from `layers["counts"]` when present, falling back to `adata.X`, and applies `scanpy.pp.normalize_total(target_sum=10000)` plus `scanpy.pp.log1p` before `rank_genes_groups`. Wilcoxon marker features are now the default source for automatic feature embedding and marker suggestions.
 
 Use `statistics_modalities=["rna", "protein"]` in Python or `--statistics-modalities rna,protein` on the CLI to run Wilcoxon statistics, optional pseudobulk, and interaction markers on selected modalities, or use `all` for every detected modality.
 
@@ -507,9 +509,9 @@ Distribution display values use `--statistics-counts-layer counts` with `--stati
 
 ### Optional pseudobulk category selection
 
-Pseudobulk category DE is now a secondary analysis. It runs only with `pseudobulk="auto"` in Python or `--pseudobulk auto` on the CLI, and is shown alongside Wilcoxon results in `Insights → Statistics → Compare → Simple design` when available. KaroSpace first removes cells below `statistics_min_cell_counts` / `--statistics-min-cell-counts`, removes features below `statistics_min_feature_counts` / `--statistics-min-feature-counts`, then removes replicate × annotation pseudobulk samples with fewer than `pseudobulk_min_cells_per_pseudobulk` / `--pseudobulk-min-cells-per-pseudobulk` cells before calculating pseudobulk Distribution means. DESeq2 then applies `pseudobulk_min_replicates` / `--pseudobulk-min-replicates`, fits one shared `~ replicate + annotation` model per annotation column, and extracts category-versus-category contrasts. It also extracts a balanced-rest contrast for every category: the category minus the equally weighted mean of all other retained annotation categories.
+Pseudobulk category DE is now a secondary analysis. It runs only with `pseudobulk="auto"` in Python or `--pseudobulk auto` on the CLI, and is shown alongside Wilcoxon results in `Insights → Statistics → Compare → Annotations` when available. KaroSpace first removes cells below `statistics_min_cell_counts` / `--statistics-min-cell-counts`, removes features below `statistics_min_feature_counts` / `--statistics-min-feature-counts`, then removes replicate × annotation pseudobulk samples with fewer than `pseudobulk_min_cells_per_pseudobulk` / `--pseudobulk-min-cells-per-pseudobulk` cells before calculating pseudobulk Distribution means. DESeq2 then applies `pseudobulk_min_replicates` / `--pseudobulk-min-replicates`, fits one shared `~ replicate + annotation` model per annotation column, and extracts category-versus-category contrasts. It also extracts a balanced-rest contrast for every category: the category minus the equally weighted mean of all other retained annotation categories.
 
-When both Wilcoxon and pseudobulk are exported, `Insights → Statistics → Features → Markers`, `Features → Distribution`, and `Compare → Simple design` include a method selector. Pathway enrichment is computed only from pseudobulk DE results; when pseudobulk is off, pathway enrichment is skipped with a warning and Wilcoxon-ranked features are not used for pathways.
+When both Wilcoxon and pseudobulk are exported, `Insights → Statistics → Features → Markers`, `Features → Distribution`, and `Compare → Annotations` include a method selector. Pathway enrichment is computed only from pseudobulk DE results; when pseudobulk is off, pathway enrichment is skipped with a warning and Wilcoxon-ranked features are not used for pathways.
 
 When selecting specific pairwise categories from the command line, wrap listed values in single quotes:
 

@@ -342,7 +342,7 @@ def _run_export_cli(argv=None):
         type=str,
         default="",
         help=(
-            "Categories to include in Simple design category-versus-category contrasts. "
+            "Categories to include in Annotations category-versus-category contrasts. "
             "Use comma-separated categories only with one statistics annotation. With "
             "--statistics-additional-annotations, use a JSON object keyed by annotation "
             "or a nested JSON list in order [main-cell-annotation, additional...], e.g. "
@@ -387,6 +387,26 @@ def _run_export_cli(argv=None):
             "Use 'off' to disable. When set, Distribution ignores --statistics-counts-layer, "
             "--statistics-normalization, and --statistics-scale-factor. Pseudobulk DE still "
             "uses --statistics-counts-layer. (default: off)"
+        ),
+    )
+    statistics_args.add_argument(
+        "--wilcoxon",
+        choices=["auto", "off", "force"],
+        default="auto",
+        help=(
+            "Cell-level Wilcoxon mode: auto estimates total runtime and skips when above "
+            "--wilcoxon-runtime-limit, off disables all Wilcoxon calculations, force runs "
+            "regardless of the runtime estimate. (default: auto)"
+        ),
+    )
+    statistics_args.add_argument(
+        "--wilcoxon-runtime-limit",
+        type=str,
+        default="00:30:00",
+        help=(
+            "Runtime budget for --wilcoxon auto in HH:MM:SS, or seconds. If the summed "
+            "predicted runtime for all planned Wilcoxon tests is above this limit, "
+            "Wilcoxon is skipped. (default: 00:30:00)"
         ),
     )
     statistics_args.add_argument(
@@ -481,11 +501,12 @@ def _run_export_cli(argv=None):
         ),
     )
     statistics_args.add_argument(
-        "--pseudobulk-n-cpus",
+        "--statistics-n-cpus",
+        dest="statistics_n_cpus",
         type=int,
         default=1,
         help=(
-            "CPU workers used for the shared PyDESeq2 fit and as the maximum number of "
+            "CPU workers used for Wilcoxon comparisons, the shared PyDESeq2 fit, and "
             "parallel shared-fit contrasts. (default: 1)"
         ),
     )
@@ -548,7 +569,7 @@ def _run_export_cli(argv=None):
         type=str,
         default="",
         help=(
-            "Comma-separated GMT pathway files for ORA/GSEA after Simple design pseudobulk DE. "
+            "Comma-separated GMT pathway files for ORA/GSEA after Annotations pseudobulk DE. "
             "When omitted, KaroSpace uses a cached/default Reactome GMT when available, "
             "then falls back to GSEApy/Enrichr."
         ),
@@ -671,8 +692,8 @@ def _run_export_cli(argv=None):
         parser.error("--statistics-min-cell-counts must be >= 0")
     if args.statistics_min_feature_counts < 0:
         parser.error("--statistics-min-feature-counts must be >= 0")
-    if args.pseudobulk_n_cpus < 1:
-        parser.error("--pseudobulk-n-cpus must be >= 1")
+    if args.statistics_n_cpus < 1:
+        parser.error("--statistics-n-cpus must be >= 1")
     if args.pseudobulk_embed_top_n_per_comparison < 0:
         parser.error("--pseudobulk-embed-top-n-per-comparison must be >= 0")
     if args.wilcoxon_min_cells_per_group < 1:
@@ -681,6 +702,13 @@ def _run_export_cli(argv=None):
         parser.error("--wilcoxon-embed-top-n-per-comparison must be >= 0")
     if args.wilcoxon_top_n_per_category < 1:
         parser.error("--wilcoxon-top-n-per-category must be >= 1")
+    from .wilcoxon import normalize_wilcoxon_mode, parse_wilcoxon_runtime_limit
+
+    try:
+        wilcoxon_mode = normalize_wilcoxon_mode(args.wilcoxon)
+        wilcoxon_runtime_limit_seconds = parse_wilcoxon_runtime_limit(args.wilcoxon_runtime_limit)
+    except ValueError as exc:
+        parser.error(str(exc))
     if args.pathway_top_n < 1:
         parser.error("--pathway-top-n must be >= 1")
     if args.pathway_min_overlap < 1:
@@ -932,6 +960,8 @@ def _run_export_cli(argv=None):
         feature_sparse_zero_threshold=args.feature_sparse_zero_threshold,
         statistics_additional_annotations=statistics_additional_annotations,
         statistics_modalities=statistics_modalities,
+        wilcoxon=wilcoxon_mode,
+        wilcoxon_runtime_limit=wilcoxon_runtime_limit_seconds,
         wilcoxon_min_cells_per_group=args.wilcoxon_min_cells_per_group,
         wilcoxon_min_pct_expressed=args.wilcoxon_min_pct_expressed,
         wilcoxon_p_adjust_method=args.wilcoxon_p_adjust_method,
@@ -962,7 +992,7 @@ def _run_export_cli(argv=None):
         pseudobulk_padj_cutoff=args.pseudobulk_padj_cutoff,
         pseudobulk_log2fc_cutoff=args.pseudobulk_log2fc_cutoff,
         pseudobulk_deseq2_fit_type=args.pseudobulk_deseq2_fit_type,
-        pseudobulk_n_cpus=args.pseudobulk_n_cpus,
+        statistics_n_cpus=args.statistics_n_cpus,
         pseudobulk_embed_top_n_per_comparison=args.pseudobulk_embed_top_n_per_comparison,
         pathway=pathway_mode,
         pathway_gmt=pathway_gmt,

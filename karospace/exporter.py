@@ -3457,6 +3457,15 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
         .marker-features-export {{ display: flex; justify-content: flex-end; margin-top: 7px; }}
         .marker-empty {{ font-size: 10px; color: var(--muted-color); line-height: 1.35; }}
+        .marker-calculation-label {{
+            font-size: 10px;
+            line-height: 1.35;
+            color: var(--muted-color);
+        }}
+        .marker-calculation-label strong {{
+            color: var(--text-color);
+            font-weight: 600;
+        }}
         .marker-group {{
             padding: 7px;
             border: 1px solid var(--border-color);
@@ -7890,6 +7899,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const labelFor = (method) => method === 'pseudobulk' ? 'Pseudobulk' : 'Wilcoxon';
         return `<div class="pseudobulk-de-select-row statistics-method-row"><div><label>Method</label><select class="statistics-method-select" data-statistics-method-panel="${{escapeHtml(panelKey)}}">${{options.map((method) => `<option value="${{escapeHtml(method)}}"${{method === active ? ' selected' : ''}}>${{escapeHtml(labelFor(method))}}</option>`).join('')}}</select></div></div>`;
     }}
+    function renderMarkerCalculationLabel(method) {{
+        const label = method === 'pseudobulk' ? 'Pseudobulk DESeq2' : 'Wilcoxon rank-sum';
+        const detail = method === 'pseudobulk'
+            ? 'replicate-level pseudobulk contrasts'
+            : 'cell-level category contrasts';
+        return `<div class="marker-calculation-label">Calculation: <strong>${{escapeHtml(label)}}</strong> (${{escapeHtml(detail)}})</div>`;
+    }}
     function bindStatisticsMethodSelects(container, rerender) {{
         container.querySelectorAll('.statistics-method-select[data-statistics-method-panel]').forEach((select) => {{
             select.addEventListener('change', () => {{
@@ -8532,7 +8548,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }},
         wilcoxon_marker_features: {{
             title: 'Wilcoxon marker features',
-            body: 'Marker features are computed with cell-level Wilcoxon rank-sum tests for the selected annotation and focused modality. KaroSpace uses the normalized layer when available; otherwise it normalizes raw counts and applies log1p before testing. Category marker lists use category-versus-rest rankings, while Simple design uses category-versus-category rankings for Annotation A and Annotation B. Features must pass the minimum detected-cell fraction and are reported after multiple-testing correction.',
+            body: 'Marker features are computed with cell-level Wilcoxon rank-sum tests for the selected annotation and focused modality. KaroSpace uses the normalized layer when available; otherwise it normalizes raw counts and applies log1p before testing. Category marker lists use category-versus-rest rankings, while Annotations uses category-versus-category rankings for Annotation A and Annotation B. Features must pass the minimum detected-cell fraction and are reported after multiple-testing correction.',
             formula: 'input: normalized/log1p per-cell values; test: Wilcoxon rank-sum; filter: max(% detected in A, % detected in B) >= min_pct; displayed features: padj < padj_cutoff and |log2FC| >= log2fc_cutoff'
         }},
         pseudobulk_marker_features: {{
@@ -8542,12 +8558,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }},
         wilcoxon_simple_de_section: {{
             title: 'Wilcoxon differential analysis',
-            body: 'This Simple design section is based on the selected cell-level Wilcoxon category-versus-category contrast. KaroSpace compares per-cell normalized/log-transformed feature values between Annotation A and Annotation B, applies the minimum detected-cell filter, then adjusts p-values across retained result features.',
+            body: 'This Annotations section is based on the selected cell-level Wilcoxon category-versus-category contrast. KaroSpace compares per-cell normalized/log-transformed feature values between Annotation A and Annotation B, applies the minimum detected-cell filter, then adjusts p-values across retained result features.',
             formula: 'test: Wilcoxon rank-sum for Annotation A vs Annotation B; retained features: max(% detected cells in A, B) >= min_pct; DE features: padj < padj_cutoff and |log2FC| >= log2fc_cutoff'
         }},
         pseudobulk_simple_de_section: {{
             title: 'Pseudobulk DESeq2 differential analysis',
-            body: 'This Simple design section is based on the selected category-versus-category pseudobulk DESeq2 contrast. Raw counts are grouped by biological replicate and annotation category, replicate-category samples below the minimum cell count are excluded, and one shared DESeq2 model is fit for the annotation. The selected Annotation A and Annotation B are extracted as a pairwise contrast when both categories have enough replicate pseudobulks. Features shown as DE pass the minimum percent-detected result filter, adjusted p-value threshold, and absolute log2FC threshold.',
+            body: 'This Annotations section is based on the selected category-versus-category pseudobulk DESeq2 contrast. Raw counts are grouped by biological replicate and annotation category, replicate-category samples below the minimum cell count are excluded, and one shared DESeq2 model is fit for the annotation. The selected Annotation A and Annotation B are extracted as a pairwise contrast when both categories have enough replicate pseudobulks. Features shown as DE pass the minimum percent-detected result filter, adjusted p-value threshold, and absolute log2FC threshold.',
             formula: 'pseudobulk sample = sum raw counts for replicate x category; model = ~ replicate + annotation; contrast = Annotation A vs Annotation B; retained features: max(% detected cells in A, B) >= min_pct; DE features: padj < padj_cutoff and |log2FC| >= log2fc_cutoff'
         }},
         wilcoxon_simple_de_table: {{
@@ -9818,7 +9834,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'Import uploads a modules JSON file and restores saved module definitions.'
             ], {{ action: () => {{ if (typeof setInsightsMode === 'function') setInsightsMode('module'); }}, nextLabel: tryIt }}),
             step('Exploration annotation selector', ['#exploration-annotation-select', '#exploration-annotation-label'], [
-                'The Exploration and Statistics tabs use this selector to choose the active annotation without changing the spatial panel viewing window.'
+                'The Exploration and Statistics tabs use this selector to choose the active annotation without changing the spatial panel viewing window.',
+                'Statistics panels also use the focused feature namespace and, when available, a method selector for Wilcoxon or pseudobulk results.'
             ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); }}, nextLabel: tryIt }}),
             step('Exploration feature modality', '#exploration-feature-modality-section', [
                 'Focused modality chooses which feature namespace is used by Exploration and Statistics feature panels.',
@@ -9829,7 +9846,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); }}, onNext: () => {{ const tree = document.querySelector('[data-insights-tree]'); if (!tree?.classList.contains('is-open')) safeTutorialClick('[data-insights-tree-root]'); }}, nextLabel: tryIt }}),
             step('Visualization menu options', ['.insights-tree-panel-content', '[data-insights-tree]'], [
                 'Exploration menu options open Overview, cell-based Features, and cell-based Compare panels.',
-                'Statistics menu options open precomputed marker, spatial, per-sample, pseudobulk, and neighborhood panels.'
+                'Statistics menu options open precomputed marker, spatial, category-mean, category-comparison, and neighborhood panels.'
             ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); const tree = document.querySelector('[data-insights-tree]'); if (!tree?.classList.contains('is-open')) safeTutorialClick('[data-insights-tree-root]'); }}, nextLabel: tryIt }}),
             step('Open Overview > Summary', '[data-insights-tree-leaf="summary"][data-insights-tree-parent="overview"]', [
                 'Open Visualization, then Overview, then Summary to inspect annotation composition across section metadata.',
@@ -9855,24 +9872,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             step('Overview Sections view switch', '.samples-view-icon-toggle', [
                 'The section composition switch changes the same data between stacked bars and a heatmap.'
             ], {{ action: () => openTutorialInsightsPanel('overview', 'sections'), scrollDelay: 720, nextLabel: tryIt }}),
-            step('Open Statistics > Features > Distribution', '[data-insights-tree-leaf="means"][data-insights-tree-parent="features"]', [
-                'Open Statistics, then Visualization, then Features, then Distribution to inspect pseudobulk statistics.',
-                'All calculation in this section is done on the raw data before the creation of the HTML file.'
-            ], {{ action: () => openTutorialVisualizationLeafMenu('features', 'means'), task: 'Click Distribution in the Features options.', nextLabel: tryIt }}),
-            step('Features Distribution per sample search', '.marker-feature-search-wrap', [
-                'Enter or select a feature in the Search control before inspecting the per-sample means panel.'
-            ], {{ action: () => openTutorialInsightsPanel('features', 'means'), task: 'Enter or select a feature in Search.', requiresInsightsFeatureSelected: true, nextLabel: tryIt }}),
-            step('Features Distribution per sample panel', ['#pseudobulk-feature-means', '#features-tab-means-content'], [
-                'The means panel uses pseudobulk mean per category to compare feature values across categories.'
-            ], {{ action: () => {{ openTutorialInsightsPanel('features', 'means'); ensureTutorialInsightsFeatureSelected(); }}, nextLabel: tryIt }}),
-            step('Features Distribution per sample view switch', '.samples-view-toggle[data-feature-subtab-toggle="means"]', [
-                'The per-sample means view can switch between category means and a barplot.'
-            ], {{ action: () => openTutorialInsightsPanel('features', 'means'), prepareDelay: 420, scrollDelay: 520, spotlightPadding: 2, nextLabel: tryIt }}),
             step('Open Statistics > Features > Markers', '[data-insights-tree-leaf="de-features"][data-insights-tree-parent="features"]', [
                 'Open Statistics, then Visualization, then Features, then Markers to inspect exported marker features.'
             ], {{ action: () => openTutorialVisualizationLeafMenu('features', 'de-features'), task: 'Click Markers in the Features options.', nextLabel: tryIt }}),
             step('Features Markers panel', ['#marker-features', '#features-tab-de-features-content'], [
                 'The marker panel lists Wilcoxon-derived marker features by category by default.',
+                'If pseudobulk results were exported, the Method selector can switch the same panel to replicate-aware marker features.',
                 'Features that were not embedded may be shown but disabled for direct feature-value viewing.'
             ], {{ action: () => {{ openTutorialInsightsPanel('features', 'de-features'); clearTutorialInsightsFeatureSearch(); }}, nextLabel: tryIt }}),
             step('Features Markers view switch', '[data-feature-subtab-toggle="de-features"]', [
@@ -9904,6 +9909,21 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             step('Features Distribution per cell view switch', '.samples-view-toggle[data-feature-subtab-toggle="distribution"]', [
                 'The distribution view switch changes between a table and a violin/boxplot.'
             ], {{ action: () => openTutorialInsightsPanel('features', 'distribution'), prepareDelay: 420, scrollDelay: 520, spotlightPadding: 2, nextLabel: tryIt }}),
+            step('Open Statistics > Features > Distribution', '[data-insights-tree-leaf="means"][data-insights-tree-parent="features"]', [
+                'Open Statistics, then Visualization, then Features, then Distribution to inspect precomputed category feature means.',
+                'Wilcoxon is the default Statistics method; pseudobulk is shown when it was exported and selected.',
+                'All calculations in this section are prepared from the raw dataset before the HTML file is created.'
+            ], {{ action: () => openTutorialVisualizationLeafMenu('features', 'means'), task: 'Click Distribution in the Features options.', nextLabel: tryIt }}),
+            step('Features Distribution statistics search', '.marker-feature-search-wrap', [
+                'Enter or select a feature in the Search control before inspecting the Statistics Distribution panel.'
+            ], {{ action: () => openTutorialInsightsPanel('features', 'means'), task: 'Enter or select a feature in Search.', requiresInsightsFeatureSelected: true, nextLabel: tryIt }}),
+            step('Features Distribution statistics panel', ['#pseudobulk-feature-means', '#features-tab-means-content'], [
+                'The panel compares feature values across categories using the active Statistics method.',
+                'Wilcoxon mode uses per-cell category means; pseudobulk mode averages retained replicate-category means.'
+            ], {{ action: () => {{ openTutorialInsightsPanel('features', 'means'); ensureTutorialInsightsFeatureSelected(); }}, nextLabel: tryIt }}),
+            step('Features Distribution statistics view switch', '.samples-view-toggle[data-feature-subtab-toggle="means"]', [
+                'The Statistics Distribution view can switch between a category mean table and a barplot.'
+            ], {{ action: () => openTutorialInsightsPanel('features', 'means'), prepareDelay: 420, scrollDelay: 520, spotlightPadding: 2, nextLabel: tryIt }}),
             step('Open Compare > Selections', '[data-insights-tree-leaf="selection"][data-insights-tree-parent="compare"]', [
                 'Open Visualization, then Compare, then Selections to analyze selected cells.'
             ], {{ action: () => openTutorialVisualizationLeafMenu('compare', 'selection'), task: 'Click Selections in Compare.', nextLabel: tryIt }}),
@@ -9925,23 +9945,24 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'Annotation comparison is a per-cell comparison between categories in the selected annotation.',
                 'Click the search icon to see a comparison between 2 annotations'
             ], {{ action: () => {{ invalidateGroupDEState?.(false); openTutorialInsightsPanel('compare', 'groups'); }}, nextLabel: tryIt }}),
-            step('Open Statistics > Compare > Simple design', '[data-insights-tree-leaf="cell-de"][data-insights-tree-parent="compare"]', [
-                'Open Statistics, then Visualization, then Compare, then Simple design to inspect pseudobulk category contrasts.'
-            ], {{ action: () => openTutorialVisualizationLeafMenu('compare', 'cell-de'), task: 'Click Simple design in Compare.', nextLabel: tryIt }}),
-            step('Compare Simple design panel', ['#pseudobulk-de-results .comparison-info', '#pseudobulk-de-results .agg-group', '#pseudobulk-de-results .agg-group-meta'], [
-                'Simple design contains category-versus-category pseudobulk DE results when they were exported.',
-                'The panel can contain warnings, marker tables, MA/volcano plots, sample diagnostics, and pathway enrichment.'
+            step('Open Statistics > Compare > Annotations', '[data-insights-tree-leaf="cell-de"][data-insights-tree-parent="compare"]', [
+                'Open Statistics, then Visualization, then Compare, then Annotations to inspect precomputed category contrasts.',
+                'Wilcoxon category-versus-category comparisons are the default; pseudobulk DESeq2 contrasts are available when exported.'
+            ], {{ action: () => openTutorialVisualizationLeafMenu('compare', 'cell-de'), task: 'Click Annotations in Compare.', nextLabel: tryIt }}),
+            step('Compare Annotations panel', ['#pseudobulk-de-results .comparison-info', '#pseudobulk-de-results .agg-group', '#pseudobulk-de-results .agg-group-meta'], [
+                'Annotations contains category-versus-category Wilcoxon results by default and pseudobulk DE results when they were exported.',
+                'The panel can contain warnings, marker tables, MA/volcano plots, method diagnostics, and pathway enrichment.'
             ], {{ action: () => {{ ensureTutorialPseudobulkDEAnnotation(); openTutorialInsightsPanel('compare', 'cell-de'); ensureTutorialPseudobulkDEAnnotation(); renderPseudobulkDE?.(); }}, combineTargets: true, nextLabel: tryIt }}),
-            step('Compare Simple design controls', ['#pseudobulk-de-source', '#pseudobulk-de-reference'], [
+            step('Compare Annotations controls', ['#pseudobulk-de-source', '#pseudobulk-de-reference'], [
                 'Annotation A and Annotation B define the active category-versus-category contrast.',
-                'Changing them updates the DE table, plots, diagnostics, and pathway section.'
+                'Changing them updates the marker table, plots, and any method-specific diagnostic or pathway sections.'
             ], {{ action: () => {{ ensureTutorialPseudobulkDEAnnotation(); openTutorialInsightsPanel('compare', 'cell-de'); ensureTutorialPseudobulkDEAnnotation(); renderPseudobulkDE?.(); }}, task: 'Choose Annotation A and B if selectors are available.', combineTargets: true, prepareDelay: 420, nextLabel: tryIt }}),
-            step('Compare Simple design view switch', ['#pseudobulk-de-section-title', '#pseudobulk-de-results .pseudobulk-de-panel-mode-switch'], [
-                'The Simple design switch separates the contrast into Raw table, Features, and Samples views.',
-                'Raw table shows exact DE values, Features shows MA and volcano plots, and Samples shows pseudobulk diagnostics such as PCA or distance matrix.'
+            step('Compare Annotations view switch', ['#pseudobulk-de-section-title', '#pseudobulk-de-results .pseudobulk-de-panel-mode-switch'], [
+                'The Annotations switch separates the contrast into Raw table, Features, and Samples views.',
+                'Raw table shows exact contrast values, Features shows MA and volcano plots, and Samples shows pseudobulk diagnostics when pseudobulk data are available.'
             ], {{ action: () => {{ ensureTutorialPseudobulkDEAnnotation(); openTutorialInsightsPanel('compare', 'cell-de'); ensureTutorialPseudobulkDEAnnotation(); renderPseudobulkDE?.(); }}, combineTargets: true, prepareDelay: 420, scrollDelay: 620, spotlightPadding: 2, nextLabel: tryIt }}),
-            step('Compare Simple design pathway switch', ['#pathway-enrichment-title', '#compare-tab-cell-de-content [data-pathway-annotation-select]', '#compare-tab-cell-de-content .pathway-panel-mode-switch'], [
-                'When pathway enrichment is available, the pathway switch changes between ORA pathways and GSEA enrichment.',
+            step('Compare Annotations pathway switch', ['#pathway-enrichment-title', '#compare-tab-cell-de-content [data-pathway-annotation-select]', '#compare-tab-cell-de-content .pathway-panel-mode-switch'], [
+                'When pseudobulk pathway enrichment is available, the pathway switch changes between ORA pathways and GSEA enrichment.',
                 'ORA summarizes significant DE features, while GSEA follows a ranked feature list across the full contrast.'
             ], {{ condition: hasPathwayPanel, action: () => {{ ensureTutorialPseudobulkDEAnnotation(); openTutorialInsightsPanel('compare', 'cell-de'); ensureTutorialPseudobulkDEAnnotation(); renderPseudobulkDE?.(); }}, combineTargets: true, prepareDelay: 520, scrollDelay: 720, spotlightPadding: 2, nextLabel: tryIt }}),
             step('Open Compare > Relationships', '[data-insights-tree-leaf="river"][data-insights-tree-parent="compare"]', [
@@ -10034,6 +10055,26 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const updatedUmapEndIndex = rawSteps.findIndex(item => item.title === umapRegionAnchorTitle);
             rawSteps.splice(updatedUmapEndIndex + 1, 0, ...regionSteps);
         }}
+        const takeTutorialStepRange = (startTitle, endExclusiveTitle) => {{
+            const startIndex = rawSteps.findIndex(item => item.title === startTitle);
+            const endIndex = rawSteps.findIndex(item => item.title === endExclusiveTitle);
+            if (startIndex < 0 || endIndex <= startIndex) return [];
+            return rawSteps.splice(startIndex, endIndex - startIndex);
+        }};
+        const insertTutorialStepsBefore = (beforeTitle, steps) => {{
+            if (!Array.isArray(steps) || !steps.length) return;
+            const beforeIndex = rawSteps.findIndex(item => item.title === beforeTitle);
+            rawSteps.splice(beforeIndex >= 0 ? beforeIndex : rawSteps.length, 0, ...steps);
+        }};
+        const statisticsDistributionSteps = takeTutorialStepRange('Open Statistics > Features > Distribution', 'Open Compare > Selections');
+        const statisticsMarkerSteps = takeTutorialStepRange('Open Statistics > Features > Markers', 'Open Features > Distribution');
+        const statisticsFeatureSteps = [
+            ...statisticsDistributionSteps,
+            ...statisticsMarkerSteps,
+        ];
+        const relationshipSteps = takeTutorialStepRange('Open Compare > Relationships', 'Open Statistics > Neighbors > Enrichment');
+        insertTutorialStepsBefore('Open Statistics > Compare > Annotations', relationshipSteps);
+        insertTutorialStepsBefore('Open Statistics > Compare > Annotations', statisticsFeatureSteps);
         const chapterStarts = new Map([
             ['Welcome the KaroSpace', 'Introduction'],
             ['Viewer info button', 'Helpers'],
@@ -10053,7 +10094,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             ['Open Features > Distribution', 'Exploration > Features'],
             ['Open Compare > Selections', 'Exploration > Compare'],
             ['Open Statistics > Features > Distribution', 'Statistics > Features'],
-            ['Open Statistics > Compare > Simple design', 'Statistics > Compare'],
+            ['Open Statistics > Compare > Annotations', 'Statistics > Compare'],
             ['Open Statistics > Neighbors > Enrichment', 'Statistics > Neighbors'],
             ['Finish the tutorial', 'Finish']
         ]);
@@ -10586,7 +10627,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             'Open Compare > Selections': ['compare', 'selection', null],
             'Open Compare > Regions': ['compare', 'regions', null],
             'Open Compare > Annotations': ['compare', 'groups', null],
-            'Open Statistics > Compare > Simple design': ['compare', 'cell-de', null],
+            'Open Statistics > Compare > Annotations': ['compare', 'cell-de', null],
             'Open Compare > Relationships': ['compare', 'river', null],
             'Open Statistics > Neighbors > Enrichment': ['neighbors', 'enrichment', null],
             'Open Statistics > Neighbors > Interactions': ['neighbors', 'interactions', null],
@@ -10646,7 +10687,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             // Menu-opening task prepared above; keep the original menu target visible.
         }} else if (step.requiresInsightsFeatureSelected) {{
             ensureTutorialInsightsFeatureSelected();
-        }} else if (title === 'Compare Simple design controls') {{
+        }} else if (title === 'Compare Annotations controls') {{
             ensureTutorialPseudobulkDEAnnotation();
             renderPseudobulkDE?.();
         }}
@@ -24797,7 +24838,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     const INSIGHTS_SUBTABS = {{
         overview: ['summary', 'sections'],
         features: ['de-features', 'spatial', 'distribution', 'means'],
-        compare: ['groups', 'regions', 'selection', 'cell-de', 'complex-contrast', 'river'],
+        compare: ['groups', 'regions', 'selection', 'cell-de', 'river'],
         neighbors: ['enrichment', 'interactions', 'dispersion'],
     }};
     const INSIGHTS_MODE_TOP_LEVEL_TABS = {{
@@ -24814,7 +24855,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         statistics: {{
             overview: [],
             features: ['means', 'de-features', 'spatial'],
-            compare: ['cell-de', 'complex-contrast'],
+            compare: ['cell-de'],
             neighbors: ['enrichment', 'interactions', 'dispersion'],
         }},
     }};
@@ -24932,7 +24973,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     const INSIGHTS_TREE_LEAF_LABELS = {{
         overview: {{ summary: 'Summary', sections: 'Sections' }},
         features: {{ 'de-features': 'Markers', spatial: 'Spatial', distribution: 'Distribution', means: 'Distribution' }},
-        compare: {{ groups: 'Annotations', regions: 'Regions', selection: 'Selections', 'cell-de': 'Simple design', 'complex-contrast': 'Complex design', river: 'Relationships' }},
+        compare: {{ groups: 'Annotations', regions: 'Regions', selection: 'Selections', 'cell-de': 'Annotations', river: 'Relationships' }},
         neighbors: {{ enrichment: 'Enrichment', interactions: 'Interactions', dispersion: 'Dispersion' }},
     }};
 
@@ -25105,8 +25146,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 updateSelectionInfo();
             }} else if (insightsCompareTab === 'cell-de') {{
                 renderPseudobulkDE();
-            }} else if (insightsCompareTab === 'complex-contrast') {{
-                renderComplexPseudobulkDesign();
             }} else if (insightsCompareTab === 'river') {{
                 renderAnnotationRiver();
             }} else {{
@@ -25962,8 +26001,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                                         <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="selection" data-insights-tree-parent="compare">Selections</button>
                                         <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="regions" data-insights-tree-parent="compare">Regions</button>
                                         <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="groups" data-insights-tree-parent="compare">Annotations</button>
-                                        <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="cell-de" data-insights-tree-parent="compare">Simple design</button>
-                                        <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="complex-contrast" data-insights-tree-parent="compare">Complex design</button>
+                                        <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="cell-de" data-insights-tree-parent="compare">Annotations</button>
                                         <button class="insights-tab insights-tree-trigger insights-tree-leaf" type="button" data-insights-tree-leaf="river" data-insights-tree-parent="compare">Relationships</button>
                                     </div></div>
                                 </div>
@@ -26070,9 +26108,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         <div class="insights-aggregation" id="pseudobulk-de-results">
                             <div class="agg-group-meta">Choose two categories to compare.</div>
                         </div>
-                    </div>
-                    <div class="insights-tab-content" id="compare-tab-complex-contrast-content">
-                        <div class="insights-aggregation" id="complex-pseudobulk-design"></div>
                     </div>
                     <div class="insights-tab-content" id="compare-tab-river-content">
                         <div class="pseudobulk-de-controls">
@@ -27667,6 +27702,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const modality = getExplorationModality();
         const activeMarkerMethod = getActiveStatisticsMethod('markers', modality, 'markers');
         const methodSelectHtml = renderStatisticsMethodSelect('markers', modality, 'markers');
+        const calculationLabelHtml = renderMarkerCalculationLabel(activeMarkerMethod);
         const markers = getExplorationMarkerFeaturesPayload(modality);
         const viewMode = getFeatureSubtabView(subtab);
         if (calcInfo) calcInfo.innerHTML = renderCalcInfoButton(viewMode === 'graph' ? 'de_heatmap' : getAnalysisCalcInfoKey(activeMarkerMethod, 'marker_features'));
@@ -27676,7 +27712,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const annotationMeta = DATA.annotations_meta?.[markerColorCol];
         if (!annotationMeta || annotationMeta.is_continuous) {{
             if (exportBtn) exportBtn.disabled = true;
-            container.innerHTML = methodSelectHtml + toggleHtml + '<div class="marker-empty">Marker features are available for categorical annotations only.</div>';
+            container.innerHTML = methodSelectHtml + calculationLabelHtml + toggleHtml + '<div class="marker-empty">Marker features are available for categorical annotations only.</div>';
             bindStatisticsMethodSelects(container, renderMarkerFeatures);
             bindFeatureSubtabViewToggle(container, subtab, renderMarkerFeatures);
             return;
@@ -27688,7 +27724,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const groupMarkers = markers[markerColorCol] || markers[markerPseudobulkKey] || {{}};
         if (!hasDEForColor) {{
             if (exportBtn) exportBtn.disabled = true;
-            container.innerHTML = methodSelectHtml;
+            container.innerHTML = methodSelectHtml + calculationLabelHtml;
             bindStatisticsMethodSelects(container, renderMarkerFeatures);
             return;
         }}
@@ -27718,7 +27754,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const heatmapControls = selectedFeature
                 ? ''
                 : `<div class="marker-heatmap-controls"><label for="marker-heatmap-topn">Top N features per category</label><input id="marker-heatmap-topn" type="number" min="1" max="10000" step="1" value="${{Math.max(1, Math.min(10000, Number(markerHeatmapTopN) || 3))}}" aria-label="Top N marker features per category to display"></div>`;
-            container.innerHTML = methodSelectHtml + heatmapControls + toggleHtml + buildFeatureDEHeatmap(heatmapData, markerColorCol);
+            container.innerHTML = methodSelectHtml + calculationLabelHtml + heatmapControls + toggleHtml + buildFeatureDEHeatmap(heatmapData, markerColorCol);
             bindStatisticsMethodSelects(container, renderMarkerFeatures);
             bindFeatureSubtabViewToggle(container, subtab, renderMarkerFeatures);
             bindPseudobulkDEPlotInteractions(container, renderMarkerFeatures);
@@ -27776,13 +27812,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
         if (rows.length === 0) {{
             if (exportBtn) exportBtn.disabled = false;
-            container.innerHTML = methodSelectHtml + toggleHtml + '<div class="marker-empty">No marker features match your selection.</div>';
+            container.innerHTML = methodSelectHtml + calculationLabelHtml + toggleHtml + '<div class="marker-empty">No marker features match your selection.</div>';
             bindStatisticsMethodSelects(container, renderMarkerFeatures);
             bindFeatureSubtabViewToggle(container, subtab, renderMarkerFeatures);
             return;
         }}
 
-        container.innerHTML = methodSelectHtml + toggleHtml + rows.join('');
+        container.innerHTML = methodSelectHtml + calculationLabelHtml + toggleHtml + rows.join('');
         bindStatisticsMethodSelects(container, renderMarkerFeatures);
         bindFeatureSubtabViewToggle(container, subtab, renderMarkerFeatures);
         bindFeatureActivateButtons(container, renderMarkerFeatures);
@@ -28905,8 +28941,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const size = Math.min(W - ml - mr, H - mt - mb);
         const cell = size / n;
         const values = matrix.flat().map(Number).filter(Number.isFinite);
-        // A complex design can contain hundreds of pseudobulk samples. Avoid
-        // Math.min/max.apply here: spreading a large distance matrix into
+        // Avoid Math.min/max.apply here: spreading a large distance matrix into
         // function arguments overflows the browser call stack.
         let minV = 0;
         let maxV = 1;
@@ -31048,17 +31083,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         bindVolcanoGroupInteraction(container, renderGroupDE);
         bindFeatureActivateButtons(container, renderGroupDE);
         bindFeatureGoogleSearchButtons(container);
-    }}
-
-    function renderComplexPseudobulkDesign() {{
-        const container = document.getElementById('complex-pseudobulk-design');
-        if (!container) return;
-        // Complex design is deliberately dormant while the generic contrast
-        // interface is being redesigned. Do not initialize or render any
-        // previously exported complex-design payload here.
-        container.innerHTML = '<div class="pseudobulk-comparison-warning"><strong>In the making.</strong> Complex design is currently under development and is not available yet.</div>';
-        return;
-
     }}
 
     function renderCellTypeTrend() {{
@@ -35186,6 +35210,8 @@ def export_to_html(
     feature_sparse_zero_threshold: float = 0.8,
     statistics_additional_annotations: Optional[List[str]] = None,
     statistics_modalities: Optional[Union[str, Sequence[str]]] = None,
+    wilcoxon: str = "auto",
+    wilcoxon_runtime_limit: Any = "00:30:00",
     wilcoxon_layer: Optional[str] = None,
     wilcoxon_min_cells_per_group: int = 20,
     wilcoxon_min_pct_expressed: float = 0.0,
@@ -35210,7 +35236,7 @@ def export_to_html(
     pseudobulk_padj_cutoff: float = 0.05,
     pseudobulk_log2fc_cutoff: float = 1,
     pseudobulk_deseq2_fit_type: str = "parametric",
-    pseudobulk_n_cpus: int = 1,
+    statistics_n_cpus: int = 1,
     pseudobulk_embed_top_n_per_comparison: int = 2,
     pathway: Optional[str] = "auto",
     pathway_gmt: Optional[Union[str, Sequence[str]]] = None,
@@ -35306,6 +35332,10 @@ def export_to_html(
     statistics_modalities : str or list, optional
         Modality names to run statistics on. Defaults to the dataset default
         modality, usually "rna". Use "all" or ["all"] for all detected modalities.
+    wilcoxon : str
+        Cell-level Wilcoxon mode: "auto", "off", or "force".
+    wilcoxon_runtime_limit : str or number
+        Runtime budget for "auto" mode, as HH:MM:SS or seconds.
     wilcoxon_layer : str, optional
         Deprecated compatibility option. Wilcoxon statistics now use
         ``layers["normalized"]`` when present; otherwise raw values are copied
@@ -35336,7 +35366,7 @@ def export_to_html(
         Obs annotation used as the biological replicate for pseudobulk analyses.
         Defaults to the dataset section_key annotation.
     statistics_contrast_categories : list or dict, optional
-        Categories to include in Simple design category-versus-category contrasts.
+        Categories to include in Annotations category-versus-category contrasts.
         Use a flat list only when one annotation is analyzed. With
         statistics_additional_annotations, pass a dict keyed by annotation name
         or a nested list matching [main_cell_annotation, *additional]. All
@@ -35382,9 +35412,9 @@ def export_to_html(
         Absolute log2 fold-change cutoff used for volcano coloring and DE table inclusion.
     pseudobulk_deseq2_fit_type : str
         PyDESeq2 dispersion trend fit type: "parametric" or "mean".
-    pseudobulk_n_cpus : int
-        Number of CPU workers used for the shared PyDESeq2 fit and the maximum
-        number of parallel shared-fit contrasts. Must be at least one.
+    statistics_n_cpus : int
+        Number of CPU workers used for Wilcoxon comparisons, the shared PyDESeq2
+        fit, and parallel shared-fit contrasts. Must be at least one.
     pseudobulk_embed_top_n_per_comparison : int
         Maximum significant DE features to auto-embed per category or contact
         comparison in embedded mode. Ignored in sidecar mode, where all feature
@@ -35681,8 +35711,9 @@ def export_to_html(
         raise ValueError("statistics_min_feature_counts must be >= 0")
     if int(pseudobulk_min_cells_per_pseudobulk) < 1:
         raise ValueError("pseudobulk_min_cells_per_pseudobulk must be >= 1")
-    if int(pseudobulk_n_cpus) < 1:
-        raise ValueError("pseudobulk_n_cpus must be >= 1")
+    effective_statistics_n_cpus = int(statistics_n_cpus)
+    if effective_statistics_n_cpus < 1:
+        raise ValueError("statistics_n_cpus must be >= 1")
     if int(pseudobulk_embed_top_n_per_comparison) < 0:
         raise ValueError("pseudobulk_embed_top_n_per_comparison must be >= 0")
     if int(wilcoxon_min_cells_per_group) < 1:
@@ -35691,6 +35722,10 @@ def export_to_html(
         raise ValueError("wilcoxon_embed_top_n_per_comparison must be >= 0")
     if int(wilcoxon_top_n_per_category) < 1:
         raise ValueError("wilcoxon_top_n_per_category must be >= 1")
+    from .wilcoxon import normalize_wilcoxon_mode, parse_wilcoxon_runtime_limit
+
+    wilcoxon_mode = normalize_wilcoxon_mode(wilcoxon)
+    wilcoxon_runtime_limit_seconds = parse_wilcoxon_runtime_limit(wilcoxon_runtime_limit)
     if int(pathway_top_n) < 1:
         raise ValueError("pathway_top_n must be >= 1")
     if int(pathway_min_overlap) < 1:
@@ -35795,6 +35830,7 @@ def export_to_html(
         f"Pseudobulk={'on' if pseudobulk_enabled else 'off'}; "
         f"interaction markers={'on' if interaction_markers_enabled else 'off'}; "
         f"statistics modalities={', '.join(selected_statistics_modalities) or 'none'}; "
+        f"statistics_n_cpus={effective_statistics_n_cpus}; "
         f"neighbor stats columns={', '.join(neighbor_stats_annotations or []) or 'none'}."
     )
     if bool(tutorial):
@@ -35812,6 +35848,8 @@ def export_to_html(
         statistics_additional_annotations=statistics_additional_annotations,
         statistics_modalities=selected_statistics_modalities,
         wilcoxon_de_annotations=wilcoxon_de_annotations,
+        wilcoxon=wilcoxon_mode,
+        wilcoxon_runtime_limit=wilcoxon_runtime_limit_seconds,
         wilcoxon_layer=wilcoxon_layer,
         wilcoxon_min_cells_per_group=wilcoxon_min_cells_per_group,
         wilcoxon_min_pct_expressed=wilcoxon_min_pct_expressed,
@@ -35836,7 +35874,7 @@ def export_to_html(
         pseudobulk_padj_cutoff=pseudobulk_padj_cutoff,
         pseudobulk_log2fc_cutoff=pseudobulk_log2fc_cutoff,
         pseudobulk_deseq2_fit_type=fit_type,
-        pseudobulk_n_cpus=int(pseudobulk_n_cpus),
+        statistics_n_cpus=effective_statistics_n_cpus,
         pseudobulk_embed_top_n_per_comparison=effective_pseudobulk_embed_top_n_per_comparison,
         interaction_marker_annotations=interaction_marker_annotations,
         neighbor_stats_annotations=neighbor_stats_annotations,
@@ -35934,7 +35972,7 @@ def export_to_html(
             log_step("Computing pathway enrichment")
             log_detail(
                 "Running ORA on significant DE features and preranked GSEA on retained ranked features; "
-                "output feeds Insights > Statistics > Compare > Simple design > Pathway Enrichment."
+                "output feeds Insights > Statistics > Compare > Annotations > Pathway Enrichment."
             )
             log_detail("Parameters:")
             if pathway_gmt:
@@ -36240,6 +36278,8 @@ def export_to_html(
                 "feature_sparse_zero_threshold": float(feature_sparse_zero_threshold),
                 "statistics_additional_annotations": statistics_additional_annotations,
                 "statistics_modalities": statistics_modalities,
+                "wilcoxon": wilcoxon_mode,
+                "wilcoxon_runtime_limit": float(wilcoxon_runtime_limit_seconds),
                 "wilcoxon_expression_source": wilcoxon_layer or "auto(normalized,raw_log1p)",
                 "wilcoxon_min_cells_per_group": int(wilcoxon_min_cells_per_group),
                 "wilcoxon_min_pct_expressed": float(wilcoxon_min_pct_expressed),
@@ -36264,7 +36304,7 @@ def export_to_html(
                 "pseudobulk_padj_cutoff": float(pseudobulk_padj_cutoff),
                 "pseudobulk_log2fc_cutoff": float(pseudobulk_log2fc_cutoff),
                 "pseudobulk_deseq2_fit_type": fit_type,
-                "pseudobulk_n_cpus": int(pseudobulk_n_cpus),
+                "statistics_n_cpus": int(effective_statistics_n_cpus),
                 "pseudobulk_embed_top_n_per_comparison": int(pseudobulk_embed_top_n_per_comparison),
                 "pathway": pathway,
                 "pathway_gmt": pathway_gmt,
