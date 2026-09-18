@@ -9820,6 +9820,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             step('Exploration annotation selector', ['#exploration-annotation-select', '#exploration-annotation-label'], [
                 'The Exploration and Statistics tabs use this selector to choose the active annotation without changing the spatial panel viewing window.'
             ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); }}, nextLabel: tryIt }}),
+            step('Exploration feature modality', '#exploration-feature-modality-section', [
+                'Focused modality chooses which feature namespace is used by Exploration and Statistics feature panels.',
+                'Switch it when the export contains multiple modalities, such as RNA and protein.'
+            ], {{ condition: () => Array.isArray(MODALITY_DESCRIPTORS) && MODALITY_DESCRIPTORS.length > 1, action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); }}, nextLabel: tryIt }}),
             step('Visualization menu tree', ['[data-insights-tree]', '[data-insights-tree-root]'], [
                 'The Visualization menu is the navigation tree.'
             ], {{ action: () => {{ if (typeof openInsightsMode === 'function') openInsightsMode('exploration'); }}, onNext: () => {{ const tree = document.querySelector('[data-insights-tree]'); if (!tree?.classList.contains('is-open')) safeTutorialClick('[data-insights-tree-root]'); }}, nextLabel: tryIt }}),
@@ -9851,13 +9855,26 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             step('Overview Sections view switch', '.samples-view-icon-toggle', [
                 'The section composition switch changes the same data between stacked bars and a heatmap.'
             ], {{ action: () => openTutorialInsightsPanel('overview', 'sections'), scrollDelay: 720, nextLabel: tryIt }}),
+            step('Open Statistics > Features > Distribution', '[data-insights-tree-leaf="means"][data-insights-tree-parent="features"]', [
+                'Open Statistics, then Visualization, then Features, then Distribution to inspect pseudobulk statistics.',
+                'All calculation in this section is done on the raw data before the creation of the HTML file.'
+            ], {{ action: () => openTutorialVisualizationLeafMenu('features', 'means'), task: 'Click Distribution in the Features options.', nextLabel: tryIt }}),
+            step('Features Distribution per sample search', '.marker-feature-search-wrap', [
+                'Enter or select a feature in the Search control before inspecting the per-sample means panel.'
+            ], {{ action: () => openTutorialInsightsPanel('features', 'means'), task: 'Enter or select a feature in Search.', requiresInsightsFeatureSelected: true, nextLabel: tryIt }}),
+            step('Features Distribution per sample panel', ['#pseudobulk-feature-means', '#features-tab-means-content'], [
+                'The means panel uses pseudobulk mean per category to compare feature values across categories.'
+            ], {{ action: () => {{ openTutorialInsightsPanel('features', 'means'); ensureTutorialInsightsFeatureSelected(); }}, nextLabel: tryIt }}),
+            step('Features Distribution per sample view switch', '.samples-view-toggle[data-feature-subtab-toggle="means"]', [
+                'The per-sample means view can switch between category means and a barplot.'
+            ], {{ action: () => openTutorialInsightsPanel('features', 'means'), prepareDelay: 420, scrollDelay: 520, spotlightPadding: 2, nextLabel: tryIt }}),
             step('Open Statistics > Features > Markers', '[data-insights-tree-leaf="de-features"][data-insights-tree-parent="features"]', [
                 'Open Statistics, then Visualization, then Features, then Markers to inspect exported marker features.'
             ], {{ action: () => openTutorialVisualizationLeafMenu('features', 'de-features'), task: 'Click Markers in the Features options.', nextLabel: tryIt }}),
             step('Features Markers panel', ['#marker-features', '#features-tab-de-features-content'], [
                 'The marker panel lists Wilcoxon-derived marker features by category by default.',
                 'Features that were not embedded may be shown but disabled for direct feature-value viewing.'
-            ], {{ action: () => openTutorialInsightsPanel('features', 'de-features'), nextLabel: tryIt }}),
+            ], {{ action: () => {{ openTutorialInsightsPanel('features', 'de-features'); clearTutorialInsightsFeatureSearch(); }}, nextLabel: tryIt }}),
             step('Features Markers view switch', '[data-feature-subtab-toggle="de-features"]', [
                 'The marker view switch changes between a compact feature list and a heatmap.'
             ], {{ action: () => openTutorialInsightsPanel('features', 'de-features'), scrollDelay: 720, nextLabel: tryIt }}),
@@ -9876,8 +9893,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 'All calculation in this section is done on cells embedded in the HTML file.'
             ], {{ action: () => openTutorialVisualizationLeafMenu('features', 'distribution'), task: 'Click Distribution in the Features options.', nextLabel: tryIt }}),
             step('Features Distribution per cell search', '.marker-feature-search-wrap', [
-                'Enter or select a feature in the Search control.'
-            ], {{ action: () => openTutorialInsightsPanel('features', 'distribution'), task: 'Enter or select a feature in Search.', requiresInsightsFeatureSelected: true, nextLabel: tryIt }}),
+                'Select a feature to visualize its contribution to each category.'
+            ], {{ action: () => {{ openTutorialInsightsPanel('features', 'distribution'); ensureTutorialInsightsFeatureSelected({{ forceRandom: true }}); }}, task: 'Enter or select a feature in Search.', requiresInsightsFeatureSelected: true, nextLabel: tryIt }}),
             step('Features Distribution per cell panel', ['#feature-distribution-panel', '#features-tab-distribution-content'], [
                 'The distribution panel summarizes feature-value distributions across categories.'
             ], {{ action: () => {{ openTutorialInsightsPanel('features', 'distribution'); ensureTutorialInsightsFeatureSelected(); }}, nextLabel: tryIt }}),
@@ -9887,19 +9904,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             step('Features Distribution per cell view switch', '.samples-view-toggle[data-feature-subtab-toggle="distribution"]', [
                 'The distribution view switch changes between a table and a violin/boxplot.'
             ], {{ action: () => openTutorialInsightsPanel('features', 'distribution'), prepareDelay: 420, scrollDelay: 520, spotlightPadding: 2, nextLabel: tryIt }}),
-            step('Open Statistics > Features > Distribution', '[data-insights-tree-leaf="means"][data-insights-tree-parent="features"]', [
-                'Open Statistics, then Visualization, then Features, then Distribution to inspect pseudobulk statistics.',
-                'All calculation in this section is done on the raw data before the creation of the HTML file.'
-            ], {{ action: () => openTutorialVisualizationLeafMenu('features', 'means'), task: 'Click Distribution in the Features options.', nextLabel: tryIt }}),
-            step('Features Distribution per sample search', '.marker-feature-search-wrap', [
-                'Enter or select a feature in the Search control before inspecting the per-sample means panel.'
-            ], {{ action: () => openTutorialInsightsPanel('features', 'means'), task: 'Enter or select a feature in Search.', requiresInsightsFeatureSelected: true, nextLabel: tryIt }}),
-            step('Features Distribution per sample panel', ['#pseudobulk-feature-means', '#features-tab-means-content'], [
-                'The means panel uses pseudobulk mean per category to compare feature values across categories.'
-            ], {{ action: () => {{ openTutorialInsightsPanel('features', 'means'); ensureTutorialInsightsFeatureSelected(); }}, nextLabel: tryIt }}),
-            step('Features Distribution per sample view switch', '.samples-view-toggle[data-feature-subtab-toggle="means"]', [
-                'The per-sample means view can switch between category means and a barplot.'
-            ], {{ action: () => openTutorialInsightsPanel('features', 'means'), prepareDelay: 420, scrollDelay: 520, spotlightPadding: 2, nextLabel: tryIt }}),
             step('Open Compare > Selections', '[data-insights-tree-leaf="selection"][data-insights-tree-parent="compare"]', [
                 'Open Visualization, then Compare, then Selections to analyze selected cells.'
             ], {{ action: () => openTutorialVisualizationLeafMenu('compare', 'selection'), task: 'Click Selections in Compare.', nextLabel: tryIt }}),
@@ -11155,23 +11159,43 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }}
     }}
 
-    function ensureTutorialInsightsFeatureSelected() {{
-        const select = document.getElementById('marker-feature-search');
-        if (!select) return;
-        if (getInsightsSelectedFeature()) return;
-        const firstOption = Array.from(select.options || []).find(option => String(option.value || '').trim());
-        if (!firstOption) return;
-        select.value = firstOption.value;
-        if (typeof activateViewerFeature === 'function') {{
-            activateViewerFeature(firstOption.value, {{ showErrors: false }})
-                .then(() => {{
-                    renderActiveInsightsPanel?.();
-                    updateTutorialStepGate?.();
-                }})
-                .catch(error => console.warn('Tutorial insights feature selection failed', error));
-        }} else {{
-            updateTutorialStepGate?.();
+    function getTutorialRandomInsightsFeatureValue(input) {{
+        const datalistId = input?.getAttribute?.('list') || '';
+        const datalist = datalistId ? document.getElementById(datalistId) : null;
+        let values = Array.from(datalist?.options || [])
+            .map(option => String(option.value || '').trim())
+            .filter(Boolean);
+        if (!values.length) {{
+            values = getInsightsFeatureSearchValues(getExplorationModality(), insightsFeaturesTab)
+                .map(feature => String(feature || '').trim())
+                .filter(Boolean);
         }}
+        values = values.filter((value, index, arr) => arr.indexOf(value) === index);
+        if (!values.length) return '';
+        return values[Math.floor(Math.random() * values.length)];
+    }}
+
+    function ensureTutorialInsightsFeatureSelected(options = {{}}) {{
+        const input = document.getElementById('marker-feature-search');
+        if (!input) return;
+        if (!options.forceRandom && getInsightsSelectedFeature()) return;
+        const feature = getTutorialRandomInsightsFeatureValue(input);
+        if (!feature) return;
+        input.value = feature;
+        input.dispatchEvent(new Event('change', {{ bubbles: true }}));
+        window.setTimeout(() => {{
+            renderActiveInsightsPanel?.();
+            updateTutorialStepGate?.();
+        }}, 120);
+    }}
+
+    function clearTutorialInsightsFeatureSearch() {{
+        const input = document.getElementById('marker-feature-search');
+        if (!input) return;
+        if (!String(input.value || '').trim()) return;
+        input.value = '';
+        renderActiveInsightsPanel?.();
+        updateTutorialStepGate?.();
     }}
 
     function clearTutorialFeatureInput() {{
