@@ -64,3 +64,20 @@ def test_load_spatial_data_keeps_only_existing_requested_section_metadata():
     assert data["section_metadata"] == ["region"]
     assert data["section_metadata_extra"] == []
     assert data["metadata_filters"] == {"region": ["cortex", "hippocampus"]}
+
+
+def test_load_spatial_data_empty_section_key_exports_one_section():
+    adata = _make_section_metadata_adata()
+
+    dataset = load_spatial_data(adata, section_key="")
+
+    assert dataset.section_key == "_karospace_single_section"
+    assert dataset.sections[0].section_id == "sample"
+    assert dataset.sections[0].n_cells == adata.n_obs
+    assert adata.obs["_karospace_single_section"].astype(str).tolist() == ["sample"] * adata.n_obs
+
+
+def test_load_spatial_data_whitespace_section_key_exports_one_section():
+    dataset = load_spatial_data(_make_section_metadata_adata(), section_key="   ")
+
+    assert [section.section_id for section in dataset.sections] == ["sample"]

@@ -108,7 +108,10 @@ def _run_export_cli(argv=None):
         "--section-key",
         type=str,
         default="sample_id",
-        help="Column to identify sections (default: sample_id)"
+        help=(
+            "Column to identify sections (default: sample_id). "
+            "Use an empty value to export the whole dataset as one section."
+        )
     )
     dataset_args.add_argument(
         "--section-order",

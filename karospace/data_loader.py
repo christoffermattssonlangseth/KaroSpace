@@ -29,6 +29,8 @@ COMPANION_ANALYTICS_JSON_FIELDS = {
     "feature_correlations_json": "feature_correlations",
     "spatial_variable_features_json": "spatial_variable_features",
 }
+SINGLE_SECTION_KEY = "_karospace_single_section"
+SINGLE_SECTION_ID = "sample"
 
 
 def _clean_pseudobulk_category_list(value: Any, option_name: str) -> Optional[List[str]]:
@@ -537,6 +539,28 @@ def _resolve_section_key_for_spatialdata(
         return fallback_col
 
     return section_key
+
+
+def _resolve_section_key(
+    adata: ad.AnnData,
+    section_key: Optional[str],
+    spatialdata_table_key: Optional[str],
+) -> str:
+    section_key_text = "" if section_key is None else str(section_key).strip()
+    if not section_key_text:
+        fallback_col = SINGLE_SECTION_KEY
+        suffix = 2
+        while fallback_col in adata.obs.columns:
+            fallback_col = f"{SINGLE_SECTION_KEY}_{suffix}"
+            suffix += 1
+        adata.obs[fallback_col] = pd.Categorical([SINGLE_SECTION_ID] * adata.n_obs)
+        log_detail(
+            f"No section_key provided; using '{fallback_col}' to export the whole dataset "
+            f"as one section named '{SINGLE_SECTION_ID}'."
+        )
+        return fallback_col
+
+    return _resolve_section_key_for_spatialdata(adata, section_key_text, spatialdata_table_key)
 
 
 def inspect_input_file(data: Any, spatialdata_table: Optional[str] = None) -> Dict[str, Any]:
@@ -4010,7 +4034,7 @@ def _detect_modalities(adata: ad.AnnData) -> Dict[str, Modality]:
 
 def load_spatial_data(
     path: Any,
-    section_key: str = "sample_id",
+    section_key: Optional[str] = "sample_id",
     spatial_key: str = "spatial",
     spatial_columns: Optional[Tuple[str, str]] = None,
     section_order: Optional[List[str]] = None,
@@ -4028,8 +4052,9 @@ def load_spatial_data(
     path : str, AnnData, or SpatialData
         Path to an .h5ad file, path to a SpatialData .zarr store, an AnnData
         object, or a SpatialData object.
-    section_key : str
-        Column in obs to identify sections
+    section_key : str, optional
+        Column in obs to identify sections. If empty, all cells are exported as
+        one section.
     spatial_key : str
         Key in obsm containing spatial coordinates
     spatial_columns : tuple, optional
@@ -4063,7 +4088,7 @@ def load_spatial_data(
     log_step(f"Loading input data from {source_label}")
     log_detail(f"Loaded AnnData table with {adata.n_obs:,} cells x {adata.n_vars:,} features.")
 
-    section_key = _resolve_section_key_for_spatialdata(adata, section_key, spatialdata_table_key)
+    section_key = _resolve_section_key(adata, section_key, spatialdata_table_key)
 
     if spatial_columns is not None:
         spatial_key = _set_spatial_from_obs_columns(adata, spatial_columns, spatial_key)
