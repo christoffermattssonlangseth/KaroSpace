@@ -280,7 +280,7 @@ CLI value conventions:
 |--------|-------------|---------|
 | `input` | Path to input `.h5ad` file or SpatialData `.zarr` store | required |
 | `-o, --output` | Output HTML file path | `karospace.html` |
-| `--section-key` | Column to identify sections | `sample_id` |
+| `--section-key` | Column to identify sections; pass `""` to export the whole dataset as one section | `sample_id` |
 | `--section-order` | Comma-separated section IDs to control section order | empty string |
 | `--spatial-key` | Key in `adata.obsm` containing spatial coordinates, or target key created from `--spatial-x/--spatial-y` | `spatial` |
 | `--main-cell-annotation` | Main obs column shown first in the viewer | `leiden` |
@@ -435,7 +435,7 @@ Use `inspect_input_file(...)` in Python or `--inspect-input` on the CLI to list 
 Internally, SpatialData input is normalized to one AnnData table before export. The selected table must satisfy the same requirements as a regular AnnData input:
 
 - **`adata.obsm['spatial']`** — 2D coordinates for each cell (x, y)
-- **`adata.obs[section_key]`** — Column identifying which section each cell belongs to
+- **`adata.obs[section_key]`** — Column identifying which section each cell belongs to. If `section_key=""`, KaroSpace creates one in-memory section for the whole dataset.
 - **Categorical or numeric columns in `adata.obs`** — For assigning cell annotations and visualizing cells
 
 For SpatialData tables, use `spatialdata_table="..."` / `--spatialdata-table ...` when the object contains more than one table. If the default `section_key="sample_id"` is missing, KaroSpace uses the table's SpatialData `region_key` automatically when available. If no per-cell region key exists, the table is exported as one section.

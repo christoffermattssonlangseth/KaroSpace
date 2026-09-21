@@ -1250,8 +1250,6 @@ class KaroSpaceExportGUI:
 
         section_key = self.section_key.get().strip()
         annotation = self.annotation.get().strip()
-        if not section_key:
-            raise ValueError("section_key is required.")
         if not annotation:
             raise ValueError("Main cells annotation is required.")
 
