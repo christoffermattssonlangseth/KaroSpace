@@ -22588,31 +22588,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }});
     }}
 
-    // Initialize UMAP panel
-    function initUMAP() {{
-        if (!DATA.has_umap) return;
-
-        // Show UMAP toggle button
-        document.getElementById('umap-toggle').style.display = 'inline-block';
-        document.getElementById('umap-toggle').addEventListener('click', toggleUMAP);
-        loadUMAPPanelState();
-        applyUMAPPanelState();
-
-        const dockBtn = document.getElementById('umap-dock-btn');
-        if (dockBtn) {{
-            dockBtn.addEventListener('click', () => {{
-                const idx = UMAP_PANEL_DOCKS.indexOf(umapPanelDock);
-                umapPanelDock = UMAP_PANEL_DOCKS[(idx + 1 + UMAP_PANEL_DOCKS.length) % UMAP_PANEL_DOCKS.length];
-                applyUMAPPanelState();
-                if (umapVisible) renderUMAP();
-            }});
-        }}
-        document.getElementById('umap-panel-smaller')?.addEventListener('click', () => {{
-            adjustUMAPPanelSize(-UMAP_PANEL_SIZE_STEP);
-        }});
-        document.getElementById('umap-panel-larger')?.addEventListener('click', () => {{
-            adjustUMAPPanelSize(UMAP_PANEL_SIZE_STEP);
-        }});
+    // Selection tools (pan / lasso / compare / create-region / query) must be
+    // wired regardless of whether the export has a UMAP embedding. These used to
+    // live inside initUMAP(), which returns early when !DATA.has_umap, so on
+    // embedding-less exports the lasso and polygon-annotation buttons did nothing
+    // on click.
+    function initSelectionTools() {{
         document.getElementById('selection-pan-btn')?.addEventListener('click', () => {{
             if (selectionPanActive && !lassoSelectionActive) {{
                 selectionPanActive = false;
@@ -22627,7 +22608,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         }});
 
         // Lasso button: select when idle, clear when a selection exists.
-        document.getElementById('selection-lasso-btn').addEventListener('click', () => {{
+        document.getElementById('selection-lasso-btn')?.addEventListener('click', () => {{
             if (selectedCells.size > 0 || selectedCellsB.size > 0) {{
                 clearSelection();
                 return;
@@ -22656,8 +22637,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
         }});
 
-        const umapParamsToggle = document.getElementById('umap-params-toggle');
-        const umapParamsPanel = document.getElementById('umap-params-panel');
         const selectionQueryToggle = document.getElementById('selection-query-toggle');
         const selectionQueryPanel = document.getElementById('selection-query-panel');
         selectionQueryToggle?.addEventListener('click', (event) => {{
@@ -22669,12 +22648,53 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             }}
             if (open) {{
                 renderSelectionQueryPanel();
-                umapParamsPanel?.classList.remove('visible');
-                umapParamsToggle?.classList.remove('active');
+                document.getElementById('umap-params-panel')?.classList.remove('visible');
+                document.getElementById('umap-params-toggle')?.classList.remove('active');
             }}
             selectionQueryPanel?.classList.toggle('visible', open);
             selectionQueryToggle.classList.toggle('active', open);
         }});
+        document.addEventListener('mousedown', (event) => {{
+            const wrap = document.getElementById('selection-query-wrap');
+            if (!wrap || wrap.contains(event.target)) return;
+            if (isTutorialFindCellsByQueryStep()) {{
+                keepTutorialSelectionQueryPanelOpen();
+                return;
+            }}
+            selectionQueryPanel?.classList.remove('visible');
+            selectionQueryToggle?.classList.remove('active');
+        }});
+    }}
+
+    // Initialize UMAP panel
+    function initUMAP() {{
+        if (!DATA.has_umap) return;
+
+        // Show UMAP toggle button
+        document.getElementById('umap-toggle').style.display = 'inline-block';
+        document.getElementById('umap-toggle').addEventListener('click', toggleUMAP);
+        loadUMAPPanelState();
+        applyUMAPPanelState();
+
+        const dockBtn = document.getElementById('umap-dock-btn');
+        if (dockBtn) {{
+            dockBtn.addEventListener('click', () => {{
+                const idx = UMAP_PANEL_DOCKS.indexOf(umapPanelDock);
+                umapPanelDock = UMAP_PANEL_DOCKS[(idx + 1 + UMAP_PANEL_DOCKS.length) % UMAP_PANEL_DOCKS.length];
+                applyUMAPPanelState();
+                if (umapVisible) renderUMAP();
+            }});
+        }}
+        document.getElementById('umap-panel-smaller')?.addEventListener('click', () => {{
+            adjustUMAPPanelSize(-UMAP_PANEL_SIZE_STEP);
+        }});
+        document.getElementById('umap-panel-larger')?.addEventListener('click', () => {{
+            adjustUMAPPanelSize(UMAP_PANEL_SIZE_STEP);
+        }});
+        const umapParamsToggle = document.getElementById('umap-params-toggle');
+        const umapParamsPanel = document.getElementById('umap-params-panel');
+        const selectionQueryToggle = document.getElementById('selection-query-toggle');
+        const selectionQueryPanel = document.getElementById('selection-query-panel');
         umapParamsToggle?.addEventListener('click', (event) => {{
             event.stopPropagation();
             const open = !umapParamsPanel?.classList.contains('visible');
@@ -22694,16 +22714,6 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             if (!wrap || wrap.contains(event.target)) return;
             umapParamsPanel?.classList.remove('visible');
             umapParamsToggle?.classList.remove('active');
-        }});
-        document.addEventListener('mousedown', (event) => {{
-            const wrap = document.getElementById('selection-query-wrap');
-            if (!wrap || wrap.contains(event.target)) return;
-            if (isTutorialFindCellsByQueryStep()) {{
-                keepTutorialSelectionQueryPanelOpen();
-                return;
-            }}
-            selectionQueryPanel?.classList.remove('visible');
-            selectionQueryToggle?.classList.remove('active');
         }});
         // UMAP spot size slider
         document.getElementById('umap-spot-size').addEventListener('input', (e) => {{
@@ -35140,6 +35150,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             initControls();
             initFilters();
             initModal();
+            initSelectionTools();
             initUMAP();
             initShortcutsOverlay();
             initKeyboardShortcuts();
