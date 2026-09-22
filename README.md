@@ -84,25 +84,6 @@ pip install -e .
 
 Optional image utilities use `Pillow` for section image embedding and `tifffile` for pyramidal TIFF reading or `karospace ome-convert`.
 
-SpatialData input is optional. Install only when you want to load SpatialData `.zarr` :
-
-```bash
-pip install -e ".[spatialdata]"
-```
-
-If KaroSpace is already installed and you want to reinstall the local checkout after editing the source:
-
-```bash
-python -m pip uninstall karospace -y
-python -m pip install -e .
-```
-
-Install the SpatialData extra in the same environment if `import spatialdata` fails:
-
-```bash
-python -m pip install -e ".[spatialdata]"
-```
-
 ## Usage
 
 ### Python API
