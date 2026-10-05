@@ -1765,7 +1765,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             gap: 10px;
             flex-wrap: wrap;
         }}
-        .visual-default-controls.annotation-mode .visual-feature-controls {{
+        .visual-default-controls.annotation-mode .visual-feature-controls,
+        .visual-default-controls.annotation-mode .visual-feature-namespace-control {{
             display: none;
         }}
         .visual-default-controls.feature-mode .visual-annotation-controls {{
@@ -4545,6 +4546,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             pointer-events: none;
             white-space: normal;
             overflow-wrap: anywhere;
+            /* Keep intrinsic sizing independent of the previous hover position. */
+            width: max-content;
             max-width: min(240px, calc(100% - 12px));
             z-index: 80;
             display: none;
@@ -7102,7 +7105,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 <button class="visual-source-btn active" id="default-source-annotation" type="button" data-default-source="annotation">Annotation</button>
                 <button class="visual-source-btn" id="default-source-feature" type="button" data-default-source="feature">Feature</button>
             </div>
-            <div class="control-group visual-feature-namespace-control" id="visual-feature-namespace-control" style="display: none;">
+            <div class="control-group visual-feature-namespace-control" id="visual-feature-namespace-control">
                 <label class="sr-only" for="visual-feature-namespace-select">Feature namespace</label>
                 <select id="visual-feature-namespace-select"></select>
             </div>
@@ -12968,8 +12971,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     function getCategoryColor(idx, annotationCol) {{
         if (annotationCol) {{
             const meta = DATA.annotations_meta && DATA.annotations_meta[annotationCol];
-            const pal = meta && meta.palette;
-            if (pal && idx >= 0 && idx < pal.length) return pal[idx];
+            if (meta && !meta.is_continuous && idx >= 0 && idx < (meta.categories || []).length) {{
+                if (!Array.isArray(meta.palette)) meta.palette = [];
+                const color = normalizeCssColorHex(meta.palette[idx]) || randomCategoryColor();
+                meta.palette[idx] = color;
+                return color;
+            }}
         }}
         return PALETTE[idx % PALETTE.length];
     }}
@@ -12989,6 +12996,52 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         return null;
     }}
 
+    const categoricalCssColorCache = new Map();
+    let categoricalColorContext = null;
+    function normalizeCssColorHex(value) {{
+        const hex = normalizeHexColor(value);
+        if (hex) return hex;
+        const token = String(value || '').trim();
+        if (!token) return null;
+        if (categoricalCssColorCache.has(token)) return categoricalCssColorCache.get(token);
+        if (!categoricalColorContext) {{
+            const canvas = document.createElement('canvas');
+            canvas.width = canvas.height = 1;
+            categoricalColorContext = canvas.getContext('2d', {{ willReadFrequently: true }});
+        }}
+        const ctx = categoricalColorContext;
+        // Invalid CSS assignments leave fillStyle unchanged. Two sentinels
+        // distinguish an invalid token from a valid color matching a sentinel.
+        ctx.fillStyle = '#010203';
+        ctx.fillStyle = token;
+        const first = ctx.fillStyle;
+        ctx.fillStyle = '#040506';
+        ctx.fillStyle = token;
+        let normalized = null;
+        if (first === ctx.fillStyle) {{
+            ctx.clearRect(0, 0, 1, 1);
+            ctx.fillRect(0, 0, 1, 1);
+            const rgb = ctx.getImageData(0, 0, 1, 1).data;
+            normalized = '#' + Array.from(rgb).slice(0, 3)
+                .map(channel => channel.toString(16).padStart(2, '0')).join('');
+        }}
+        categoricalCssColorCache.set(token, normalized);
+        return normalized;
+    }}
+
+    function randomCategoryColor() {{
+        // Saturated HSV colors avoid the grey fallback and stay visible.
+        const hue = Math.random() * 6;
+        const saturation = 0.55 + Math.random() * 0.25;
+        const value = 0.72 + Math.random() * 0.23;
+        const channel = (offset) => {{
+            const k = (offset + hue) % 6;
+            const intensity = value * (1 - saturation * Math.max(0, Math.min(k, 4 - k, 1)));
+            return Math.round(255 * intensity).toString(16).padStart(2, '0');
+        }};
+        return `#${{channel(5)}}${{channel(3)}}${{channel(1)}}`;
+    }}
+
     function ensureColorColumnPalette(annotationCol) {{
         if (!annotationCol) return null;
         const meta = DATA.annotations_meta?.[annotationCol];
@@ -12997,8 +13050,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const expectedLength = meta.categories.length;
         if (!Array.isArray(meta.palette)) meta.palette = [];
         for (let i = 0; i < expectedLength; i++) {{
-            const existing = normalizeHexColor(meta.palette[i]);
-            meta.palette[i] = existing || normalizeHexColor(PALETTE[i % PALETTE.length]) || '#999999';
+            meta.palette[i] = getCategoryColor(i, annotationCol);
         }}
         if (meta.palette.length !== expectedLength) meta.palette = meta.palette.slice(0, expectedLength);
         return meta.palette;
@@ -15361,16 +15413,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
 	    function syncVisualFeatureNamespaceSelect() {{
 	        const options = getFeatureNamespaceOptions();
-	        const modalityControl = document.getElementById('visual-feature-namespace-control');
 	        const modalitySelect = document.getElementById('visual-feature-namespace-select');
 	        if (modalitySelect) {{
 	            const active = getVisualModality();
 	            setSelectOptions(modalitySelect, options, active);
-	        }}
-	        if (modalityControl) {{
-	            const defaultControls = document.getElementById('visual-default-controls');
-	            const isFeatureMode = defaultControls?.classList.contains('feature-mode');
-	            modalityControl.style.display = isFeatureMode && options.length > 1 ? '' : 'none';
 	        }}
 	        ['a', 'b'].forEach((side) => {{
 	            const select = document.getElementById(`overview-blend-${{side}}-namespace`);
@@ -22496,7 +22542,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         updateStickyOffsets();
         if (!window.ResizeObserver) return;
         const observer = new ResizeObserver(() => requestAnimationFrame(updateStickyOffsets));
-        ['.header', '#visual-params-bar', '#filter-bar'].forEach(selector => {{
+        // Insights and legend width transitions resize the content column.
+        // Track that boundary so the fixed UMAP stays beside the sidebars,
+        // including when a lasso selection opens Insights automatically.
+        ['.header', '#visual-params-bar', '#filter-bar', '#content-column'].forEach(selector => {{
             const el = document.querySelector(selector);
             if (el) observer.observe(el);
         }});
