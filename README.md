@@ -460,7 +460,7 @@ dataset = load_spatial_data(
 
 ### Optional category palettes
 
-If `adata.uns["{col}_colors"]` exists (scanpy convention — list of hex aligned to `adata.obs[col].cat.categories`), KaroSpace uses it for that column everywhere (legend, spots, neighbor views, samples panel). Length mismatch or missing key falls back to the default palette.
+If `adata.uns["{col}_colors"]` exists (scanpy convention — colors aligned to `adata.obs[col].cat.categories`), KaroSpace uses it for that column everywhere (legend, spots, neighbor views, samples panel). Hex, RGB, and named CSS colors are converted to hex for the legend color editor. Length mismatch or a missing palette generates random, non-grey category colors, which stay consistent during the viewer session and can be exported for reuse.
 
 ### Optional neighborhood graph
 
