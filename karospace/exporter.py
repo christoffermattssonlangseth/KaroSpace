@@ -5764,9 +5764,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             text-align: center;
             padding: 2px 4px;
             border-radius: 3px;
+            color: #000;
         }}
-        .selection-summary-compare-label.region-a {{ background: var(--accent-fill); color: var(--accent-on-fill); }}
-        .selection-summary-compare-label.region-b {{ background: var(--compare-fill); color: var(--compare-on-fill); }}
+        .selection-summary-compare-label.region-a {{ background: var(--accent-fill); }}
+        .selection-summary-compare-label.region-b {{ background: var(--compare-fill); }}
         .selection-summary-compare-row {{
             display: grid;
             grid-template-columns: minmax(72px, 1fr) 18px minmax(72px, 1fr);
@@ -5814,7 +5815,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             border-radius: 999px;
             overflow: hidden;
             background: color-mix(in srgb, var(--border-color) 62%, transparent);
-            color: var(--accent-on-fill);
+            color: #000;
             font-size: 10px;
             font-weight: 700;
             font-variant-numeric: tabular-nums;
@@ -5824,29 +5825,35 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .selection-summary-compare-bar span {{
             position: relative;
             z-index: 1;
+            flex: 0 1 auto;
+            min-width: 0;
             padding: 0 6px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }}
+        .selection-summary-compare-bar::after {{
+            content: '';
+            flex: calc(100 - var(--selection-share)) 1 0%;
         }}
         .selection-summary-compare-fill {{
-            position: absolute;
-            top: 0;
-            bottom: 0;
-            min-width: 2px;
+            /* Reserve label space, then scale the fill within the remaining track. */
+            flex: var(--selection-share) 1 0%;
+            height: 100%;
+            min-width: 0;
         }}
         .selection-summary-compare-a {{
-            justify-content: flex-end;
+            flex-direction: row-reverse;
             text-align: right;
         }}
         .selection-summary-compare-a .selection-summary-compare-fill {{
-            right: 0;
             background: var(--accent-fill);
         }}
         .selection-summary-compare-b {{
             justify-content: flex-start;
             text-align: left;
-            color: var(--compare-on-fill);
         }}
         .selection-summary-compare-b .selection-summary-compare-fill {{
-            left: 0;
             background: var(--compare-fill);
         }}
         .selection-query {{
@@ -17914,9 +17921,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             const isActive = linkedSpotlightEnabled && spotlightPinnedCategory === label;
             const chipColor = getCategoryColorForValue(summaryA.typeColumn, label);
             html += `<div class="selection-summary-compare-row${{isActive ? ' is-active' : ''}}" data-spotlight-cat="${{escapeHtml(label)}}" title="Click to spotlight ${{escapeHtml(label)}} in the viewer">
-                <div class="selection-summary-compare-bar selection-summary-compare-a" title="Selection A: ${{countA.toLocaleString()}} cells (${{pctA}}%)"><div class="selection-summary-compare-fill" style="width:${{pctA}}%;"></div><span>${{countA.toLocaleString()}} (${{pctA}}%)</span></div>
+                <div class="selection-summary-compare-bar selection-summary-compare-a" style="--selection-share:${{pctA}};" title="Selection A: ${{countA.toLocaleString()}} cells (${{pctA}}%)"><div class="selection-summary-compare-fill"></div><span>${{countA.toLocaleString()}} (${{pctA}}%)</span></div>
                 <span class="selection-summary-compare-type" style="background:${{chipColor}};" title="${{escapeHtml(label)}}" aria-label="${{escapeHtml(label)}}"></span>
-                <div class="selection-summary-compare-bar selection-summary-compare-b" title="Selection B: ${{countB.toLocaleString()}} cells (${{pctB}}%)"><div class="selection-summary-compare-fill" style="width:${{pctB}}%;"></div><span>${{countB.toLocaleString()}} (${{pctB}}%)</span></div>
+                <div class="selection-summary-compare-bar selection-summary-compare-b" style="--selection-share:${{pctB}};" title="Selection B: ${{countB.toLocaleString()}} cells (${{pctB}}%)"><div class="selection-summary-compare-fill"></div><span>${{countB.toLocaleString()}} (${{pctB}}%)</span></div>
             </div>`;
         }});
         html += '<div class="selection-summary-compare-legend">';
