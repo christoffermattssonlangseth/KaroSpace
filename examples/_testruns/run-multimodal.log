@@ -1,0 +1,279 @@
+Loading multimodal CosMx dataset: ../KaroSpaceDataWrangling/notebooks/data/cosmx_multiomic_breast/cosmx_multiomic_breast.companion.ready.h5ad
+- Loading input data from ../KaroSpaceDataWrangling/notebooks/data/cosmx_multiomic_breast/cosmx_multiomic_breast.companion.ready.h5ad
+  ↳ Loaded AnnData table with 152,451 cells x 18,942 features.
+  ↳ Resolved 1 section from obs column 'sample'.
+  ↳ Section metadata columns: sample, tissue, Run_Tissue_name, Panel (4 shown in the visual params bar; 0 stored as section-only metadata).
+  ↳ Modalities: rna (default) + protein, protein_channel, protein_isotype.
+Loaded 1 section(s) with 152,451 total cells
+Detected modalities: ['rna', 'protein', 'protein_channel', 'protein_isotype']
+
+Exporting sidecar bundle...
+- Building viewer data payload
+  ↳ Main cells annotation: leiden_rna; embedded annotation columns=leiden_rna, leiden_protein.
+  ↳ Pseudobulk=off; interaction markers=on; statistics modalities=rna; neighbor stats columns=leiden_rna, leiden_protein.
+  ↳ Feature storage=sidecar; no feature vectors will be embedded in the HTML.
+- Preparing Wilcoxon expression matrix for modality rna.
+    ↳ Warning: No 'normalized' layer found for Wilcoxon statistics; raw expression values from adata.layers['counts'] were library-size normalized to target_sum=10000 and log1p transformed before rank_genes_groups.
+  ↳ prepared_expression_source=counts_log1p_normalized
+- Preparing Distribution expression matrix for modality rna.
+  ↳ prepared_distribution_expression_source=counts_library_normalized
+- Computing Wilcoxon marker statistics for modality rna: 2 annotation columns; output feeds Statistics > Features and Statistics > Compare.
+  - Wilcoxon statistics: modality=rna; annotation column leiden_rna
+    ↳ Parameters:
+      ↳ method=cell_wilcoxon
+      ↳ rest=one_vs_rest
+      ↳ pairwise=category_vs_category
+      ↳ expression_source=counts_log1p_normalized
+      ↳ min_cells_per_group=20
+      ↳ min_pct_expressed=0
+      ↳ p_adjust=fdr_bh
+      ↳ padj_cutoff=0.05
+      ↳ log2fc_cutoff=1
+      ↳ top_n_per_comparison=300
+      ↳ embed_top_n_per_comparison=0
+      ↳ reported_pairwise_categories=all retained categories
+    ↳ Stored Wilcoxon marker payload: 15 categories, layer=counts_log1p_normalized.
+    ↳ Stored Wilcoxon result payload: 15 categories, 225/225 comparisons available, 2285 unique reported features.
+    ↳ Feature counts per comparison (denominator: features after min_pct; rest numerator: source-enriched log2FC >= 1 after top-N; pairwise numerator: padj < 0.05 and |log2FC| >= 1):
+      ↳ 0 vs rest: 73/18942 source-enriched features retained after log2FC cutoff and top-N cap
+      ↳ 0 vs 1: 70/18942 two-sided features pass threshold
+      ↳ 0 vs 2: 106/18942 two-sided features pass threshold
+      ↳ 0 vs 3: 259/18942 two-sided features pass threshold
+      ↳ 0 vs 4: 300/18942 two-sided features pass threshold
+      ↳ 0 vs 5: 265/18942 two-sided features pass threshold
+      ↳ 0 vs 6: 261/18942 two-sided features pass threshold
+      ↳ 0 vs 7: 140/18942 two-sided features pass threshold
+      ↳ 0 vs 8: 265/18942 two-sided features pass threshold
+      ↳ 0 vs 9: 282/18942 two-sided features pass threshold
+      ↳ 0 vs 10: 299/18942 two-sided features pass threshold
+      ↳ 0 vs 11: 120/18942 two-sided features pass threshold
+      ↳ 0 vs 12: 300/18942 two-sided features pass threshold
+      ↳ 0 vs 13: 259/18942 two-sided features pass threshold
+      ↳ 0 vs 14: 300/18942 two-sided features pass threshold
+      ↳ 1 vs rest: 300/18942 source-enriched features retained after log2FC cutoff and top-N cap
+      ↳ 1 vs 0: 70/18942 two-sided features pass threshold
+      ↳ 1 vs 2: 35/18942 two-sided features pass threshold
+      ↳ 1 vs 3: 300/18942 two-sided features pass threshold
+      ↳ 1 vs 4: 300/18942 two-sided features pass threshold
+      ↳ 1 vs 5: 300/18942 two-sided features pass threshold
+      ↳ 1 vs 6: 300/18942 two-sided features pass threshold
+      ↳ 1 vs 7: 125/18942 two-sided features pass threshold
+      ↳ 1 vs 8: 300/18942 two-sided features pass threshold
+      ↳ 1 vs 9: 300/18942 two-sided features pass threshold
+      ↳ 1 vs 10: 300/18942 two-sided features pass threshold
+      ↳ 1 vs 11: 84/18942 two-sided features pass threshold
+      ↳ 1 vs 12: 300/18942 two-sided features pass threshold
+      ↳ 1 vs 13: 275/18942 two-sided features pass threshold
+      ↳ 1 vs 14: 300/18942 two-sided features pass threshold
+      ↳ 2 vs rest: 300/18942 source-enriched features retained after log2FC cutoff and top-N cap
+      ↳ 2 vs 0: 106/18942 two-sided features pass threshold
+      ↳ 2 vs 1: 35/18942 two-sided features pass threshold
+      ↳ 2 vs 3: 300/18942 two-sided features pass threshold
+      ↳ 2 vs 4: 300/18942 two-sided features pass threshold
+      ↳ 2 vs 5: 300/18942 two-sided features pass threshold
+      ↳ 2 vs 6: 300/18942 two-sided features pass threshold
+      ↳ 2 vs 7: 127/18942 two-sided features pass threshold
+      ↳ 2 vs 8: 300/18942 two-sided features pass threshold
+      ↳ 2 vs 9: 300/18942 two-sided features pass threshold
+      ↳ 2 vs 10: 300/18942 two-sided features pass threshold
+      ↳ 2 vs 11: 112/18942 two-sided features pass threshold
+      ↳ 2 vs 12: 300/18942 two-sided features pass threshold
+      ↳ 2 vs 13: 286/18942 two-sided features pass threshold
+      ↳ 2 vs 14: 300/18942 two-sided features pass threshold
+      ↳ 3 vs rest: 187/18942 source-enriched features retained after log2FC cutoff and top-N cap
+      ↳ 3 vs 0: 259/18942 two-sided features pass threshold
+      ↳ 3 vs 1: 300/18942 two-sided features pass threshold
+      ↳ 3 vs 2: 300/18942 two-sided features pass threshold
+      ↳ 3 vs 4: 299/18942 two-sided features pass threshold
+      ↳ 3 vs 5: 260/18942 two-sided features pass threshold
+      ↳ 3 vs 6: 93/18942 two-sided features pass threshold
+      ↳ 3 vs 7: 300/18942 two-sided features pass threshold
+      ↳ 3 vs 8: 272/18942 two-sided features pass threshold
+      ↳ 3 vs 9: 177/18942 two-sided features pass threshold
+      ↳ 3 vs 10: 246/18942 two-sided features pass threshold
+      ↳ 3 vs 11: 286/18942 two-sided features pass threshold
+      ↳ 3 vs 12: 296/18942 two-sided features pass threshold
+      ↳ 3 vs 13: 136/18942 two-sided features pass threshold
+      ↳ 3 vs 14: 300/18942 two-sided features pass threshold
+      ↳ 4 vs rest: 0/18942 source-enriched features retained after log2FC cutoff and top-N cap
+      ↳ 4 vs 0: 300/18942 two-sided features pass threshold
+      ↳ 4 vs 1: 300/18942 two-sided features pass threshold
+      ↳ 4 vs 2: 300/18942 two-sided features pass threshold
+      ↳ 4 vs 3: 299/18942 two-sided features pass threshold
+      ↳ 4 vs 5: 299/18942 two-sided features pass threshold
+      ↳ 4 vs 6: 299/18942 two-sided features pass threshold
+      ↳ 4 vs 7: 300/18942 two-sided features pass threshold
+      ↳ 4 vs 8: 299/18942 two-sided features pass threshold
+      ↳ 4 vs 9: 299/18942 two-sided features pass threshold
+      ↳ 4 vs 10: 244/18942 two-sided features pass threshold
+      ↳ 4 vs 11: 300/18942 two-sided features pass threshold
+      ↳ 4 vs 12: 32/18942 two-sided features pass threshold
+      ↳ 4 vs 13: 299/18942 two-sided features pass threshold
+      ↳ 4 vs 14: 5/18942 two-sided features pass threshold
+      ↳ 5 vs rest: 237/18942 source-enriched features retained after log2FC cutoff and top-N cap
+      ↳ 5 vs 0: 265/18942 two-sided features pass threshold
+      ↳ 5 vs 1: 300/18942 two-sided features pass threshold
+      ↳ 5 vs 2: 300/18942 two-sided features pass threshold
+      ↳ 5 vs 3: 260/18942 two-sided features pass threshold
+      ↳ 5 vs 4: 299/18942 two-sided features pass threshold
+      ↳ 5 vs 6: 128/18942 two-sided features pass threshold
+      ↳ 5 vs 7: 300/18942 two-sided features pass threshold
+      ↳ 5 vs 8: 211/18942 two-sided features pass threshold
+      ↳ 5 vs 9: 247/18942 two-sided features pass threshold
+      ↳ 5 vs 10: 237/18942 two-sided features pass threshold
+      ↳ 5 vs 11: 295/18942 two-sided features pass threshold
+      ↳ 5 vs 12: 299/18942 two-sided features pass threshold
+      ↳ 5 vs 13: 219/18942 two-sided features pass threshold
+      ↳ 5 vs 14: 300/18942 two-sided features pass threshold
+      ↳ 6 vs rest: 146/18942 source-enriched features retained after log2FC cutoff and top-N cap
+      ↳ 6 vs 0: 261/18942 two-sided features pass threshold
+      ↳ 6 vs 1: 300/18942 two-sided features pass threshold
+      ↳ 6 vs 2: 300/18942 two-sided features pass threshold
+      ↳ 6 vs 3: 93/18942 two-sided features pass threshold
+      ↳ 6 vs 4: 299/18942 two-sided features pass threshold
+      ↳ 6 vs 5: 128/18942 two-sided features pass threshold
+      ↳ 6 vs 7: 300/18942 two-sided features pass threshold
+      ↳ 6 vs 8: 255/18942 two-sided features pass threshold
+      ↳ 6 vs 9: 154/18942 two-sided features pass threshold
+      ↳ 6 vs 10: 277/18942 two-sided features pass threshold
+      ↳ 6 vs 11: 280/18942 two-sided features pass threshold
+      ↳ 6 vs 12: 297/18942 two-sided features pass threshold
+      ↳ 6 vs 13: 132/18942 two-sided features pass threshold
+      ↳ 6 vs 14: 300/18942 two-sided features pass threshold
+      ↳ 7 vs rest: 300/18942 source-enriched features retained after log2FC cutoff and top-N cap
+      ↳ 7 vs 0: 140/18942 two-sided features pass threshold
+      ↳ 7 vs 1: 125/18942 two-sided features pass threshold
+      ↳ 7 vs 2: 127/18942 two-sided features pass threshold
+      ↳ 7 vs 3: 300/18942 two-sided features pass threshold
+      ↳ 7 vs 4: 300/18942 two-sided features pass threshold
+      ↳ 7 vs 5: 300/18942 two-sided features pass threshold
+      ↳ 7 vs 6: 300/18942 two-sided features pass threshold
+      ↳ 7 vs 8: 300/18942 two-sided features pass threshold
+      ↳ 7 vs 9: 300/18942 two-sided features pass threshold
+      ↳ 7 vs 10: 300/18942 two-sided features pass threshold
+      ↳ 7 vs 11: 163/18942 two-sided features pass threshold
+      ↳ 7 vs 12: 300/18942 two-sided features pass threshold
+      ↳ 7 vs 13: 277/18942 two-sided features pass threshold
+      ↳ 7 vs 14: 300/18942 two-sided features pass threshold
+      ↳ 8 vs rest: 300/18942 source-enriched features retained after log2FC cutoff and top-N cap
+      ↳ 8 vs 0: 265/18942 two-sided features pass threshold
+      ↳ 8 vs 1: 300/18942 two-sided features pass threshold
+      ↳ 8 vs 2: 300/18942 two-sided features pass threshold
+      ↳ 8 vs 3: 272/18942 two-sided features pass threshold
+      ↳ 8 vs 4: 299/18942 two-sided features pass threshold
+      ↳ 8 vs 5: 211/18942 two-sided features pass threshold
+      ↳ 8 vs 6: 255/18942 two-sided features pass threshold
+      ↳ 8 vs 7: 300/18942 two-sided features pass threshold
+      ↳ 8 vs 9: 256/18942 two-sided features pass threshold
+      ↳ 8 vs 10: 296/18942 two-sided features pass threshold
+      ↳ 8 vs 11: 275/18942 two-sided features pass threshold
+      ↳ 8 vs 12: 297/18942 two-sided features pass threshold
+      ↳ 8 vs 13: 268/18942 two-sided features pass threshold
+      ↳ 8 vs 14: 300/18942 two-sided features pass threshold
+      ↳ 9 vs rest: 17/18942 source-enriched features retained after log2FC cutoff and top-N cap
+      ↳ 9 vs 0: 282/18942 two-sided features pass threshold
+      ↳ 9 vs 1: 300/18942 two-sided features pass threshold
+      ↳ 9 vs 2: 300/18942 two-sided features pass threshold
+      ↳ 9 vs 3: 177/18942 two-sided features pass threshold
+      ↳ 9 vs 4: 299/18942 two-sided features pass threshold
+      ↳ 9 vs 5: 247/18942 two-sided features pass threshold
+      ↳ 9 vs 6: 154/18942 two-sided features pass threshold
+      ↳ 9 vs 7: 300/18942 two-sided features pass threshold
+      ↳ 9 vs 8: 256/18942 two-sided features pass threshold
+      ↳ 9 vs 10: 68/18942 two-sided features pass threshold
+      ↳ 9 vs 11: 298/18942 two-sided features pass threshold
+      ↳ 9 vs 12: 250/18942 two-sided features pass threshold
+      ↳ 9 vs 13: 192/18942 two-sided features pass threshold
+      ↳ 9 vs 14: 254/18942 two-sided features pass threshold
+      ↳ 10 vs rest: 1/18942 source-enriched features retained after log2FC cutoff and top-N cap
+      ↳ 10 vs 0: 299/18942 two-sided features pass threshold
+      ↳ 10 vs 1: 300/18942 two-sided features pass threshold
+      ↳ 10 vs 2: 300/18942 two-sided features pass threshold
+      ↳ 10 vs 3: 246/18942 two-sided features pass threshold
+      ↳ 10 vs 4: 244/18942 two-sided features pass threshold
+      ↳ 10 vs 5: 237/18942 two-sided features pass threshold
+      ↳ 10 vs 6: 277/18942 two-sided features pass threshold
+      ↳ 10 vs 7: 300/18942 two-sided features pass threshold
+      ↳ 10 vs 8: 296/18942 two-sided features pass threshold
+      ↳ 10 vs 9: 68/18942 two-sided features pass threshold
+      ↳ 10 vs 11: 300/18942 two-sided features pass threshold
+      ↳ 10 vs 12: 15/18942 two-sided features pass threshold
+      ↳ 10 vs 13: 297/18942 two-sided features pass threshold
+      ↳ 10 vs 14: 77/18942 two-sided features pass threshold
+      ↳ 11 vs rest: 300/18942 source-enriched features retained after log2FC cutoff and top-N cap
+      ↳ 11 vs 0: 120/18942 two-sided features pass threshold
+      ↳ 11 vs 1: 84/18942 two-sided features pass threshold
+      ↳ 11 vs 2: 112/18942 two-sided features pass threshold
+      ↳ 11 vs 3: 286/18942 two-sided features pass threshold
+      ↳ 11 vs 4: 300/18942 two-sided features pass threshold
+      ↳ 11 vs 5: 295/18942 two-sided features pass threshold
+      ↳ 11 vs 6: 280/18942 two-sided features pass threshold
+      ↳ 11 vs 7: 163/18942 two-sided features pass threshold
+      ↳ 11 vs 8: 275/18942 two-sided features pass threshold
+      ↳ 11 vs 9: 298/18942 two-sided features pass threshold
+      ↳ 11 vs 10: 300/18942 two-sided features pass threshold
+      ↳ 11 vs 12: 300/18942 two-sided features pass threshold
+      ↳ 11 vs 13: 273/18942 two-sided features pass threshold
+      ↳ 11 vs 14: 300/18942 two-sided features pass threshold
+      ↳ 12 vs rest: 0/18942 source-enriched features retained after log2FC cutoff and top-N cap
+      ↳ 12 vs 0: 300/18942 two-sided features pass threshold
+      ↳ 12 vs 1: 300/18942 two-sided features pass threshold
+      ↳ 12 vs 2: 300/18942 two-sided features pass threshold
+      ↳ 12 vs 3: 296/18942 two-sided features pass threshold
+      ↳ 12 vs 4: 32/18942 two-sided features pass threshold
+      ↳ 12 vs 5: 299/18942 two-sided features pass threshold
+      ↳ 12 vs 6: 297/18942 two-sided features pass threshold
+      ↳ 12 vs 7: 300/18942 two-sided features pass threshold
+      ↳ 12 vs 8: 297/18942 two-sided features pass threshold
+      ↳ 12 vs 9: 250/18942 two-sided features pass threshold
+      ↳ 12 vs 10: 15/18942 two-sided features pass threshold
+      ↳ 12 vs 11: 300/18942 two-sided features pass threshold
+      ↳ 12 vs 13: 299/18942 two-sided features pass threshold
+      ↳ 12 vs 14: 28/18942 two-sided features pass threshold
+      ↳ 13 vs rest: 178/18942 source-enriched features retained after log2FC cutoff and top-N cap
+      ↳ 13 vs 0: 259/18942 two-sided features pass threshold
+      ↳ 13 vs 1: 275/18942 two-sided features pass threshold
+      ↳ 13 vs 2: 286/18942 two-sided features pass threshold
+      ↳ 13 vs 3: 136/18942 two-sided features pass threshold
+      ↳ 13 vs 4: 299/18942 two-sided features pass threshold
+      ↳ 13 vs 5: 219/18942 two-sided features pass threshold
+      ↳ 13 vs 6: 132/18942 two-sided features pass threshold
+      ↳ 13 vs 7: 277/18942 two-sided features pass threshold
+      ↳ 13 vs 8: 268/18942 two-sided features pass threshold
+      ↳ 13 vs 9: 192/18942 two-sided features pass threshold
+      ↳ 13 vs 10: 297/18942 two-sided features pass threshold
+      ↳ 13 vs 11: 273/18942 two-sided features pass threshold
+      ↳ 13 vs 12: 299/18942 two-sided features pass threshold
+      ↳ 13 vs 14: 300/18942 two-sided features pass threshold
+      ↳ 14 vs rest: 0/18942 source-enriched features retained after log2FC cutoff and top-N cap
+      ↳ 14 vs 0: 300/18942 two-sided features pass threshold
+      ↳ 14 vs 1: 300/18942 two-sided features pass threshold
+      ↳ 14 vs 2: 300/18942 two-sided features pass threshold
+      ↳ 14 vs 3: 300/18942 two-sided features pass threshold
+      ↳ 14 vs 4: 5/18942 two-sided features pass threshold
+      ↳ 14 vs 5: 300/18942 two-sided features pass threshold
+      ↳ 14 vs 6: 300/18942 two-sided features pass threshold
+      ↳ 14 vs 7: 300/18942 two-sided features pass threshold
+      ↳ 14 vs 8: 300/18942 two-sided features pass threshold
+      ↳ 14 vs 9: 254/18942 two-sided features pass threshold
+      ↳ 14 vs 10: 77/18942 two-sided features pass threshold
+      ↳ 14 vs 11: 300/18942 two-sided features pass threshold
+      ↳ 14 vs 12: 28/18942 two-sided features pass threshold
+      ↳ 14 vs 13: 300/18942 two-sided features pass threshold
+    ↳ Features selected for HTML embedding for modality rna: 0.
+  - Wilcoxon statistics: modality=rna; annotation column leiden_protein
+    ↳ Parameters:
+      ↳ method=cell_wilcoxon
+      ↳ rest=one_vs_rest
+      ↳ pairwise=category_vs_category
+      ↳ expression_source=counts_log1p_normalized
+      ↳ min_cells_per_group=20
+      ↳ min_pct_expressed=0
+      ↳ p_adjust=fdr_bh
+      ↳ padj_cutoff=0.05
+      ↳ log2fc_cutoff=1
+      ↳ top_n_per_comparison=300
+      ↳ embed_top_n_per_comparison=0
+      ↳ reported_pairwise_categories=all retained categories
+/Users/chrislangseth/miniforge3/lib/python3.10/multiprocessing/resource_tracker.py:224: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '

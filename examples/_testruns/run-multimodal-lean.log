@@ -1,0 +1,36 @@
+Loading multimodal CosMx dataset: ../KaroSpaceDataWrangling/notebooks/data/cosmx_multiomic_breast/cosmx_multiomic_breast.companion.ready.h5ad
+- Loading input data from ../KaroSpaceDataWrangling/notebooks/data/cosmx_multiomic_breast/cosmx_multiomic_breast.companion.ready.h5ad
+  ↳ Loaded AnnData table with 152,451 cells x 18,942 features.
+  ↳ Resolved 1 section from obs column 'sample'.
+  ↳ Section metadata columns: sample, tissue, Run_Tissue_name, Panel (4 shown in the visual params bar; 0 stored as section-only metadata).
+  ↳ Modalities: rna (default) + protein, protein_channel, protein_isotype.
+Loaded 1 section(s) with 152,451 total cells
+Detected modalities: ['rna', 'protein', 'protein_channel', 'protein_isotype']
+
+Exporting sidecar bundle...
+- Building viewer data payload
+  ↳ Main cells annotation: leiden_rna; embedded annotation columns=leiden_rna, leiden_protein.
+  ↳ Pseudobulk=off; interaction markers=on; statistics modalities=rna; neighbor stats columns=leiden_rna.
+  ↳ Feature storage=sidecar; no feature vectors will be embedded in the HTML.
+- Preparing Wilcoxon expression matrix for modality rna.
+    ↳ Warning: No 'normalized' layer found for Wilcoxon statistics; raw expression values from adata.layers['counts'] were library-size normalized to target_sum=10000 and log1p transformed before rank_genes_groups.
+  ↳ prepared_expression_source=counts_log1p_normalized
+- Preparing Distribution expression matrix for modality rna.
+  ↳ prepared_distribution_expression_source=counts_library_normalized
+- Computing Wilcoxon marker statistics for modality rna: 1 annotation column; output feeds Statistics > Features and Statistics > Compare.
+  - Wilcoxon statistics: modality=rna; annotation column leiden_rna
+    ↳ Parameters:
+      ↳ method=cell_wilcoxon
+      ↳ rest=one_vs_rest
+      ↳ pairwise=category_vs_category
+      ↳ expression_source=counts_log1p_normalized
+      ↳ min_cells_per_group=20
+      ↳ min_pct_expressed=0
+      ↳ p_adjust=fdr_bh
+      ↳ padj_cutoff=0.05
+      ↳ log2fc_cutoff=1
+      ↳ top_n_per_comparison=300
+      ↳ embed_top_n_per_comparison=0
+      ↳ reported_pairwise_categories=all retained categories
+/Users/chrislangseth/miniforge3/lib/python3.10/multiprocessing/resource_tracker.py:224: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '
